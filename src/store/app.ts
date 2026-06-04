@@ -1,0 +1,626 @@
+import { create } from "zustand";
+import { DEFAULT_APP_SETTINGS, type AppSettings, type Chat, type ChatTagEntry, type ChatZone, type Message, type Project, type Provider, type Tag, type Zone } from "@/lib/types";
+import * as api from "@/lib/tauri";
+
+export type StreamPhase =
+  | "thinking"
+  | "answering"
+  | "tool_calling"
+  | "tool_running";
+
+export interface StreamingState {
+  messageId: string;
+  content: string;
+  /** Live reasoning content streamed by the current assistant turn. */
+  reasoning: string;
+  phase: StreamPhase;
+  /** Tool calls being constructed via deltas in the current assistant turn. */
+  pendingTools: { index: number; name: string; args: string }[];
+  /** The tool that is actively executing (between executing event and result). */
+  runningTool: string | null;
+  /** Wall-clock time when the assistant turn started (request kicked off). */
+  startedAt: number;
+  /** Wall-clock time when we received the first content/reasoning token, or
+   * `null` while still waiting on the provider. Used as the timer's origin so
+   * the visible duration reflects generation time and not network latency. */
+  firstTokenAt: number | null;
+}
+
+/** Stats kept per-message-id for the toolbar under each assistant bubble. */
+export interface MessageStats {
+  /** Total wall-clock from first token to assistant_saved. */
+  durationMs: number;
+  /** Latency from request kickoff to the first streamed token. */
+  timeToFirstTokenMs: number | null;
+  contentChars: number;
+  reasoningChars: number;
+}
+
+/**
+ * Running totals for the entire user turn (from the user's send up through
+ * the last assistant_saved before `done`). Survives across iterations of the
+ * agentic loop so the live token counter / timer in the status banner don't
+ * reset between tool calls. Reset on `user_message_saved`, cleared on
+ * `done` / `error` / `cancelled`.
+ */
+export interface TurnAggregate {
+  /** Time the turn began (user's `send` event). */
+  startedAt: number;
+  /** Time of the first content or thinking token in the whole turn. */
+  firstTokenAt: number | null;
+  contentChars: number;
+  reasoningChars: number;
+  /** Cumulative chars in tool call arguments across all tool calls this turn. */
+  toolCallChars: number;
+}
+
+interface AppStore {
+  // collections
+  providers: Provider[];
+  zones: Zone[];
+  chats: Chat[];
+  projects: Project[];
+  tags: Tag[];
+  tagsByChat: Record<string, ChatTagEntry[]>;
+  /** Perspective zones per chat: chatId → ChatZone[] */
+  chatZonesByChat: Record<string, ChatZone[]>;
+
+  // current selection
+  activeChatId: string | null;
+  messagesByChat: Record<string, Message[]>;
+  streamingByChat: Record<string, StreamingState>;
+  /** Active perspective streams: chatId → { zoneId → StreamingState } */
+  perspectiveStreamsByChat: Record<string, Record<string, StreamingState>>;
+  /** Running stats for the current user turn (survives multi-step loops). */
+  turnByChat: Record<string, TurnAggregate>;
+  /** Chat IDs whose title is currently being regenerated. */
+  regeneratingTitles: Set<string>;
+  /** Per-message generation stats, keyed by message id. */
+  statsByMessage: Record<string, MessageStats>;
+  /** Current visual theme. Persisted via the backend settings table. */
+  theme: ThemePrefs;
+  setTheme: (theme: Partial<ThemePrefs>) => Promise<void>;
+  loadThemeFromBackend: () => Promise<void>;
+
+  appSettings: AppSettings;
+  loadAppSettings: () => Promise<void>;
+  setAppSettings: (partial: Partial<AppSettings>) => Promise<void>;
+
+  // ui
+  settingsOpen: boolean;
+  zoneEditorOpen: boolean;
+  editingZoneId: string | null;
+  zonesPanelOpen: boolean;
+  defaultZoneId: string | null;
+
+  // actions
+  refreshProviders: () => Promise<void>;
+  refreshZones: () => Promise<void>;
+  refreshChats: () => Promise<void>;
+  setActiveChat: (id: string | null) => Promise<void>;
+  loadMessages: (chatId: string) => Promise<void>;
+  applyStreamEvent: (chatId: string, event: import("@/lib/types").StreamEvent, perspectiveZoneId?: string) => void;
+  setChatTitle: (chatId: string, title: string) => void;
+  setChatZone: (chatId: string, zoneId: string | null) => Promise<void>;
+  regenerateTitle: (chatId: string) => Promise<void>;
+
+  openSettings: () => void;
+  closeSettings: () => void;
+  openZoneEditor: (id: string | null) => void;
+  closeZoneEditor: () => void;
+  openZonesPanel: () => void;
+  closeZonesPanel: () => void;
+  setDefaultZone: (id: string | null) => Promise<void>;
+  loadDefaultZone: () => Promise<void>;
+
+  projectsPanelOpen: boolean;
+  openProjectsPanel: () => void;
+  closeProjectsPanel: () => void;
+  refreshProjects: () => Promise<void>;
+  refreshTags: () => Promise<void>;
+  loadChatTags: (chatId: string) => Promise<void>;
+  setChatProject: (chatId: string, projectId: string | null) => Promise<void>;
+  toggleProjectContext: (chatId: string, enabled: boolean) => Promise<void>;
+  addChatTag: (chatId: string, tagId: string) => Promise<void>;
+  removeChatTag: (chatId: string, tagId: string) => Promise<void>;
+  toggleChatTagContext: (chatId: string, tagId: string, enabled: boolean) => Promise<void>;
+
+  loadChatZones: (chatId: string) => Promise<void>;
+  addPerspectiveZone: (chatId: string, zoneId: string) => Promise<void>;
+  removePerspectiveZone: (chatId: string, zoneId: string) => Promise<void>;
+}
+
+function freshStreaming(messageId: string): StreamingState {
+  return {
+    messageId,
+    content: "",
+    reasoning: "",
+    phase: "thinking",
+    pendingTools: [],
+    runningTool: null,
+    startedAt: Date.now(),
+    firstTokenAt: null,
+  };
+}
+
+export interface ThemePrefs {
+  mode: "dark" | "light";
+  accent: string;
+}
+
+const DEFAULT_THEME: ThemePrefs = { mode: "dark", accent: "#4f9cf9" };
+
+const FONT_SIZE_MAP: Record<AppSettings["fontSize"], string> = {
+  normal: "14px",
+  large: "16px",
+  xl: "18px",
+};
+
+function applyAppSettingsToDom(settings: AppSettings) {
+  document.documentElement.style.setProperty(
+    "--font-size-message",
+    FONT_SIZE_MAP[settings.fontSize],
+  );
+}
+
+function applyThemeToDom(theme: ThemePrefs) {
+  const html = document.documentElement;
+  html.classList.toggle("light", theme.mode === "light");
+  html.classList.toggle("dark", theme.mode === "dark");
+  html.style.setProperty("--color-accent", theme.accent);
+  // Bump the accent-hover with a simple +10% lightness via mix-blend; keep it close.
+  html.style.setProperty("--color-accent-hover", theme.accent);
+}
+
+export const useApp = create<AppStore>((set, get) => ({
+  providers: [],
+  zones: [],
+  chats: [],
+  projects: [],
+  tags: [],
+  tagsByChat: {},
+  chatZonesByChat: {},
+
+  activeChatId: null,
+  messagesByChat: {},
+  streamingByChat: {},
+  perspectiveStreamsByChat: {},
+  turnByChat: {},
+  regeneratingTitles: new Set(),
+  statsByMessage: {},
+  theme: DEFAULT_THEME,
+  appSettings: DEFAULT_APP_SETTINGS,
+
+  settingsOpen: false,
+  zoneEditorOpen: false,
+  editingZoneId: null,
+  zonesPanelOpen: false,
+  defaultZoneId: null,
+  projectsPanelOpen: false,
+
+  async refreshProviders() {
+    const providers = await api.listProviders();
+    set({ providers });
+  },
+  async refreshZones() {
+    const zones = await api.listZones();
+    set({ zones });
+  },
+  async refreshChats() {
+    const chats = await api.listChats();
+    set({ chats });
+  },
+  async setActiveChat(id) {
+    set({ activeChatId: id });
+    if (id) {
+      if (!get().messagesByChat[id]) await get().loadMessages(id);
+      if (!get().tagsByChat[id]) await get().loadChatTags(id);
+      await get().loadChatZones(id);
+    }
+  },
+  async loadMessages(chatId) {
+    const messages = await api.getMessages(chatId);
+    set((s) => ({ messagesByChat: { ...s.messagesByChat, [chatId]: messages } }));
+  },
+  applyStreamEvent(chatId, event, perspectiveZoneId) {
+    // Route perspective events to the separate perspective streams map.
+    if (perspectiveZoneId) {
+      set((s) => {
+        const chatPersp = { ...(s.perspectiveStreamsByChat[chatId] ?? {}) };
+        const perspectiveStreamsByChat = { ...s.perspectiveStreamsByChat };
+        const messagesByChat = { ...s.messagesByChat };
+        const msgs = messagesByChat[chatId] ?? [];
+        const current = chatPersp[perspectiveZoneId];
+
+        switch (event.type) {
+          case "assistant_start":
+            chatPersp[perspectiveZoneId] = freshStreaming(event.messageId);
+            break;
+          case "token":
+            if (current) {
+              chatPersp[perspectiveZoneId] = {
+                ...current,
+                phase: "answering",
+                content: current.content + event.delta,
+                firstTokenAt: current.firstTokenAt ?? Date.now(),
+              };
+            }
+            break;
+          case "thinking_token":
+            if (current) {
+              chatPersp[perspectiveZoneId] = {
+                ...current,
+                phase: "thinking",
+                reasoning: current.reasoning + event.delta,
+                firstTokenAt: current.firstTokenAt ?? Date.now(),
+              };
+            }
+            break;
+          case "assistant_saved":
+            messagesByChat[chatId] = [...msgs, event.message];
+            delete chatPersp[perspectiveZoneId];
+            break;
+          case "done":
+          case "cancelled":
+          case "error":
+            delete chatPersp[perspectiveZoneId];
+            break;
+        }
+
+        perspectiveStreamsByChat[chatId] = chatPersp;
+        return { perspectiveStreamsByChat, messagesByChat };
+      });
+      return;
+    }
+
+    set((s) => {
+      const msgs = s.messagesByChat[chatId] ?? [];
+      const streaming = { ...s.streamingByChat };
+      const messagesByChat = { ...s.messagesByChat };
+      const statsByMessage = { ...s.statsByMessage };
+      const turnByChat = { ...s.turnByChat };
+      const current = streaming[chatId];
+
+      switch (event.type) {
+        case "user_message_saved":
+          messagesByChat[chatId] = [...msgs, event.message];
+          // The user just kicked off a new turn — reset turn-level totals so
+          // the live banner starts at zero, not from the previous turn.
+          turnByChat[chatId] = {
+            startedAt: Date.now(),
+            firstTokenAt: null,
+            contentChars: 0,
+            reasoningChars: 0,
+            toolCallChars: 0,
+          };
+          break;
+
+        case "assistant_start":
+          streaming[chatId] = freshStreaming(event.messageId);
+          // Fall-back: if a regenerate flow kicked off without a preceding
+          // user_message_saved event, seed the turn aggregate here so the
+          // banner still has something to display.
+          if (!turnByChat[chatId]) {
+            turnByChat[chatId] = {
+              startedAt: Date.now(),
+              firstTokenAt: null,
+              contentChars: 0,
+              reasoningChars: 0,
+              toolCallChars: 0,
+            };
+          }
+          break;
+
+        case "token":
+          if (current) {
+            const now = Date.now();
+            streaming[chatId] = {
+              ...current,
+              phase: "answering",
+              content: current.content + event.delta,
+              firstTokenAt: current.firstTokenAt ?? now,
+            };
+            const t = turnByChat[chatId];
+            if (t) {
+              turnByChat[chatId] = {
+                ...t,
+                firstTokenAt: t.firstTokenAt ?? now,
+                contentChars: t.contentChars + event.delta.length,
+              };
+            }
+          }
+          break;
+
+        case "thinking_token":
+          if (current) {
+            const now = Date.now();
+            streaming[chatId] = {
+              ...current,
+              phase: "thinking",
+              reasoning: current.reasoning + event.delta,
+              firstTokenAt: current.firstTokenAt ?? now,
+            };
+            const t = turnByChat[chatId];
+            if (t) {
+              turnByChat[chatId] = {
+                ...t,
+                firstTokenAt: t.firstTokenAt ?? now,
+                reasoningChars: t.reasoningChars + event.delta.length,
+              };
+            }
+          }
+          break;
+
+        case "tool_call_start":
+          if (current) {
+            const exists = current.pendingTools.some((t) => t.index === event.index);
+            streaming[chatId] = {
+              ...current,
+              phase: "tool_calling",
+              pendingTools: exists
+                ? current.pendingTools.map((t) =>
+                    t.index === event.index ? { ...t, name: event.name } : t,
+                  )
+                : [
+                    ...current.pendingTools,
+                    { index: event.index, name: event.name, args: "" },
+                  ],
+            };
+          }
+          break;
+
+        case "tool_call_args_delta":
+          if (current) {
+            streaming[chatId] = {
+              ...current,
+              phase: "tool_calling",
+              pendingTools: current.pendingTools.map((t) =>
+                t.index === event.index ? { ...t, args: t.args + event.delta } : t,
+              ),
+            };
+            const tca = turnByChat[chatId];
+            if (tca) {
+              turnByChat[chatId] = {
+                ...tca,
+                toolCallChars: tca.toolCallChars + event.delta.length,
+              };
+            }
+          }
+          break;
+
+        case "tool_call_executing":
+          if (current) {
+            streaming[chatId] = {
+              ...current,
+              phase: "tool_running",
+              runningTool: event.name,
+            };
+          }
+          break;
+
+        case "tool_call_result":
+          if (current) {
+            streaming[chatId] = { ...current, runningTool: null };
+          }
+          break;
+
+        case "tool_message_saved":
+          messagesByChat[chatId] = [...msgs, event.message];
+          break;
+
+        case "assistant_saved":
+          messagesByChat[chatId] = [...msgs, event.message];
+          if (current) {
+            const now = Date.now();
+            // Duration measures generation time, not network wait. If we
+            // somehow saved without a first-token event (no streaming
+            // tokens at all), fall back to total time so we don't show 0.
+            const start = current.firstTokenAt ?? current.startedAt;
+            statsByMessage[event.message.id] = {
+              durationMs: now - start,
+              timeToFirstTokenMs:
+                current.firstTokenAt !== null
+                  ? current.firstTokenAt - current.startedAt
+                  : null,
+              contentChars: current.content.length,
+              reasoningChars: current.reasoning.length,
+            };
+          }
+          delete streaming[chatId];
+          break;
+
+        case "done":
+        case "cancelled":
+        case "error":
+          delete streaming[chatId];
+          delete turnByChat[chatId];
+          break;
+      }
+      return {
+        messagesByChat,
+        streamingByChat: streaming,
+        statsByMessage,
+        turnByChat,
+      };
+    });
+
+    // After the first assistant response completes, auto-generate a title.
+    if (event.type === "done" && get().appSettings.autoTitle) {
+      const msgs = get().messagesByChat[chatId] ?? [];
+      const assistantCount = msgs.filter((m) => m.role === "assistant").length;
+      if (assistantCount === 1 && !get().regeneratingTitles.has(chatId)) {
+        get().regenerateTitle(chatId).catch(console.error);
+      }
+    }
+  },
+  setChatTitle(chatId, title) {
+    set((s) => ({
+      chats: s.chats.map((c) => (c.id === chatId ? { ...c, title } : c)),
+    }));
+  },
+  async setChatZone(chatId, zoneId) {
+    await api.setChatZone(chatId, zoneId);
+    set((s) => ({
+      chats: s.chats.map((c) => (c.id === chatId ? { ...c, zoneId } : c)),
+    }));
+  },
+  async regenerateTitle(chatId) {
+    set((s) => {
+      const next = new Set(s.regeneratingTitles);
+      next.add(chatId);
+      return { regeneratingTitles: next };
+    });
+    try {
+      const title = await api.generateTitle(chatId);
+      get().setChatTitle(chatId, title);
+    } finally {
+      set((s) => {
+        const next = new Set(s.regeneratingTitles);
+        next.delete(chatId);
+        return { regeneratingTitles: next };
+      });
+    }
+  },
+  async setTheme(partial) {
+    const next = { ...get().theme, ...partial };
+    set({ theme: next });
+    applyThemeToDom(next);
+    try {
+      await api.setSetting("theme", JSON.stringify(next));
+    } catch (e) {
+      console.warn("failed to persist theme", e);
+    }
+  },
+  async loadThemeFromBackend() {
+    try {
+      const raw = await api.getSetting("theme");
+      if (raw) {
+        const parsed = JSON.parse(raw) as ThemePrefs;
+        const merged = { ...DEFAULT_THEME, ...parsed };
+        set({ theme: merged });
+        applyThemeToDom(merged);
+        return;
+      }
+    } catch (e) {
+      console.warn("failed to load theme", e);
+    }
+    applyThemeToDom(DEFAULT_THEME);
+  },
+  async loadAppSettings() {
+    try {
+      const raw = await api.getSetting("app_settings");
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<AppSettings>;
+        const merged = { ...DEFAULT_APP_SETTINGS, ...parsed };
+        set({ appSettings: merged });
+        applyAppSettingsToDom(merged);
+      }
+    } catch (e) {
+      console.warn("failed to load app settings", e);
+    }
+  },
+  async setAppSettings(partial) {
+    const next = { ...get().appSettings, ...partial };
+    set({ appSettings: next });
+    applyAppSettingsToDom(next);
+    try {
+      await api.setSetting("app_settings", JSON.stringify(next));
+    } catch (e) {
+      console.warn("failed to persist app settings", e);
+    }
+  },
+  openSettings: () => set({ settingsOpen: true }),
+  closeSettings: () => set({ settingsOpen: false }),
+  openZoneEditor: (id) => set({ zoneEditorOpen: true, editingZoneId: id }),
+  closeZoneEditor: () => set({ zoneEditorOpen: false, editingZoneId: null }),
+  openZonesPanel: () => set({ zonesPanelOpen: true }),
+  closeZonesPanel: () => set({ zonesPanelOpen: false }),
+  async setDefaultZone(id) {
+    set({ defaultZoneId: id });
+    try {
+      await api.setSetting("default_zone_id", id ?? "");
+    } catch (e) {
+      console.warn("failed to persist default zone", e);
+    }
+  },
+  async loadDefaultZone() {
+    try {
+      const raw = await api.getSetting("default_zone_id");
+      if (raw) set({ defaultZoneId: raw });
+    } catch (e) {
+      console.warn("failed to load default zone", e);
+    }
+  },
+
+  openProjectsPanel: () => set({ projectsPanelOpen: true }),
+  closeProjectsPanel: () => set({ projectsPanelOpen: false }),
+
+  async refreshProjects() {
+    const projects = await api.listProjects();
+    set({ projects });
+  },
+  async refreshTags() {
+    const tags = await api.listTags();
+    set({ tags });
+  },
+  async loadChatTags(chatId) {
+    const entries = await api.getChatTags(chatId);
+    set((s) => ({ tagsByChat: { ...s.tagsByChat, [chatId]: entries } }));
+  },
+  async setChatProject(chatId, projectId) {
+    await api.setChatProject(chatId, projectId);
+    set((s) => ({
+      chats: s.chats.map((c) => (c.id === chatId ? { ...c, projectId } : c)),
+    }));
+  },
+  async toggleProjectContext(chatId, enabled) {
+    await api.setChatProjectContext(chatId, enabled);
+    set((s) => ({
+      chats: s.chats.map((c) =>
+        c.id === chatId ? { ...c, projectContextEnabled: enabled } : c,
+      ),
+    }));
+  },
+  async addChatTag(chatId, tagId) {
+    await api.addChatTag(chatId, tagId);
+    await get().loadChatTags(chatId);
+  },
+  async removeChatTag(chatId, tagId) {
+    await api.removeChatTag(chatId, tagId);
+    set((s) => ({
+      tagsByChat: {
+        ...s.tagsByChat,
+        [chatId]: (s.tagsByChat[chatId] ?? []).filter((t) => t.tagId !== tagId),
+      },
+    }));
+  },
+  async toggleChatTagContext(chatId, tagId, enabled) {
+    await api.setChatTagContext(chatId, tagId, enabled);
+    set((s) => ({
+      tagsByChat: {
+        ...s.tagsByChat,
+        [chatId]: (s.tagsByChat[chatId] ?? []).map((t) =>
+          t.tagId === tagId ? { ...t, contextEnabled: enabled } : t,
+        ),
+      },
+    }));
+  },
+
+  async loadChatZones(chatId) {
+    const zones = await api.getChatZones(chatId);
+    set((s) => ({ chatZonesByChat: { ...s.chatZonesByChat, [chatId]: zones } }));
+  },
+  async addPerspectiveZone(chatId, zoneId) {
+    await api.addPerspectiveZone(chatId, zoneId);
+    await get().loadChatZones(chatId);
+  },
+  async removePerspectiveZone(chatId, zoneId) {
+    await api.removePerspectiveZone(chatId, zoneId);
+    set((s) => ({
+      chatZonesByChat: {
+        ...s.chatZonesByChat,
+        [chatId]: (s.chatZonesByChat[chatId] ?? []).filter((z) => z.zoneId !== zoneId),
+      },
+    }));
+  },
+}));

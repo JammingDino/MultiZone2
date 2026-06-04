@@ -1,0 +1,43 @@
+{
+  "name": "multizone",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.1.1",
+    "@tauri-apps/plugin-dialog": "^2.0.1",
+    "@tauri-apps/plugin-fs": "^2.0.3",
+    "function-plot": "^1.25.1",
+    "katex": "^0.16.11",
+    "lucide-react": "^0.460.0",
+    "mermaid": "^11.4.0",
+    "pdfjs-dist": "^4.7.76",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-markdown": "^9.0.1",
+    "react-syntax-highlighter": "^15.6.1",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.0",
+    "remark-math": "^6.0.0",
+    "zustand": "^5.0.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0-beta.4",
+    "@tauri-apps/cli": "^2.1.0",
+    "@types/node": "^22.19.19",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/react-syntax-highlighter": "^15.5.13",
+    "@vitejs/plugin-react": "^4.3.4",
+    "tailwindcss": "^4.0.0-beta.4",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.1",
+    "vite-plugin-static-copy": "^2.1.0"
+  }
+}

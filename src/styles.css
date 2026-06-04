@@ -1,0 +1,443 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0b0d10;
+  --color-panel: #14171c;
+  --color-panel-hover: #242a33;
+  --color-border: #2d333d;
+  --color-border-strong: #3a4151;
+  --color-text: #e4e6eb;
+  --color-text-muted: #8b929e;
+  --color-accent: #4f9cf9;
+  --color-accent-hover: #6aaffa;
+  --color-danger: #ef4444;
+}
+
+html.light {
+  --color-bg: #fafafa;
+  --color-panel: #ffffff;
+  --color-panel-hover: #e9edf2;
+  --color-border: #d8dde4;
+  --color-border-strong: #b8bfc9;
+  --color-text: #1f2329;
+  --color-text-muted: #5b6573;
+  --color-accent: #2f80ed;
+  --color-accent-hover: #1d6fdd;
+  --color-danger: #d63031;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family:
+    "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+  overflow: hidden;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+button {
+  cursor: pointer;
+  font-family: inherit;
+}
+
+input,
+textarea,
+select {
+  font-family: inherit;
+  background: transparent;
+  color: inherit;
+  outline: none;
+}
+
+/* ===== Global transition for interactive feedback ===== */
+button,
+a,
+[role="button"],
+summary,
+input,
+textarea,
+select,
+.cursor-pointer,
+.markdown a {
+  transition:
+    background-color 130ms ease,
+    border-color 130ms ease,
+    color 130ms ease,
+    opacity 130ms ease,
+    transform 130ms ease,
+    filter 130ms ease,
+    box-shadow 130ms ease;
+}
+
+/* Universal hover feedback for interactive elements.
+   Works regardless of the element's own background — brightness lifts
+   transparent icons, panel-tinted buttons, and accent-filled buttons alike.
+   This is in addition to any per-element :hover styles, not a replacement.
+   `.cursor-pointer` is included so clickable <div>s (chat list items,
+   provider rows, etc.) get the same affordance as <button>s. */
+button:not(:disabled):hover,
+[role="button"]:not([aria-disabled="true"]):hover,
+summary:hover,
+.cursor-pointer:hover,
+label:has(> input[type="checkbox"]):hover,
+label:has(> input[type="radio"]):hover {
+  filter: brightness(1.22);
+}
+
+html.light button:not(:disabled):hover,
+html.light [role="button"]:not([aria-disabled="true"]):hover,
+html.light summary:hover,
+html.light .cursor-pointer:hover {
+  /* On light backgrounds brightness goes toward white, which is the wrong direction.
+     Use a darken + saturate combo instead. */
+  filter: brightness(0.93) saturate(1.15);
+}
+
+button:not(:disabled):active,
+[role="button"]:not([aria-disabled="true"]):active,
+.cursor-pointer:active {
+  transform: scale(0.97);
+  filter: brightness(0.9);
+}
+
+button:not(:disabled):focus-visible,
+[role="button"]:not([aria-disabled="true"]):focus-visible,
+a:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Disabled state: dim and remove the pointer affordance. */
+button:disabled,
+[role="button"][aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ===== Checkboxes ===== */
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  margin: 0;
+  border: 1.5px solid var(--color-border-strong);
+  border-radius: 4px;
+  background: var(--color-panel);
+  cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+}
+input[type="checkbox"]:hover {
+  border-color: var(--color-accent);
+}
+input[type="checkbox"]:checked {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 0.5px;
+  width: 5px;
+  height: 9px;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* ===== Radio ===== */
+input[type="radio"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid var(--color-border-strong);
+  border-radius: 50%;
+  background: var(--color-panel);
+  cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+}
+input[type="radio"]:hover {
+  border-color: var(--color-accent);
+}
+input[type="radio"]:checked {
+  border-color: var(--color-accent);
+}
+input[type="radio"]:checked::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: var(--color-accent);
+}
+
+/* ===== Range sliders ===== */
+input[type="range"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  height: 4px;
+  background: var(--color-border);
+  border-radius: 999px;
+  outline: none;
+  padding: 0;
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  background: var(--color-border);
+  border-radius: 999px;
+}
+input[type="range"]::-moz-range-track {
+  height: 4px;
+  background: var(--color-border);
+  border-radius: 999px;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  background: var(--color-accent);
+  border-radius: 50%;
+  border: 2px solid var(--color-bg);
+  margin-top: -6px;
+  cursor: pointer;
+  box-shadow: 0 0 0 1px var(--color-border-strong);
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+input[type="range"]:hover::-webkit-slider-thumb {
+  transform: scale(1.15);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-accent) 30%, transparent);
+}
+input[type="range"]:active::-webkit-slider-thumb {
+  transform: scale(1.1);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  background: var(--color-accent);
+  border-radius: 50%;
+  border: 2px solid var(--color-bg);
+  cursor: pointer;
+  box-shadow: 0 0 0 1px var(--color-border-strong);
+}
+input[type="range"]:hover::-moz-range-thumb {
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-accent) 30%, transparent);
+}
+
+/* ===== Color picker swatch ===== */
+input[type="color"] {
+  -webkit-appearance: none;
+  appearance: none;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  cursor: pointer;
+  overflow: hidden;
+}
+input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+input[type="color"]::-webkit-color-swatch { border: none; }
+input[type="color"]:hover { border-color: var(--color-accent); }
+
+/* ===== Hover-revealed message action bar =====
+   Tailwind v4-beta's group-hover arbitrary variants don't always emit,
+   so do it explicitly with plain CSS. */
+.msg-row {
+  position: relative;
+}
+.msg-row .msg-actions {
+  opacity: 0;
+  transition: opacity 150ms ease;
+  pointer-events: none;
+}
+.msg-row:hover .msg-actions,
+.msg-row:focus-within .msg-actions,
+.msg-row .msg-actions:hover {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* ===== Markdown content ===== */
+.markdown {
+  line-height: 1.55;
+  font-size: 14px;
+}
+
+.markdown > *:first-child {
+  margin-top: 0;
+}
+.markdown > *:last-child {
+  margin-bottom: 0;
+}
+
+.markdown p {
+  margin: 0.4em 0;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  font-weight: 600;
+  line-height: 1.25;
+  margin: 1em 0 0.4em;
+  color: var(--color-text);
+}
+.markdown h1 {
+  font-size: 1.6em;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 0.25em;
+}
+.markdown h2 {
+  font-size: 1.35em;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 0.2em;
+}
+.markdown h3 {
+  font-size: 1.18em;
+}
+.markdown h4 {
+  font-size: 1.05em;
+}
+.markdown h5,
+.markdown h6 {
+  font-size: 1em;
+  color: var(--color-text-muted);
+}
+
+.markdown ul,
+.markdown ol {
+  margin: 0.4em 0;
+  padding-left: 1.6em;
+}
+.markdown ul {
+  list-style: disc outside;
+}
+.markdown ol {
+  list-style: decimal outside;
+}
+.markdown ul ul {
+  list-style: circle outside;
+}
+.markdown ul ul ul {
+  list-style: square outside;
+}
+.markdown li {
+  margin: 0.2em 0;
+}
+.markdown li > p {
+  margin: 0.2em 0;
+}
+.markdown li::marker {
+  color: var(--color-text-muted);
+}
+
+.markdown blockquote {
+  margin: 0.5em 0;
+  padding: 0.3em 0.9em;
+  border-left: 3px solid var(--color-border);
+  color: var(--color-text-muted);
+}
+
+.markdown hr {
+  margin: 1em 0;
+  border: 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.markdown a {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.markdown a:hover {
+  color: var(--color-accent-hover);
+}
+
+.markdown strong {
+  font-weight: 600;
+}
+.markdown em {
+  font-style: italic;
+}
+
+.markdown table {
+  width: auto;
+  margin: 0.5em 0;
+  border-collapse: collapse;
+  font-size: 0.95em;
+}
+.markdown th,
+.markdown td {
+  padding: 0.35em 0.65em;
+  border: 1px solid var(--color-border);
+  text-align: left;
+}
+.markdown th {
+  background: var(--color-panel);
+  font-weight: 600;
+}
+
+.markdown :not(pre) > code {
+  background: var(--color-panel);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 0.05em 0.35em;
+  font-size: 0.9em;
+  font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+}
+
+.markdown pre {
+  margin: 0.6em 0;
+}
+
+.markdown .katex {
+  font-size: 1.05em;
+}
+.markdown .katex-display {
+  margin: 0.5em 0;
+  overflow-x: auto;
+}

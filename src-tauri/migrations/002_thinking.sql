@@ -1,0 +1,2 @@
+ALTER TABLE messages ADD COLUMN reasoning TEXT;
+ALTER TABLE zones ADD COLUMN thinking_enabled INTEGER NOT NULL DEFAULT 0;

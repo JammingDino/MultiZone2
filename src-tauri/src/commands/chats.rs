@@ -1,0 +1,428 @@
+use crate::commands::{new_id, now_ts};
+use crate::db::models::{Chat, ChatTagEntry, ChatZone, Message, Provider, Zone};
+use crate::error::{AppError, AppResult};
+use crate::llm::client::LlmClient;
+use crate::llm::thinking::strip_thinking_blocks;
+use crate::llm::types::{ChatMessage, ChatRequest, MessageContent};
+use crate::state::AppState;
+use tauri::{AppHandle, Emitter, State};
+
+const CHAT_COLS: &str =
+    "id, title, zone_id, project_id, project_context_enabled, created_at, updated_at";
+
+#[tauri::command]
+pub async fn list_chats(state: State<'_, AppState>) -> AppResult<Vec<Chat>> {
+    let rows = sqlx::query_as::<_, Chat>(&format!(
+        "SELECT {CHAT_COLS} FROM chats ORDER BY updated_at DESC"
+    ))
+    .fetch_all(&state.db)
+    .await?;
+    Ok(rows)
+}
+
+#[tauri::command]
+pub async fn create_chat(
+    state: State<'_, AppState>,
+    zone_id: Option<String>,
+    project_id: Option<String>,
+) -> AppResult<Chat> {
+    let id = new_id();
+    let now = now_ts();
+
+    // Inherit default zone from project if zone_id not provided.
+    let effective_zone_id = match (&zone_id, &project_id) {
+        (None, Some(pid)) => {
+            sqlx::query_scalar::<_, Option<String>>(
+                "SELECT default_zone_id FROM projects WHERE id = ?1",
+            )
+            .bind(pid)
+            .fetch_optional(&state.db)
+            .await?
+            .flatten()
+            .or(zone_id.clone())
+        }
+        _ => zone_id.clone(),
+    };
+
+    sqlx::query(
+        "INSERT INTO chats (id, title, zone_id, project_id, created_at, updated_at)
+         VALUES (?1, 'New Chat', ?2, ?3, ?4, ?4)",
+    )
+    .bind(&id)
+    .bind(&effective_zone_id)
+    .bind(&project_id)
+    .bind(now)
+    .execute(&state.db)
+    .await?;
+
+    let chat = sqlx::query_as::<_, Chat>(&format!(
+        "SELECT {CHAT_COLS} FROM chats WHERE id = ?1"
+    ))
+    .bind(&id)
+    .fetch_one(&state.db)
+    .await?;
+    Ok(chat)
+}
+
+#[tauri::command]
+pub async fn rename_chat(
+    state: State<'_, AppState>,
+    id: String,
+    title: String,
+) -> AppResult<()> {
+    sqlx::query("UPDATE chats SET title = ?1, updated_at = ?2 WHERE id = ?3")
+        .bind(&title)
+        .bind(now_ts())
+        .bind(&id)
+        .execute(&state.db)
+        .await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_chat_zone(
+    state: State<'_, AppState>,
+    id: String,
+    zone_id: Option<String>,
+) -> AppResult<()> {
+    sqlx::query("UPDATE chats SET zone_id = ?1, updated_at = ?2 WHERE id = ?3")
+        .bind(&zone_id)
+        .bind(now_ts())
+        .bind(&id)
+        .execute(&state.db)
+        .await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_chat_project(
+    state: State<'_, AppState>,
+    chat_id: String,
+    project_id: Option<String>,
+) -> AppResult<()> {
+    sqlx::query("UPDATE chats SET project_id = ?1, updated_at = ?2 WHERE id = ?3")
+        .bind(&project_id)
+        .bind(now_ts())
+        .bind(&chat_id)
+        .execute(&state.db)
+        .await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_chat_project_context(
+    state: State<'_, AppState>,
+    chat_id: String,
+    enabled: bool,
+) -> AppResult<()> {
+    sqlx::query(
+        "UPDATE chats SET project_context_enabled = ?1, updated_at = ?2 WHERE id = ?3",
+    )
+    .bind(enabled)
+    .bind(now_ts())
+    .bind(&chat_id)
+    .execute(&state.db)
+    .await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_chat_tags(
+    state: State<'_, AppState>,
+    chat_id: String,
+) -> AppResult<Vec<ChatTagEntry>> {
+    let rows = sqlx::query_as::<_, ChatTagEntry>(
+        "SELECT t.id AS tag_id, t.name, t.color, t.context_snippet, ct.context_enabled
+         FROM chat_tags ct
+         JOIN tags t ON t.id = ct.tag_id
+         WHERE ct.chat_id = ?1
+         ORDER BY t.name",
+    )
+    .bind(&chat_id)
+    .fetch_all(&state.db)
+    .await?;
+    Ok(rows)
+}
+
+#[tauri::command]
+pub async fn add_chat_tag(
+    state: State<'_, AppState>,
+    chat_id: String,
+    tag_id: String,
+) -> AppResult<()> {
+    sqlx::query(
+        "INSERT OR IGNORE INTO chat_tags (chat_id, tag_id, context_enabled) VALUES (?1, ?2, 0)",
+    )
+    .bind(&chat_id)
+    .bind(&tag_id)
+    .execute(&state.db)
+    .await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn remove_chat_tag(
+    state: State<'_, AppState>,
+    chat_id: String,
+    tag_id: String,
+) -> AppResult<()> {
+    sqlx::query("DELETE FROM chat_tags WHERE chat_id = ?1 AND tag_id = ?2")
+        .bind(&chat_id)
+        .bind(&tag_id)
+        .execute(&state.db)
+        .await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_chat_tag_context(
+    state: State<'_, AppState>,
+    chat_id: String,
+    tag_id: String,
+    enabled: bool,
+) -> AppResult<()> {
+    sqlx::query(
+        "UPDATE chat_tags SET context_enabled = ?1 WHERE chat_id = ?2 AND tag_id = ?3",
+    )
+    .bind(enabled)
+    .bind(&chat_id)
+    .bind(&tag_id)
+    .execute(&state.db)
+    .await?;
+    Ok(())
+}
+
+// ─── Perspective zones ────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn get_chat_zones(
+    state: State<'_, AppState>,
+    chat_id: String,
+) -> AppResult<Vec<ChatZone>> {
+    let rows = sqlx::query_as::<_, ChatZone>(
+        "SELECT chat_id, zone_id FROM chat_zones WHERE chat_id = ?1",
+    )
+    .bind(&chat_id)
+    .fetch_all(&state.db)
+    .await?;
+    Ok(rows)
+}
+
+#[tauri::command]
+pub async fn add_perspective_zone(
+    state: State<'_, AppState>,
+    chat_id: String,
+    zone_id: String,
+) -> AppResult<()> {
+    sqlx::query(
+        "INSERT OR IGNORE INTO chat_zones (chat_id, zone_id) VALUES (?1, ?2)",
+    )
+    .bind(&chat_id)
+    .bind(&zone_id)
+    .execute(&state.db)
+    .await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn remove_perspective_zone(
+    state: State<'_, AppState>,
+    chat_id: String,
+    zone_id: String,
+) -> AppResult<()> {
+    sqlx::query("DELETE FROM chat_zones WHERE chat_id = ?1 AND zone_id = ?2")
+        .bind(&chat_id)
+        .bind(&zone_id)
+        .execute(&state.db)
+        .await?;
+    Ok(())
+}
+
+/// Deletes the given message and everything chronologically after it in the same chat.
+#[tauri::command]
+pub async fn delete_messages_from(
+    state: State<'_, AppState>,
+    chat_id: String,
+    message_id: String,
+) -> AppResult<()> {
+    let row: Option<(i64,)> =
+        sqlx::query_as("SELECT created_at FROM messages WHERE id = ?1 AND chat_id = ?2")
+            .bind(&message_id)
+            .bind(&chat_id)
+            .fetch_optional(&state.db)
+            .await?;
+    let Some((ts,)) = row else {
+        return Err(AppError::NotFound(format!("message {message_id}")));
+    };
+    sqlx::query("DELETE FROM messages WHERE chat_id = ?1 AND created_at >= ?2")
+        .bind(&chat_id)
+        .bind(ts)
+        .execute(&state.db)
+        .await?;
+    sqlx::query("UPDATE chats SET updated_at = ?1 WHERE id = ?2")
+        .bind(now_ts())
+        .bind(&chat_id)
+        .execute(&state.db)
+        .await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn delete_chat(state: State<'_, AppState>, id: String) -> AppResult<()> {
+    sqlx::query("DELETE FROM chats WHERE id = ?1")
+        .bind(&id)
+        .execute(&state.db)
+        .await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_messages(
+    state: State<'_, AppState>,
+    chat_id: String,
+) -> AppResult<Vec<Message>> {
+    let rows = sqlx::query_as::<_, Message>(
+        "SELECT id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, created_at
+         FROM messages WHERE chat_id = ?1 ORDER BY created_at ASC",
+    )
+    .bind(&chat_id)
+    .fetch_all(&state.db)
+    .await?;
+    Ok(rows)
+}
+
+#[tauri::command]
+pub async fn generate_title(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    chat_id: String,
+) -> AppResult<String> {
+    let chat = sqlx::query_as::<_, Chat>(&format!(
+        "SELECT {CHAT_COLS} FROM chats WHERE id = ?1"
+    ))
+    .bind(&chat_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::NotFound(format!("chat {chat_id}")))?;
+
+    let zone_id = chat.zone_id.clone().ok_or_else(|| {
+        AppError::Invalid("chat has no zone, cannot generate title".into())
+    })?;
+
+    let zone = sqlx::query_as::<_, Zone>(
+        "SELECT id, name, provider_id, model, system_prompt, temperature, max_tokens, top_p,
+                tools_enabled, tool_config, thinking_enabled, include_thinking_in_context,
+                icon, accent_color, created_at, updated_at
+         FROM zones WHERE id = ?1",
+    )
+    .bind(&zone_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::NotFound(format!("zone {zone_id}")))?;
+
+    let provider_id = zone.provider_id.clone().ok_or_else(|| {
+        AppError::Invalid("zone has no provider".into())
+    })?;
+    let provider = sqlx::query_as::<_, Provider>(
+        "SELECT id, name, base_url, api_key, created_at FROM providers WHERE id = ?1",
+    )
+    .bind(&provider_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::NotFound(format!("provider {provider_id}")))?;
+
+    let first_user = sqlx::query_as::<_, Message>(
+        "SELECT id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, created_at
+         FROM messages WHERE chat_id = ?1 AND role = 'user' ORDER BY created_at ASC LIMIT 1",
+    )
+    .bind(&chat_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::Invalid("no user message yet".into()))?;
+
+    let user_text = extract_text_from_content_json(&first_user.content);
+
+    let prompt = format!(
+        "Generate a very short title (3 to 6 words, no quotes, no period) summarizing this chat based on the user's first message. Respond with ONLY the title text — no preamble, no explanation, no thinking out loud.\n\nUser message:\n{user_text}"
+    );
+
+    let req = ChatRequest {
+        model: zone.model.clone(),
+        messages: vec![ChatMessage {
+            role: "user".into(),
+            content: Some(MessageContent::Text(prompt)),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        }],
+        temperature: Some(0.4),
+        max_tokens: Some(2048),
+        top_p: None,
+        tools: None,
+        reasoning_effort: None,
+        stream: false,
+    };
+
+    let client = LlmClient::new(&state.http, &provider.base_url, provider.api_key.as_deref());
+    let resp = client.chat_completion(&req).await?;
+    let title = resp
+        .choices
+        .first()
+        .and_then(|c| match &c.message.content {
+            Some(MessageContent::Text(s)) => Some(s.clone()),
+            Some(MessageContent::Parts(parts)) => {
+                let joined: String = parts
+                    .iter()
+                    .filter_map(|p| match p {
+                        crate::llm::types::ContentPart::Text { text } => Some(text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                if joined.is_empty() { None } else { Some(joined) }
+            }
+            None => None,
+        })
+        .unwrap_or_else(|| "New Chat".to_string());
+
+    let title = strip_thinking_blocks(&title);
+    let title = title
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .last()
+        .unwrap_or("")
+        .to_string();
+    let title = title.trim().trim_matches('"').trim_matches('\'').to_string();
+    let title = if title.is_empty() { "New Chat".to_string() } else { title };
+
+    sqlx::query("UPDATE chats SET title = ?1, updated_at = ?2 WHERE id = ?3")
+        .bind(&title)
+        .bind(now_ts())
+        .bind(&chat_id)
+        .execute(&state.db)
+        .await?;
+
+    let _ = app.emit(
+        "chat-title-updated",
+        serde_json::json!({ "chatId": chat_id, "title": title }),
+    );
+
+    Ok(title)
+}
+
+fn extract_text_from_content_json(content_json: &str) -> String {
+    if let Ok(parts) = serde_json::from_str::<Vec<serde_json::Value>>(content_json) {
+        let mut buf = String::new();
+        for p in parts {
+            if p.get("type").and_then(|v| v.as_str()) == Some("text") {
+                if let Some(t) = p.get("text").and_then(|v| v.as_str()) {
+                    if !buf.is_empty() { buf.push('\n'); }
+                    buf.push_str(t);
+                }
+            }
+        }
+        return buf;
+    }
+    content_json.to_string()
+}

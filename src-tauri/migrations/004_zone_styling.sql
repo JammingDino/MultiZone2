@@ -1,0 +1,2 @@
+ALTER TABLE zones ADD COLUMN icon TEXT;
+ALTER TABLE zones ADD COLUMN accent_color TEXT;

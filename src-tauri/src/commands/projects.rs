@@ -10,7 +10,7 @@ use tauri::State;
 #[tauri::command]
 pub async fn list_projects(state: State<'_, AppState>) -> AppResult<Vec<Project>> {
     let rows = sqlx::query_as::<_, Project>(
-        "SELECT id, name, icon, accent_color, default_zone_id, context_snippet, directory, created_at, updated_at
+        "SELECT id, name, icon, accent_color, default_zone_id, context_snippet, directory, default_context_enabled, created_at, updated_at
          FROM projects ORDER BY name",
     )
     .fetch_all(&state.db)
@@ -28,15 +28,17 @@ pub struct ProjectInput {
     pub default_zone_id: Option<String>,
     pub context_snippet: Option<String>,
     pub directory: Option<String>,
+    pub default_context_enabled: Option<bool>,
 }
 
 #[tauri::command]
 pub async fn upsert_project(state: State<'_, AppState>, project: ProjectInput) -> AppResult<Project> {
     let id = project.id.unwrap_or_else(new_id);
     let now = now_ts();
+    let default_context = project.default_context_enabled.unwrap_or(false);
     sqlx::query(
-        "INSERT INTO projects (id, name, icon, accent_color, default_zone_id, context_snippet, directory, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
+        "INSERT INTO projects (id, name, icon, accent_color, default_zone_id, context_snippet, directory, default_context_enabled, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)
          ON CONFLICT(id) DO UPDATE SET
            name = excluded.name,
            icon = excluded.icon,
@@ -44,6 +46,7 @@ pub async fn upsert_project(state: State<'_, AppState>, project: ProjectInput) -
            default_zone_id = excluded.default_zone_id,
            context_snippet = excluded.context_snippet,
            directory = excluded.directory,
+           default_context_enabled = excluded.default_context_enabled,
            updated_at = excluded.updated_at",
     )
     .bind(&id)
@@ -53,12 +56,13 @@ pub async fn upsert_project(state: State<'_, AppState>, project: ProjectInput) -
     .bind(&project.default_zone_id)
     .bind(&project.context_snippet)
     .bind(&project.directory)
+    .bind(default_context)
     .bind(now)
     .execute(&state.db)
     .await?;
 
     let row = sqlx::query_as::<_, Project>(
-        "SELECT id, name, icon, accent_color, default_zone_id, context_snippet, directory, created_at, updated_at
+        "SELECT id, name, icon, accent_color, default_zone_id, context_snippet, directory, default_context_enabled, created_at, updated_at
          FROM projects WHERE id = ?1",
     )
     .bind(&id)

@@ -113,13 +113,18 @@ function ToolStepView({
 }) {
   // Auto-expand while tool args are streaming so the user can see them build up.
   const [open, setOpen] = useState(step.pending);
+  const [mermaidFailed, setMermaidFailed] = useState(false);
   const { toolCall, toolResult, pending } = step;
 
-  // If a step transitions from pending → done, collapse it automatically
-  // (the args section is replaced by the result). Let the user re-open if curious.
+  // Keep open while running so the user sees the executing indicator.
+  // Collapse once the result is in.
   useEffect(() => {
-    if (!pending) setOpen(false);
-  }, [pending]);
+    if (!pending && !toolResult) {
+      setOpen(true); // show executing state
+    } else if (!pending && toolResult) {
+      setOpen(false); // collapse when done
+    }
+  }, [pending, !!toolResult]);
   const name = toolCall.function.name;
 
   const resultText = toolResult ? extractToolResultText(toolResult.content) : null;
@@ -145,7 +150,9 @@ function ToolStepView({
     errorKind === "timeout";
 
   const args = parseArgs(toolCall.function.arguments);
-  const renderedView = toolResult ? renderToolOutput(name, args, resultText, chatId) : null;
+  const renderedView = toolResult
+    ? renderToolOutput(name, args, resultText, chatId, () => setMermaidFailed(true))
+    : null;
 
   // ask_user gets its own visual treatment, no folder header.
   if (name === "ask_user" && toolResult && !isError) {
@@ -184,6 +191,7 @@ function ToolStepView({
   if (pending) status = "pending";
   else if (!toolResult) status = "running";
   else if (isError) status = isSetupIssue ? "warning" : "error";
+  else if (mermaidFailed) status = "error";
   else status = "done";
 
   const statusIcon =
@@ -222,6 +230,16 @@ function ToolStepView({
             {toolCall.function.arguments || ""}
             <span className="animate-pulse text-[var(--color-accent)]">▌</span>
           </pre>
+        </div>
+      )}
+
+      {/* Executing indicator — shown while the tool is running (args done, no result yet) */}
+      {status === "running" && (
+        <div className="border-t border-[var(--color-border)] px-3 py-2.5 text-xs">
+          <div className="flex items-center gap-2 text-[var(--color-text-muted)]">
+            <Loader2 size={12} className="animate-spin text-[var(--color-accent)]" />
+            <span>Executing <code className="text-[var(--color-text)]">{name}</code>…</span>
+          </div>
         </div>
       )}
 
@@ -330,6 +348,7 @@ function renderToolOutput(
   args: any,
   resultText: string | null,
   _chatId: string,
+  onMermaidError?: () => void,
 ): React.ReactNode {
   if (!resultText) return null;
   let parsed: any;
@@ -362,7 +381,7 @@ function renderToolOutput(
     if (!source) return null;
     return (
       <>
-        <MermaidBlock source={source} />
+        <MermaidBlock source={source} onRenderError={onMermaidError} />
         {parsed.caption && (
           <div className="mt-1 text-center text-xs text-[var(--color-text-muted)]">
             {parsed.caption}

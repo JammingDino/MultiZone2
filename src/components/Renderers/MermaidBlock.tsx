@@ -73,7 +73,7 @@ function ensureInitialized() {
   }
 }
 
-export function MermaidBlock({ source }: { source: string }) {
+export function MermaidBlock({ source, onRenderError }: { source: string; onRenderError?: () => void }) {
   const reactId = useId();
   const renderId = "mermaid-" + reactId.replace(/[^a-zA-Z0-9]/g, "");
   const [svg, setSvg] = useState<string>("");
@@ -114,6 +114,7 @@ export function MermaidBlock({ source }: { source: string }) {
         if (!cancelled) {
           setError(String(e?.message || e));
           setLoading(false);
+          onRenderError?.();
         }
         document.querySelectorAll(`[id^="d${renderId}"]`).forEach((n) => n.remove());
       }

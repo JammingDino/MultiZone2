@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { X, Plus, Trash2, Folder, FolderOpen } from "lucide-react";
+import { X, Plus, Trash2, Folder, FolderOpen, ToggleLeft } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
@@ -62,7 +62,8 @@ function ProjectsTab({
   onSaved: () => void;
   onDeleted: () => void;
 }) {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const initId = useApp((s) => s.projectsPanelInitId);
+  const [selectedId, setSelectedId] = useState<string | null>(initId ?? null);
   const [isNew, setIsNew] = useState(false);
   const selected = projects.find((p) => p.id === selectedId) ?? null;
   const showForm = isNew || selectedId !== null;
@@ -159,6 +160,7 @@ function ProjectForm({
   const [defaultZoneId, setDefaultZoneId] = useState<string | null>(null);
   const [contextSnippet, setContextSnippet] = useState("");
   const [directory, setDirectory] = useState<string | null>(null);
+  const [defaultContextEnabled, setDefaultContextEnabled] = useState(false);
   const [iconSearch, setIconSearch] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -170,9 +172,11 @@ function ProjectForm({
       setDefaultZoneId(project.defaultZoneId ?? null);
       setContextSnippet(project.contextSnippet ?? "");
       setDirectory(project.directory ?? null);
+      setDefaultContextEnabled(project.defaultContextEnabled ?? false);
     } else {
       setName(""); setIcon(null); setAccentColor(null);
       setDefaultZoneId(null); setContextSnippet(""); setDirectory(null);
+      setDefaultContextEnabled(false);
     }
     setIconSearch("");
   }, [project?.id]);
@@ -201,6 +205,7 @@ function ProjectForm({
         defaultZoneId,
         contextSnippet: contextSnippet.trim() || null,
         directory: directory || null,
+        defaultContextEnabled,
       });
       onSaved(saved);
     } finally { setSaving(false); }
@@ -340,6 +345,25 @@ function ProjectForm({
             placeholder="e.g. You are working in the context of the Work project. Always respond professionally."
           />
         </label>
+
+        {/* Default context on */}
+        <div
+          onClick={() => setDefaultContextEnabled((v) => !v)}
+          className="flex cursor-pointer items-center justify-between rounded border border-[var(--color-border)] px-3 py-2.5 hover:border-[var(--color-accent)]"
+        >
+          <div>
+            <div className="text-sm font-medium">Enable context by default</div>
+            <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">
+              New chats in this project will start with the context snippet active
+            </div>
+          </div>
+          <button
+            onClick={(e) => { e.stopPropagation(); setDefaultContextEnabled((v) => !v); }}
+            className={`relative h-5 w-9 flex-shrink-0 rounded-full transition-colors ${defaultContextEnabled ? "bg-[var(--color-accent)]" : "bg-[var(--color-border)]"}`}
+          >
+            <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all duration-200 ${defaultContextEnabled ? "translate-x-4" : ""}`} />
+          </button>
+        </div>
       </div>
 
       <div className="flex justify-end gap-2 border-t border-[var(--color-border)] px-4 py-3">

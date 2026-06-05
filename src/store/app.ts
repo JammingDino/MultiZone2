@@ -114,7 +114,8 @@ interface AppStore {
   loadDefaultZone: () => Promise<void>;
 
   projectsPanelOpen: boolean;
-  openProjectsPanel: () => void;
+  projectsPanelInitId: string | null;
+  openProjectsPanel: (projectId?: string) => void;
   closeProjectsPanel: () => void;
   refreshProjects: () => Promise<void>;
   refreshTags: () => Promise<void>;
@@ -143,24 +144,60 @@ function freshStreaming(messageId: string): StreamingState {
   };
 }
 
+export type BackgroundEffect = "none" | "particles" | "orbs" | "aurora" | "grid" | "stars" | "shooting";
+
 export interface ThemePrefs {
   mode: "dark" | "light";
   accent: string;
+  backgroundEffect: BackgroundEffect;
+  effectSpeed: number;
+  effectDensity: number;
+  effectOpacity: number;
+  effectColor: string;
+  bloomEnabled: boolean;
+  bloomIntensity: number;
+  shadowsEnabled: boolean;
 }
 
-const DEFAULT_THEME: ThemePrefs = { mode: "dark", accent: "#4f9cf9" };
-
-const FONT_SIZE_MAP: Record<AppSettings["fontSize"], string> = {
-  normal: "14px",
-  large: "16px",
-  xl: "18px",
+const DEFAULT_THEME: ThemePrefs = {
+  mode: "dark",
+  accent: "#4f9cf9",
+  backgroundEffect: "none",
+  effectSpeed: 1.0,
+  effectDensity: 60,
+  effectOpacity: 0.5,
+  effectColor: "accent",
+  bloomEnabled: false,
+  bloomIntensity: 0.5,
+  shadowsEnabled: true,
 };
 
+const LEGACY_FONT_SIZE: Record<string, number> = { normal: 14, large: 16, xl: 18 };
+
+let fontLinkEl: HTMLLinkElement | null = null;
+
 function applyAppSettingsToDom(settings: AppSettings) {
-  document.documentElement.style.setProperty(
-    "--font-size-message",
-    FONT_SIZE_MAP[settings.fontSize],
-  );
+  const fs = typeof settings.fontSize === "number" ? settings.fontSize : 14;
+  document.documentElement.style.setProperty("--font-size-message", `${fs}px`);
+
+  const family = settings.fontFamily?.trim();
+  if (family) {
+    document.documentElement.style.setProperty("--font-family", `"${family}", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`);
+    // Inject Google Fonts link if not already present for this family
+    const encoded = encodeURIComponent(family);
+    const href = `https://fonts.googleapis.com/css2?family=${encoded}:wght@400;500;600;700&display=swap`;
+    if (!fontLinkEl || fontLinkEl.href !== href) {
+      fontLinkEl?.remove();
+      fontLinkEl = document.createElement("link");
+      fontLinkEl.rel = "stylesheet";
+      fontLinkEl.href = href;
+      document.head.appendChild(fontLinkEl);
+    }
+  } else {
+    document.documentElement.style.removeProperty("--font-family");
+    fontLinkEl?.remove();
+    fontLinkEl = null;
+  }
 }
 
 function applyThemeToDom(theme: ThemePrefs) {
@@ -168,8 +205,10 @@ function applyThemeToDom(theme: ThemePrefs) {
   html.classList.toggle("light", theme.mode === "light");
   html.classList.toggle("dark", theme.mode === "dark");
   html.style.setProperty("--color-accent", theme.accent);
-  // Bump the accent-hover with a simple +10% lightness via mix-blend; keep it close.
   html.style.setProperty("--color-accent-hover", theme.accent);
+  html.classList.toggle("bloom", !!theme.bloomEnabled);
+  html.classList.toggle("shadows", !!theme.shadowsEnabled);
+  html.style.setProperty("--bloom-intensity", String(theme.bloomIntensity ?? 0.5));
 }
 
 export const useApp = create<AppStore>((set, get) => ({
@@ -197,6 +236,7 @@ export const useApp = create<AppStore>((set, get) => ({
   zonesPanelOpen: false,
   defaultZoneId: null,
   projectsPanelOpen: false,
+  projectsPanelInitId: null,
 
   async refreshProviders() {
     const providers = await api.listProviders();
@@ -510,8 +550,12 @@ export const useApp = create<AppStore>((set, get) => ({
     try {
       const raw = await api.getSetting("app_settings");
       if (raw) {
-        const parsed = JSON.parse(raw) as Partial<AppSettings>;
+        const parsed = JSON.parse(raw) as Partial<AppSettings> & { fontSize?: any };
         const merged = { ...DEFAULT_APP_SETTINGS, ...parsed };
+        // Migrate legacy string fontSize values
+        if (typeof merged.fontSize === "string") {
+          merged.fontSize = LEGACY_FONT_SIZE[merged.fontSize as string] ?? 14;
+        }
         set({ appSettings: merged });
         applyAppSettingsToDom(merged);
       }
@@ -552,8 +596,8 @@ export const useApp = create<AppStore>((set, get) => ({
     }
   },
 
-  openProjectsPanel: () => set({ projectsPanelOpen: true }),
-  closeProjectsPanel: () => set({ projectsPanelOpen: false }),
+  openProjectsPanel: (projectId?: string) => set({ projectsPanelOpen: true, projectsPanelInitId: projectId ?? null }),
+  closeProjectsPanel: () => set({ projectsPanelOpen: false, projectsPanelInitId: null }),
 
   async refreshProjects() {
     const projects = await api.listProjects();

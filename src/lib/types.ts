@@ -52,6 +52,8 @@ export interface Project {
   contextSnippet: string | null;
   /** Local filesystem directory the project is rooted at; scopes filesystem tools. */
   directory: string | null;
+  /** When true, new chats in this project start with project context enabled. */
+  defaultContextEnabled: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -154,15 +156,21 @@ export interface AppSettings {
   autoTitle: boolean;
   /** Start thinking/reasoning blocks expanded instead of collapsed. */
   expandThinkingByDefault: boolean;
-  /** Base font size for message text. */
-  fontSize: "normal" | "large" | "xl";
+  /** Base font size for message text (px). */
+  fontSize: number;
+  /** Font family for message text. Empty string = Inter (default). */
+  fontFamily: string;
+  /** Fallback filesystem directory when a chat has no project with a directory set. */
+  defaultDirectory: string;
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   sendKey: "enter",
   autoTitle: true,
   expandThinkingByDefault: false,
-  fontSize: "normal",
+  fontSize: 14,
+  fontFamily: "",
+  defaultDirectory: "",
 };
 
 export interface DbStats {

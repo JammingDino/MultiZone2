@@ -274,17 +274,38 @@ async fn run_agentic_loop(
     let zone_config: Value =
         serde_json::from_str(&zone.tool_config).unwrap_or(Value::Object(Default::default()));
 
-    // The project directory (if this chat belongs to a project with one) scopes
-    // the filesystem tools and serves as their base for relative paths.
-    let project_dir: Option<String> = sqlx::query_scalar(
-        "SELECT p.directory FROM projects p
-         JOIN chats c ON c.project_id = p.id
-         WHERE c.id = ?1",
-    )
-    .bind(chat_id)
-    .fetch_optional(&state.db)
-    .await?
-    .flatten();
+    // The project directory scopes the filesystem tools. If no project directory
+    // is set, fall back to the app-level default directory from settings.
+    let project_dir: Option<String> = {
+        let from_project: Option<String> = sqlx::query_scalar(
+            "SELECT p.directory FROM projects p
+             JOIN chats c ON c.project_id = p.id
+             WHERE c.id = ?1",
+        )
+        .bind(chat_id)
+        .fetch_optional(&state.db)
+        .await?
+        .flatten();
+
+        if from_project.is_some() {
+            from_project
+        } else {
+            // Fall back to the default directory stored in app_settings JSON
+            let raw: Option<String> = sqlx::query_scalar(
+                "SELECT value FROM settings WHERE key = 'app_settings'",
+            )
+            .fetch_optional(&state.db)
+            .await?
+            .flatten();
+            raw.and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+                .and_then(|v| {
+                    v.get("defaultDirectory")
+                        .and_then(|d| d.as_str())
+                        .filter(|s| !s.trim().is_empty())
+                        .map(String::from)
+                })
+        }
+    };
 
     let client = LlmClient::new(&state.http, &provider.base_url, provider.api_key.as_deref());
 

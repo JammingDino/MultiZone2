@@ -37,8 +37,7 @@ body,
 body {
   background: var(--color-bg);
   color: var(--color-text);
-  font-family:
-    "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-family, "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
   font-size: 14px;
   overflow: hidden;
 }
@@ -471,4 +470,39 @@ input[type="color"]:hover { border-color: var(--color-accent); }
 .math-plot-wrapper .content path,
 .math-plot-wrapper .content circle {
   stroke-width: 2px;
+}
+
+/* ===== Bloom / glow effect ===== */
+html.bloom {
+  --bloom-glow: color-mix(in srgb, var(--color-accent) calc(var(--bloom-intensity, 0.5) * 60%), transparent);
+}
+html.bloom button:not(:disabled):hover,
+html.bloom [role="button"]:not([aria-disabled="true"]):hover,
+html.bloom .cursor-pointer:hover {
+  box-shadow: 0 0 calc(8px + var(--bloom-intensity, 0.5) * 12px) var(--bloom-glow);
+}
+html.bloom input:focus,
+html.bloom textarea:focus,
+html.bloom select:focus {
+  box-shadow: 0 0 calc(6px + var(--bloom-intensity, 0.5) * 10px) var(--bloom-glow);
+}
+html.bloom .rounded-lg:focus-within,
+html.bloom .rounded-md:focus-within {
+  box-shadow: 0 0 calc(4px + var(--bloom-intensity, 0.5) * 8px) var(--bloom-glow);
+}
+html.bloom .text-\[var\(--color-accent\)\],
+html.bloom [class*="text-emerald"],
+html.bloom [class*="text-violet"] {
+  text-shadow: 0 0 calc(4px + var(--bloom-intensity, 0.5) * 8px) currentColor;
+}
+
+/* ===== Shadows ===== */
+html:not(.shadows) [class*="shadow"] {
+  box-shadow: none !important;
+}
+html.shadows [class*="shadow-lg"] {
+  box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+}
+html.shadows [class*="shadow-xl"] {
+  box-shadow: 0 16px 40px rgba(0,0,0,0.55);
 }

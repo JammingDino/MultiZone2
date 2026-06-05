@@ -148,6 +148,8 @@ pub async fn dispatch(
         "execute_code" => code_exec::run(&args, zone_config).await,
         "read_file" => filesystem::read_file(&args, zone_config, project_dir).await,
         "list_directory" => filesystem::list_directory(&args, zone_config, project_dir).await,
+        "create_file" => filesystem::create_file(&args, zone_config, project_dir).await,
+        "edit_file" => filesystem::edit_file(&args, zone_config, project_dir).await,
         "plot_function" => render_graph::plot(&args).await,
         "draw_diagram" => render_graph::draw(&args).await,
         "ask_user" => ask_user::run(&args).await,

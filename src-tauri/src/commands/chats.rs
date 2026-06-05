@@ -29,28 +29,30 @@ pub async fn create_chat(
     let id = new_id();
     let now = now_ts();
 
-    // Inherit default zone from project if zone_id not provided.
-    let effective_zone_id = match (&zone_id, &project_id) {
-        (None, Some(pid)) => {
-            sqlx::query_scalar::<_, Option<String>>(
-                "SELECT default_zone_id FROM projects WHERE id = ?1",
+    // Inherit default zone and default_context_enabled from project when set.
+    let (effective_zone_id, project_context_enabled) = match &project_id {
+        Some(pid) => {
+            let row: Option<(Option<String>, bool)> = sqlx::query_as(
+                "SELECT default_zone_id, default_context_enabled FROM projects WHERE id = ?1",
             )
             .bind(pid)
             .fetch_optional(&state.db)
-            .await?
-            .flatten()
-            .or(zone_id.clone())
+            .await?;
+            let (proj_zone, proj_ctx) = row.unwrap_or((None, false));
+            let effective_zone = zone_id.clone().or(proj_zone);
+            (effective_zone, proj_ctx)
         }
-        _ => zone_id.clone(),
+        None => (zone_id.clone(), false),
     };
 
     sqlx::query(
-        "INSERT INTO chats (id, title, zone_id, project_id, created_at, updated_at)
-         VALUES (?1, 'New Chat', ?2, ?3, ?4, ?4)",
+        "INSERT INTO chats (id, title, zone_id, project_id, project_context_enabled, created_at, updated_at)
+         VALUES (?1, 'New Chat', ?2, ?3, ?4, ?5, ?5)",
     )
     .bind(&id)
     .bind(&effective_zone_id)
     .bind(&project_id)
+    .bind(project_context_enabled)
     .bind(now)
     .execute(&state.db)
     .await?;

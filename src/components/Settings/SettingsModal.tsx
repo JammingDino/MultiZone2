@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
-import { X, Plus, Trash2, RefreshCw, Server, Palette, MessageSquare, Database, AlertTriangle, Loader2 } from "lucide-react";
+import { X, Plus, Trash2, RefreshCw, Server, Palette, MessageSquare, Database, AlertTriangle, Loader2, Folder, FolderOpen } from "lucide-react";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useApp } from "@/store/app";
+import type { BackgroundEffect } from "@/store/app";
 import * as api from "@/lib/tauri";
 import type { DbStats, Provider } from "@/lib/types";
 
@@ -102,12 +104,21 @@ function ProvidersTab() {
 // ─── Appearance ───────────────────────────────────────────────────────────────
 
 const ACCENT_PRESETS = ["#4f9cf9", "#22c55e", "#a855f7", "#f97316", "#ec4899", "#facc15"];
+const FONT_PRESETS = ["Inter", "Roboto", "JetBrains Mono", "Fira Code", "Merriweather", "Lato"];
 
 function AppearanceTab() {
   const theme = useApp((s) => s.theme);
   const setTheme = useApp((s) => s.setTheme);
   const appSettings = useApp((s) => s.appSettings);
   const setAppSettings = useApp((s) => s.setAppSettings);
+  const [fontInput, setFontInput] = useState(appSettings.fontFamily ?? "");
+
+  const fontSize = typeof appSettings.fontSize === "number" ? appSettings.fontSize : 14;
+
+  function applyFont(f: string) {
+    setFontInput(f);
+    setAppSettings({ fontFamily: f });
+  }
 
   return (
     <div className="flex flex-col gap-5">
@@ -151,18 +162,176 @@ function AppearanceTab() {
       </section>
 
       <section>
-        <h3 className="mb-2 text-sm font-medium">Message font size</h3>
+        <h3 className="mb-2 text-sm font-medium">Font</h3>
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {FONT_PRESETS.map((f) => (
+            <button
+              key={f}
+              onClick={() => applyFont(fontInput === f ? "" : f)}
+              className={`rounded border px-2.5 py-1 text-xs ${
+                fontInput === f
+                  ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)] text-[var(--color-text)]"
+                  : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-accent)]"
+              }`}
+              style={{ fontFamily: f }}
+            >
+              {f}
+            </button>
+          ))}
+        </div>
         <div className="flex gap-2">
-          {([["normal", "Normal (14px)"], ["large", "Large (16px)"], ["xl", "X-Large (18px)"]] as const).map(([val, label]) => (
+          <input
+            value={fontInput}
+            onChange={(e) => setFontInput(e.target.value)}
+            onBlur={() => setAppSettings({ fontFamily: fontInput })}
+            onKeyDown={(e) => { if (e.key === "Enter") setAppSettings({ fontFamily: fontInput }); }}
+            placeholder="Custom Google Font name, e.g. Source Code Pro"
+            className="flex-1 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 py-1.5 text-xs outline-none focus:border-[var(--color-accent)]"
+          />
+          {fontInput && (
+            <button
+              onClick={() => applyFont("")}
+              className="rounded border border-[var(--color-border)] px-2 py-1 text-xs hover:border-[var(--color-accent)]"
+            >
+              Reset
+            </button>
+          )}
+        </div>
+        <p className="mt-1.5 text-[10px] text-[var(--color-text-muted)]">
+          Enter any Google Fonts name. Applied to the whole app.
+        </p>
+      </section>
+
+      <section>
+        <h3 className="mb-2 text-sm font-medium">Message font size</h3>
+        <SliderRow
+          label=""
+          value={fontSize}
+          min={10} max={24} step={1}
+          display={`${fontSize}px`}
+          onChange={(v) => setAppSettings({ fontSize: v })}
+        />
+        <p className="mt-1 text-[10px] text-[var(--color-text-muted)]">Applies to message text only. UI chrome scales separately.</p>
+      </section>
+
+      <section>
+        <h3 className="mb-2 text-sm font-medium">Visual effects</h3>
+        <div className="flex flex-col gap-2">
+          <div
+            onClick={() => setTheme({ shadowsEnabled: !theme.shadowsEnabled })}
+            className="flex cursor-pointer items-center justify-between rounded border border-[var(--color-border)] px-3 py-2 hover:border-[var(--color-accent)]"
+          >
+            <div>
+              <div className="text-sm">Drop shadows</div>
+              <div className="text-[10px] text-[var(--color-text-muted)]">Adds depth shadows to panels and cards</div>
+            </div>
+            <Toggle checked={!!theme.shadowsEnabled} onChange={(v) => setTheme({ shadowsEnabled: v })} />
+          </div>
+          <div
+            onClick={() => setTheme({ bloomEnabled: !theme.bloomEnabled })}
+            className="flex cursor-pointer items-center justify-between rounded border border-[var(--color-border)] px-3 py-2 hover:border-[var(--color-accent)]"
+          >
+            <div>
+              <div className="text-sm">Bloom / glow</div>
+              <div className="text-[10px] text-[var(--color-text-muted)]">Adds glow to interactive elements and accent colors</div>
+            </div>
+            <Toggle checked={!!theme.bloomEnabled} onChange={(v) => setTheme({ bloomEnabled: v })} />
+          </div>
+          {theme.bloomEnabled && (
+            <div className="ml-3 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+              <SliderRow
+                label="Glow intensity"
+                value={theme.bloomIntensity ?? 0.5}
+                min={0.1} max={1} step={0.05}
+                display={`${Math.round((theme.bloomIntensity ?? 0.5) * 100)}%`}
+                onChange={(v) => setTheme({ bloomIntensity: v })}
+              />
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section>
+        <h3 className="mb-2 text-sm font-medium">Background effect</h3>
+        <div className="mb-3 grid grid-cols-4 gap-1.5">
+          {(
+            [
+              ["none", "None"],
+              ["particles", "Particles"],
+              ["orbs", "Orbs"],
+              ["aurora", "Aurora"],
+              ["grid", "Grid"],
+              ["stars", "Stars"],
+              ["shooting", "Shooting ★"],
+            ] as [BackgroundEffect, string][]
+          ).map(([val, label]) => (
             <button
               key={val}
-              onClick={() => setAppSettings({ fontSize: val })}
-              className={`flex-1 rounded border px-3 py-2 text-sm ${appSettings.fontSize === val ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]" : "border-[var(--color-border)] hover:border-[var(--color-accent)]"}`}
+              onClick={() => setTheme({ backgroundEffect: val })}
+              className={`rounded border px-2 py-1.5 text-xs ${
+                theme.backgroundEffect === val
+                  ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)] text-[var(--color-text)]"
+                  : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
+              }`}
             >
               {label}
             </button>
           ))}
         </div>
+
+        {theme.backgroundEffect !== "none" && (
+          <div className="flex flex-col gap-3 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+            <SliderRow
+              label="Speed"
+              value={theme.effectSpeed}
+              min={0.1} max={3} step={0.1}
+              display={`${theme.effectSpeed.toFixed(1)}×`}
+              onChange={(v) => setTheme({ effectSpeed: v })}
+            />
+            {["particles", "orbs", "stars", "shooting", "grid"].includes(theme.backgroundEffect) && (
+              <SliderRow
+                label={theme.backgroundEffect === "grid" ? "Scale" : "Density"}
+                value={theme.effectDensity}
+                min={theme.backgroundEffect === "grid" ? 15 : 10}
+                max={theme.backgroundEffect === "grid" ? 150 : 200}
+                step={5}
+                display={theme.backgroundEffect === "grid" ? `${theme.effectDensity}px` : String(theme.effectDensity)}
+                onChange={(v) => setTheme({ effectDensity: v })}
+              />
+            )}
+            <SliderRow
+              label="Opacity"
+              value={theme.effectOpacity}
+              min={0.05} max={1} step={0.05}
+              display={`${Math.round(theme.effectOpacity * 100)}%`}
+              onChange={(v) => setTheme({ effectOpacity: v })}
+            />
+            <div>
+              <div className="mb-1.5 text-xs text-[var(--color-text-muted)]">Effect color</div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setTheme({ effectColor: "accent" })}
+                  className={`rounded border px-3 py-1 text-xs ${
+                    theme.effectColor === "accent"
+                      ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]"
+                      : "border-[var(--color-border)] hover:border-[var(--color-accent)]"
+                  }`}
+                >
+                  Use accent
+                </button>
+                <label className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+                  Custom
+                  <input
+                    type="color"
+                    value={theme.effectColor === "accent" ? theme.accent : (theme.effectColor || theme.accent)}
+                    onChange={(e) => setTheme({ effectColor: e.target.value })}
+                    className="h-7 w-10 cursor-pointer rounded border border-[var(--color-border)] bg-transparent"
+                  />
+                </label>
+              </div>
+            </div>
+          </div>
+        )}
       </section>
 
       <section>
@@ -188,6 +357,11 @@ function ChatTab() {
   const appSettings = useApp((s) => s.appSettings);
   const setAppSettings = useApp((s) => s.setAppSettings);
   const zones = useApp((s) => s.zones);
+
+  async function pickDefaultDir() {
+    const selected = await open({ directory: true, multiple: false });
+    if (typeof selected === "string") setAppSettings({ defaultDirectory: selected });
+  }
   const defaultZoneId = useApp((s) => s.defaultZoneId);
   const setDefaultZone = useApp((s) => s.setDefaultZone);
 
@@ -244,13 +418,16 @@ function ChatTab() {
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
           Automatically ask the model to generate a short title after the first response.
         </p>
-        <label className="flex cursor-pointer items-center justify-between rounded border border-[var(--color-border)] px-3 py-2.5 hover:border-[var(--color-accent)]">
+        <div
+          onClick={() => setAppSettings({ autoTitle: !appSettings.autoTitle })}
+          className="flex cursor-pointer items-center justify-between rounded border border-[var(--color-border)] px-3 py-2.5 hover:border-[var(--color-accent)]"
+        >
           <span className="text-sm">Auto-generate titles</span>
           <Toggle
             checked={appSettings.autoTitle}
             onChange={(v) => setAppSettings({ autoTitle: v })}
           />
-        </label>
+        </div>
       </section>
 
       <section>
@@ -258,13 +435,45 @@ function ChatTab() {
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
           Show thinking/reasoning expanded by default. When off, blocks are collapsed once streaming finishes.
         </p>
-        <label className="flex cursor-pointer items-center justify-between rounded border border-[var(--color-border)] px-3 py-2.5 hover:border-[var(--color-accent)]">
+        <div
+          onClick={() => setAppSettings({ expandThinkingByDefault: !appSettings.expandThinkingByDefault })}
+          className="flex cursor-pointer items-center justify-between rounded border border-[var(--color-border)] px-3 py-2.5 hover:border-[var(--color-accent)]"
+        >
           <span className="text-sm">Expand reasoning by default</span>
           <Toggle
             checked={appSettings.expandThinkingByDefault}
             onChange={(v) => setAppSettings({ expandThinkingByDefault: v })}
           />
-        </label>
+        </div>
+      </section>
+
+      <section>
+        <h3 className="mb-1 text-sm font-medium">Default file directory</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          Fallback directory for file system tools when a chat isn't in a project (or the project has no directory set).
+        </p>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={pickDefaultDir}
+            className="flex shrink-0 items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:border-[var(--color-accent)]"
+          >
+            <FolderOpen size={13} /> Choose folder…
+          </button>
+          {appSettings.defaultDirectory ? (
+            <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5">
+              <Folder size={12} className="shrink-0 text-[var(--color-text-muted)]" />
+              <span className="truncate font-mono text-xs" title={appSettings.defaultDirectory}>{appSettings.defaultDirectory}</span>
+              <button
+                onClick={() => setAppSettings({ defaultDirectory: "" })}
+                className="ml-auto shrink-0 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ) : (
+            <span className="text-xs text-[var(--color-text-muted)]">No default directory set</span>
+          )}
+        </div>
       </section>
     </div>
   );
@@ -379,11 +588,11 @@ function DataTab() {
 function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
     <button
-      onClick={() => onChange(!checked)}
-      className={`relative h-5 w-9 rounded-full transition-colors ${checked ? "bg-[var(--color-accent)]" : "bg-[var(--color-border)]"}`}
+      onClick={(e) => { e.stopPropagation(); onChange(!checked); }}
+      className={`relative h-5 w-9 flex-shrink-0 rounded-full transition-colors ${checked ? "bg-[var(--color-accent)]" : "bg-[var(--color-border)]"}`}
     >
       <span
-        className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${checked ? "translate-x-4" : "translate-x-0.5"}`}
+        className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all duration-200 ${checked ? "translate-x-4" : ""}`}
       />
     </button>
   );
@@ -465,5 +674,30 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <div className="mb-1 text-xs text-[var(--color-text-muted)]">{label}</div>
       {children}
     </label>
+  );
+}
+
+function SliderRow({
+  label, value, min, max, step, display, onChange,
+}: {
+  label: string; value: number; min: number; max: number; step: number; display: string;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between text-xs text-[var(--color-text-muted)]">
+        <span>{label}</span>
+        <span className="tabular-nums">{display}</span>
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(parseFloat(e.target.value))}
+        className="w-full"
+      />
+    </div>
   );
 }

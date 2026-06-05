@@ -62,6 +62,9 @@ pub struct Project {
     /// Local filesystem directory the project is rooted at. Filesystem tools
     /// run relative to (and are scoped within) this directory when set.
     pub directory: Option<String>,
+    /// When true, new chats created inside this project start with project
+    /// context enabled automatically.
+    pub default_context_enabled: bool,
     pub created_at: i64,
     pub updated_at: i64,
 }

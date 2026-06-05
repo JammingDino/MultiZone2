@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Plus, Settings, Layers, FolderOpen, Folder, ChevronRight, ChevronDown, FolderPlus, ChevronLeft } from "lucide-react";
+import { Plus, Settings, Layers, ChevronRight, ChevronDown, FolderPlus, ChevronLeft, Pencil, Trash2 } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { ChatList } from "./ChatList";
@@ -29,6 +29,7 @@ export function Sidebar() {
 
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [projectMenu, setProjectMenu] = useState<{ projectId: string; x: number; y: number } | null>(null);
 
   useEffect(() => {
     refreshProviders();
@@ -53,6 +54,19 @@ export function Sidebar() {
     const chat = await api.createChat(effectiveZoneId, projectId ?? null);
     await refreshChats();
     await setActiveChat(chat.id);
+  }
+
+  function openProjectMenu(e: React.MouseEvent, projectId: string) {
+    e.preventDefault();
+    e.stopPropagation();
+    setProjectMenu({ projectId, x: e.clientX, y: e.clientY });
+  }
+
+  async function deleteProjectFromMenu(projectId: string) {
+    setProjectMenu(null);
+    await api.deleteProject(projectId);
+    await refreshProjects();
+    await refreshChats();
   }
 
   function toggleCollapse(projectId: string) {
@@ -102,7 +116,7 @@ export function Sidebar() {
             <Layers size={15} />
           </button>
           <button
-            onClick={openProjectsPanel}
+            onClick={() => openProjectsPanel()}
             title="Manage Projects"
             className="rounded p-2 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-accent)]"
           >
@@ -172,6 +186,7 @@ export function Sidebar() {
                 isOpen={isOpen}
                 onToggle={() => toggleCollapse(project.id)}
                 onNewChat={() => onNewChat(project.id)}
+                onContextMenu={(e) => openProjectMenu(e, project.id)}
                 color={color}
                 ProjectIcon={ProjectIcon}
               />
@@ -210,6 +225,37 @@ export function Sidebar() {
         )}
       </div>
 
+      {/* Project right-click menu */}
+      {projectMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setProjectMenu(null)} onContextMenu={(e) => { e.preventDefault(); setProjectMenu(null); }} />
+          <div
+            className="fixed z-50 min-w-[180px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg"
+            style={{ left: projectMenu.x, top: projectMenu.y }}
+          >
+            <button
+              onClick={() => { setProjectMenu(null); onNewChat(projectMenu.projectId); }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)]"
+            >
+              <Plus size={14} /> New chat
+            </button>
+            <button
+              onClick={() => { const id = projectMenu.projectId; setProjectMenu(null); openProjectsPanel(id); }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)]"
+            >
+              <Pencil size={14} /> Edit project
+            </button>
+            <div className="my-0.5 border-t border-[var(--color-border)]" />
+            <button
+              onClick={() => deleteProjectFromMenu(projectMenu.projectId)}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[var(--color-danger)] hover:bg-[var(--color-panel-hover)]"
+            >
+              <Trash2 size={14} /> Delete project
+            </button>
+          </div>
+        </>
+      )}
+
       {/* Footer buttons */}
       <div className="border-t border-[var(--color-border)] p-2 flex flex-col gap-1">
         <button
@@ -220,7 +266,7 @@ export function Sidebar() {
           Configure Zones
         </button>
         <button
-          onClick={openProjectsPanel}
+          onClick={() => openProjectsPanel()}
           className="flex w-full items-center justify-center gap-2 rounded-md border border-[var(--color-border)] py-2 text-xs transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
         >
           <FolderPlus size={13} />
@@ -237,6 +283,7 @@ function ProjectFolderHeader({
   isOpen,
   onToggle,
   onNewChat,
+  onContextMenu,
   color,
   ProjectIcon,
 }: {
@@ -245,13 +292,15 @@ function ProjectFolderHeader({
   isOpen: boolean;
   onToggle: () => void;
   onNewChat: () => void;
+  onContextMenu: (e: React.MouseEvent) => void;
   color: string;
   ProjectIcon: React.ComponentType<{ size?: number; color?: string }>;
 }) {
   return (
-    <div className="group mx-1 flex items-center gap-1 rounded px-1 py-1">
+    <div className="group mx-1 flex items-center gap-1 rounded px-1 py-1" onContextMenu={onContextMenu}>
       <button
         onClick={onToggle}
+        onContextMenu={onContextMenu}
         className="flex flex-1 items-center gap-1.5 rounded px-1 py-0.5 text-xs font-medium text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
       >
         {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}

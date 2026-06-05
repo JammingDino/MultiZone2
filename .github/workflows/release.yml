@@ -1,0 +1,145 @@
+name: Release
+
+# Runs on every push to main, except the automated version-bump commit
+# (which appends "[skip ci]" so GitHub skips this workflow natively).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  # ── Build MSI + NSIS installer and publish a GitHub Release ──────────────
+  build:
+    name: Build & release
+    runs-on: windows-latest
+    permissions:
+      contents: write   # needed to create releases
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read current version
+        id: ver
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Setup Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      # Cache Cargo registry + compiled artifacts between runs.
+      - name: Rust build cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      # tauri-action builds the app, creates the GitHub Release, and uploads
+      # the bundle files automatically.
+      - name: Build Tauri app and publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v${{ steps.ver.outputs.version }}
+          releaseName: MultiZone v${{ steps.ver.outputs.version }}
+          releaseBody: |
+            ## MultiZone v${{ steps.ver.outputs.version }}
+
+            | Installer | Description |
+            |-----------|-------------|
+            | `*_x64_en-US.msi` | Windows MSI installer (recommended) |
+            | `*_x64-setup.exe` | NSIS self-contained setup / portable exe |
+
+            See the [commit history](https://github.com/${{ github.repository }}/commits/main)
+            for a full list of changes since the last release.
+          releaseDraft: false
+          prerelease: false
+          # msi  → standard Windows installer
+          # nsis → self-contained setup exe (no admin required for portable use)
+          args: --bundles msi,nsis
+
+  # ── Bump the patch version (0.x.y → 0.x.y+1) after a successful build ───
+  bump-version:
+    name: Bump patch version
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Capture both the current and next version in one step so every
+      # subsequent step can reference ${{ steps.bump.outputs.old }} and
+      # ${{ steps.bump.outputs.new }} without re-reading files.
+      - name: Compute versions
+        id: bump
+        shell: bash
+        run: |
+          OLD=$(node -p "require('./package.json').version")
+          NEW=$(node -e "
+            const [maj, min, pat] = '$OLD'.split('.').map(Number);
+            console.log(maj + '.' + min + '.' + (pat + 1));
+          ")
+          echo "old=$OLD" >> "$GITHUB_OUTPUT"
+          echo "new=$NEW" >> "$GITHUB_OUTPUT"
+          echo "Bumping $OLD → $NEW"
+
+      - name: Bump package.json
+        shell: bash
+        run: |
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            pkg.version = '${{ steps.bump.outputs.new }}';
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+
+      - name: Bump src-tauri/Cargo.toml
+        shell: bash
+        run: |
+          # Replace only the standalone `version = "…"` line (the [package]
+          # entry).  Dependency lines like `tauri = { version = "2.1", … }`
+          # are not line-anchored so the ^ guard keeps them untouched.
+          sed -i \
+            's/^version = "${{ steps.bump.outputs.old }}"$/version = "${{ steps.bump.outputs.new }}"/' \
+            src-tauri/Cargo.toml
+
+      - name: Bump src-tauri/tauri.conf.json
+        shell: bash
+        run: |
+          node -e "
+            const fs = require('fs');
+            const cfg = JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json', 'utf8'));
+            cfg.version = '${{ steps.bump.outputs.new }}';
+            fs.writeFileSync('src-tauri/tauri.conf.json', JSON.stringify(cfg, null, 2) + '\n');
+          "
+
+      - name: Commit and push
+        shell: bash
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json
+          git commit -m "chore: bump version to ${{ steps.bump.outputs.new }} [skip ci]"
+          git push origin main

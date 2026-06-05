@@ -1,6 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import functionPlot from "function-plot";
 
+function useIsLightMode() {
+  const [light, setLight] = useState(() =>
+    document.documentElement.classList.contains("light"),
+  );
+  useEffect(() => {
+    const obs = new MutationObserver(() => {
+      setLight(document.documentElement.classList.contains("light"));
+    });
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => obs.disconnect();
+  }, []);
+  return light;
+}
+
 export interface MathPlotData {
   title?: string;
   xRange: [number, number];
@@ -26,6 +40,7 @@ export function MathPlotBlock(props: SpecProps | DataProps) {
   const [error, setError] = useState<string | null>(null);
   const isError = "error" in parsed;
   const data = isError ? null : parsed;
+  const isLight = useIsLightMode();
 
   useEffect(() => {
     if (!ref.current || !data) return;
@@ -34,8 +49,8 @@ export function MathPlotBlock(props: SpecProps | DataProps) {
     try {
       functionPlot({
         target: ref.current,
-        width: ref.current.clientWidth || 600,
-        height: 280,
+        width: ref.current.clientWidth || 560,
+        height: 260,
         grid: true,
         title: data.title,
         xAxis: { domain: data.xRange, label: data.xLabel },
@@ -45,7 +60,7 @@ export function MathPlotBlock(props: SpecProps | DataProps) {
     } catch (e: any) {
       setError(String(e?.message || e));
     }
-  }, [JSON.stringify(data)]);
+  }, [JSON.stringify(data), isLight]);
 
   if (isError || error) {
     const msg = isError ? parsed.error : error;
@@ -58,7 +73,7 @@ export function MathPlotBlock(props: SpecProps | DataProps) {
   }
 
   return (
-    <div className="my-2 overflow-hidden rounded border border-[var(--color-border)] bg-[var(--color-panel)] p-2">
+    <div className="math-plot-wrapper my-2 overflow-hidden rounded border border-[var(--color-border)] bg-[var(--color-panel)] p-2">
       <div ref={ref} />
     </div>
   );

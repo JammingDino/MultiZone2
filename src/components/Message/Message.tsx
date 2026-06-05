@@ -4,7 +4,7 @@ import { Markdown } from "@/components/Renderers/Markdown";
 import { User, Check, X } from "lucide-react";
 import { StepBlock } from "./StepBlock";
 import { MessageActions } from "./MessageActions";
-import type { BotTurn, PerspectiveTurn } from "@/lib/grouping";
+import type { BotTurn, PerspectiveTurn, TurnBlock } from "@/lib/grouping";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { getZoneIcon } from "@/lib/zoneIcons";
@@ -28,8 +28,6 @@ function useThrottledStreaming(source: string, streaming: boolean): string {
       setVisible(latestRef.current);
       return;
     }
-    // Push the current value right away so the first render isn't empty,
-    // then on a fixed cadence while streaming continues.
     setVisible(latestRef.current);
     const id = window.setInterval(
       () => setVisible(latestRef.current),
@@ -39,6 +37,17 @@ function useThrottledStreaming(source: string, streaming: boolean): string {
   }, [streaming]);
 
   return visible;
+}
+
+/** Renders a single text chunk, with its own streaming throttle. */
+function TextBlockView({ text, streaming }: { text: string; streaming: boolean }) {
+  const visible = useThrottledStreaming(text, streaming);
+  return (
+    <div>
+      <Markdown source={visible} />
+      {streaming && <span className="animate-pulse">▌</span>}
+    </div>
+  );
 }
 
 function parseParts(json: string): ContentPart[] {
@@ -73,11 +82,9 @@ export function UserMessage({ message }: { message: Message }) {
     }
     setEditing(false);
     try {
-      // Drop this user message and everything after it, then resend with new text.
       await api.deleteMessagesFrom(message.chatId, message.id);
       await loadMessages(message.chatId);
       const parts: InputPart[] = [{ type: "text", text: next }];
-      // Re-attach the original images so the edit doesn't silently drop them.
       for (const img of images) {
         parts.push({ type: "image", data_url: img.image_url.url });
       }
@@ -176,10 +183,7 @@ export function UserMessage({ message }: { message: Message }) {
 
 export function BotTurnView({ turn }: { turn: BotTurn }) {
   const isStreaming = Boolean(turn.streaming);
-  const hasAnything =
-    turn.text.length > 0 || turn.steps.length > 0 || isStreaming;
-  // Hooks must run unconditionally, so throttle before any early return.
-  const visibleText = useThrottledStreaming(turn.text, isStreaming);
+  const hasAnything = turn.blocks.length > 0 || isStreaming;
 
   const chatId = useApp((s) => s.activeChatId) ?? "";
   const zone = useApp((s) => {
@@ -189,14 +193,40 @@ export function BotTurnView({ turn }: { turn: BotTurn }) {
 
   if (!hasAnything) return null;
 
-  // The pivot for regenerate is the first assistant message id in this turn —
-  // we delete the whole turn (including its tool messages, which sit after it)
-  // and re-run the loop.
   const pivotMessageId = turn.messageIds[0];
   const lastMessageId = turn.messageIds[turn.messageIds.length - 1];
 
+  // Combine all text blocks for copy action.
+  const allText = turn.blocks
+    .filter((b): b is Extract<TurnBlock, { kind: "text" }> => b.kind === "text")
+    .map((b) => b.text)
+    .join("\n\n");
+
   const ZoneIcon = getZoneIcon(zone?.icon);
   const zoneColor = zone?.accentColor ?? null;
+
+  // Build ordered block elements, tracking step index for labelling.
+  let stepIdx = 0;
+  const blockElements = turn.blocks.map((block, i) => {
+    if (block.kind === "text") {
+      return (
+        <TextBlockView
+          key={`text-${i}`}
+          text={block.text}
+          streaming={!!block.streaming}
+        />
+      );
+    }
+    stepIdx += 1;
+    return (
+      <StepBlock
+        key={block.step.key}
+        step={block.step}
+        index={stepIdx}
+        chatId={chatId}
+      />
+    );
+  });
 
   return (
     <div className="msg-row">
@@ -208,27 +238,19 @@ export function BotTurnView({ turn }: { turn: BotTurn }) {
           <ZoneIcon size={14} color={zoneColor ? "white" : "var(--color-text-muted)"} />
         </div>
         <div
-          className="flex-1 overflow-hidden border-l-2 pl-3"
+          className="flex-1 min-w-0 overflow-hidden border-l-2 pl-3"
           style={{
             borderColor: zoneColor
               ? `${zoneColor}55`
               : "color-mix(in srgb, var(--color-accent) 33%, transparent)",
           }}
         >
-          {turn.steps.length > 0 && (
-            <div className="mb-2 flex flex-col gap-1.5">
-              {turn.steps.map((step, i) => (
-                <StepBlock key={step.key} step={step} index={i + 1} chatId={chatId} />
-              ))}
+          {blockElements.length > 0 && (
+            <div className="flex flex-col gap-2">
+              {blockElements}
             </div>
           )}
-          {visibleText && (
-            <div>
-              <Markdown source={visibleText} />
-              {isStreaming && <span className="animate-pulse">▌</span>}
-            </div>
-          )}
-          {isStreaming && !visibleText && turn.steps.length === 0 && (
+          {isStreaming && turn.blocks.length === 0 && (
             <span className="animate-pulse text-[var(--color-text-muted)]">▌</span>
           )}
         </div>
@@ -236,7 +258,7 @@ export function BotTurnView({ turn }: { turn: BotTurn }) {
       {!isStreaming && chatId && pivotMessageId && (
         <div className="msg-actions">
           <MessageActions
-            text={turn.text}
+            text={allText}
             messageId={lastMessageId}
             pivotMessageId={pivotMessageId}
             chatId={chatId}

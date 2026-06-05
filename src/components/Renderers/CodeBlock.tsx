@@ -1,13 +1,31 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Copy, Check } from "lucide-react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { oneDark, oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { MermaidBlock } from "./MermaidBlock";
 import { MathPlotBlock } from "./MathPlotBlock";
 
 interface Props {
   language: string;
   code: string;
+}
+
+/** Watches for dark/light class changes on <html> and returns true when in light mode. */
+function useIsLightMode() {
+  const [light, setLight] = useState(() =>
+    document.documentElement.classList.contains("light"),
+  );
+  useEffect(() => {
+    const obs = new MutationObserver(() => {
+      setLight(document.documentElement.classList.contains("light"));
+    });
+    obs.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+    return () => obs.disconnect();
+  }, []);
+  return light;
 }
 
 export function CodeBlock({ language, code }: Props) {
@@ -18,12 +36,15 @@ export function CodeBlock({ language, code }: Props) {
 
 function RawCode({ language, code }: Props) {
   const [copied, setCopied] = useState(false);
+  const isLight = useIsLightMode();
 
   async function onCopy() {
     await navigator.clipboard.writeText(code);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }
+
+  const theme = isLight ? oneLight : oneDark;
 
   return (
     <div className="my-2 overflow-hidden rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] text-sm">
@@ -38,9 +59,17 @@ function RawCode({ language, code }: Props) {
         </button>
       </div>
       <SyntaxHighlighter
-        language={language}
-        style={oneDark as any}
-        customStyle={{ margin: 0, background: "transparent", padding: "0.75rem", fontSize: "13px" }}
+        language={language || "text"}
+        style={theme}
+        customStyle={{
+          margin: 0,
+          background: "transparent",
+          padding: "0.75rem",
+          fontSize: "13px",
+        }}
+        codeTagProps={{
+          style: { background: "transparent", fontFamily: "ui-monospace, 'Cascadia Code', 'JetBrains Mono', Menlo, Consolas, monospace" },
+        }}
       >
         {code}
       </SyntaxHighlighter>

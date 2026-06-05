@@ -139,11 +139,12 @@ pub async fn dispatch(
     db: &SqlitePool,
     chat_id: &str,
     project_dir: Option<&str>,
+    http: &reqwest::Client,
 ) -> AppResult<String> {
     let args: Value = serde_json::from_str(arguments).unwrap_or(Value::Null);
     match name {
         "get_current_datetime" => datetime::run(&args).await,
-        "web_search" => web_search::run(&args, zone_config).await,
+        "web_search" => web_search::run(&args, zone_config, http).await,
         "execute_code" => code_exec::run(&args, zone_config).await,
         "read_file" => filesystem::read_file(&args, zone_config, project_dir).await,
         "list_directory" => filesystem::list_directory(&args, zone_config, project_dir).await,

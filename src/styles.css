@@ -441,3 +441,34 @@ input[type="color"]:hover { border-color: var(--color-accent); }
   margin: 0.5em 0;
   overflow-x: auto;
 }
+
+/* ===== function-plot (MathPlotBlock) theme awareness ===== */
+.math-plot-wrapper .function-plot {
+  background: transparent !important;
+}
+.math-plot-wrapper text {
+  fill: var(--color-text) !important;
+  font-family: inherit !important;
+  font-size: 12px !important;
+}
+.math-plot-wrapper .axis path,
+.math-plot-wrapper .axis .domain,
+.math-plot-wrapper .axis .tick line {
+  stroke: var(--color-border-strong) !important;
+}
+.math-plot-wrapper .x.grid .tick line,
+.math-plot-wrapper .y.grid .tick line {
+  stroke: var(--color-border) !important;
+  opacity: 0.7 !important;
+}
+.math-plot-wrapper .x.grid path,
+.math-plot-wrapper .y.grid path {
+  stroke: none !important;
+}
+.math-plot-wrapper .graph-container rect.background {
+  fill: transparent !important;
+}
+.math-plot-wrapper .content path,
+.math-plot-wrapper .content circle {
+  stroke-width: 2px;
+}

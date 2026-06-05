@@ -34,6 +34,7 @@ chrono = { version = "0.4", features = ["serde"] }
 
 image = "0.25"
 base64 = "0.22"
+scraper = "0.20"
 
 thiserror = "2.0"
 anyhow = "1.0"

@@ -171,8 +171,8 @@ export function MessageThread({ chatId }: { chatId: string }) {
 
   return (
     <div className="relative flex flex-1 flex-col overflow-hidden">
-      <div className="flex-1 overflow-y-auto px-6 py-4" ref={containerRef}>
-        <div className="mx-auto flex max-w-3xl flex-col gap-5" ref={innerRef}>
+      <div className="flex-1 overflow-y-auto px-3 py-4 sm:px-6" ref={containerRef}>
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-5" ref={innerRef}>
           {units.map((unit, i) =>
             unit.type === "user" ? (
               <UserMessage key={unit.message.id} message={unit.message} />

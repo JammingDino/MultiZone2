@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Plus, Settings, Layers, FolderOpen, Folder, ChevronRight, ChevronDown, FolderPlus } from "lucide-react";
+import { Plus, Settings, Layers, FolderOpen, Folder, ChevronRight, ChevronDown, FolderPlus, ChevronLeft } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { ChatList } from "./ChatList";
@@ -27,8 +27,8 @@ export function Sidebar() {
     loadAppSettings,
   } = useApp();
 
-  // Track which project folders are collapsed (by project id).
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   useEffect(() => {
     refreshProviders();
@@ -45,7 +45,6 @@ export function Sidebar() {
   async function onNewChat(projectId?: string) {
     const hasZone = (id: string | null | undefined): id is string =>
       !!id && zones.some((z) => z.id === id);
-    // A project's own default zone takes precedence over the global default.
     const project = projectId ? projects.find((p) => p.id === projectId) : null;
     const effectiveZoneId =
       (hasZone(project?.defaultZoneId) ? project!.defaultZoneId : null) ??
@@ -67,21 +66,84 @@ export function Sidebar() {
 
   const ungroupedChats = chats.filter((c) => !c.projectId);
 
+  if (!sidebarOpen) {
+    return (
+      <aside className="flex h-full w-12 flex-shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-panel)]">
+        {/* Expand button */}
+        <div className="flex h-12 items-center justify-center border-b border-[var(--color-border)]">
+          <button
+            onClick={() => setSidebarOpen(true)}
+            title="Expand sidebar"
+            className="rounded p-1.5 hover:bg-[var(--color-panel-hover)]"
+          >
+            <ChevronRight size={16} className="text-[var(--color-accent)]" />
+          </button>
+        </div>
+
+        {/* New chat icon */}
+        <div className="flex flex-col items-center gap-1 p-1 pt-2">
+          <button
+            onClick={() => onNewChat()}
+            disabled={zones.length === 0}
+            title={zones.length === 0 ? "Create a zone first" : "New chat"}
+            className="flex items-center justify-center rounded p-2 hover:bg-[var(--color-panel-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Plus size={16} />
+          </button>
+        </div>
+
+        {/* Footer icons */}
+        <div className="mt-auto border-t border-[var(--color-border)] p-1 flex flex-col items-center gap-1">
+          <button
+            onClick={openZonesPanel}
+            title="Configure Zones"
+            className="rounded p-2 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-accent)]"
+          >
+            <Layers size={15} />
+          </button>
+          <button
+            onClick={openProjectsPanel}
+            title="Manage Projects"
+            className="rounded p-2 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-accent)]"
+          >
+            <FolderPlus size={15} />
+          </button>
+          <button
+            onClick={openSettings}
+            title="Settings"
+            className="rounded p-2 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-accent)]"
+          >
+            <Settings size={15} />
+          </button>
+        </div>
+      </aside>
+    );
+  }
+
   return (
-    <aside className="flex h-full w-72 flex-col border-r border-[var(--color-border)] bg-[var(--color-panel)]">
+    <aside className="flex h-full w-72 flex-shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-panel)]">
       {/* Header */}
       <div className="flex h-12 items-center justify-between border-b border-[var(--color-border)] px-3">
         <div className="flex items-center gap-2 font-semibold">
           <Layers size={18} className="text-[var(--color-accent)]" />
           MultiZone
         </div>
-        <button
-          onClick={openSettings}
-          className="rounded p-1.5 hover:bg-[var(--color-panel-hover)]"
-          title="Settings"
-        >
-          <Settings size={16} />
-        </button>
+        <div className="flex items-center gap-0.5">
+          <button
+            onClick={openSettings}
+            className="rounded p-1.5 hover:bg-[var(--color-panel-hover)]"
+            title="Settings"
+          >
+            <Settings size={16} />
+          </button>
+          <button
+            onClick={() => setSidebarOpen(false)}
+            className="rounded p-1.5 hover:bg-[var(--color-panel-hover)]"
+            title="Collapse sidebar"
+          >
+            <ChevronLeft size={16} />
+          </button>
+        </div>
       </div>
 
       {/* New chat button */}
@@ -97,7 +159,6 @@ export function Sidebar() {
 
       {/* Chat list with project folders */}
       <div className="flex-1 overflow-y-auto">
-        {/* Project folders */}
         {projects.map((project) => {
           const projectChats = chats.filter((c) => c.projectId === project.id);
           const isOpen = !collapsed.has(project.id);
@@ -128,7 +189,6 @@ export function Sidebar() {
           );
         })}
 
-        {/* Ungrouped chats */}
         {ungroupedChats.length > 0 && (
           <>
             {projects.length > 0 && (

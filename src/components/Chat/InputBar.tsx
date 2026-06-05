@@ -272,12 +272,36 @@ function AttachmentChip({
   );
 }
 
+// Maximum long-edge pixel size for stored images. Anything larger is
+// resized down before storage so that large screenshots/photos don't
+// inflate the base64 payload sent to the model on every turn.
+const MAX_IMAGE_PX = 1280;
+
 async function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
+  const raw = await new Promise<string>((resolve, reject) => {
     const r = new FileReader();
     r.onload = () => resolve(r.result as string);
     r.onerror = reject;
     r.readAsDataURL(file);
+  });
+
+  return new Promise<string>((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const { naturalWidth: w, naturalHeight: h } = img;
+      if (w <= MAX_IMAGE_PX && h <= MAX_IMAGE_PX) {
+        resolve(raw);
+        return;
+      }
+      const scale = MAX_IMAGE_PX / Math.max(w, h);
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(w * scale);
+      canvas.height = Math.round(h * scale);
+      canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL("image/jpeg", 0.85));
+    };
+    img.onerror = reject;
+    img.src = raw;
   });
 }
 

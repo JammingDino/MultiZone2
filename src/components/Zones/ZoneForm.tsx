@@ -24,6 +24,12 @@ interface PromptTemplate {
 
 export const PROMPT_TEMPLATES: PromptTemplate[] = [
   {
+    id: "blank",
+    label: "Blank",
+    description: "Start with an empty system prompt.",
+    prompt: "",
+  },
+  {
     id: "study_guide",
     label: "Study Guide (Socratic)",
     description: "Guides students to answers through questions and visuals — never gives the answer directly.",
@@ -217,6 +223,9 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
   const [topP, setTopP] = useState("");
   const [tools, setTools] = useState<string[]>([]);
   const [toolConfig, setToolConfig] = useState("{}");
+  const [wsProvider, setWsProvider] = useState("multi");
+  const [wsEndpoint, setWsEndpoint] = useState("");
+  const [wsApiKey, setWsApiKey] = useState("");
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const [includeThinkingInContext, setIncludeThinkingInContext] = useState(false);
   const [icon, setIcon] = useState<string | null>(null);
@@ -244,7 +253,15 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
       } catch {
         setTools([]);
       }
-      setToolConfig(zone.toolConfig || "{}");
+      const tc = zone.toolConfig || "{}";
+      setToolConfig(tc);
+      try {
+        const parsed = JSON.parse(tc);
+        const ws = parsed?.web_search ?? {};
+        setWsProvider(ws.provider ?? "multi");
+        setWsEndpoint(ws.endpoint ?? "");
+        setWsApiKey(ws.api_key ?? "");
+      } catch { /* ignore */ }
       setThinkingEnabled(zone.thinkingEnabled ?? false);
       setIncludeThinkingInContext(zone.includeThinkingInContext ?? false);
       setIcon(zone.icon ?? null);
@@ -259,6 +276,9 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
       setTopP("");
       setTools([]);
       setToolConfig("{}");
+      setWsProvider("multi");
+      setWsEndpoint("");
+      setWsApiKey("");
       setThinkingEnabled(false);
       setIncludeThinkingInContext(false);
       setIcon(null);
@@ -284,6 +304,34 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
   }, [iconSearch]);
 
   const activeColor = accentColor ?? "var(--color-accent)";
+
+  function buildToolConfig(
+    base: string,
+    provider: string,
+    endpoint: string,
+    apiKey: string,
+  ): string {
+    let obj: Record<string, unknown> = {};
+    try { obj = JSON.parse(base); } catch { /* keep empty */ }
+    const ws: Record<string, string> = { provider };
+    if (endpoint.trim()) ws.endpoint = endpoint.trim();
+    if (apiKey.trim()) ws.api_key = apiKey.trim();
+    obj.web_search = ws;
+    return JSON.stringify(obj, null, 2);
+  }
+
+  function onWsProviderChange(p: string) {
+    setWsProvider(p);
+    setToolConfig((tc) => buildToolConfig(tc, p, wsEndpoint, wsApiKey));
+  }
+  function onWsEndpointChange(v: string) {
+    setWsEndpoint(v);
+    setToolConfig((tc) => buildToolConfig(tc, wsProvider, v, wsApiKey));
+  }
+  function onWsApiKeyChange(v: string) {
+    setWsApiKey(v);
+    setToolConfig((tc) => buildToolConfig(tc, wsProvider, wsEndpoint, v));
+  }
 
   async function onSave() {
     if (!name.trim() || !model.trim()) return;
@@ -339,18 +387,22 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
     <>
       <div className="flex-1 overflow-y-auto p-4">
         {/* Name + icon preview row */}
-        <div className="mb-3 flex items-end gap-3">
+        <div className="mb-3 flex items-start gap-3">
           <div className="flex-1">
             <Field label="Name">
               <input value={name} onChange={(e) => setName(e.target.value)} className="input" />
             </Field>
           </div>
-          {/* Live preview avatar */}
-          <div
-            className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg shadow-sm"
-            style={{ background: activeColor }}
-          >
-            <SelectedIcon size={18} color="white" />
+          {/* Live preview avatar — spacer div matches the Field label height so the
+              avatar visually aligns with the input rather than the label text. */}
+          <div className="flex shrink-0 flex-col">
+            <div className="mb-1 h-[16px]" />
+            <div
+              className="flex h-[34px] w-9 items-center justify-center rounded-lg shadow-sm"
+              style={{ background: activeColor }}
+            >
+              <SelectedIcon size={18} color="white" />
+            </div>
           </div>
         </div>
 
@@ -504,9 +556,11 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
           </Field>
         </div>
 
-        <label className="mb-3 block">
+        {/* System prompt — kept as a plain div (not label) so the template-picker
+            backdrop overlay doesn't trigger label focus side-effects. */}
+        <div className="mb-3">
           <div className="mb-1 flex items-center justify-between text-xs text-[var(--color-text-muted)]">
-            <span>System prompt (optional)</span>
+            <label htmlFor="zone-system-prompt">System prompt (optional)</label>
             {/* Template picker */}
             <div className="relative" ref={templatePickerRef}>
               <button
@@ -522,45 +576,48 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
                 <>
                   <div
                     className="fixed inset-0 z-30"
-                    onClick={() => setTemplatePickerOpen(false)}
+                    onMouseDown={(e) => { e.preventDefault(); setTemplatePickerOpen(false); }}
                   />
                   <div className="absolute right-0 top-full z-40 mt-1 w-72 rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-xl">
                     <div className="px-3 py-1.5 text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">
                       Prompt templates
                     </div>
-                    {PROMPT_TEMPLATES.map((tpl) => (
-                      <button
-                        key={tpl.id}
-                        type="button"
-                        onClick={() => applyTemplate(tpl)}
-                        className="flex w-full flex-col items-start px-3 py-2 text-left hover:bg-[var(--color-panel-hover)]"
-                      >
-                        <span className="text-xs font-medium text-[var(--color-text)]">
-                          {tpl.label}
-                        </span>
-                        <span className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
-                          {tpl.description}
-                        </span>
-                        {tpl.suggestedTools && (
-                          <span className="mt-1 text-[10px] text-[var(--color-text-muted)] opacity-70">
-                            Enables: {tpl.suggestedTools.join(", ")}
+                    <div className="max-h-64 overflow-y-auto">
+                      {PROMPT_TEMPLATES.map((tpl) => (
+                        <button
+                          key={tpl.id}
+                          type="button"
+                          onClick={() => applyTemplate(tpl)}
+                          className="flex w-full flex-col items-start px-3 py-2 text-left hover:bg-[var(--color-panel-hover)]"
+                        >
+                          <span className="text-xs font-medium text-[var(--color-text)]">
+                            {tpl.label}
                           </span>
-                        )}
-                      </button>
-                    ))}
+                          <span className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
+                            {tpl.description}
+                          </span>
+                          {tpl.suggestedTools && (
+                            <span className="mt-1 text-[10px] text-[var(--color-text-muted)] opacity-70">
+                              Enables: {tpl.suggestedTools.join(", ")}
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </>
               )}
             </div>
           </div>
           <textarea
+            id="zone-system-prompt"
             value={systemPrompt}
             onChange={(e) => setSystemPrompt(e.target.value)}
             rows={4}
             className="input"
             placeholder="You are a helpful assistant."
           />
-        </label>
+        </div>
 
         <div className="grid grid-cols-3 gap-3">
           <Field label={`Temperature: ${temperature.toFixed(2)}`}>
@@ -612,6 +669,56 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
             ))}
           </div>
         </Field>
+
+        {tools.includes("web_search") && (
+          <div className="mb-3 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+            <div className="mb-2 text-xs font-medium text-[var(--color-text)]">Web Search settings</div>
+            <div className="mb-2">
+              <div className="mb-1 text-xs text-[var(--color-text-muted)]">Provider</div>
+              <select
+                value={wsProvider}
+                onChange={(e) => onWsProviderChange(e.target.value)}
+                className="input"
+              >
+                <option value="multi">multi — DDG + Marginalia, no key (recommended)</option>
+                <option value="duckduckgo">duckduckgo — DDG Lite only, no key</option>
+                <option value="marginalia">marginalia — independent index, no key</option>
+                <option value="searxng">searxng — self-hosted (needs endpoint)</option>
+                <option value="brave">brave — Brave Search API (needs key)</option>
+                <option value="tavily">tavily — Tavily API (needs key)</option>
+                <option value="serper">serper — Google via Serper API (needs key)</option>
+              </select>
+            </div>
+            {wsProvider === "searxng" && (
+              <div className="mb-2">
+                <div className="mb-1 text-xs text-[var(--color-text-muted)]">SearXNG endpoint URL</div>
+                <input
+                  value={wsEndpoint}
+                  onChange={(e) => onWsEndpointChange(e.target.value)}
+                  className="input"
+                  placeholder="http://localhost:8080"
+                />
+              </div>
+            )}
+            {["brave", "tavily", "serper"].includes(wsProvider) && (
+              <div className="mb-2">
+                <div className="mb-1 text-xs text-[var(--color-text-muted)]">API key</div>
+                <input
+                  type="password"
+                  value={wsApiKey}
+                  onChange={(e) => onWsApiKeyChange(e.target.value)}
+                  className="input"
+                  placeholder="sk-…"
+                />
+              </div>
+            )}
+            {(wsProvider === "multi" || wsProvider === "duckduckgo" || wsProvider === "marginalia") && (
+              <div className="text-[11px] text-[var(--color-text-muted)]">
+                No API key required — results are fetched directly.
+              </div>
+            )}
+          </div>
+        )}
 
         <Field label="Reasoning">
           <div className="flex flex-col gap-1.5">

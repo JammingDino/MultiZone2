@@ -149,8 +149,9 @@ export function ChatPanel() {
     >
       {activeChat ? (
         <>
-          <header className="flex h-12 items-center gap-3 border-b border-[var(--color-border)] px-4">
+          <header className="flex min-h-12 flex-wrap items-center gap-2 border-b border-[var(--color-border)] px-3 py-1.5 sm:flex-nowrap sm:gap-3 sm:px-4">
             <div className="min-w-0 flex-1 truncate text-sm font-medium">{activeChat.title}</div>
+            <div className="flex shrink-0 items-center gap-2">
             <PerspectiveZonePicker
               chatId={activeChat.id}
               primaryZoneId={activeChat.zoneId}
@@ -160,6 +161,7 @@ export function ChatPanel() {
               onRemove={(zoneId) => removePerspectiveZone(activeChat.id, zoneId)}
             />
             <ZonePicker chatId={activeChat.id} currentZoneId={activeChat.zoneId} />
+            </div>
           </header>
 
           {/* Project + tag strip — always available so you can set the chat's

@@ -480,6 +480,7 @@ async fn run_agentic_loop(
                 &state.db,
                 chat_id,
                 project_dir.as_deref(),
+                &state.http,
             )
             .await
             .unwrap_or_else(|e| {
@@ -797,7 +798,18 @@ async fn build_message_history(
     .fetch_all(db)
     .await?;
 
-    for m in rows {
+    // Find the last user message so we can downgrade images in earlier turns.
+    // Qwen2-VL tokenises images at native resolution (~700-1000 tokens each);
+    // with N images accumulated over K turns we'd otherwise pay a growing
+    // prefill cost on every response. Setting detail:"low" for historical
+    // images cuts each to ~85 tokens (~10× cheaper) while leaving the most
+    // recent user message at full quality. The stored data is not touched —
+    // this only affects the API request body built here.
+    let last_user_idx = rows.iter().rposition(|m| m.role == "user");
+
+    for (idx, m) in rows.into_iter().enumerate() {
+        let is_historical = last_user_idx.map_or(false, |li| idx < li);
+
         let mut content_parts: Vec<ContentPart> =
             serde_json::from_str(&m.content).unwrap_or_default();
         // For historical assistant turns, strip inline thinking blocks before
@@ -807,6 +819,16 @@ async fn build_message_history(
             for part in &mut content_parts {
                 if let ContentPart::Text { text } = part {
                     *text = strip_thinking_blocks(text);
+                }
+            }
+        }
+        // Downgrade historical images to low detail to reduce vision-token
+        // prefill cost. Applies to both user messages (uploaded images) and
+        // tool messages (images returned by file-system reads).
+        if is_historical {
+            for part in &mut content_parts {
+                if let ContentPart::ImageUrl { image_url } = part {
+                    image_url.detail = Some("low".to_string());
                 }
             }
         }

@@ -21,6 +21,11 @@ export interface ToolStep {
   pending: boolean;
 }
 
+/** A single ordered item in a bot turn — either a text chunk or a step (thinking/tool). */
+export type TurnBlock =
+  | { kind: "text"; text: string; streaming?: boolean }
+  | { kind: "step"; step: Step };
+
 export interface PerspectiveTurn {
   zoneId: string;
   messageId: string;
@@ -33,9 +38,8 @@ export interface BotTurn {
   type: "bot";
   /** All assistant message ids in this turn, ordered. */
   messageIds: string[];
-  steps: Step[];
-  /** Concatenated final text from the assistant turn(s). */
-  text: string;
+  /** Ordered sequence of text chunks and steps, preserving the model's actual output order. */
+  blocks: TurnBlock[];
   streaming?: StreamingState;
   /** Perspective zone responses attached to this turn. */
   perspectives: PerspectiveTurn[];
@@ -71,7 +75,7 @@ function parseToolCalls(json: string | null): ToolCall[] {
 }
 
 function newTurn(): BotTurn {
-  return { type: "bot", messageIds: [], steps: [], text: "", perspectives: [] };
+  return { type: "bot", messageIds: [], blocks: [], perspectives: [] };
 }
 
 export function groupMessages(
@@ -83,7 +87,6 @@ export function groupMessages(
   const primaryMsgs = messages.filter((m) => !m.zoneId);
   const perspMsgs = messages.filter((m) => !!m.zoneId);
 
-  // Build primary flow units (same logic as before).
   const units: RenderUnit[] = [];
   let turn: BotTurn | null = null;
 
@@ -104,34 +107,48 @@ export function groupMessages(
       t.messageIds.push(m.id);
       const text = extractText(m.content);
       const calls = parseToolCalls(m.toolCalls);
+
+      // Emit blocks in the order the model produced them: reasoning → text → tool calls.
       if (m.reasoning && m.reasoning.trim()) {
-        t.steps.push({
-          kind: "thinking",
-          key: `${m.id}:thinking`,
-          text: m.reasoning,
-          streaming: false,
+        t.blocks.push({
+          kind: "step",
+          step: {
+            kind: "thinking",
+            key: `${m.id}:thinking`,
+            text: m.reasoning,
+            streaming: false,
+          },
         });
       }
       if (text) {
-        if (t.text) t.text += "\n\n";
-        t.text += text;
+        t.blocks.push({ kind: "text", text });
       }
       for (const tc of calls) {
-        t.steps.push({
-          kind: "tool",
-          key: `${m.id}:${tc.id}`,
-          toolCall: tc,
-          toolResult: null,
-          pending: false,
+        t.blocks.push({
+          kind: "step",
+          step: {
+            kind: "tool",
+            key: `${m.id}:${tc.id}`,
+            toolCall: tc,
+            toolResult: null,
+            pending: false,
+          },
         });
       }
     } else if (m.role === "tool" && turn !== null) {
       const t: BotTurn = turn;
-      const step = t.steps.find(
-        (s): s is ToolStep =>
-          s.kind === "tool" && s.toolCall.id === m.toolCallId && s.toolResult === null,
-      );
-      if (step) step.toolResult = m;
+      // Attach the tool result to its matching pending ToolStep block.
+      for (const block of t.blocks) {
+        if (
+          block.kind === "step" &&
+          block.step.kind === "tool" &&
+          block.step.toolCall.id === m.toolCallId &&
+          block.step.toolResult === null
+        ) {
+          block.step.toolResult = m;
+          break;
+        }
+      }
     }
   }
 
@@ -139,29 +156,35 @@ export function groupMessages(
     if (turn === null) turn = newTurn();
     const t: BotTurn = turn;
     t.streaming = streaming;
+
     if (streaming.reasoning) {
-      t.steps.push({
-        kind: "thinking",
-        key: `streaming:${streaming.messageId}:thinking`,
-        text: streaming.reasoning,
-        streaming: true,
+      t.blocks.push({
+        kind: "step",
+        step: {
+          kind: "thinking",
+          key: `streaming:${streaming.messageId}:thinking`,
+          text: streaming.reasoning,
+          streaming: true,
+        },
       });
     }
     if (streaming.content) {
-      if (t.text) t.text += "\n\n";
-      t.text += streaming.content;
+      t.blocks.push({ kind: "text", text: streaming.content, streaming: true });
     }
     for (const pt of streaming.pendingTools) {
-      t.steps.push({
-        kind: "tool",
-        key: `streaming:${streaming.messageId}:${pt.index}`,
-        toolCall: {
-          id: `pending-${pt.index}`,
-          callType: "function",
-          function: { name: pt.name, arguments: pt.args },
+      t.blocks.push({
+        kind: "step",
+        step: {
+          kind: "tool",
+          key: `streaming:${streaming.messageId}:${pt.index}`,
+          toolCall: {
+            id: `pending-${pt.index}`,
+            callType: "function",
+            function: { name: pt.name, arguments: pt.args },
+          },
+          toolResult: null,
+          pending: true,
         },
-        toolResult: null,
-        pending: true,
       });
     }
   }
@@ -169,16 +192,13 @@ export function groupMessages(
   if (turn) units.push(turn);
 
   // ── Attach persisted perspective messages to their user turns ──────────────
-  // Collect user message timestamps so we can slot perspectives into the right turn.
   const userTimestamps: number[] = units
     .filter((u): u is UserUnit => u.type === "user")
     .map((u) => u.message.createdAt);
 
-  // Build per-turn perspective lists from persisted messages.
   const perspByTurnIdx = new Map<number, PerspectiveTurn[]>();
   for (const pm of perspMsgs) {
     if (pm.role !== "assistant" || !pm.zoneId) continue;
-    // Find which user turn this response follows.
     let turnIdx = -1;
     for (let i = userTimestamps.length - 1; i >= 0; i--) {
       if (pm.createdAt >= userTimestamps[i]) {
@@ -204,7 +224,6 @@ export function groupMessages(
     perspByTurnIdx.set(turnIdx, list);
   }
 
-  // Assign persisted perspectives to the correct BotTurns.
   let userIdx = 0;
   for (const unit of units) {
     if (unit.type === "user") {
@@ -223,7 +242,6 @@ export function groupMessages(
         const existing = lastBot.perspectives.find((p) => p.zoneId === zoneId);
         if (existing) {
           existing.streaming = streamState;
-          // Merge streaming content on top of any persisted text.
           if (streamState.content && !existing.text.includes(streamState.content)) {
             existing.text = streamState.content;
           }

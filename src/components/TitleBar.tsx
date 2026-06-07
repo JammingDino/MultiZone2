@@ -33,8 +33,10 @@ export function TitleBar() {
         className="flex flex-1 items-center gap-2 px-3 text-xs font-semibold tracking-wide"
         style={{ color: "var(--color-text-muted)" }}
       >
-        <span style={{ color: accent }} className="font-bold">Multi</span>
-        <span>Zone</span>
+        <span className="pointer-events-none flex items-center gap-2">
+          <span style={{ color: accent }} className="font-bold">Multi</span>
+          <span>Zone</span>
+        </span>
       </div>
       <div className="flex h-full items-stretch">
         <WinBtn title="Minimize" onClick={() => { appWindow.minimize().catch(() => {}); }}>

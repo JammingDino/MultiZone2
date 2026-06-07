@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
-import { X, Plus, Trash2, RefreshCw, Server, Palette, MessageSquare, Database, AlertTriangle, Loader2, Folder, FolderOpen } from "lucide-react";
+import { X, Plus, Trash2, RefreshCw, Server, Palette, MessageSquare, Database, AlertTriangle, Loader2, Folder, FolderOpen, Globe, Copy, Check } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useApp } from "@/store/app";
 import type { BackgroundEffect } from "@/store/app";
 import * as api from "@/lib/tauri";
 import type { DbStats, Provider } from "@/lib/types";
 
-type Tab = "providers" | "appearance" | "chat" | "data";
+type Tab = "providers" | "appearance" | "chat" | "api" | "data";
 
 export function SettingsModal() {
   const { closeSettings } = useApp();
@@ -26,12 +26,14 @@ export function SettingsModal() {
             <TabButton active={tab === "providers"} icon={<Server size={14} />} label="Providers" onClick={() => setTab("providers")} />
             <TabButton active={tab === "appearance"} icon={<Palette size={14} />} label="Appearance" onClick={() => setTab("appearance")} />
             <TabButton active={tab === "chat"} icon={<MessageSquare size={14} />} label="Chat" onClick={() => setTab("chat")} />
+            <TabButton active={tab === "api"} icon={<Globe size={14} />} label="API" onClick={() => setTab("api")} />
             <TabButton active={tab === "data"} icon={<Database size={14} />} label="Data" onClick={() => setTab("data")} />
           </nav>
           <div className="flex-1 overflow-y-auto p-4">
             {tab === "providers" && <ProvidersTab />}
             {tab === "appearance" && <AppearanceTab />}
             {tab === "chat" && <ChatTab />}
+            {tab === "api" && <ApiTab />}
             {tab === "data" && <DataTab />}
           </div>
         </div>
@@ -262,7 +264,10 @@ function AppearanceTab() {
               ["aurora", "Aurora"],
               ["grid", "Grid"],
               ["stars", "Stars"],
-              ["shooting", "Shooting ★"],
+              ["shooting", "Shooting"],
+              ["waves", "Waves"],
+              ["fireflies", "Fireflies"],
+              ["boids", "Boids"],
             ] as [BackgroundEffect, string][]
           ).map(([val, label]) => (
             <button
@@ -288,7 +293,7 @@ function AppearanceTab() {
               display={`${theme.effectSpeed.toFixed(1)}×`}
               onChange={(v) => setTheme({ effectSpeed: v })}
             />
-            {["particles", "orbs", "stars", "shooting", "grid"].includes(theme.backgroundEffect) && (
+            {["particles", "orbs", "stars", "shooting", "grid", "waves", "fireflies", "boids"].includes(theme.backgroundEffect) && (
               <SliderRow
                 label={theme.backgroundEffect === "grid" ? "Scale" : "Density"}
                 value={theme.effectDensity}
@@ -474,6 +479,149 @@ function ChatTab() {
             <span className="text-xs text-[var(--color-text-muted)]">No default directory set</span>
           )}
         </div>
+      </section>
+    </div>
+  );
+}
+
+// ─── API ──────────────────────────────────────────────────────────────────────
+
+function ApiTab() {
+  const appSettings = useApp((s) => s.appSettings);
+  const setAppSettings = useApp((s) => s.setAppSettings);
+
+  const [portInput, setPortInput] = useState(String(appSettings.apiPort ?? 8765));
+  const [status, setStatus] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const baseUrl = `http://127.0.0.1:${appSettings.apiPort ?? 8765}`;
+
+  // Push the current config to the backend, persist it, and reflect any error.
+  async function apply(next: { apiEnabled?: boolean; apiPort?: number; apiToken?: string }) {
+    const merged = { ...appSettings, ...next };
+    setBusy(true);
+    setStatus(null);
+    try {
+      // Ensure a token exists before enabling.
+      if (merged.apiEnabled && !merged.apiToken) {
+        merged.apiToken = await api.generateApiToken();
+      }
+      await api.applyApiSettings(merged.apiEnabled, merged.apiPort, merged.apiToken);
+      await setAppSettings({
+        apiEnabled: merged.apiEnabled,
+        apiPort: merged.apiPort,
+        apiToken: merged.apiToken,
+      });
+      setStatus(merged.apiEnabled ? `Running on ${`http://127.0.0.1:${merged.apiPort}`}` : "Stopped.");
+    } catch (e: any) {
+      setStatus(`Error: ${e?.message || String(e)}`);
+      // Roll the toggle back if start failed.
+      if (next.apiEnabled) await setAppSettings({ apiEnabled: false });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function regenerateToken() {
+    const token = await api.generateApiToken();
+    await apply({ apiToken: token });
+  }
+
+  function commitPort() {
+    const p = parseInt(portInput, 10);
+    if (!Number.isFinite(p) || p < 1 || p > 65535) {
+      setPortInput(String(appSettings.apiPort ?? 8765));
+      return;
+    }
+    if (p !== appSettings.apiPort) apply({ apiPort: p });
+  }
+
+  async function copyToken() {
+    if (!appSettings.apiToken) return;
+    try {
+      await navigator.clipboard.writeText(appSettings.apiToken);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {}
+  }
+
+  const curlExample = `curl -N -X POST ${baseUrl}/api/chats/CHAT_ID/messages \\\n  -H "Authorization: Bearer ${appSettings.apiToken || "YOUR_TOKEN"}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"text":"Hello"}'`;
+
+  return (
+    <div className="flex flex-col gap-6">
+      <section>
+        <h3 className="mb-1 text-sm font-medium">Local HTTP API</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          Exposes a local REST + SSE API (bound to 127.0.0.1) so external tools or scripts can
+          list and create chats, pick zones/projects, and send messages — the same capabilities as
+          the app. Requests must include your bearer token.
+        </p>
+        <div
+          onClick={() => !busy && apply({ apiEnabled: !appSettings.apiEnabled })}
+          className="flex cursor-pointer items-center justify-between rounded border border-[var(--color-border)] px-3 py-2.5 hover:border-[var(--color-accent)]"
+        >
+          <span className="text-sm">Enable API server</span>
+          <Toggle checked={appSettings.apiEnabled} onChange={(v) => apply({ apiEnabled: v })} />
+        </div>
+        {status && (
+          <div className="mt-2 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+            {busy && <Loader2 size={12} className="animate-spin" />}
+            {status}
+          </div>
+        )}
+      </section>
+
+      <section>
+        <h3 className="mb-1 text-sm font-medium">Port</h3>
+        <p className="mb-2 text-xs text-[var(--color-text-muted)]">Base URL: <span className="font-mono">{baseUrl}</span></p>
+        <input
+          value={portInput}
+          onChange={(e) => setPortInput(e.target.value)}
+          onBlur={commitPort}
+          onKeyDown={(e) => { if (e.key === "Enter") commitPort(); }}
+          inputMode="numeric"
+          className="w-40 rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-2.5 py-1.5 text-sm outline-none focus:border-[var(--color-accent)]"
+          placeholder="8765"
+        />
+      </section>
+
+      <section>
+        <h3 className="mb-1 text-sm font-medium">Bearer token</h3>
+        <p className="mb-2 text-xs text-[var(--color-text-muted)]">
+          Send as <span className="font-mono">Authorization: Bearer &lt;token&gt;</span>. Keep it secret.
+        </p>
+        <div className="flex items-center gap-2">
+          <input
+            readOnly
+            value={appSettings.apiToken || "— none generated —"}
+            className="min-w-0 flex-1 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 py-1.5 font-mono text-xs outline-none"
+          />
+          <button
+            onClick={copyToken}
+            disabled={!appSettings.apiToken}
+            className="flex shrink-0 items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1.5 text-xs hover:border-[var(--color-accent)] disabled:opacity-50"
+          >
+            {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? "Copied" : "Copy"}
+          </button>
+          <button
+            onClick={regenerateToken}
+            disabled={busy}
+            className="flex shrink-0 items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1.5 text-xs hover:border-[var(--color-accent)] disabled:opacity-50"
+          >
+            <RefreshCw size={12} className={busy ? "animate-spin" : ""} /> Regenerate
+          </button>
+        </div>
+      </section>
+
+      <section>
+        <h3 className="mb-2 text-sm font-medium">Example</h3>
+        <pre className="overflow-x-auto rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3 font-mono text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+{curlExample}
+        </pre>
+        <p className="mt-1.5 text-[10px] text-[var(--color-text-muted)]">
+          Append <span className="font-mono">?wait=true</span> to get the final message as JSON instead of an SSE stream.
+        </p>
       </section>
     </div>
   );

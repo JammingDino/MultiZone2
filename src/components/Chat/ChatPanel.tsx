@@ -109,6 +109,7 @@ export function ChatPanel() {
     let unlistenStream: (() => void) | undefined;
     let unlistenTitle: (() => void) | undefined;
     let unlistenTags: (() => void) | undefined;
+    let unlistenZone: (() => void) | undefined;
     api.onStream((env) => {
       applyStreamEvent(env.chatId, env.event, env.perspectiveZoneId);
     }).then((u) => {
@@ -131,11 +132,20 @@ export function ChatPanel() {
       if (cancelled) u();
       else unlistenTags = u;
     });
+    api.onChatZoneUpdated(() => {
+      // The model switched the chat's primary zone mid-turn — re-pull chats so
+      // the zone picker reflects the new zone live.
+      refreshChats();
+    }).then((u) => {
+      if (cancelled) u();
+      else unlistenZone = u;
+    });
     return () => {
       cancelled = true;
       unlistenStream?.();
       unlistenTitle?.();
       unlistenTags?.();
+      unlistenZone?.();
     };
   }, [applyStreamEvent, setChatTitle, refreshChats, refreshTags, loadChatTags]);
 
@@ -265,7 +275,7 @@ function ProjectTagStrip({
   const projectHasSnippet = !!project?.contextSnippet?.trim();
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5 border-b border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-1.5">
+    <div className="flex flex-wrap items-center gap-1.5 border-b border-[var(--color-border)] px-4 py-1.5">
       {/* Project selector */}
       <div className="relative">
         <button

@@ -91,6 +91,11 @@ export const setSetting = (key: string, value: string) =>
 export const getDbStats = () => invoke<DbStats>("get_db_stats");
 export const resetDatabase = () => invoke<void>("reset_database");
 
+// API server
+export const applyApiSettings = (enabled: boolean, port: number, token: string) =>
+  invoke<void>("apply_api_settings", { enabled, port, token });
+export const generateApiToken = () => invoke<string>("generate_api_token");
+
 // Attachments
 export const uploadAttachment = (chatId: string, filePath: string) =>
   invoke<Attachment>("upload_attachment", { chatId, filePath });
@@ -114,4 +119,11 @@ export function onChatTagsUpdated(
   handler: (e: { chatId: string }) => void,
 ): Promise<UnlistenFn> {
   return listen<{ chatId: string }>("chat-tags-updated", (e) => handler(e.payload));
+}
+export function onChatZoneUpdated(
+  handler: (e: { chatId: string; zoneId: string }) => void,
+): Promise<UnlistenFn> {
+  return listen<{ chatId: string; zoneId: string }>("chat-zone-updated", (e) =>
+    handler(e.payload),
+  );
 }

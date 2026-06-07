@@ -59,6 +59,53 @@ The `web_search` tool is available per-zone and works out of the box with no API
 | `tavily` | `api_key` | [Tavily](https://tavily.com/). |
 | `serper` | `api_key` | [Serper](https://serper.dev/) (Google via API). |
 
+## HTTP API
+
+MultiZone can expose a local HTTP API so external tools or scripts can drive it like a CLI — listing and creating chats, picking zones/projects, and sending messages with the same agentic loop the GUI uses.
+
+Enable it under **Settings → API**: toggle it on, optionally change the port, and copy the auto-generated bearer token. The server binds to `127.0.0.1` only and every request must include `Authorization: Bearer <token>`.
+
+Base URL: `http://127.0.0.1:8765` (default port).
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/health` | Liveness check (no auth required). |
+| `GET` | `/api/zones` | List zones. |
+| `GET` | `/api/projects` | List projects. |
+| `GET` | `/api/tags` | List tags. |
+| `GET` | `/api/chats` | List chats. |
+| `POST` | `/api/chats` | Create a chat. Body: `{ "zoneId"?, "projectId"? }`. |
+| `GET` | `/api/chats/:id/messages` | List a chat's messages. |
+| `POST` | `/api/chats/:id/messages` | Send a message (see below). |
+| `POST` | `/api/chats/:id/regenerate` | Re-run the last turn. |
+| `POST` | `/api/chats/:id/cancel` | Cancel the in-flight stream. |
+| `POST` | `/api/chats/:id/zone` | Set the primary zone. Body: `{ "zoneId" }`. |
+| `GET`/`POST`/`DELETE` | `/api/chats/:id/perspectives` | List/add/remove perspective zones. Body for add/remove: `{ "zoneId" }`. |
+
+Sending a message accepts either `{ "text": "..." }` or `{ "parts": [...] }` (the same content parts the GUI uses). By default the response is a [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events) stream of the same events the GUI receives (tokens, tool calls, etc.). Append `?wait=true` to instead block until the turn finishes and return the final messages as JSON.
+
+```bash
+# Create a chat with a specific zone
+curl -X POST http://127.0.0.1:8765/api/chats \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"zoneId":"<zone-id>"}'
+
+# Send a message and stream the response (SSE)
+curl -N -X POST http://127.0.0.1:8765/api/chats/<chat-id>/messages \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Hello"}'
+
+# Send a message and wait for the final result as JSON
+curl -X POST "http://127.0.0.1:8765/api/chats/<chat-id>/messages?wait=true" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Hello"}'
+```
+
+API-driven activity also updates any matching chat open in the app live.
+
 ## Project structure
 
 ```
@@ -68,6 +115,7 @@ src/                    React + TypeScript frontend
   store/                Zustand app state
 src-tauri/
   src/
+    api/                Local HTTP API (axum) — REST + SSE
     commands/           Tauri IPC command handlers
     db/                 SQLite models and migrations
     llm/                LLM client, streaming, thinking blocks

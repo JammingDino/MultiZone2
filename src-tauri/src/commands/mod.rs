@@ -1,3 +1,4 @@
+pub mod api;
 pub mod providers;
 pub mod zones;
 pub mod chats;

@@ -1,3 +1,4 @@
+mod api;
 mod db;
 mod llm;
 mod tools;
@@ -23,6 +24,8 @@ pub fn run() {
             tauri::async_runtime::block_on(async move {
                 let state = AppState::init(&handle).await.expect("failed to init app state");
                 handle.manage(state);
+                // Launch the HTTP API server if the user has enabled it.
+                commands::api::start_if_enabled(&handle).await;
             });
             Ok(())
         })
@@ -67,6 +70,8 @@ pub fn run() {
             commands::attachments::upload_attachment,
             commands::attachments::save_pdf_attachment,
             commands::attachments::get_attachment_images,
+            commands::api::apply_api_settings,
+            commands::api::generate_api_token,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -5,6 +5,7 @@ pub mod filesystem;
 pub mod render_graph;
 pub mod ask_user;
 pub mod tags;
+pub mod zone;
 
 use crate::error::AppResult;
 use crate::llm::types::Tool;
@@ -86,6 +87,7 @@ pub enum ToolId {
     RenderGraph,
     AskUser,
     ManageTags,
+    SwitchZone,
 }
 
 impl ToolId {
@@ -98,6 +100,7 @@ impl ToolId {
             "render_graph" => Some(Self::RenderGraph),
             "ask_user" => Some(Self::AskUser),
             "manage_tags" => Some(Self::ManageTags),
+            "switch_zone" => Some(Self::SwitchZone),
             _ => None,
         }
     }
@@ -111,6 +114,7 @@ impl ToolId {
             Self::RenderGraph => "render_graph",
             Self::AskUser => "ask_user",
             Self::ManageTags => "manage_tags",
+            Self::SwitchZone => "switch_zone",
         }
     }
 
@@ -126,6 +130,7 @@ impl ToolId {
             Self::RenderGraph => render_graph::definitions(ctx),
             Self::AskUser => vec![ask_user::definition()],
             Self::ManageTags => vec![tags::definition()],
+            Self::SwitchZone => zone::definitions(),
         }
     }
 }
@@ -154,6 +159,8 @@ pub async fn dispatch(
         "draw_diagram" => render_graph::draw(&args).await,
         "ask_user" => ask_user::run(&args).await,
         "tag_chat" => tags::run(&args, db, chat_id).await,
+        "list_zones" => zone::list_zones(db).await,
+        "change_zone" => zone::change_zone(&args, db, chat_id).await,
         other => Ok(serde_json::json!({
             "error": format!("unknown tool: {other}")
         }).to_string()),

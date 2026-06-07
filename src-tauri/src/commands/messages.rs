@@ -12,9 +12,11 @@ use crate::llm::thinking::strip_thinking_blocks;
 use crate::tools::{self, ThemePalette, ToolContext, ToolId};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
+use tokio::sync::{mpsc, RwLock};
 
 const MAX_TOOL_ITERATIONS: usize = 8;
 
@@ -51,18 +53,67 @@ pub enum StreamPayload<'a> {
     Error { message: String },
 }
 
-fn emit(app: &AppHandle, chat_id: &str, payload: StreamPayload) {
-    let _ = app.emit(
-        "stream",
-        serde_json::json!({ "chatId": chat_id, "event": payload }),
-    );
+/// Lightweight, cloneable bundle of everything the message engine needs from
+/// the app state. Both the Tauri `State<AppState>` path and the HTTP API build
+/// one of these so the same core loop drives the GUI and the API.
+#[derive(Clone)]
+pub struct EngineCtx {
+    pub db: SqlitePool,
+    pub http: reqwest::Client,
+    pub active_streams: Arc<RwLock<HashMap<String, Arc<AtomicBool>>>>,
 }
 
-fn emit_persp(app: &AppHandle, chat_id: &str, zone_id: &str, payload: StreamPayload) {
-    let _ = app.emit(
-        "stream",
-        serde_json::json!({ "chatId": chat_id, "perspectiveZoneId": zone_id, "event": payload }),
-    );
+impl EngineCtx {
+    pub fn from_state(state: &AppState) -> Self {
+        Self {
+            db: state.db.clone(),
+            http: state.http.clone(),
+            active_streams: state.active_streams.clone(),
+        }
+    }
+}
+
+/// Where streamed events go. Always mirrors to the Tauri app (so a chat open in
+/// the GUI updates live), and optionally fans the same JSON envelopes out to an
+/// SSE channel for an HTTP API caller.
+#[derive(Clone)]
+pub struct StreamSink {
+    app: AppHandle,
+    tx: Option<mpsc::UnboundedSender<String>>,
+}
+
+impl StreamSink {
+    pub fn tauri(app: AppHandle) -> Self {
+        Self { app, tx: None }
+    }
+
+    pub fn api(app: AppHandle, tx: mpsc::UnboundedSender<String>) -> Self {
+        Self { app, tx: Some(tx) }
+    }
+
+    fn dispatch(&self, env: Value) {
+        if let Some(tx) = &self.tx {
+            let _ = tx.send(env.to_string());
+        }
+        let _ = self.app.emit("stream", env);
+    }
+
+    fn emit(&self, chat_id: &str, payload: StreamPayload) {
+        self.dispatch(serde_json::json!({ "chatId": chat_id, "event": payload }));
+    }
+
+    fn emit_persp(&self, chat_id: &str, zone_id: &str, payload: StreamPayload) {
+        self.dispatch(serde_json::json!({
+            "chatId": chat_id,
+            "perspectiveZoneId": zone_id,
+            "event": payload,
+        }));
+    }
+
+    /// Side-channel app events (tag/title/zone refreshes). GUI-only; no SSE.
+    fn emit_event(&self, event: &str, payload: Value) {
+        let _ = self.app.emit(event, payload);
+    }
 }
 
 #[tauri::command]
@@ -82,66 +133,43 @@ pub async fn regenerate_response(
     state: State<'_, AppState>,
     chat_id: String,
 ) -> AppResult<()> {
+    let ctx = EngineCtx::from_state(&state);
+    let sink = StreamSink::tauri(app);
+    run_regenerate_entry(&ctx, &sink, &chat_id).await
+}
+
+/// Shared entry point for "regenerate" used by both the Tauri command and the
+/// HTTP API: registers a cancel flag, runs the loop + perspectives, cleans up.
+pub async fn run_regenerate_entry(
+    ctx: &EngineCtx,
+    sink: &StreamSink,
+    chat_id: &str,
+) -> AppResult<()> {
     let cancel = Arc::new(AtomicBool::new(false));
-    state
-        .active_streams
+    ctx.active_streams
         .write()
         .await
-        .insert(chat_id.clone(), cancel.clone());
+        .insert(chat_id.to_string(), cancel.clone());
 
-    let result = run_regenerate(&app, &state, &chat_id, cancel).await;
+    let result = run_regenerate(ctx, sink, chat_id, cancel).await;
 
-    state.active_streams.write().await.remove(&chat_id);
+    ctx.active_streams.write().await.remove(chat_id);
 
     if let Err(e) = &result {
-        emit(
-            &app,
-            &chat_id,
-            StreamPayload::Error { message: e.to_string() },
-        );
+        sink.emit(chat_id, StreamPayload::Error { message: e.to_string() });
     }
     result
 }
 
 async fn run_regenerate(
-    app: &AppHandle,
-    state: &AppState,
+    ctx: &EngineCtx,
+    sink: &StreamSink,
     chat_id: &str,
     cancel: Arc<AtomicBool>,
 ) -> AppResult<()> {
-    let chat = sqlx::query_as::<_, Chat>(&format!(
-        "SELECT {CHAT_COLS} FROM chats WHERE id = ?1"
-    ))
-    .bind(chat_id)
-    .fetch_optional(&state.db)
-    .await?
-    .ok_or_else(|| AppError::NotFound(format!("chat {chat_id}")))?;
-
-    let zone_id = chat
-        .zone_id
-        .clone()
-        .ok_or_else(|| AppError::Invalid("chat has no zone".into()))?;
-    let zone = sqlx::query_as::<_, Zone>(&format!(
-        "SELECT {ZONE_COLS} FROM zones WHERE id = ?1"
-    ))
-    .bind(&zone_id)
-    .fetch_optional(&state.db)
-    .await?
-    .ok_or_else(|| AppError::NotFound(format!("zone {zone_id}")))?;
-
-    let provider_id = zone
-        .provider_id
-        .clone()
-        .ok_or_else(|| AppError::Invalid("zone has no provider".into()))?;
-    let provider = sqlx::query_as::<_, Provider>(
-        "SELECT id, name, base_url, api_key, created_at FROM providers WHERE id = ?1",
-    )
-    .bind(&provider_id)
-    .fetch_optional(&state.db)
-    .await?
-    .ok_or_else(|| AppError::NotFound(format!("provider {provider_id}")))?;
-
-    run_agentic_loop(app, state, chat_id, &zone, &provider, cancel).await
+    run_agentic_loop(ctx, sink, chat_id, cancel.clone()).await?;
+    run_perspectives(ctx, sink, chat_id, cancel).await;
+    Ok(())
 }
 
 #[tauri::command]
@@ -151,71 +179,56 @@ pub async fn send_message(
     chat_id: String,
     parts: Vec<InputPart>,
 ) -> AppResult<()> {
-    // Register a cancel flag for this chat.
+    let ctx = EngineCtx::from_state(&state);
+    let sink = StreamSink::tauri(app);
+    run_send_entry(&ctx, &sink, &chat_id, parts).await
+}
+
+/// Shared entry point for "send" used by both the Tauri command and the HTTP
+/// API: registers a cancel flag, runs the send, cleans up.
+pub async fn run_send_entry(
+    ctx: &EngineCtx,
+    sink: &StreamSink,
+    chat_id: &str,
+    parts: Vec<InputPart>,
+) -> AppResult<()> {
     let cancel = Arc::new(AtomicBool::new(false));
-    state
-        .active_streams
+    ctx.active_streams
         .write()
         .await
-        .insert(chat_id.clone(), cancel.clone());
+        .insert(chat_id.to_string(), cancel.clone());
 
-    let result = run_send(&app, &state, &chat_id, parts, cancel.clone()).await;
+    let result = run_send(ctx, sink, chat_id, parts, cancel.clone()).await;
 
-    // Always clean up the cancel registration.
-    state.active_streams.write().await.remove(&chat_id);
+    ctx.active_streams.write().await.remove(chat_id);
 
     if let Err(e) = &result {
-        emit(
-            &app,
-            &chat_id,
-            StreamPayload::Error { message: e.to_string() },
-        );
+        sink.emit(chat_id, StreamPayload::Error { message: e.to_string() });
     }
     result
 }
 
 async fn run_send(
-    app: &AppHandle,
-    state: &AppState,
+    ctx: &EngineCtx,
+    sink: &StreamSink,
     chat_id: &str,
     parts: Vec<InputPart>,
     cancel: Arc<AtomicBool>,
 ) -> AppResult<()> {
-    // 1. Load chat, zone, provider
+    // Validate the chat exists and has a zone before persisting anything.
     let chat = sqlx::query_as::<_, Chat>(&format!(
         "SELECT {CHAT_COLS} FROM chats WHERE id = ?1"
     ))
     .bind(chat_id)
-    .fetch_optional(&state.db)
+    .fetch_optional(&ctx.db)
     .await?
     .ok_or_else(|| AppError::NotFound(format!("chat {chat_id}")))?;
 
-    let zone_id = chat
-        .zone_id
-        .clone()
-        .ok_or_else(|| AppError::Invalid("chat has no zone".into()))?;
+    if chat.zone_id.is_none() {
+        return Err(AppError::Invalid("chat has no zone".into()));
+    }
 
-    let zone = sqlx::query_as::<_, Zone>(&format!(
-        "SELECT {ZONE_COLS} FROM zones WHERE id = ?1"
-    ))
-    .bind(&zone_id)
-    .fetch_optional(&state.db)
-    .await?
-    .ok_or_else(|| AppError::NotFound(format!("zone {zone_id}")))?;
-
-    let provider_id = zone
-        .provider_id
-        .clone()
-        .ok_or_else(|| AppError::Invalid("zone has no provider".into()))?;
-    let provider = sqlx::query_as::<_, Provider>(
-        "SELECT id, name, base_url, api_key, created_at FROM providers WHERE id = ?1",
-    )
-    .bind(&provider_id)
-    .fetch_optional(&state.db)
-    .await?
-    .ok_or_else(|| AppError::NotFound(format!("provider {provider_id}")))?;
-
-    // 2. Convert input parts to ContentParts and save user message
+    // Convert input parts to ContentParts and save user message
     let content_parts: Vec<ContentPart> = parts
         .into_iter()
         .map(|p| match p {
@@ -237,41 +250,78 @@ async fn run_send(
     .bind(chat_id)
     .bind(&content_json)
     .bind(user_now)
-    .execute(&state.db)
+    .execute(&ctx.db)
     .await?;
     sqlx::query("UPDATE chats SET updated_at = ?1 WHERE id = ?2")
         .bind(user_now)
         .bind(chat_id)
-        .execute(&state.db)
+        .execute(&ctx.db)
         .await?;
 
     let user_msg = sqlx::query_as::<_, Message>(&format!(
         "SELECT {MSG_COLS} FROM messages WHERE id = ?1"
     ))
     .bind(&user_msg_id)
-    .fetch_one(&state.db)
+    .fetch_one(&ctx.db)
     .await?;
-    emit(app, chat_id, StreamPayload::UserMessageSaved { message: &user_msg });
+    sink.emit(chat_id, StreamPayload::UserMessageSaved { message: &user_msg });
 
-    run_agentic_loop(app, state, chat_id, &zone, &provider, cancel.clone()).await?;
-    run_perspectives(app, state, chat_id, cancel).await;
+    run_agentic_loop(ctx, sink, chat_id, cancel.clone()).await?;
+    run_perspectives(ctx, sink, chat_id, cancel).await;
     Ok(())
 }
 
+/// Load a zone and its provider by zone id. Shared by the agentic loop (initial
+/// load + reload after a mid-turn zone switch).
+async fn load_zone_and_provider(
+    db: &SqlitePool,
+    zone_id: &str,
+) -> AppResult<(Zone, Provider)> {
+    let zone = sqlx::query_as::<_, Zone>(&format!(
+        "SELECT {ZONE_COLS} FROM zones WHERE id = ?1"
+    ))
+    .bind(zone_id)
+    .fetch_optional(db)
+    .await?
+    .ok_or_else(|| AppError::NotFound(format!("zone {zone_id}")))?;
+
+    let provider_id = zone
+        .provider_id
+        .clone()
+        .ok_or_else(|| AppError::Invalid("zone has no provider".into()))?;
+    let provider = sqlx::query_as::<_, Provider>(
+        "SELECT id, name, base_url, api_key, created_at FROM providers WHERE id = ?1",
+    )
+    .bind(&provider_id)
+    .fetch_optional(db)
+    .await?
+    .ok_or_else(|| AppError::NotFound(format!("provider {provider_id}")))?;
+
+    Ok((zone, provider))
+}
+
 async fn run_agentic_loop(
-    app: &AppHandle,
-    state: &AppState,
+    ctx: &EngineCtx,
+    sink: &StreamSink,
     chat_id: &str,
-    zone: &Zone,
-    provider: &Provider,
     cancel: Arc<AtomicBool>,
 ) -> AppResult<()> {
-    // Build initial messages array (full history)
-    let mut api_messages = build_message_history(&state.db, chat_id, zone).await?;
+    let tool_ctx = load_tool_context(&ctx.db).await;
 
-    let tool_ctx = load_tool_context(state).await;
-    let tools = build_tools_for_zone(zone, &tool_ctx);
-    let zone_config: Value =
+    // Resolve the chat's current primary zone. This is re-checked after every
+    // tool-execution phase so the `change_zone` tool can switch zones mid-turn.
+    let mut current_zone_id = sqlx::query_scalar::<_, Option<String>>(
+        "SELECT zone_id FROM chats WHERE id = ?1",
+    )
+    .bind(chat_id)
+    .fetch_optional(&ctx.db)
+    .await?
+    .flatten()
+    .ok_or_else(|| AppError::Invalid("chat has no zone".into()))?;
+
+    let (mut zone, mut provider) = load_zone_and_provider(&ctx.db, &current_zone_id).await?;
+    let mut tools = build_tools_for_zone(&zone, &tool_ctx);
+    let mut zone_config: Value =
         serde_json::from_str(&zone.tool_config).unwrap_or(Value::Object(Default::default()));
 
     // The project directory scopes the filesystem tools. If no project directory
@@ -283,7 +333,7 @@ async fn run_agentic_loop(
              WHERE c.id = ?1",
         )
         .bind(chat_id)
-        .fetch_optional(&state.db)
+        .fetch_optional(&ctx.db)
         .await?
         .flatten();
 
@@ -294,7 +344,7 @@ async fn run_agentic_loop(
             let raw: Option<String> = sqlx::query_scalar(
                 "SELECT value FROM settings WHERE key = 'app_settings'",
             )
-            .fetch_optional(&state.db)
+            .fetch_optional(&ctx.db)
             .await?
             .flatten();
             raw.and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
@@ -307,18 +357,21 @@ async fn run_agentic_loop(
         }
     };
 
-    let client = LlmClient::new(&state.http, &provider.base_url, provider.api_key.as_deref());
+    // Build initial messages array (full history)
+    let mut api_messages = build_message_history(&ctx.db, chat_id, &zone).await?;
+
+    let mut client =
+        LlmClient::new(&ctx.http, &provider.base_url, provider.api_key.as_deref());
 
     // Agentic loop
     for _iteration in 0..MAX_TOOL_ITERATIONS {
         if cancel.load(Ordering::Relaxed) {
-            emit(app, chat_id, StreamPayload::Cancelled);
+            sink.emit(chat_id, StreamPayload::Cancelled);
             return Ok(());
         }
 
         let assistant_msg_id = new_id();
-        emit(
-            app,
+        sink.emit(
             chat_id,
             StreamPayload::AssistantStart {
                 message_id: assistant_msg_id.clone(),
@@ -344,40 +397,32 @@ async fn run_agentic_loop(
 
         let response = client.chat_stream(&req).await?;
 
+        let sink_for_emit = sink.clone();
         let chat_id_for_emit = chat_id.to_string();
-        let app_for_emit = app.clone();
         let agg = consume_stream(response, cancel.clone(), move |ev| match ev {
             StreamEvent::Token { delta } => {
-                emit(&app_for_emit, &chat_id_for_emit, StreamPayload::Token { delta });
+                sink_for_emit.emit(&chat_id_for_emit, StreamPayload::Token { delta });
             }
             StreamEvent::ThinkingToken { delta } => {
-                emit(
-                    &app_for_emit,
-                    &chat_id_for_emit,
-                    StreamPayload::ThinkingToken { delta },
-                );
+                sink_for_emit
+                    .emit(&chat_id_for_emit, StreamPayload::ThinkingToken { delta });
             }
             StreamEvent::ToolCallStart { index, name, id } => {
-                emit(
-                    &app_for_emit,
+                sink_for_emit.emit(
                     &chat_id_for_emit,
                     StreamPayload::ToolCallStart { index, id, name },
                 );
             }
             StreamEvent::ToolCallDeltaArgs { index, delta } => {
-                emit(
-                    &app_for_emit,
+                sink_for_emit.emit(
                     &chat_id_for_emit,
                     StreamPayload::ToolCallArgsDelta { index, delta },
                 );
             }
             StreamEvent::Done { .. } => {}
             StreamEvent::Error { message } => {
-                emit(
-                    &app_for_emit,
-                    &chat_id_for_emit,
-                    StreamPayload::Error { message },
-                );
+                sink_for_emit
+                    .emit(&chat_id_for_emit, StreamPayload::Error { message });
             }
         })
         .await?;
@@ -411,24 +456,24 @@ async fn run_agentic_loop(
         .bind(&tool_calls_json)
         .bind(&reasoning_save)
         .bind(now)
-        .execute(&state.db)
+        .execute(&ctx.db)
         .await?;
         sqlx::query("UPDATE chats SET updated_at = ?1 WHERE id = ?2")
             .bind(now)
             .bind(chat_id)
-            .execute(&state.db)
+            .execute(&ctx.db)
             .await?;
 
         let saved = sqlx::query_as::<_, Message>(&format!(
             "SELECT {MSG_COLS} FROM messages WHERE id = ?1"
         ))
         .bind(&assistant_msg_id)
-        .fetch_one(&state.db)
+        .fetch_one(&ctx.db)
         .await?;
-        emit(app, chat_id, StreamPayload::AssistantSaved { message: &saved });
+        sink.emit(chat_id, StreamPayload::AssistantSaved { message: &saved });
 
         if agg.cancelled {
-            emit(app, chat_id, StreamPayload::Cancelled);
+            sink.emit(chat_id, StreamPayload::Cancelled);
             return Ok(());
         }
 
@@ -482,12 +527,11 @@ async fn run_agentic_loop(
         // Execute tools, persist results, push into history
         for tc in &agg.tool_calls {
             if cancel.load(Ordering::Relaxed) {
-                emit(app, chat_id, StreamPayload::Cancelled);
+                sink.emit(chat_id, StreamPayload::Cancelled);
                 return Ok(());
             }
 
-            emit(
-                app,
+            sink.emit(
                 chat_id,
                 StreamPayload::ToolCallExecuting {
                     index: 0,
@@ -498,10 +542,10 @@ async fn run_agentic_loop(
                 &tc.function.name,
                 &tc.function.arguments,
                 &zone_config,
-                &state.db,
+                &ctx.db,
                 chat_id,
                 project_dir.as_deref(),
-                &state.http,
+                &ctx.http,
             )
             .await
             .unwrap_or_else(|e| {
@@ -510,14 +554,13 @@ async fn run_agentic_loop(
 
             // The tag tool mutates tags/chat_tags — tell the UI to refresh.
             if tc.function.name == "tag_chat" {
-                let _ = app.emit(
+                sink.emit_event(
                     "chat-tags-updated",
                     serde_json::json!({ "chatId": chat_id }),
                 );
             }
 
-            emit(
-                app,
+            sink.emit(
                 chat_id,
                 StreamPayload::ToolCallResult {
                     index: 0,
@@ -544,20 +587,16 @@ async fn run_agentic_loop(
             .bind(&tool_content_json)
             .bind(&tc.id)
             .bind(tnow)
-            .execute(&state.db)
+            .execute(&ctx.db)
             .await?;
 
             let saved_tool = sqlx::query_as::<_, Message>(&format!(
                 "SELECT {MSG_COLS} FROM messages WHERE id = ?1"
             ))
             .bind(&tool_msg_id)
-            .fetch_one(&state.db)
+            .fetch_one(&ctx.db)
             .await?;
-            emit(
-                app,
-                chat_id,
-                StreamPayload::ToolMessageSaved { message: &saved_tool },
-            );
+            sink.emit(chat_id, StreamPayload::ToolMessageSaved { message: &saved_tool });
 
             api_messages.push(ChatMessage {
                 role: "tool".into(),
@@ -571,25 +610,64 @@ async fn run_agentic_loop(
         if asked_user {
             break;
         }
+
+        // A tool may have switched the chat's primary zone (`change_zone`). If so,
+        // reload the zone/provider/tools and continue the loop under the new zone.
+        let latest_zone_id = sqlx::query_scalar::<_, Option<String>>(
+            "SELECT zone_id FROM chats WHERE id = ?1",
+        )
+        .bind(chat_id)
+        .fetch_optional(&ctx.db)
+        .await?
+        .flatten();
+
+        if let Some(new_zone_id) = latest_zone_id {
+            if new_zone_id != current_zone_id {
+                // If reloading fails (e.g. the new zone lacks a provider), keep
+                // going on the current zone rather than aborting the turn.
+                match load_zone_and_provider(&ctx.db, &new_zone_id).await {
+                    Ok((new_zone, new_provider)) => {
+                        current_zone_id = new_zone_id.clone();
+                        zone = new_zone;
+                        provider = new_provider;
+                        tools = build_tools_for_zone(&zone, &tool_ctx);
+                        zone_config = serde_json::from_str(&zone.tool_config)
+                            .unwrap_or(Value::Object(Default::default()));
+                        client = LlmClient::new(
+                            &ctx.http,
+                            &provider.base_url,
+                            provider.api_key.as_deref(),
+                        );
+                        sink.emit_event(
+                            "chat-zone-updated",
+                            serde_json::json!({ "chatId": chat_id, "zoneId": new_zone_id }),
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!("zone switch to {new_zone_id} failed: {e}");
+                    }
+                }
+            }
+        }
         // Loop for follow-up assistant turn
     }
 
-    emit(app, chat_id, StreamPayload::Done);
+    sink.emit(chat_id, StreamPayload::Done);
     Ok(())
 }
 
 // ─── Perspective zone runners ─────────────────────────────────────────────────
 
 async fn run_perspectives(
-    app: &AppHandle,
-    state: &AppState,
+    ctx: &EngineCtx,
+    sink: &StreamSink,
     chat_id: &str,
     cancel: Arc<AtomicBool>,
 ) {
     let zone_ids: Vec<String> =
         sqlx::query_scalar("SELECT zone_id FROM chat_zones WHERE chat_id = ?1")
             .bind(chat_id)
-            .fetch_all(&state.db)
+            .fetch_all(&ctx.db)
             .await
             .unwrap_or_default();
 
@@ -599,18 +677,14 @@ async fn run_perspectives(
 
     let mut handles = Vec::new();
     for zone_id in zone_ids {
-        let app = app.clone();
-        let db = state.db.clone();
-        let http = state.http.clone();
+        let ctx = ctx.clone();
+        let sink = sink.clone();
         let chat_id = chat_id.to_string();
         let cancel = cancel.clone();
         handles.push(tokio::spawn(async move {
-            if let Err(e) =
-                run_perspective(&app, &db, &http, &chat_id, &zone_id, cancel).await
-            {
+            if let Err(e) = run_perspective(&ctx, &sink, &chat_id, &zone_id, cancel).await {
                 tracing::warn!("perspective zone {zone_id} error: {e}");
-                emit_persp(
-                    &app,
+                sink.emit_persp(
                     &chat_id,
                     &zone_id,
                     StreamPayload::Error { message: e.to_string() },
@@ -624,9 +698,8 @@ async fn run_perspectives(
 }
 
 async fn run_perspective(
-    app: &AppHandle,
-    db: &SqlitePool,
-    http: &reqwest::Client,
+    ctx: &EngineCtx,
+    sink: &StreamSink,
     chat_id: &str,
     zone_id: &str,
     cancel: Arc<AtomicBool>,
@@ -635,31 +708,12 @@ async fn run_perspective(
         return Ok(());
     }
 
-    let zone = sqlx::query_as::<_, Zone>(&format!(
-        "SELECT {ZONE_COLS} FROM zones WHERE id = ?1"
-    ))
-    .bind(zone_id)
-    .fetch_optional(db)
-    .await?
-    .ok_or_else(|| AppError::NotFound(format!("perspective zone {zone_id}")))?;
+    let (zone, provider) = load_zone_and_provider(&ctx.db, zone_id).await?;
 
-    let provider_id = zone
-        .provider_id
-        .clone()
-        .ok_or_else(|| AppError::Invalid("perspective zone has no provider".into()))?;
-    let provider = sqlx::query_as::<_, Provider>(
-        "SELECT id, name, base_url, api_key, created_at FROM providers WHERE id = ?1",
-    )
-    .bind(&provider_id)
-    .fetch_optional(db)
-    .await?
-    .ok_or_else(|| AppError::NotFound(format!("provider {provider_id}")))?;
-
-    let api_messages = build_message_history(db, chat_id, &zone).await?;
+    let api_messages = build_message_history(&ctx.db, chat_id, &zone).await?;
 
     let msg_id = new_id();
-    emit_persp(
-        app,
+    sink.emit_persp(
         chat_id,
         zone_id,
         StreamPayload::AssistantStart { message_id: msg_id.clone() },
@@ -682,20 +736,19 @@ async fn run_perspective(
         stream: true,
     };
 
-    let client = crate::llm::client::LlmClient::new(http, &provider.base_url, provider.api_key.as_deref());
+    let client = crate::llm::client::LlmClient::new(&ctx.http, &provider.base_url, provider.api_key.as_deref());
     let response = client.chat_stream(&req).await?;
 
-    let app_clone = app.clone();
+    let sink_clone = sink.clone();
     let chat_id_clone = chat_id.to_string();
     let zone_id_clone = zone_id.to_string();
 
     let agg = crate::llm::streaming::consume_stream(response, cancel.clone(), move |ev| match ev {
         crate::llm::streaming::StreamEvent::Token { delta } => {
-            emit_persp(&app_clone, &chat_id_clone, &zone_id_clone, StreamPayload::Token { delta });
+            sink_clone.emit_persp(&chat_id_clone, &zone_id_clone, StreamPayload::Token { delta });
         }
         crate::llm::streaming::StreamEvent::ThinkingToken { delta } => {
-            emit_persp(
-                &app_clone,
+            sink_clone.emit_persp(
                 &chat_id_clone,
                 &zone_id_clone,
                 StreamPayload::ThinkingToken { delta },
@@ -727,22 +780,22 @@ async fn run_perspective(
     .bind(&reasoning_save)
     .bind(zone_id)
     .bind(now)
-    .execute(db)
+    .execute(&ctx.db)
     .await?;
 
     let saved = sqlx::query_as::<_, Message>(&format!(
         "SELECT {MSG_COLS} FROM messages WHERE id = ?1"
     ))
     .bind(&msg_id)
-    .fetch_one(db)
+    .fetch_one(&ctx.db)
     .await?;
 
-    emit_persp(app, chat_id, zone_id, StreamPayload::AssistantSaved { message: &saved });
+    sink.emit_persp(chat_id, zone_id, StreamPayload::AssistantSaved { message: &saved });
 
     if agg.cancelled {
-        emit_persp(app, chat_id, zone_id, StreamPayload::Cancelled);
+        sink.emit_persp(chat_id, zone_id, StreamPayload::Cancelled);
     } else {
-        emit_persp(app, chat_id, zone_id, StreamPayload::Done);
+        sink.emit_persp(chat_id, zone_id, StreamPayload::Done);
     }
 
     Ok(())
@@ -911,10 +964,10 @@ fn parse_tool_result_content(result: &str) -> (Vec<ContentPart>, MessageContent)
     (vec![part], MessageContent::Text(result.to_string()))
 }
 
-async fn load_tool_context(state: &AppState) -> ToolContext {
+async fn load_tool_context(db: &SqlitePool) -> ToolContext {
     let row: Option<(String,)> = sqlx::query_as("SELECT value FROM settings WHERE key = ?1")
         .bind("theme")
-        .fetch_optional(&state.db)
+        .fetch_optional(db)
         .await
         .ok()
         .flatten();

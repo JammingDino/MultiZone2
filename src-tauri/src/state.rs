@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 pub struct AppState {
     pub db: SqlitePool,
@@ -15,6 +15,8 @@ pub struct AppState {
     pub attachments_dir: PathBuf,
     /// Per-chat cancellation flags for in-flight streams.
     pub active_streams: Arc<RwLock<HashMap<String, Arc<AtomicBool>>>>,
+    /// Running HTTP API server, if enabled. Replaced on settings change.
+    pub api_server: Mutex<Option<crate::api::ApiHandle>>,
 }
 
 impl AppState {
@@ -40,6 +42,7 @@ impl AppState {
             app_data_dir,
             attachments_dir,
             active_streams: Arc::new(RwLock::new(HashMap::new())),
+            api_server: Mutex::new(None),
         })
     }
 }

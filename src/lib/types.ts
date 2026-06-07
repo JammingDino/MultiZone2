@@ -162,6 +162,12 @@ export interface AppSettings {
   fontFamily: string;
   /** Fallback filesystem directory when a chat has no project with a directory set. */
   defaultDirectory: string;
+  /** When true, the embedded local HTTP API server runs. */
+  apiEnabled: boolean;
+  /** Port the API server binds to on 127.0.0.1. */
+  apiPort: number;
+  /** Bearer token required by the API server. */
+  apiToken: string;
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -171,6 +177,9 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   fontSize: 14,
   fontFamily: "",
   defaultDirectory: "",
+  apiEnabled: false,
+  apiPort: 8765,
+  apiToken: "",
 };
 
 export interface DbStats {
@@ -189,4 +198,5 @@ export const ALL_TOOLS: { id: string; label: string; description: string }[] = [
   { id: "render_graph", label: "Graph / diagram", description: "Render Mermaid diagrams or math plots inline." },
   { id: "ask_user", label: "Ask user", description: "Lets the model pause and ask the user a clarifying question with answer buttons." },
   { id: "manage_tags", label: "Tag chat", description: "Lets the model create tags and assign them to the current chat to categorize it." },
+  { id: "switch_zone", label: "Switch zone", description: "Lets the model list zones and switch the chat to a different zone mid-conversation." },
 ];

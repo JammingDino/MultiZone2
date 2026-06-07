@@ -144,7 +144,7 @@ function freshStreaming(messageId: string): StreamingState {
   };
 }
 
-export type BackgroundEffect = "none" | "particles" | "orbs" | "aurora" | "grid" | "stars" | "shooting";
+export type BackgroundEffect = "none" | "particles" | "orbs" | "aurora" | "grid" | "stars" | "shooting" | "waves" | "fireflies" | "boids";
 
 export interface ThemePrefs {
   mode: "dark" | "light";

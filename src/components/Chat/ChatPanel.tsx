@@ -38,8 +38,10 @@ export function ChatPanel() {
     toggleChatTagContext,
     addPerspectiveZone,
     removePerspectiveZone,
+    setChatPerspectiveMode,
     respondApproval,
   } = useApp();
+  const globalPerspectiveMode = useApp((s) => s.appSettings.perspectiveMode);
 
   const pendingApprovalByChat = useApp((s) => s.pendingApprovalByChat);
   const pendingApproval = activeChatId ? (pendingApprovalByChat[activeChatId] ?? null) : null;
@@ -171,8 +173,11 @@ export function ChatPanel() {
               primaryZoneId={activeChat.zoneId}
               perspectiveZones={chatZonesByChat[activeChat.id] ?? []}
               allZones={zones}
+              mode={activeChat.perspectiveMode}
+              globalMode={globalPerspectiveMode}
               onAdd={(zoneId) => addPerspectiveZone(activeChat.id, zoneId)}
               onRemove={(zoneId) => removePerspectiveZone(activeChat.id, zoneId)}
+              onSetMode={(m) => setChatPerspectiveMode(activeChat.id, m)}
             />
             <ZonePicker chatId={activeChat.id} currentZoneId={activeChat.zoneId} />
             </div>
@@ -449,20 +454,32 @@ function PerspectiveZonePicker({
   primaryZoneId,
   perspectiveZones,
   allZones,
+  mode,
+  globalMode,
   onAdd,
   onRemove,
+  onSetMode,
 }: {
   chatId: string;
   primaryZoneId: string | null;
   perspectiveZones: ChatZone[];
   allZones: Zone[];
+  mode: "sequential" | "parallel" | null;
+  globalMode: "sequential" | "parallel";
   onAdd: (zoneId: string) => void;
   onRemove: (zoneId: string) => void;
+  onSetMode: (mode: "sequential" | "parallel" | null) => void;
 }) {
   const [open, setOpen] = useState(false);
   const perspZoneIds = new Set(perspectiveZones.map((z) => z.zoneId));
   const addable = allZones.filter((z) => z.id !== primaryZoneId && !perspZoneIds.has(z.id));
   const count = perspectiveZones.length;
+  // The toggle has three states: inherit (null) and the two explicit modes.
+  const modeOptions: { value: "sequential" | "parallel" | null; label: string }[] = [
+    { value: null, label: `Default (${globalMode})` },
+    { value: "sequential", label: "Sequential" },
+    { value: "parallel", label: "Parallel" },
+  ];
 
   return (
     <div className="relative">
@@ -538,6 +555,36 @@ function PerspectiveZonePicker({
                 ))}
               </>
             )}
+
+            <div className="mx-2 my-1 border-t border-[var(--color-border)]" />
+            <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+              Run mode
+            </div>
+            <div className="flex gap-1 px-3 pb-2 pt-0.5">
+              {modeOptions.map((opt) => {
+                const active = mode === opt.value;
+                return (
+                  <button
+                    key={opt.label}
+                    onClick={() => onSetMode(opt.value)}
+                    title={
+                      opt.value === null
+                        ? "Use the global default set in Settings → Chat"
+                        : opt.value === "sequential"
+                          ? "Run perspective zones one at a time (gentler on local model VRAM)"
+                          : "Run all perspective zones at once"
+                    }
+                    className={`flex-1 whitespace-nowrap rounded border px-2 py-1 text-[11px] transition ${
+                      active
+                        ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)] text-[var(--color-text)]"
+                        : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-accent)]"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </>
       )}

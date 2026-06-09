@@ -8,7 +8,7 @@ use crate::state::AppState;
 use tauri::{AppHandle, Emitter, State};
 
 const CHAT_COLS: &str =
-    "id, title, zone_id, project_id, project_context_enabled, created_at, updated_at";
+    "id, title, zone_id, project_id, project_context_enabled, perspective_mode, created_at, updated_at";
 
 #[tauri::command]
 pub async fn list_chats(state: State<'_, AppState>) -> AppResult<Vec<Chat>> {
@@ -223,6 +223,25 @@ pub async fn add_perspective_zone(
     .bind(&zone_id)
     .execute(&state.db)
     .await?;
+    Ok(())
+}
+
+/// Set the per-chat perspective execution mode override. Pass `None` to clear
+/// the override and inherit the global default from app settings.
+#[tauri::command]
+pub async fn set_chat_perspective_mode(
+    state: State<'_, AppState>,
+    chat_id: String,
+    mode: Option<String>,
+) -> AppResult<()> {
+    // Only persist recognised values; treat anything else as "inherit".
+    let mode = mode.filter(|m| m == "sequential" || m == "parallel");
+    sqlx::query("UPDATE chats SET perspective_mode = ?1, updated_at = ?2 WHERE id = ?3")
+        .bind(&mode)
+        .bind(now_ts())
+        .bind(&chat_id)
+        .execute(&state.db)
+        .await?;
     Ok(())
 }
 

@@ -39,6 +39,8 @@ export interface Chat {
   zoneId: string | null;
   projectId: string | null;
   projectContextEnabled: boolean;
+  /** Per-chat override for perspective execution; null = inherit global setting. */
+  perspectiveMode: "sequential" | "parallel" | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -183,6 +185,18 @@ export interface AppSettings {
    * "text"   — extract text content from pages and send as text
    */
   pdfMode: "images" | "text";
+  /**
+   * Default execution mode for perspective zones (overridable per chat).
+   * "sequential" — run one zone at a time (default; gentler on local model VRAM)
+   * "parallel"   — run all perspective zones at once
+   */
+  perspectiveMode: "sequential" | "parallel";
+  /**
+   * How multiple model responses are laid out in the chat.
+   * "stacked" — full-width response blocks stacked vertically (default)
+   * "columns" — side-by-side columns for direct comparison
+   */
+  perspectiveLayout: "stacked" | "columns";
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -197,6 +211,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   apiToken: "",
   autoApproveLevel: "all",
   pdfMode: "images",
+  perspectiveMode: "sequential",
+  perspectiveLayout: "stacked",
 };
 
 export interface DbStats {

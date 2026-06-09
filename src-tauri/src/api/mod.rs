@@ -38,7 +38,7 @@ use tokio::sync::{oneshot, RwLock};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 const CHAT_COLS: &str =
-    "id, title, zone_id, project_id, project_context_enabled, created_at, updated_at";
+    "id, title, zone_id, project_id, project_context_enabled, perspective_mode, created_at, updated_at";
 const MSG_COLS: &str =
     "id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, created_at";
 

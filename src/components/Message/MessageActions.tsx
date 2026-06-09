@@ -16,7 +16,7 @@ interface Props {
    */
   pivotMessageId?: string;
   chatId: string;
-  variant: "user" | "assistant";
+  variant: "user" | "assistant" | "perspective";
   onEdit?: () => void;
 }
 
@@ -56,7 +56,7 @@ export function MessageActions({
   return (
     <div
       className={`mt-1 flex items-center gap-1 text-xs text-[var(--color-text-muted)] ${
-        variant === "user" ? "justify-end pr-10" : "pl-10"
+        variant === "user" ? "justify-end pr-10" : variant === "assistant" ? "pl-10" : ""
       }`}
     >
       <ActionButton onClick={onCopy} label={copied ? "Copied" : "Copy"}>
@@ -79,7 +79,7 @@ export function MessageActions({
         </ActionButton>
       )}
 
-      {variant === "assistant" && stats && (
+      {variant !== "user" && stats && (
         <div className="relative">
           <ActionButton
             onClick={() => setShowStats((v) => !v)}

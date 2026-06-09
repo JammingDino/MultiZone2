@@ -55,6 +55,10 @@ export const addPerspectiveZone = (chatId: string, zoneId: string) =>
   invoke<void>("add_perspective_zone", { chatId, zoneId });
 export const removePerspectiveZone = (chatId: string, zoneId: string) =>
   invoke<void>("remove_perspective_zone", { chatId, zoneId });
+export const setChatPerspectiveMode = (
+  chatId: string,
+  mode: "sequential" | "parallel" | null,
+) => invoke<void>("set_chat_perspective_mode", { chatId, mode });
 export const deleteChat = (id: string) => invoke<void>("delete_chat", { id });
 
 // Projects

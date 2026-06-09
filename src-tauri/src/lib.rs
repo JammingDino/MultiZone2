@@ -50,6 +50,7 @@ pub fn run() {
             commands::chats::get_chat_zones,
             commands::chats::add_perspective_zone,
             commands::chats::remove_perspective_zone,
+            commands::chats::set_chat_perspective_mode,
             commands::chats::delete_chat,
             commands::chats::delete_messages_from,
             commands::chats::get_messages,

@@ -24,7 +24,7 @@ const ZONE_COLS: &str = "id, name, provider_id, model, system_prompt, temperatur
     tools_enabled, tool_config, thinking_enabled, include_thinking_in_context,
     icon, accent_color, created_at, updated_at";
 const CHAT_COLS: &str =
-    "id, title, zone_id, project_id, project_context_enabled, created_at, updated_at";
+    "id, title, zone_id, project_id, project_context_enabled, perspective_mode, created_at, updated_at";
 const MSG_COLS: &str =
     "id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, created_at";
 
@@ -770,25 +770,89 @@ async fn run_perspectives(
         return;
     }
 
-    let mut handles = Vec::new();
-    for zone_id in zone_ids {
-        let ctx = ctx.clone();
-        let sink = sink.clone();
-        let chat_id = chat_id.to_string();
-        let cancel = cancel.clone();
-        handles.push(tokio::spawn(async move {
-            if let Err(e) = run_perspective(&ctx, &sink, &chat_id, &zone_id, cancel).await {
+    let mode = resolve_perspective_mode(&ctx.db, chat_id).await;
+
+    if mode == "parallel" {
+        // Fire every perspective at once. They're still blind to each other:
+        // history is snapshotted at the last user message, so none can observe a
+        // sibling's in-flight answer.
+        let mut handles = Vec::new();
+        for zone_id in zone_ids {
+            let ctx = ctx.clone();
+            let sink = sink.clone();
+            let chat_id = chat_id.to_string();
+            let cancel = cancel.clone();
+            handles.push(tokio::spawn(async move {
+                if let Err(e) = run_perspective(&ctx, &sink, &chat_id, &zone_id, cancel).await {
+                    tracing::warn!("perspective zone {zone_id} error: {e}");
+                    sink.emit_persp(
+                        &chat_id,
+                        &zone_id,
+                        StreamPayload::Error { message: e.to_string() },
+                    );
+                }
+            }));
+        }
+        for h in handles {
+            let _ = h.await;
+        }
+    } else {
+        // Sequential: run one zone at a time (gentler on local model VRAM).
+        // Each still only sees prior rounds, never the current round's answers.
+        for zone_id in zone_ids {
+            if cancel.load(Ordering::Relaxed) {
+                break;
+            }
+            if let Err(e) = run_perspective(ctx, sink, chat_id, &zone_id, cancel.clone()).await {
                 tracing::warn!("perspective zone {zone_id} error: {e}");
                 sink.emit_persp(
-                    &chat_id,
+                    chat_id,
                     &zone_id,
                     StreamPayload::Error { message: e.to_string() },
                 );
             }
-        }));
+        }
     }
-    for h in handles {
-        let _ = h.await;
+}
+
+/// Resolves the effective perspective execution mode for a chat:
+/// per-chat override → global `perspectiveMode` app setting → `"sequential"`.
+async fn resolve_perspective_mode(db: &SqlitePool, chat_id: &str) -> String {
+    let chat_mode: Option<String> = match sqlx::query_scalar::<_, Option<String>>(
+        "SELECT perspective_mode FROM chats WHERE id = ?1",
+    )
+    .bind(chat_id)
+    .fetch_optional(db)
+    .await
+    {
+        Ok(Some(inner)) => inner,
+        _ => None,
+    };
+    if let Some(m) = chat_mode {
+        if m == "sequential" || m == "parallel" {
+            return m;
+        }
+    }
+
+    // Global default lives in the app_settings JSON blob (same place the
+    // filesystem default directory is read from).
+    let global = sqlx::query_scalar::<_, String>(
+        "SELECT value FROM settings WHERE key = 'app_settings'",
+    )
+    .fetch_optional(db)
+    .await
+    .ok()
+    .flatten()
+    .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+    .and_then(|v| {
+        v.get("perspectiveMode")
+            .and_then(|m| m.as_str())
+            .map(String::from)
+    });
+
+    match global.as_deref() {
+        Some("parallel") => "parallel".to_string(),
+        _ => "sequential".to_string(),
     }
 }
 
@@ -947,6 +1011,33 @@ async fn build_message_history(
         if !sys.trim().is_empty() { snippets.push(sys.clone()); }
     }
 
+    // Does this chat involve perspective zones (now, or historically)? If so we
+    // build a shared multi-model transcript; otherwise we keep the original
+    // single-zone history verbatim so ordinary chats are completely unaffected.
+    let persp_zone_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM chat_zones WHERE chat_id = ?1")
+            .bind(chat_id)
+            .fetch_one(db)
+            .await
+            .unwrap_or(0);
+    let persp_msg_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM messages WHERE chat_id = ?1 AND zone_id IS NOT NULL",
+    )
+    .bind(chat_id)
+    .fetch_one(db)
+    .await
+    .unwrap_or(0);
+    let multi_model = persp_zone_count > 0 || persp_msg_count > 0;
+
+    // In a multi-zone chat, tell this model which participant it is (and who the
+    // others are) so it can read the labelled transcript correctly and answer as
+    // itself on this turn.
+    if multi_model {
+        if let Some(identity) = build_identity_preamble(db, chat_id, chat.as_ref(), zone).await? {
+            snippets.push(identity);
+        }
+    }
+
     let mut out: Vec<ChatMessage> = Vec::new();
     if !snippets.is_empty() {
         out.push(ChatMessage {
@@ -958,6 +1049,12 @@ async fn build_message_history(
         });
     }
 
+    if multi_model {
+        build_multi_model_history(db, chat_id, chat.as_ref(), &mut out).await?;
+        return Ok(out);
+    }
+
+    // ── Single-zone history (unchanged) ───────────────────────────────────────
     // Exclude perspective messages (zone_id IS NOT NULL) from the history sent
     // to any zone so they never pollute the primary conversation context.
     let rows = sqlx::query_as::<_, Message>(&format!(
@@ -1031,6 +1128,228 @@ async fn build_message_history(
     }
 
     Ok(out)
+}
+
+/// Builds the per-turn identity preamble for a zone in a multi-zone chat:
+/// tells the model which participant it is, names the other participants, and
+/// explains the `**Name:**` labelling used in the shared transcript. Returns
+/// `None` only if zone names can't be resolved at all.
+async fn build_identity_preamble(
+    db: &SqlitePool,
+    chat_id: &str,
+    chat: Option<&Chat>,
+    self_zone: &Zone,
+) -> AppResult<Option<String>> {
+    // All participant zone ids: the primary zone plus every perspective zone.
+    let mut ids: Vec<String> = Vec::new();
+    if let Some(pz) = chat.and_then(|c| c.zone_id.clone()) {
+        ids.push(pz);
+    }
+    let persp: Vec<String> =
+        sqlx::query_scalar("SELECT zone_id FROM chat_zones WHERE chat_id = ?1")
+            .bind(chat_id)
+            .fetch_all(db)
+            .await
+            .unwrap_or_default();
+    ids.extend(persp);
+
+    let zone_names: Vec<(String, String)> =
+        sqlx::query_as("SELECT id, name FROM zones").fetch_all(db).await?;
+    let name_of = |zid: &str| -> Option<String> {
+        zone_names.iter().find(|(id, _)| id == zid).map(|(_, n)| n.clone())
+    };
+
+    // Distinct "other participant" names (everyone except this zone).
+    let mut others: Vec<String> = Vec::new();
+    for id in &ids {
+        if *id == self_zone.id {
+            continue;
+        }
+        if let Some(n) = name_of(id) {
+            if !others.contains(&n) {
+                others.push(n);
+            }
+        }
+    }
+
+    let mut text = format!(
+        "You are taking part in a multi-zone conversation. You are \"{}\". \
+         You answer this turn independently — you cannot see what the other zones \
+         say this turn, only what everyone said in previous turns.",
+        self_zone.name
+    );
+    if !others.is_empty() {
+        text.push_str(&format!(
+            " The other participants are: {}.",
+            others.join(", ")
+        ));
+    }
+    text.push_str(
+        " In the conversation that follows, each previous turn is prefixed with the \
+         name of the zone that wrote it (e.g. \"**Name:**\"). Those labels are context \
+         only — reply directly in your own voice without prefixing your answer with a name.",
+    );
+
+    Ok(Some(text))
+}
+
+/// Builds a shared, multi-model transcript for perspective chats and appends it
+/// to `out` (which already holds the system message, if any).
+///
+/// Two rules implement the desired behaviour:
+///   1. **Blind within a round** — every zone answers as if it were the only
+///      responder. We never include any assistant/tool message produced *after*
+///      the last user message, so a zone can't see its siblings' (or the
+///      primary's) answer for the turn currently being generated. The primary's
+///      own in-progress tool loop is appended in memory by the caller, not here.
+///   2. **Shared memory across rounds** — for every *previous* round we merge
+///      all zones' answers into a single labelled assistant message, so on the
+///      next turn each zone can see what every other zone said before.
+///
+/// Tool-call structure from past rounds is flattened to text here; the active
+/// turn still carries full tool structure via the caller's in-memory appends.
+async fn build_multi_model_history(
+    db: &SqlitePool,
+    chat_id: &str,
+    chat: Option<&Chat>,
+    out: &mut Vec<ChatMessage>,
+) -> AppResult<()> {
+    let rows = sqlx::query_as::<_, Message>(&format!(
+        "SELECT {MSG_COLS} FROM messages WHERE chat_id = ?1 ORDER BY created_at ASC"
+    ))
+    .bind(chat_id)
+    .fetch_all(db)
+    .await?;
+
+    // The last user message is the current-round boundary. Anything an assistant
+    // produced at/after it belongs to the round being generated → excluded.
+    let last_user_ts = rows
+        .iter()
+        .filter(|m| m.role == "user")
+        .map(|m| m.created_at)
+        .max();
+
+    // Resolve zone ids → display names so each contribution can be labelled.
+    let zone_names: Vec<(String, String)> =
+        sqlx::query_as("SELECT id, name FROM zones").fetch_all(db).await?;
+    let primary_zone_id = chat.and_then(|c| c.zone_id.clone());
+    let name_of = |zid: &str| -> String {
+        zone_names
+            .iter()
+            .find(|(id, _)| id == zid)
+            .map(|(_, n)| n.clone())
+            .unwrap_or_else(|| "Assistant".to_string())
+    };
+    let primary_name = primary_zone_id
+        .as_deref()
+        .map(name_of)
+        .unwrap_or_else(|| "Assistant".to_string());
+
+    // Accumulates the answers produced since the previous user message, flushed
+    // as one merged assistant turn when the next user message (or the end) is hit.
+    let mut pending: Vec<(String, String)> = Vec::new();
+
+    for m in &rows {
+        match m.role.as_str() {
+            "system" => continue,
+            "user" => {
+                push_merged_round(out, &mut pending);
+                let is_historical = last_user_ts.map_or(false, |lu| m.created_at < lu);
+                if let Some(content) = user_message_content(m, is_historical) {
+                    out.push(ChatMessage {
+                        role: "user".into(),
+                        content: Some(content),
+                        tool_calls: None,
+                        tool_call_id: None,
+                        name: None,
+                    });
+                }
+            }
+            "assistant" => {
+                // Only past-round answers; current-round siblings stay hidden.
+                let is_past = last_user_ts.map_or(false, |lu| m.created_at < lu);
+                if !is_past {
+                    continue;
+                }
+                let text = strip_thinking_blocks(&assistant_text(&m.content));
+                let text = text.trim();
+                if text.is_empty() {
+                    continue;
+                }
+                let label = match &m.zone_id {
+                    None => primary_name.clone(),
+                    Some(z) => name_of(z),
+                };
+                pending.push((label, text.to_string()));
+            }
+            // Tool messages aren't replayed in the shared transcript.
+            _ => continue,
+        }
+    }
+    push_merged_round(out, &mut pending);
+
+    Ok(())
+}
+
+/// Flushes the accumulated per-zone answers for one round into a single labelled
+/// assistant message (keeps the API's user/assistant alternation valid).
+fn push_merged_round(out: &mut Vec<ChatMessage>, pending: &mut Vec<(String, String)>) {
+    if pending.is_empty() {
+        return;
+    }
+    let mut buf = String::new();
+    for (i, (label, text)) in pending.iter().enumerate() {
+        if i > 0 {
+            buf.push_str("\n\n");
+        }
+        buf.push_str("**");
+        buf.push_str(label);
+        buf.push_str(":**\n");
+        buf.push_str(text);
+    }
+    pending.clear();
+    out.push(ChatMessage {
+        role: "assistant".into(),
+        content: Some(MessageContent::Text(buf)),
+        tool_calls: None,
+        tool_call_id: None,
+        name: None,
+    });
+}
+
+/// Joins the text parts of a stored assistant message's content JSON.
+fn assistant_text(content_json: &str) -> String {
+    let parts: Vec<ContentPart> = serde_json::from_str(content_json).unwrap_or_default();
+    parts
+        .iter()
+        .filter_map(|p| match p {
+            ContentPart::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+/// Builds the API content for a stored user message, downgrading historical
+/// images to low detail (same vision-token economy as the single-zone path).
+fn user_message_content(m: &Message, downgrade_images: bool) -> Option<MessageContent> {
+    let mut parts: Vec<ContentPart> = serde_json::from_str(&m.content).unwrap_or_default();
+    if downgrade_images {
+        for part in &mut parts {
+            if let ContentPart::ImageUrl { image_url } = part {
+                image_url.detail = Some("low".to_string());
+            }
+        }
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    if parts.len() == 1 {
+        if let ContentPart::Text { text } = &parts[0] {
+            return Some(MessageContent::Text(text.clone()));
+        }
+    }
+    Some(MessageContent::Parts(parts))
 }
 
 fn build_tools_for_zone(zone: &Zone, ctx: &ToolContext) -> Vec<Tool> {

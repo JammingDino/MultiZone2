@@ -138,6 +138,10 @@ interface AppStore {
   loadChatZones: (chatId: string) => Promise<void>;
   addPerspectiveZone: (chatId: string, zoneId: string) => Promise<void>;
   removePerspectiveZone: (chatId: string, zoneId: string) => Promise<void>;
+  setChatPerspectiveMode: (
+    chatId: string,
+    mode: "sequential" | "parallel" | null,
+  ) => Promise<void>;
 }
 
 function freshStreaming(messageId: string): StreamingState {
@@ -263,7 +267,16 @@ export const useApp = create<AppStore>((set, get) => ({
   async setActiveChat(id) {
     set({ activeChatId: id });
     if (id) {
-      if (!get().messagesByChat[id]) await get().loadMessages(id);
+      // Always refresh from the DB on entry so the view reflects persisted
+      // state (e.g. primary + perspective answers) even if the in-memory cache
+      // drifted while streaming in the background. Skip the reload only while a
+      // stream is actively writing into this chat, so we don't clobber the
+      // in-flight turn that hasn't been saved yet.
+      const streamingHere =
+        !!get().streamingByChat[id] ||
+        Object.keys(get().perspectiveStreamsByChat[id] ?? {}).length > 0;
+      if (!streamingHere) await get().loadMessages(id);
+      else if (!get().messagesByChat[id]) await get().loadMessages(id);
       if (!get().tagsByChat[id]) await get().loadChatTags(id);
       await get().loadChatZones(id);
     }
@@ -279,6 +292,7 @@ export const useApp = create<AppStore>((set, get) => ({
         const chatPersp = { ...(s.perspectiveStreamsByChat[chatId] ?? {}) };
         const perspectiveStreamsByChat = { ...s.perspectiveStreamsByChat };
         const messagesByChat = { ...s.messagesByChat };
+        const statsByMessage = { ...s.statsByMessage };
         const msgs = messagesByChat[chatId] ?? [];
         const current = chatPersp[perspectiveZoneId];
 
@@ -308,6 +322,21 @@ export const useApp = create<AppStore>((set, get) => ({
             break;
           case "assistant_saved":
             messagesByChat[chatId] = [...msgs, event.message];
+            // Record generation stats for this perspective response so its block
+            // shows the same timing/token readout as the primary answer.
+            if (current) {
+              const now = Date.now();
+              const start = current.firstTokenAt ?? current.startedAt;
+              statsByMessage[event.message.id] = {
+                durationMs: now - start,
+                timeToFirstTokenMs:
+                  current.firstTokenAt !== null
+                    ? current.firstTokenAt - current.startedAt
+                    : null,
+                contentChars: current.content.length,
+                reasoningChars: current.reasoning.length,
+              };
+            }
             delete chatPersp[perspectiveZoneId];
             break;
           case "done":
@@ -318,7 +347,7 @@ export const useApp = create<AppStore>((set, get) => ({
         }
 
         perspectiveStreamsByChat[chatId] = chatPersp;
-        return { perspectiveStreamsByChat, messagesByChat };
+        return { perspectiveStreamsByChat, messagesByChat, statsByMessage };
       });
       return;
     }
@@ -717,6 +746,14 @@ export const useApp = create<AppStore>((set, get) => ({
         ...s.chatZonesByChat,
         [chatId]: (s.chatZonesByChat[chatId] ?? []).filter((z) => z.zoneId !== zoneId),
       },
+    }));
+  },
+  async setChatPerspectiveMode(chatId, mode) {
+    await api.setChatPerspectiveMode(chatId, mode);
+    set((s) => ({
+      chats: s.chats.map((c) =>
+        c.id === chatId ? { ...c, perspectiveMode: mode } : c,
+      ),
     }));
   },
 }));

@@ -46,6 +46,9 @@ pub struct Chat {
     pub zone_id: Option<String>,
     pub project_id: Option<String>,
     pub project_context_enabled: bool,
+    /// Per-chat override for how perspective zones run: `Some("sequential")`,
+    /// `Some("parallel")`, or `None` to inherit the global app setting.
+    pub perspective_mode: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }

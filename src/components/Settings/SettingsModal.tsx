@@ -531,6 +531,50 @@ function ChatTab() {
           )}
         </div>
       </section>
+
+      <section>
+        <h3 className="mb-1 text-sm font-medium">Perspective run mode</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          Default for how multiple zones answer in a chat. Each chat can override this from its Perspectives menu.
+        </p>
+        <div className="flex gap-2">
+          {([
+            ["sequential", "Sequential", "Run perspective zones one at a time — gentler on local model VRAM."],
+            ["parallel",   "Parallel",   "Run all perspective zones at once — fastest, best for remote APIs."],
+          ] as const).map(([val, label, desc]) => (
+            <button
+              key={val}
+              onClick={() => setAppSettings({ perspectiveMode: val })}
+              className={`flex-1 rounded border px-3 py-2.5 text-left text-sm ${appSettings.perspectiveMode === val ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]" : "border-[var(--color-border)] hover:border-[var(--color-accent)]"}`}
+            >
+              <div className="font-medium">{label}</div>
+              <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">{desc}</div>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section>
+        <h3 className="mb-1 text-sm font-medium">Perspective layout</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          How additional model responses are arranged beneath the primary answer.
+        </p>
+        <div className="flex gap-2">
+          {([
+            ["stacked", "Stacked", "Full-width response blocks stacked vertically."],
+            ["columns", "Columns", "Side-by-side columns for direct comparison."],
+          ] as const).map(([val, label, desc]) => (
+            <button
+              key={val}
+              onClick={() => setAppSettings({ perspectiveLayout: val })}
+              className={`flex-1 rounded border px-3 py-2.5 text-left text-sm ${appSettings.perspectiveLayout === val ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]" : "border-[var(--color-border)] hover:border-[var(--color-accent)]"}`}
+            >
+              <div className="font-medium">{label}</div>
+              <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">{desc}</div>
+            </button>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }

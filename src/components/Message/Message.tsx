@@ -190,6 +190,7 @@ export function BotTurnView({ turn }: { turn: BotTurn }) {
     const chat = s.chats.find((c) => c.id === chatId);
     return chat ? s.zones.find((z) => z.id === chat.zoneId) : null;
   });
+  const [collapsed, setCollapsed] = useState(false);
 
   if (!hasAnything) return null;
 
@@ -228,14 +229,31 @@ export function BotTurnView({ turn }: { turn: BotTurn }) {
     );
   });
 
+  // When a turn has perspectives, the primary answer becomes a peer to them:
+  // it gets the same collapse control (a chevron beneath the avatar) and a name
+  // label so every participant in the turn reads at equal priority.
+  const hasPerspectives = turn.perspectives.length > 0;
+  const showCollapsed = hasPerspectives && collapsed && !isStreaming;
+
   return (
     <div className="msg-row">
       <div className="flex gap-3">
-        <div
-          className="mt-1 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded shadow-sm"
-          style={{ background: zoneColor ?? "var(--color-panel)" }}
-        >
-          <ZoneIcon size={14} color={zoneColor ? "white" : "var(--color-text-muted)"} />
+        <div className="flex flex-col items-center gap-1">
+          <div
+            className="mt-1 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded shadow-sm"
+            style={{ background: zoneColor ?? "var(--color-panel)" }}
+          >
+            <ZoneIcon size={14} color={zoneColor ? "white" : "var(--color-text-muted)"} />
+          </div>
+          {hasPerspectives && !isStreaming && (
+            <button
+              onClick={() => setCollapsed((v) => !v)}
+              title={collapsed ? "Expand response" : "Collapse response"}
+              className="flex h-5 w-5 items-center justify-center rounded text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
+            >
+              {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+            </button>
+          )}
         </div>
         <div
           className="flex-1 min-w-0 overflow-hidden border-l-2 pl-3"
@@ -245,17 +263,38 @@ export function BotTurnView({ turn }: { turn: BotTurn }) {
               : "color-mix(in srgb, var(--color-accent) 33%, transparent)",
           }}
         >
-          {blockElements.length > 0 && (
-            <div className="flex flex-col gap-2">
-              {blockElements}
+          {hasPerspectives && (
+            <div className="mb-1 flex items-center gap-2 text-xs">
+              <span
+                className="font-medium"
+                style={{ color: zoneColor ?? "var(--color-accent)" }}
+              >
+                {zone?.name ?? "Primary"}
+              </span>
+              {zone?.model && (
+                <span className="truncate text-[var(--color-text-muted)]">{zone.model}</span>
+              )}
             </div>
           )}
-          {isStreaming && turn.blocks.length === 0 && (
-            <span className="animate-pulse text-[var(--color-text-muted)]">▌</span>
+          {showCollapsed ? (
+            <span className="text-xs italic text-[var(--color-text-muted)]">
+              Response collapsed
+            </span>
+          ) : (
+            <>
+              {blockElements.length > 0 && (
+                <div className="flex flex-col gap-2">
+                  {blockElements}
+                </div>
+              )}
+              {isStreaming && turn.blocks.length === 0 && (
+                <span className="animate-pulse text-[var(--color-text-muted)]">▌</span>
+              )}
+            </>
           )}
         </div>
       </div>
-      {!isStreaming && chatId && pivotMessageId && (
+      {!isStreaming && chatId && pivotMessageId && !showCollapsed && (
         <div className="msg-actions">
           <MessageActions
             text={allText}
@@ -266,60 +305,139 @@ export function BotTurnView({ turn }: { turn: BotTurn }) {
           />
         </div>
       )}
-      {turn.perspectives.length > 0 && (
-        <div className="mt-3 flex flex-col gap-2 pl-10">
-          {turn.perspectives.map((p) => (
-            <PerspectivePanelView key={p.zoneId} persp={p} />
-          ))}
-        </div>
+      {hasPerspectives && (
+        <PerspectiveGroup perspectives={turn.perspectives} chatId={chatId} />
       )}
     </div>
   );
 }
 
-function PerspectivePanelView({ persp }: { persp: PerspectiveTurn }) {
+function PerspectiveGroup({
+  perspectives,
+  chatId,
+}: {
+  perspectives: PerspectiveTurn[];
+  chatId: string;
+}) {
+  const layout = useApp((s) => s.appSettings.perspectiveLayout);
+  return (
+    <div className={layout === "columns" ? "mt-5 flex flex-wrap gap-4" : "mt-5 flex flex-col gap-5"}>
+      {perspectives.map((p) => (
+        <PerspectiveResponseView key={p.zoneId} persp={p} chatId={chatId} layout={layout} />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Renders a perspective zone's answer with the same visual language as the
+ * primary message (avatar + zone-coloured left border + plain markdown), plus a
+ * collapse toggle directly beneath the avatar so each model's response can be
+ * folded away.
+ */
+function PerspectiveResponseView({
+  persp,
+  chatId,
+  layout,
+}: {
+  persp: PerspectiveTurn;
+  chatId: string;
+  layout: "stacked" | "columns";
+}) {
   const [expanded, setExpanded] = useState(true);
+  const [showReasoning, setShowReasoning] = useState(false);
   const isStreaming = Boolean(persp.streaming);
   const zone = useApp((s) => s.zones.find((z) => z.id === persp.zoneId));
   const ZoneIcon = getZoneIcon(zone?.icon);
-  const color = zone?.accentColor ?? "var(--color-accent)";
+  const color = zone?.accentColor ?? null;
   const visibleText = useThrottledStreaming(persp.text, isStreaming);
 
   return (
-    <div
-      className="rounded border border-[var(--color-border)] bg-[var(--color-bg)]"
-      style={{ borderLeftColor: color, borderLeftWidth: 2 }}
-    >
-      <button
-        onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-2 px-3 py-1.5 text-xs hover:bg-[var(--color-panel-hover)]"
-      >
-        {expanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-        <span
-          className="flex h-4 w-4 shrink-0 items-center justify-center rounded"
-          style={{ background: color }}
-        >
-          <ZoneIcon size={10} color="white" />
-        </span>
-        <span className="font-medium" style={{ color }}>{zone?.name ?? persp.zoneId}</span>
-        {isStreaming && (
-          <span className="ml-auto animate-pulse text-[var(--color-text-muted)]">generating…</span>
-        )}
-      </button>
-      {expanded && (
-        <div className="px-4 pb-3 pt-1 text-sm">
-          {persp.reasoning && (
-            <div className="mb-2 rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1.5 font-mono text-xs text-[var(--color-text-muted)] opacity-70">
-              {persp.reasoning}
-            </div>
-          )}
-          {visibleText ? (
-            <Markdown source={visibleText} />
-          ) : isStreaming ? (
-            <span className="animate-pulse text-[var(--color-text-muted)]">▌</span>
-          ) : null}
+    <div className={`msg-row ${layout === "columns" ? "min-w-[280px] flex-1" : ""}`}>
+      <div className="flex gap-3">
+        {/* Avatar + the collapse "dropdown" beneath it */}
+        <div className="flex flex-col items-center gap-1">
+          <div
+            className="mt-1 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded shadow-sm"
+            style={{ background: color ?? "var(--color-panel)" }}
+          >
+            <ZoneIcon size={14} color={color ? "white" : "var(--color-text-muted)"} />
+          </div>
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            title={expanded ? "Collapse response" : "Expand response"}
+            className="flex h-5 w-5 items-center justify-center rounded text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
+          >
+            {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          </button>
         </div>
-      )}
+
+        <div
+          className="flex-1 min-w-0 overflow-hidden border-l-2 pl-3"
+          style={{
+            borderColor: color
+              ? `${color}55`
+              : "color-mix(in srgb, var(--color-accent) 33%, transparent)",
+          }}
+        >
+          {/* Subtle name label so multiple models stay distinguishable. */}
+          <div className="mb-1 flex items-center gap-2 text-xs">
+            <span className="font-medium" style={{ color: color ?? "var(--color-accent)" }}>
+              {zone?.name ?? "Perspective"}
+            </span>
+            {zone?.model && (
+              <span className="truncate text-[var(--color-text-muted)]">{zone.model}</span>
+            )}
+            {isStreaming && (
+              <span className="animate-pulse text-[var(--color-text-muted)]">generating…</span>
+            )}
+          </div>
+
+          {expanded ? (
+            <>
+              {persp.reasoning && (
+                <div className="mb-2">
+                  <button
+                    onClick={() => setShowReasoning((v) => !v)}
+                    className="flex items-center gap-1 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                  >
+                    {showReasoning ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+                    Reasoning
+                  </button>
+                  {showReasoning && (
+                    <div className="mt-1 whitespace-pre-wrap rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1.5 font-mono text-xs text-[var(--color-text-muted)] opacity-80">
+                      {persp.reasoning}
+                    </div>
+                  )}
+                </div>
+              )}
+              <div className="text-sm">
+                {visibleText ? (
+                  <Markdown source={visibleText} />
+                ) : isStreaming ? (
+                  <span className="animate-pulse text-[var(--color-text-muted)]">▌</span>
+                ) : (
+                  <span className="text-xs italic text-[var(--color-text-muted)]">No response.</span>
+                )}
+              </div>
+              {!isStreaming && visibleText && (
+                <div className="msg-actions">
+                  <MessageActions
+                    text={persp.text}
+                    messageId={persp.messageId}
+                    chatId={chatId}
+                    variant="perspective"
+                  />
+                </div>
+              )}
+            </>
+          ) : (
+            <span className="text-xs italic text-[var(--color-text-muted)]">
+              Response collapsed
+            </span>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

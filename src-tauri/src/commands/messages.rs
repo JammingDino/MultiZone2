@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{mpsc, oneshot, RwLock};
 
 const MAX_TOOL_ITERATIONS: usize = 8;
 
@@ -44,6 +44,8 @@ pub enum StreamPayload<'a> {
     ThinkingToken { delta: String },
     ToolCallStart { index: usize, id: String, name: String },
     ToolCallArgsDelta { index: usize, delta: String },
+    /// Emitted when a tool requires user approval before it can run.
+    ToolApprovalRequired { index: usize, name: String, arguments: String },
     ToolCallExecuting { index: usize, name: String },
     ToolCallResult { index: usize, name: String, result: String },
     ToolMessageSaved { message: &'a Message },
@@ -61,6 +63,7 @@ pub struct EngineCtx {
     pub db: SqlitePool,
     pub http: reqwest::Client,
     pub active_streams: Arc<RwLock<HashMap<String, Arc<AtomicBool>>>>,
+    pub tool_approvals: Arc<tokio::sync::Mutex<HashMap<String, oneshot::Sender<bool>>>>,
 }
 
 impl EngineCtx {
@@ -69,6 +72,7 @@ impl EngineCtx {
             db: state.db.clone(),
             http: state.http.clone(),
             active_streams: state.active_streams.clone(),
+            tool_approvals: state.tool_approvals.clone(),
         }
     }
 }
@@ -118,11 +122,64 @@ impl StreamSink {
 
 #[tauri::command]
 pub async fn cancel_stream(state: State<'_, AppState>, chat_id: String) -> AppResult<()> {
-    let map = state.active_streams.read().await;
-    if let Some(flag) = map.get(&chat_id) {
-        flag.store(true, Ordering::Relaxed);
+    {
+        let map = state.active_streams.read().await;
+        if let Some(flag) = map.get(&chat_id) {
+            flag.store(true, Ordering::Relaxed);
+        }
+    }
+    // Deny any pending tool approval so the backend loop isn't stuck.
+    let mut approvals = state.tool_approvals.lock().await;
+    if let Some(tx) = approvals.remove(&chat_id) {
+        let _ = tx.send(false);
     }
     Ok(())
+}
+
+/// Called by the frontend to approve or deny a pending tool execution.
+#[tauri::command]
+pub async fn respond_tool_approval(
+    state: State<'_, AppState>,
+    chat_id: String,
+    approved: bool,
+) -> AppResult<()> {
+    let mut map = state.tool_approvals.lock().await;
+    if let Some(tx) = map.remove(&chat_id) {
+        let _ = tx.send(approved);
+    }
+    Ok(())
+}
+
+/// Read the auto-approve level from persisted app_settings.
+/// Returns "all" if not set (backward-compatible: no approval prompts).
+async fn get_auto_approve_level(db: &SqlitePool) -> String {
+    let raw: Option<Option<String>> = sqlx::query_scalar(
+        "SELECT value FROM settings WHERE key = 'app_settings'",
+    )
+    .fetch_optional(db)
+    .await
+    .ok()
+    .flatten();
+
+    raw.flatten()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| {
+            v.get("autoApproveLevel")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+        })
+        .unwrap_or_else(|| "all".to_string())
+}
+
+/// Returns true when the tool needs explicit user approval given the current level.
+fn approval_needed(auto_level: &str, tool_safety: u8) -> bool {
+    match auto_level {
+        "all" => false,
+        "safe_moderate" => tool_safety > 1,
+        "safe" => tool_safety > 0,
+        "none" => true,
+        _ => false,
+    }
 }
 
 /// Run the agentic loop against the chat's existing history without inserting
@@ -525,32 +582,70 @@ async fn run_agentic_loop(
             .any(|tc| tc.function.name == "ask_user");
 
         // Execute tools, persist results, push into history
+        let auto_approve_level = get_auto_approve_level(&ctx.db).await;
         for tc in &agg.tool_calls {
             if cancel.load(Ordering::Relaxed) {
                 sink.emit(chat_id, StreamPayload::Cancelled);
                 return Ok(());
             }
 
-            sink.emit(
-                chat_id,
-                StreamPayload::ToolCallExecuting {
+            // Check whether this tool needs explicit user approval.
+            let tool_safety = tools::tool_safety_by_name(&tc.function.name);
+            let needs_approval = approval_needed(&auto_approve_level, tool_safety);
+
+            let approved = if needs_approval {
+                let (tx, rx) = oneshot::channel::<bool>();
+                ctx.tool_approvals.lock().await.insert(chat_id.to_string(), tx);
+
+                sink.emit(chat_id, StreamPayload::ToolApprovalRequired {
                     index: 0,
                     name: tc.function.name.clone(),
-                },
-            );
-            let result = tools::dispatch(
-                &tc.function.name,
-                &tc.function.arguments,
-                &zone_config,
-                &ctx.db,
-                chat_id,
-                project_dir.as_deref(),
-                &ctx.http,
-            )
-            .await
-            .unwrap_or_else(|e| {
-                serde_json::json!({ "error": e.to_string() }).to_string()
-            });
+                    arguments: tc.function.arguments.clone(),
+                });
+
+                // Wait up to 5 minutes for the user to approve or deny.
+                let result = tokio::time::timeout(
+                    tokio::time::Duration::from_secs(300),
+                    rx,
+                )
+                .await
+                .unwrap_or(Ok(false))
+                .unwrap_or(false);
+
+                ctx.tool_approvals.lock().await.remove(chat_id);
+                result
+            } else {
+                true
+            };
+
+            let result = if approved {
+                sink.emit(
+                    chat_id,
+                    StreamPayload::ToolCallExecuting {
+                        index: 0,
+                        name: tc.function.name.clone(),
+                    },
+                );
+                tools::dispatch(
+                    &tc.function.name,
+                    &tc.function.arguments,
+                    &zone_config,
+                    &ctx.db,
+                    chat_id,
+                    project_dir.as_deref(),
+                    &ctx.http,
+                )
+                .await
+                .unwrap_or_else(|e| {
+                    serde_json::json!({ "error": e.to_string() }).to_string()
+                })
+            } else {
+                serde_json::json!({
+                    "error": "Tool execution denied by user.",
+                    "error_kind": "denied"
+                })
+                .to_string()
+            };
 
             // The tag tool mutates tags/chat_tags — tell the UI to refresh.
             if tc.function.name == "tag_chat" {

@@ -453,6 +453,57 @@ function ChatTab() {
       </section>
 
       <section>
+        <h3 className="mb-1 text-sm font-medium">Tool auto-approval</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          Controls which tool safety classes run automatically. Dangerous tools include code
+          execution and shell commands; moderate tools include web search and file system access.
+        </p>
+        <div className="flex flex-col gap-2">
+          {([
+            ["all",          "Auto-approve everything",          "All tools run without prompts — same as the previous default behavior."],
+            ["safe_moderate","Auto-approve safe + moderate",     "Only dangerous tools (code exec, shell) show an approval prompt."],
+            ["safe",         "Auto-approve safe tools only",     "Moderate tools (web search, file system) and dangerous tools require approval."],
+            ["none",         "Require approval for all tools",   "Every tool call shows an approval prompt before it runs."],
+          ] as const).map(([val, label, desc]) => (
+            <button
+              key={val}
+              onClick={() => setAppSettings({ autoApproveLevel: val })}
+              className={`rounded border px-3 py-2 text-left text-sm ${
+                appSettings.autoApproveLevel === val
+                  ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]"
+                  : "border-[var(--color-border)] hover:border-[var(--color-accent)]"
+              }`}
+            >
+              <div className="font-medium">{label}</div>
+              <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">{desc}</div>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section>
+        <h3 className="mb-1 text-sm font-medium">PDF processing</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          How PDF files are handled when attached to a message.
+        </p>
+        <div className="flex gap-2">
+          {([
+            ["images", "Images", "Render each page as an image — good for diagrams, layouts, and scanned documents."],
+            ["text",   "Text",   "Extract the text content from each page — faster and works with text-heavy PDFs."],
+          ] as const).map(([val, label, desc]) => (
+            <button
+              key={val}
+              onClick={() => setAppSettings({ pdfMode: val })}
+              className={`flex-1 rounded border px-3 py-2.5 text-left text-sm ${appSettings.pdfMode === val ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]" : "border-[var(--color-border)] hover:border-[var(--color-accent)]"}`}
+            >
+              <div className="font-medium">{label}</div>
+              <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">{desc}</div>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section>
         <h3 className="mb-1 text-sm font-medium">Default file directory</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
           Fallback directory for file system tools when a chat isn't in a project (or the project has no directory set).

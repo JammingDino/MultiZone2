@@ -63,6 +63,7 @@ pub async fn apply_api_settings(
         state.db.clone(),
         state.http.clone(),
         state.active_streams.clone(),
+        state.tool_approvals.clone(),
         port,
         token,
     )
@@ -100,6 +101,7 @@ pub async fn start_if_enabled(app: &AppHandle) {
         state.db.clone(),
         state.http.clone(),
         state.active_streams.clone(),
+        state.tool_approvals.clone(),
         cfg.port,
         cfg.token,
     )

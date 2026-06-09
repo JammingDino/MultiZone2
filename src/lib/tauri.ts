@@ -82,6 +82,8 @@ export const regenerateResponse = (chatId: string) =>
   invoke<void>("regenerate_response", { chatId });
 export const cancelStream = (chatId: string) =>
   invoke<void>("cancel_stream", { chatId });
+export const respondToolApproval = (chatId: string, approved: boolean) =>
+  invoke<void>("respond_tool_approval", { chatId, approved });
 
 // Settings
 export const getSetting = (key: string) =>

@@ -79,6 +79,11 @@ pub async fn run(args: &Value, zone_config: &Value) -> AppResult<String> {
         }
     };
 
+    let headless = cfg
+        .get("headless")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
     let mut child: Option<Child> = None;
     let mut used_program: Option<&str> = None;
     let mut last_error: Option<String> = None;
@@ -88,6 +93,12 @@ pub async fn run(args: &Value, zone_config: &Value) -> AppResult<String> {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        #[cfg(windows)]
+        if headless {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
         match cmd.spawn() {
             Ok(c) => {
                 child = Some(c);

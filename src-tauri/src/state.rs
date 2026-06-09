@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{oneshot, Mutex, RwLock};
 
 pub struct AppState {
     pub db: SqlitePool,
@@ -17,6 +17,8 @@ pub struct AppState {
     pub active_streams: Arc<RwLock<HashMap<String, Arc<AtomicBool>>>>,
     /// Running HTTP API server, if enabled. Replaced on settings change.
     pub api_server: Mutex<Option<crate::api::ApiHandle>>,
+    /// Pending tool-approval gates: chatId → oneshot sender for the approval answer.
+    pub tool_approvals: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>>,
 }
 
 impl AppState {
@@ -43,6 +45,7 @@ impl AppState {
             attachments_dir,
             active_streams: Arc::new(RwLock::new(HashMap::new())),
             api_server: Mutex::new(None),
+            tool_approvals: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 }

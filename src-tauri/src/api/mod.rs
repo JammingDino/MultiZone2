@@ -48,6 +48,7 @@ struct ApiState {
     db: SqlitePool,
     http: reqwest::Client,
     active_streams: Arc<RwLock<HashMap<String, Arc<AtomicBool>>>>,
+    tool_approvals: Arc<tokio::sync::Mutex<HashMap<String, oneshot::Sender<bool>>>>,
     app: AppHandle,
     token: String,
 }
@@ -58,6 +59,7 @@ impl ApiState {
             db: self.db.clone(),
             http: self.http.clone(),
             active_streams: self.active_streams.clone(),
+            tool_approvals: self.tool_approvals.clone(),
         }
     }
 }
@@ -84,10 +86,11 @@ pub async fn start(
     db: SqlitePool,
     http: reqwest::Client,
     active_streams: Arc<RwLock<HashMap<String, Arc<AtomicBool>>>>,
+    tool_approvals: Arc<tokio::sync::Mutex<HashMap<String, oneshot::Sender<bool>>>>,
     port: u16,
     token: String,
 ) -> crate::error::AppResult<ApiHandle> {
-    let state = ApiState { db, http, active_streams, app, token };
+    let state = ApiState { db, http, active_streams, tool_approvals, app, token };
     let router = build_router(state);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], port));

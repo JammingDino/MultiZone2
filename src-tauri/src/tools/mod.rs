@@ -6,6 +6,7 @@ pub mod render_graph;
 pub mod ask_user;
 pub mod tags;
 pub mod zone;
+pub mod shell;
 
 use crate::error::AppResult;
 use crate::llm::types::Tool;
@@ -88,6 +89,7 @@ pub enum ToolId {
     AskUser,
     ManageTags,
     SwitchZone,
+    Shell,
 }
 
 impl ToolId {
@@ -101,6 +103,7 @@ impl ToolId {
             "ask_user" => Some(Self::AskUser),
             "manage_tags" => Some(Self::ManageTags),
             "switch_zone" => Some(Self::SwitchZone),
+            "shell_exec" => Some(Self::Shell),
             _ => None,
         }
     }
@@ -115,6 +118,7 @@ impl ToolId {
             Self::AskUser => "ask_user",
             Self::ManageTags => "manage_tags",
             Self::SwitchZone => "switch_zone",
+            Self::Shell => "shell_exec",
         }
     }
 
@@ -131,7 +135,30 @@ impl ToolId {
             Self::AskUser => vec![ask_user::definition()],
             Self::ManageTags => vec![tags::definition()],
             Self::SwitchZone => zone::definitions(),
+            Self::Shell => vec![shell::definition()],
         }
+    }
+
+    /// Safety classification: 0 = safe, 1 = moderate, 2 = dangerous.
+    pub fn safety_level(self) -> u8 {
+        match self {
+            Self::DateTime | Self::AskUser | Self::ManageTags | Self::RenderGraph => 0,
+            Self::WebSearch | Self::FileSystem | Self::SwitchZone => 1,
+            Self::CodeExec | Self::Shell => 2,
+        }
+    }
+}
+
+/// Map a raw tool function name to its safety level.
+/// 0 = safe, 1 = moderate, 2 = dangerous.
+pub fn tool_safety_by_name(name: &str) -> u8 {
+    match name {
+        "get_current_datetime" | "ask_user" | "tag_chat"
+        | "plot_function" | "draw_diagram" => 0,
+        "web_search" | "read_file" | "list_directory"
+        | "create_file" | "edit_file" | "list_zones" | "change_zone" => 1,
+        "execute_code" | "run_command" => 2,
+        _ => 1,
     }
 }
 
@@ -161,6 +188,7 @@ pub async fn dispatch(
         "tag_chat" => tags::run(&args, db, chat_id).await,
         "list_zones" => zone::list_zones(db).await,
         "change_zone" => zone::change_zone(&args, db, chat_id).await,
+        "run_command" => shell::run(&args, zone_config, project_dir).await,
         other => Ok(serde_json::json!({
             "error": format!("unknown tool: {other}")
         }).to_string()),

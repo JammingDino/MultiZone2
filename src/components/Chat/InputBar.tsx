@@ -3,7 +3,7 @@ import { Paperclip, Send, X, FileText, Image as ImageIcon, FileType, Loader2, Sq
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import type { InputPart } from "@/lib/types";
-import { renderPdfToJpegs } from "@/lib/pdf";
+import { renderPdfToJpegs, extractPdfText } from "@/lib/pdf";
 
 interface PendingAttachment {
   id: string;
@@ -30,6 +30,7 @@ export function InputBar({ chatId, disabled, ref }: InputBarProps) {
   const [sending, setSending] = useState(false);
   const refreshChats = useApp((s) => s.refreshChats);
   const sendKey = useApp((s) => s.appSettings.sendKey);
+  const pdfMode = useApp((s) => s.appSettings.pdfMode);
   const fileRef = useRef<HTMLInputElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const isStreaming = useApp((s) => Boolean(s.streamingByChat[chatId]));
@@ -57,19 +58,28 @@ export function InputBar({ chatId, disabled, ref }: InputBarProps) {
           id,
           fileName: file.name,
           fileType: "pdf",
-          payload: [],
+          payload: pdfMode === "text" ? "" : [],
           progress: { page: 0, total: 0 },
         };
         setPending((p) => [...p, stub]);
         try {
-          const pages = await renderPdfToJpegs(file, (pr) => {
+          if (pdfMode === "text") {
+            const text = await extractPdfText(file, (pr) => {
+              setPending((p) => p.map((a) => (a.id === id ? { ...a, progress: pr } : a)));
+            });
             setPending((p) =>
-              p.map((a) => (a.id === id ? { ...a, progress: pr } : a)),
+              p.map((a) => (a.id === id ? { ...a, payload: text, progress: undefined } : a)),
             );
-          });
-          setPending((p) =>
-            p.map((a) => (a.id === id ? { ...a, payload: pages, progress: undefined } : a)),
-          );
+          } else {
+            const pages = await renderPdfToJpegs(file, (pr) => {
+              setPending((p) =>
+                p.map((a) => (a.id === id ? { ...a, progress: pr } : a)),
+              );
+            });
+            setPending((p) =>
+              p.map((a) => (a.id === id ? { ...a, payload: pages, progress: undefined } : a)),
+            );
+          }
         } catch (e) {
           console.error(e);
           setPending((p) => p.filter((a) => a.id !== id));
@@ -117,12 +127,16 @@ export function InputBar({ chatId, disabled, ref }: InputBarProps) {
         if (att.fileType === "image") {
           parts.push({ type: "image", data_url: att.payload as string });
         } else if (att.fileType === "pdf") {
-          const pages = att.payload as string[];
-          textParts.push(`[Attached PDF: ${att.fileName} — ${pages.length} pages follow as images]`);
-          for (const dataUrl of pages) {
-            parts.push({ type: "image", data_url: dataUrl });
+          if (typeof att.payload === "string") {
+            textParts.push(`File: ${att.fileName} (PDF, extracted text)\n\`\`\`\n${att.payload}\n\`\`\``);
+          } else {
+            const pages = att.payload as string[];
+            textParts.push(`[Attached PDF: ${att.fileName} — ${pages.length} pages follow as images]`);
+            for (const dataUrl of pages) {
+              parts.push({ type: "image", data_url: dataUrl });
+            }
+            api.savePdfAttachment(chatId, att.fileName, pages).catch(console.error);
           }
-          api.savePdfAttachment(chatId, att.fileName, pages).catch(console.error);
         } else if (att.fileType === "text") {
           textParts.push(`File: ${att.fileName}\n\`\`\`\n${att.payload as string}\n\`\`\``);
         }

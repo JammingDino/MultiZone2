@@ -3,6 +3,12 @@ import { RefreshCw, Trash2, X, BookOpen, ChevronDown } from "lucide-react";
 import * as api from "@/lib/tauri";
 import type { Provider, Zone } from "@/lib/types";
 import { ALL_TOOLS } from "@/lib/types";
+
+const SAFETY_BADGE: Record<number, { label: string; cls: string }> = {
+  0: { label: "Safe",      cls: "border-green-600/40  bg-green-600/10  text-green-500" },
+  1: { label: "Moderate",  cls: "border-yellow-600/40 bg-yellow-600/10 text-yellow-500" },
+  2: { label: "Dangerous", cls: "border-red-600/40    bg-red-600/10    text-red-500" },
+};
 import {
   ZONE_ICON_GROUPS,
   ZONE_ICONS,
@@ -226,6 +232,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
   const [wsProvider, setWsProvider] = useState("multi");
   const [wsEndpoint, setWsEndpoint] = useState("");
   const [wsApiKey, setWsApiKey] = useState("");
+  const [ceHeadless, setCeHeadless] = useState(false);
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const [includeThinkingInContext, setIncludeThinkingInContext] = useState(false);
   const [icon, setIcon] = useState<string | null>(null);
@@ -261,6 +268,8 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
         setWsProvider(ws.provider ?? "multi");
         setWsEndpoint(ws.endpoint ?? "");
         setWsApiKey(ws.api_key ?? "");
+        const ce = parsed?.code_exec ?? {};
+        setCeHeadless(ce.headless ?? false);
       } catch { /* ignore */ }
       setThinkingEnabled(zone.thinkingEnabled ?? false);
       setIncludeThinkingInContext(zone.includeThinkingInContext ?? false);
@@ -279,6 +288,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
       setWsProvider("multi");
       setWsEndpoint("");
       setWsApiKey("");
+      setCeHeadless(false);
       setThinkingEnabled(false);
       setIncludeThinkingInContext(false);
       setIcon(null);
@@ -310,6 +320,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
     provider: string,
     endpoint: string,
     apiKey: string,
+    headless: boolean,
   ): string {
     let obj: Record<string, unknown> = {};
     try { obj = JSON.parse(base); } catch { /* keep empty */ }
@@ -317,20 +328,26 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
     if (endpoint.trim()) ws.endpoint = endpoint.trim();
     if (apiKey.trim()) ws.api_key = apiKey.trim();
     obj.web_search = ws;
+    const ce = typeof obj.code_exec === "object" && obj.code_exec !== null ? { ...obj.code_exec as object } : {};
+    obj.code_exec = { ...ce, headless };
     return JSON.stringify(obj, null, 2);
   }
 
   function onWsProviderChange(p: string) {
     setWsProvider(p);
-    setToolConfig((tc) => buildToolConfig(tc, p, wsEndpoint, wsApiKey));
+    setToolConfig((tc) => buildToolConfig(tc, p, wsEndpoint, wsApiKey, ceHeadless));
   }
   function onWsEndpointChange(v: string) {
     setWsEndpoint(v);
-    setToolConfig((tc) => buildToolConfig(tc, wsProvider, v, wsApiKey));
+    setToolConfig((tc) => buildToolConfig(tc, wsProvider, v, wsApiKey, ceHeadless));
   }
   function onWsApiKeyChange(v: string) {
     setWsApiKey(v);
-    setToolConfig((tc) => buildToolConfig(tc, wsProvider, wsEndpoint, v));
+    setToolConfig((tc) => buildToolConfig(tc, wsProvider, wsEndpoint, v, ceHeadless));
+  }
+  function onCeHeadlessChange(v: boolean) {
+    setCeHeadless(v);
+    setToolConfig((tc) => buildToolConfig(tc, wsProvider, wsEndpoint, wsApiKey, v));
   }
 
   async function onSave() {
@@ -651,22 +668,31 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
 
         <Field label="Tools">
           <div className="flex flex-col gap-1.5">
-            {ALL_TOOLS.map((t) => (
-              <label
-                key={t.id}
-                className="flex cursor-pointer items-start gap-2 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-2 text-xs hover:border-[var(--color-accent)]"
-              >
-                <input
-                  type="checkbox"
-                  checked={tools.includes(t.id)}
-                  onChange={() => toggleTool(t.id)}
-                />
-                <div>
-                  <div className="font-medium">{t.label}</div>
-                  <div className="text-[var(--color-text-muted)]">{t.description}</div>
-                </div>
-              </label>
-            ))}
+            {ALL_TOOLS.map((t) => {
+              const badge = SAFETY_BADGE[t.safety];
+              return (
+                <label
+                  key={t.id}
+                  className="flex cursor-pointer items-start gap-2 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-2 text-xs hover:border-[var(--color-accent)]"
+                >
+                  <input
+                    type="checkbox"
+                    checked={tools.includes(t.id)}
+                    onChange={() => toggleTool(t.id)}
+                    className="mt-0.5 shrink-0"
+                  />
+                  <div className="flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-medium">{t.label}</span>
+                      <span className={`rounded border px-1.5 py-0.5 text-[10px] font-medium ${badge.cls}`}>
+                        {badge.label}
+                      </span>
+                    </div>
+                    <div className="mt-0.5 text-[var(--color-text-muted)]">{t.description}</div>
+                  </div>
+                </label>
+              );
+            })}
           </div>
         </Field>
 
@@ -717,6 +743,27 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
                 No API key required — results are fetched directly.
               </div>
             )}
+          </div>
+        )}
+
+        {tools.includes("code_exec") && (
+          <div className="mb-3 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+            <div className="mb-2 text-xs font-medium text-[var(--color-text)]">Code Execution settings</div>
+            <label className="flex cursor-pointer items-start gap-2 rounded border border-[var(--color-border)] bg-[var(--color-panel)] p-2 text-xs hover:border-[var(--color-accent)]">
+              <input
+                type="checkbox"
+                checked={ceHeadless}
+                onChange={(e) => onCeHeadlessChange(e.target.checked)}
+                className="mt-0.5 shrink-0"
+              />
+              <div>
+                <div className="font-medium">Headless mode</div>
+                <div className="text-[var(--color-text-muted)]">
+                  Suppress console/terminal windows when running code on Windows. Prevents the brief
+                  window flash that appears before execution completes.
+                </div>
+              </div>
+            </label>
           </div>
         )}
 

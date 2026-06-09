@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Upload, Tag as TagIcon, X, Zap, Folder, FolderX, ChevronDown, SplitSquareHorizontal, Plus } from "lucide-react";
+import { Upload, Tag as TagIcon, X, Zap, Folder, FolderX, ChevronDown, SplitSquareHorizontal, Plus, ShieldAlert } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { MessageThread } from "./MessageThread";
@@ -38,7 +38,11 @@ export function ChatPanel() {
     toggleChatTagContext,
     addPerspectiveZone,
     removePerspectiveZone,
+    respondApproval,
   } = useApp();
+
+  const pendingApprovalByChat = useApp((s) => s.pendingApprovalByChat);
+  const pendingApproval = activeChatId ? (pendingApprovalByChat[activeChatId] ?? null) : null;
 
   const activeChat = chats.find((c) => c.id === activeChatId) ?? null;
   const activeZone = activeChat ? zones.find((z) => z.id === activeChat.zoneId) : null;
@@ -191,7 +195,14 @@ export function ChatPanel() {
           />
 
           <MessageThread chatId={activeChat.id} />
-          {pendingAskUser ? (
+          {pendingApproval ? (
+            <ToolApprovalBanner
+              toolName={pendingApproval.name}
+              toolArguments={pendingApproval.arguments}
+              onApprove={() => respondApproval(activeChatId!, true)}
+              onDeny={() => respondApproval(activeChatId!, false)}
+            />
+          ) : pendingAskUser ? (
             <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3">
               <div className="mx-auto max-w-3xl">
                 <AskUserCard
@@ -530,6 +541,69 @@ function PerspectiveZonePicker({
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function ToolApprovalBanner({
+  toolName,
+  toolArguments,
+  onApprove,
+  onDeny,
+}: {
+  toolName: string;
+  toolArguments: string;
+  onApprove: () => void;
+  onDeny: () => void;
+}) {
+  const [showArgs, setShowArgs] = useState(false);
+
+  let argsDisplay = toolArguments;
+  try {
+    argsDisplay = JSON.stringify(JSON.parse(toolArguments), null, 2);
+  } catch { /* leave as-is */ }
+
+  const displayName = toolName.replace(/_/g, " ");
+
+  return (
+    <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3">
+      <div className="mx-auto max-w-3xl">
+        <div className="rounded border border-[var(--color-accent)]/40 bg-[var(--color-panel)] p-3">
+          <div className="mb-2 flex items-center gap-2">
+            <ShieldAlert size={14} className="shrink-0 text-[var(--color-accent)]" />
+            <span className="text-sm font-medium">Tool approval required</span>
+          </div>
+          <p className="mb-2 text-xs text-[var(--color-text-muted)]">
+            The model wants to run{" "}
+            <span className="font-mono font-medium text-[var(--color-text)]">{displayName}</span>
+          </p>
+          <button
+            onClick={() => setShowArgs((v) => !v)}
+            className="mb-2 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+          >
+            {showArgs ? "Hide" : "Show"} arguments
+          </button>
+          {showArgs && (
+            <pre className="mb-3 overflow-x-auto rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-2 text-[11px] font-mono leading-relaxed text-[var(--color-text-muted)]">
+              {argsDisplay}
+            </pre>
+          )}
+          <div className="flex gap-2">
+            <button
+              onClick={onApprove}
+              className="rounded bg-[var(--color-accent)] px-4 py-1.5 text-xs text-white hover:opacity-90"
+            >
+              Approve
+            </button>
+            <button
+              onClick={onDeny}
+              className="rounded border border-[var(--color-border)] px-4 py-1.5 text-xs hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]"
+            >
+              Deny
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

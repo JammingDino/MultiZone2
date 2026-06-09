@@ -33,6 +33,7 @@ pub fn definitions() -> Vec<Tool> {
                      directory (if the chat belongs to a project with one set). Access is restricted \
                      to the project directory and the zone's allowed root paths.\n\n\
                      For text files, returns the content as a string (invalid bytes are replaced).\n\
+                     For PDF files (.pdf), extracts and returns the text content from all pages.\n\
                      For image files (png, jpg, gif, webp, bmp), set `as_image: true` to load the \
                      image directly into the model's visual context."
                         .into(),
@@ -257,6 +258,33 @@ pub async fn read_file(
             { "type": "image_url", "image_url": { "url": data_url } }
         ]))
         .unwrap_or_else(|_| json!({ "error": "serialization failed" }).to_string()));
+    }
+
+    let is_pdf = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.eq_ignore_ascii_case("pdf"))
+        .unwrap_or(false);
+
+    if is_pdf {
+        let bytes = match tokio::fs::read(&p).await {
+            Ok(b) => b,
+            Err(e) => return Ok(json!({ "error": e.to_string() }).to_string()),
+        };
+        let path_str = p.to_string_lossy().to_string();
+        let result = tokio::task::spawn_blocking(move || {
+            pdf_extract::extract_text_from_mem(&bytes)
+        })
+        .await;
+        return match result {
+            Ok(Ok(text)) => Ok(json!({
+                "path": path_str,
+                "content": text,
+            })
+            .to_string()),
+            Ok(Err(e)) => Ok(json!({ "error": format!("PDF text extraction failed: {e}") }).to_string()),
+            Err(e) => Ok(json!({ "error": format!("task join error: {e}") }).to_string()),
+        };
     }
 
     match tokio::fs::read(&p).await {

@@ -10,6 +10,35 @@ export interface PdfRenderProgress {
   total: number;
 }
 
+/** Extract plain text from all pages of a PDF. Returns one block per page separated by headers. */
+export async function extractPdfText(
+  file: File,
+  onProgress?: (p: PdfRenderProgress) => void,
+): Promise<string> {
+  const buf = await file.arrayBuffer();
+  const doc = await pdfjsLib.getDocument({ data: buf }).promise;
+  const pages: string[] = [];
+
+  for (let i = 1; i <= doc.numPages; i++) {
+    const page = await doc.getPage(i);
+    const content = await page.getTextContent();
+    const text = (content.items as any[])
+      .filter((item) => "str" in item)
+      .map((item) => item.str as string)
+      .join(" ")
+      .replace(/ {2,}/g, " ")
+      .trim();
+    pages.push(text);
+    onProgress?.({ page: i, total: doc.numPages });
+    page.cleanup();
+  }
+
+  await doc.destroy();
+  return pages
+    .map((text, i) => `--- Page ${i + 1} ---\n${text}`)
+    .join("\n\n");
+}
+
 /** Render every page of a PDF to base64-encoded JPEGs at ~1024px wide. */
 export async function renderPdfToJpegs(
   file: File,

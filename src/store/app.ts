@@ -54,6 +54,12 @@ export interface TurnAggregate {
   toolCallChars: number;
 }
 
+export interface PendingApproval {
+  index: number;
+  name: string;
+  arguments: string;
+}
+
 interface AppStore {
   // collections
   providers: Provider[];
@@ -75,6 +81,8 @@ interface AppStore {
   turnByChat: Record<string, TurnAggregate>;
   /** Chat IDs whose title is currently being regenerated. */
   regeneratingTitles: Set<string>;
+  /** Pending tool approval per chat: chatId → approval info, or absent when none pending. */
+  pendingApprovalByChat: Record<string, PendingApproval>;
   /** Per-message generation stats, keyed by message id. */
   statsByMessage: Record<string, MessageStats>;
   /** Current visual theme. Persisted via the backend settings table. */
@@ -103,6 +111,7 @@ interface AppStore {
   setChatTitle: (chatId: string, title: string) => void;
   setChatZone: (chatId: string, zoneId: string | null) => Promise<void>;
   regenerateTitle: (chatId: string) => Promise<void>;
+  respondApproval: (chatId: string, approved: boolean) => Promise<void>;
 
   openSettings: () => void;
   closeSettings: () => void;
@@ -226,6 +235,7 @@ export const useApp = create<AppStore>((set, get) => ({
   perspectiveStreamsByChat: {},
   turnByChat: {},
   regeneratingTitles: new Set(),
+  pendingApprovalByChat: {},
   statsByMessage: {},
   theme: DEFAULT_THEME,
   appSettings: DEFAULT_APP_SETTINGS,
@@ -319,6 +329,7 @@ export const useApp = create<AppStore>((set, get) => ({
       const messagesByChat = { ...s.messagesByChat };
       const statsByMessage = { ...s.statsByMessage };
       const turnByChat = { ...s.turnByChat };
+      const pendingApprovalByChat = { ...s.pendingApprovalByChat };
       const current = streaming[chatId];
 
       switch (event.type) {
@@ -428,6 +439,14 @@ export const useApp = create<AppStore>((set, get) => ({
           }
           break;
 
+        case "tool_approval_required":
+          pendingApprovalByChat[chatId] = {
+            index: event.index,
+            name: event.name,
+            arguments: event.arguments,
+          };
+          break;
+
         case "tool_call_executing":
           if (current) {
             streaming[chatId] = {
@@ -436,12 +455,16 @@ export const useApp = create<AppStore>((set, get) => ({
               runningTool: event.name,
             };
           }
+          // Clear approval banner — the tool is now actually executing.
+          delete pendingApprovalByChat[chatId];
           break;
 
         case "tool_call_result":
           if (current) {
             streaming[chatId] = { ...current, runningTool: null };
           }
+          // Also clear any lingering approval state (e.g. denied tool).
+          delete pendingApprovalByChat[chatId];
           break;
 
         case "tool_message_saved":
@@ -474,6 +497,7 @@ export const useApp = create<AppStore>((set, get) => ({
         case "error":
           delete streaming[chatId];
           delete turnByChat[chatId];
+          delete pendingApprovalByChat[chatId];
           break;
       }
       return {
@@ -481,15 +505,35 @@ export const useApp = create<AppStore>((set, get) => ({
         streamingByChat: streaming,
         statsByMessage,
         turnByChat,
+        pendingApprovalByChat,
       };
     });
 
-    // After the first assistant response completes, auto-generate a title.
-    if (event.type === "done" && get().appSettings.autoTitle) {
+    // After the first assistant response completes, set the chat title.
+    if (event.type === "done") {
       const msgs = get().messagesByChat[chatId] ?? [];
       const assistantCount = msgs.filter((m) => m.role === "assistant").length;
       if (assistantCount === 1 && !get().regeneratingTitles.has(chatId)) {
-        get().regenerateTitle(chatId).catch(console.error);
+        if (get().appSettings.autoTitle) {
+          get().regenerateTitle(chatId).catch(console.error);
+        } else {
+          // Use the user's first message text as the title; set empty when no text.
+          const firstUserMsg = msgs.find((m) => m.role === "user");
+          if (firstUserMsg) {
+            try {
+              const parts = JSON.parse(firstUserMsg.content) as { type: string; text?: string }[];
+              const text = parts
+                .filter((p) => p.type === "text" && p.text)
+                .map((p) => p.text!)
+                .join(" ")
+                .trim();
+              const title = text.length > 80 ? text.slice(0, 77) + "…" : text;
+              api.renameChat(chatId, title).catch(console.error);
+              get().setChatTitle(chatId, title);
+              get().refreshChats().catch(console.error);
+            } catch { /* ignore parse errors */ }
+          }
+        }
       }
     }
   },
@@ -520,6 +564,14 @@ export const useApp = create<AppStore>((set, get) => ({
         return { regeneratingTitles: next };
       });
     }
+  },
+  async respondApproval(chatId, approved) {
+    set((s) => {
+      const next = { ...s.pendingApprovalByChat };
+      delete next[chatId];
+      return { pendingApprovalByChat: next };
+    });
+    await api.respondToolApproval(chatId, approved);
   },
   async setTheme(partial) {
     const next = { ...get().theme, ...partial };

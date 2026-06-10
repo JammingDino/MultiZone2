@@ -104,7 +104,9 @@ export interface Message {
 
 export type ContentPart =
   | { type: "text"; text: string }
-  | { type: "image_url"; image_url: { url: string; detail?: string } };
+  | { type: "image_url"; image_url: { url: string; detail?: string } }
+  | { type: "hidden_text"; text: string }
+  | { type: "hidden_image"; image_url: { url: string; detail?: string } };
 
 export interface ToolCall {
   id: string;
@@ -126,7 +128,9 @@ export interface Attachment {
 
 export type InputPart =
   | { type: "text"; text: string }
-  | { type: "image"; data_url: string };
+  | { type: "image"; data_url: string }
+  | { type: "hidden_text"; text: string }
+  | { type: "hidden_image"; data_url: string };
 
 /** Stream event payloads emitted by the backend over the `stream` event. */
 export type StreamEvent =

@@ -38,8 +38,8 @@ export function ZonesPanel() {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div className="flex h-[700px] w-[960px] flex-col rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] shadow-xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={closeZonesPanel}>
+      <div className="flex h-[700px] w-[960px] flex-col rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] shadow-xl" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
           <div className="font-medium">Configure Zones</div>

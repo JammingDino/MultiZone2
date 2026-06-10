@@ -13,8 +13,8 @@ export function SettingsModal() {
   const [tab, setTab] = useState<Tab>("providers");
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div className="flex h-[620px] w-[820px] flex-col rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] shadow-xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={closeSettings}>
+      <div className="flex h-[620px] w-[820px] flex-col rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex h-12 items-center justify-between border-b border-[var(--color-border)] px-4">
           <div className="font-medium">Settings</div>
           <button onClick={closeSettings} className="rounded p-1 hover:bg-[var(--color-panel-hover)]">

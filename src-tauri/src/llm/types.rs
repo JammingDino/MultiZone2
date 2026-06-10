@@ -11,6 +11,16 @@ pub enum ContentPart {
     ImageUrl {
         image_url: ImageUrl,
     },
+    /// Stored in the DB but hidden from the chat UI. Converted to `Text` when
+    /// building API requests so the model still receives the content.
+    HiddenText {
+        text: String,
+    },
+    /// Stored in the DB but hidden from the chat UI. Converted to `ImageUrl`
+    /// when building API requests so the model still receives the image.
+    HiddenImage {
+        image_url: ImageUrl,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

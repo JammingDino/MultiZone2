@@ -1,5 +1,5 @@
-import { useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
-import { Paperclip, Send, X, FileText, Image as ImageIcon, FileType, Loader2, Square } from "lucide-react";
+import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
+import { Paperclip, Send, X, FileText, Image as ImageIcon, FileType, Loader2, Square, ZoomIn } from "lucide-react";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import type { InputPart } from "@/lib/types";
@@ -28,6 +28,8 @@ export function InputBar({ chatId, disabled, ref }: InputBarProps) {
   const [text, setText] = useState("");
   const [pending, setPending] = useState<PendingAttachment[]>([]);
   const [sending, setSending] = useState(false);
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  const previewAtt = pending.find((a) => a.id === previewId) ?? null;
   const refreshChats = useApp((s) => s.refreshChats);
   const sendKey = useApp((s) => s.appSettings.sendKey);
   const pdfMode = useApp((s) => s.appSettings.pdfMode);
@@ -120,31 +122,35 @@ export function InputBar({ chatId, disabled, ref }: InputBarProps) {
 
     try {
       const parts: InputPart[] = [];
-      const textParts: string[] = [];
-      if (hasText) textParts.push(text.trim());
+      const visibleTextParts: string[] = [];
+      if (hasText) visibleTextParts.push(text.trim());
+
+      for (const att of pending) {
+        if (att.fileType === "text") {
+          visibleTextParts.push(`File: ${att.fileName}\n\`\`\`\n${att.payload as string}\n\`\`\``);
+        }
+      }
+
+      const joined = visibleTextParts.join("\n\n");
+      if (joined) {
+        parts.push({ type: "text", text: joined });
+      }
 
       for (const att of pending) {
         if (att.fileType === "image") {
           parts.push({ type: "image", data_url: att.payload as string });
         } else if (att.fileType === "pdf") {
           if (typeof att.payload === "string") {
-            textParts.push(`File: ${att.fileName} (PDF, extracted text)\n\`\`\`\n${att.payload}\n\`\`\``);
+            parts.push({ type: "hidden_text", text: `File: ${att.fileName} (PDF, extracted text)\n\`\`\`\n${att.payload}\n\`\`\`` });
           } else {
             const pages = att.payload as string[];
-            textParts.push(`[Attached PDF: ${att.fileName} — ${pages.length} pages follow as images]`);
+            parts.push({ type: "hidden_text", text: `[Attached PDF: ${att.fileName} — ${pages.length} pages follow as images]` });
             for (const dataUrl of pages) {
-              parts.push({ type: "image", data_url: dataUrl });
+              parts.push({ type: "hidden_image", data_url: dataUrl });
             }
             api.savePdfAttachment(chatId, att.fileName, pages).catch(console.error);
           }
-        } else if (att.fileType === "text") {
-          textParts.push(`File: ${att.fileName}\n\`\`\`\n${att.payload as string}\n\`\`\``);
         }
-      }
-
-      const joined = textParts.join("\n\n");
-      if (joined) {
-        parts.unshift({ type: "text", text: joined });
       }
 
       setText("");
@@ -190,9 +196,16 @@ export function InputBar({ chatId, disabled, ref }: InputBarProps) {
                 key={att.id}
                 attachment={att}
                 onRemove={() => removePending(att.id)}
+                onPreview={att.progress ? undefined : () => setPreviewId(att.id)}
               />
             ))}
           </div>
+        )}
+        {previewAtt && (
+          <AttachmentPreview
+            attachment={previewAtt}
+            onClose={() => setPreviewId(null)}
+          />
         )}
         <div className="flex items-end gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 focus-within:border-[var(--color-accent)]">
           <button
@@ -258,9 +271,11 @@ export function InputBar({ chatId, disabled, ref }: InputBarProps) {
 function AttachmentChip({
   attachment,
   onRemove,
+  onPreview,
 }: {
   attachment: PendingAttachment;
   onRemove: () => void;
+  onPreview?: () => void;
 }) {
   const icon =
     attachment.fileType === "image" ? (
@@ -270,18 +285,112 @@ function AttachmentChip({
     ) : (
       <FileText size={12} />
     );
+
+  const canPreview = Boolean(onPreview);
+
   return (
-    <div className="flex items-center gap-1.5 rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1 text-xs">
+    <div
+      className={`group flex items-center gap-1.5 rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1 text-xs ${canPreview ? "cursor-pointer hover:border-[var(--color-accent)]" : ""}`}
+      onClick={onPreview}
+      title={canPreview ? "Click to preview" : undefined}
+    >
       {icon}
       <span className="max-w-[160px] truncate">{attachment.fileName}</span>
-      {attachment.progress && (
+      {attachment.progress ? (
         <span className="text-[var(--color-text-muted)]">
           {attachment.progress.page}/{attachment.progress.total || "…"}
         </span>
-      )}
-      <button onClick={onRemove} className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
+      ) : canPreview ? (
+        <ZoomIn size={11} className="shrink-0 text-[var(--color-text-muted)] opacity-0 group-hover:opacity-100" />
+      ) : null}
+      <button
+        onClick={(e) => { e.stopPropagation(); onRemove(); }}
+        className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+      >
         <X size={12} />
       </button>
+    </div>
+  );
+}
+
+function AttachmentPreview({
+  attachment,
+  onClose,
+}: {
+  attachment: PendingAttachment;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  let body: React.ReactNode;
+
+  if (attachment.fileType === "image") {
+    body = (
+      <img
+        src={attachment.payload as string}
+        alt={attachment.fileName}
+        className="max-h-[75vh] max-w-full rounded object-contain"
+      />
+    );
+  } else if (attachment.fileType === "pdf") {
+    if (typeof attachment.payload === "string") {
+      // text mode
+      body = (
+        <pre className="max-h-[70vh] max-w-[75vw] overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-relaxed">
+          {attachment.payload || "(no text extracted)"}
+        </pre>
+      );
+    } else {
+      // images mode — scrollable page gallery
+      const pages = attachment.payload as string[];
+      body = (
+        <div className="flex max-h-[75vh] max-w-[80vw] flex-col gap-4 overflow-y-auto">
+          {pages.map((src, i) => (
+            <div key={i} className="flex flex-col items-center gap-1">
+              <span className="text-xs text-[var(--color-text-muted)]">Page {i + 1}</span>
+              <img
+                src={src}
+                alt={`Page ${i + 1}`}
+                className="max-w-full rounded border border-[var(--color-border)]"
+              />
+            </div>
+          ))}
+        </div>
+      );
+    }
+  } else {
+    // text file
+    body = (
+      <pre className="max-h-[70vh] max-w-[75vw] overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-relaxed">
+        {attachment.payload as string}
+      </pre>
+    );
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="relative rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-5 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-3 flex items-center justify-between gap-6">
+          <span className="max-w-[400px] truncate text-sm font-medium">{attachment.fileName}</span>
+          <button
+            onClick={onClose}
+            className="rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
+          >
+            <X size={16} />
+          </button>
+        </div>
+        {body}
+      </div>
     </div>
   );
 }

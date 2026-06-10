@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ContentPart, Message, InputPart } from "@/lib/types";
 import { Markdown } from "@/components/Renderers/Markdown";
-import { User, Check, X } from "lucide-react";
+import { User, Check, X, FileType, ZoomIn } from "lucide-react";
 import { StepBlock } from "./StepBlock";
 import { MessageActions } from "./MessageActions";
 import type { BotTurn, PerspectiveTurn, TurnBlock } from "@/lib/grouping";
@@ -58,6 +58,38 @@ function parseParts(json: string): ContentPart[] {
   return [{ type: "text", text: json }];
 }
 
+type PdfAttachment =
+  | { fileName: string; mode: "images"; pages: string[] }
+  | { fileName: string; mode: "text"; text: string };
+
+function parsePdfAttachments(parts: ContentPart[]): PdfAttachment[] {
+  const result: PdfAttachment[] = [];
+  let current: { fileName: string; pages: string[] } | null = null;
+
+  for (const p of parts) {
+    if (p.type === "hidden_text") {
+      if (current) { result.push({ ...current, mode: "images" }); current = null; }
+
+      const imgMatch = p.text.match(/^\[Attached PDF: (.+) — \d+ pages follow as images\]$/);
+      if (imgMatch) { current = { fileName: imgMatch[1], pages: [] }; continue; }
+
+      const txtMatch = p.text.match(/^File: (.+) \(PDF, extracted text\)\n```\n([\s\S]*?)\n```$/);
+      if (txtMatch) result.push({ fileName: txtMatch[1], mode: "text", text: txtMatch[2] });
+    } else if (p.type === "hidden_image" && current) {
+      current.pages.push(p.image_url.url);
+    } else if (p.type !== "hidden_image") {
+      if (current) { result.push({ ...current, mode: "images" }); current = null; }
+    }
+  }
+  if (current) result.push({ ...current, mode: "images" });
+  return result;
+}
+
+type MessagePreview =
+  | { kind: "image"; url: string }
+  | { kind: "pdf-images"; fileName: string; pages: string[] }
+  | { kind: "pdf-text"; fileName: string; text: string };
+
 export function UserMessage({ message }: { message: Message }) {
   const parts = parseParts(message.content);
   const text = parts
@@ -67,9 +99,13 @@ export function UserMessage({ message }: { message: Message }) {
   const images = parts.filter(
     (p): p is Extract<ContentPart, { type: "image_url" }> => p.type === "image_url",
   );
+  // hidden_text and hidden_image parts are never rendered — they are sent to
+  // the model but kept invisible in the chat UI.
+  const pdfAttachments = parsePdfAttachments(parts);
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(text);
+  const [preview, setPreview] = useState<MessagePreview | null>(null);
   const loadMessages = useApp((s) => s.loadMessages);
   const refreshChats = useApp((s) => s.refreshChats);
 
@@ -150,12 +186,43 @@ export function UserMessage({ message }: { message: Message }) {
           {images.length > 0 && (
             <div className="flex flex-wrap justify-end gap-2">
               {images.map((img, i) => (
-                <img
+                <button
                   key={i}
-                  src={img.image_url.url}
-                  alt="attachment"
-                  className="max-h-48 rounded border border-[var(--color-border)]"
-                />
+                  onClick={() => setPreview({ kind: "image", url: img.image_url.url })}
+                  className="group relative rounded border border-[var(--color-border)] hover:border-[var(--color-accent)]"
+                  title="Click to preview"
+                >
+                  <img
+                    src={img.image_url.url}
+                    alt="attachment"
+                    className="max-h-48 rounded"
+                  />
+                  <span className="absolute inset-0 flex items-center justify-center rounded bg-black/0 transition group-hover:bg-black/20">
+                    <ZoomIn size={20} className="opacity-0 text-white drop-shadow group-hover:opacity-100 transition" />
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+          {pdfAttachments.length > 0 && (
+            <div className="flex flex-wrap justify-end gap-1.5">
+              {pdfAttachments.map((pdf, i) => (
+                <button
+                  key={i}
+                  onClick={() =>
+                    setPreview(
+                      pdf.mode === "images"
+                        ? { kind: "pdf-images", fileName: pdf.fileName, pages: pdf.pages }
+                        : { kind: "pdf-text", fileName: pdf.fileName, text: pdf.text },
+                    )
+                  }
+                  className="flex items-center gap-1.5 rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1 text-xs hover:border-[var(--color-accent)] hover:bg-[var(--color-panel-hover)]"
+                  title="Click to preview"
+                >
+                  <FileType size={11} className="shrink-0 text-[var(--color-text-muted)]" />
+                  <span className="max-w-[180px] truncate">{pdf.fileName}</span>
+                  <ZoomIn size={10} className="shrink-0 text-[var(--color-text-muted)]" />
+                </button>
               ))}
             </div>
           )}
@@ -176,6 +243,81 @@ export function UserMessage({ message }: { message: Message }) {
           variant="user"
           onEdit={() => setEditing(true)}
         />
+      </div>
+      {preview && (
+        <MessagePreviewModal preview={preview} onClose={() => setPreview(null)} />
+      )}
+    </div>
+  );
+}
+
+function MessagePreviewModal({
+  preview,
+  onClose,
+}: {
+  preview: MessagePreview;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  const title =
+    preview.kind === "image" ? "Image preview" : preview.fileName;
+
+  let body: React.ReactNode;
+  if (preview.kind === "image") {
+    body = (
+      <img
+        src={preview.url}
+        alt="attachment"
+        className="max-h-[75vh] max-w-full rounded object-contain"
+      />
+    );
+  } else if (preview.kind === "pdf-images") {
+    body = (
+      <div className="flex max-h-[75vh] max-w-[80vw] flex-col gap-4 overflow-y-auto">
+        {preview.pages.map((src, i) => (
+          <div key={i} className="flex flex-col items-center gap-1">
+            <span className="text-xs text-[var(--color-text-muted)]">Page {i + 1}</span>
+            <img
+              src={src}
+              alt={`Page ${i + 1}`}
+              className="max-w-full rounded border border-[var(--color-border)]"
+            />
+          </div>
+        ))}
+      </div>
+    );
+  } else {
+    body = (
+      <pre className="max-h-[70vh] max-w-[75vw] overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-relaxed">
+        {preview.text || "(no text extracted)"}
+      </pre>
+    );
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="relative rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-5 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-3 flex items-center justify-between gap-6">
+          <span className="max-w-[400px] truncate text-sm font-medium">{title}</span>
+          <button
+            onClick={onClose}
+            className="rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
+          >
+            <X size={16} />
+          </button>
+        </div>
+        {body}
       </div>
     </div>
   );

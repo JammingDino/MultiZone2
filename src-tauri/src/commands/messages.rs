@@ -33,6 +33,10 @@ const MSG_COLS: &str =
 pub enum InputPart {
     Text { text: String },
     Image { data_url: String },
+    /// Text sent to the model but hidden from the chat UI.
+    HiddenText { text: String },
+    /// Image sent to the model but hidden from the chat UI.
+    HiddenImage { data_url: String },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -291,6 +295,10 @@ async fn run_send(
         .map(|p| match p {
             InputPart::Text { text } => ContentPart::Text { text },
             InputPart::Image { data_url } => ContentPart::ImageUrl {
+                image_url: ImageUrl { url: data_url, detail: None },
+            },
+            InputPart::HiddenText { text } => ContentPart::HiddenText { text },
+            InputPart::HiddenImage { data_url } => ContentPart::HiddenImage {
                 image_url: ImageUrl { url: data_url, detail: None },
             },
         })
@@ -996,11 +1004,26 @@ async fn build_message_history(
         // tool messages (images returned by file-system reads).
         if is_historical {
             for part in &mut content_parts {
-                if let ContentPart::ImageUrl { image_url } = part {
-                    image_url.detail = Some("low".to_string());
+                match part {
+                    ContentPart::ImageUrl { image_url }
+                    | ContentPart::HiddenImage { image_url } => {
+                        image_url.detail = Some("low".to_string());
+                    }
+                    _ => {}
                 }
             }
         }
+
+        // Promote hidden parts to their visible equivalents for the API.
+        // The hidden flag is only meaningful to the UI renderer.
+        let content_parts: Vec<ContentPart> = content_parts
+            .into_iter()
+            .map(|p| match p {
+                ContentPart::HiddenText { text } => ContentPart::Text { text },
+                ContentPart::HiddenImage { image_url } => ContentPart::ImageUrl { image_url },
+                other => other,
+            })
+            .collect();
         let content = if content_parts.is_empty() {
             None
         } else if content_parts.len() == 1 {

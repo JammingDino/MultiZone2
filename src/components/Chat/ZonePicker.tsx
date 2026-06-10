@@ -1,16 +1,18 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, Check, Plus, Layers } from "lucide-react";
+import { ChevronDown, Check, Plus, Layers, Zap, Brain } from "lucide-react";
 import { useApp } from "@/store/app";
 import { getZoneIcon } from "@/lib/zoneIcons";
 
 interface Props {
   chatId: string;
   currentZoneId: string | null;
+  smartRouting: boolean;
 }
 
-export function ZonePicker({ chatId, currentZoneId }: Props) {
+export function ZonePicker({ chatId, currentZoneId, smartRouting }: Props) {
   const zones = useApp((s) => s.zones);
   const setChatZone = useApp((s) => s.setChatZone);
+  const setChatSmart = useApp((s) => s.setChatSmart);
   const openZoneEditor = useApp((s) => s.openZoneEditor);
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -30,10 +32,17 @@ export function ZonePicker({ chatId, currentZoneId }: Props) {
     return () => window.removeEventListener("mousedown", onClick);
   }, [open]);
 
-  async function pick(zoneId: string) {
+  async function pick(zoneId: string | null) {
     setOpen(false);
-    if (zoneId !== currentZoneId) {
+    if (zoneId !== currentZoneId || smartRouting) {
       await setChatZone(chatId, zoneId);
+    }
+  }
+
+  async function pickSmart() {
+    setOpen(false);
+    if (!smartRouting) {
+      await setChatSmart(chatId, true);
     }
   }
 
@@ -44,7 +53,9 @@ export function ZonePicker({ chatId, currentZoneId }: Props) {
         className="flex items-center gap-1.5 rounded border border-transparent px-1.5 py-0.5 text-xs text-[var(--color-text-muted)] hover:border-[var(--color-border)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]"
         title="Change zone"
       >
-        {current ? (
+        {smartRouting ? (
+          <Brain size={12} className="text-[var(--color-accent)]" />
+        ) : current ? (
           <span
             className="flex h-4 w-4 items-center justify-center rounded"
             style={{ background: currentColor ?? "var(--color-accent)" }}
@@ -52,17 +63,47 @@ export function ZonePicker({ chatId, currentZoneId }: Props) {
             <CurrentIcon size={10} color="white" />
           </span>
         ) : (
-          <Layers size={12} />
+          <Zap size={12} className="text-[var(--color-accent)]" />
         )}
-        <span>{current ? `${current.name} · ${current.model}` : "Choose a zone"}</span>
+        <span>
+          {smartRouting
+            ? "Smart chat"
+            : current
+              ? `${current.name} · ${current.model}`
+              : "Quick chat"}
+        </span>
         <ChevronDown size={12} />
       </button>
 
       {open && (
         <div className="absolute left-0 top-full z-40 mt-1 min-w-[260px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg">
-          {zones.length === 0 && (
-            <div className="px-3 py-2 text-xs text-[var(--color-text-muted)]">No zones yet.</div>
-          )}
+          <button
+            onClick={() => pick(null)}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)]"
+          >
+            <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-[var(--color-panel-hover)]">
+              <Zap size={11} className="text-[var(--color-accent)]" />
+            </div>
+            <div className="flex-1">
+              <div>Quick chat</div>
+              <div className="text-xs text-[var(--color-text-muted)]">No zone · default model</div>
+            </div>
+            {!smartRouting && currentZoneId === null && <Check size={12} className="text-[var(--color-accent)]" />}
+          </button>
+          <button
+            onClick={pickSmart}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)]"
+          >
+            <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-[var(--color-panel-hover)]">
+              <Brain size={11} className="text-[var(--color-accent)]" />
+            </div>
+            <div className="flex-1">
+              <div>Smart chat</div>
+              <div className="text-xs text-[var(--color-text-muted)]">Router picks the best zone per message</div>
+            </div>
+            {smartRouting && <Check size={12} className="text-[var(--color-accent)]" />}
+          </button>
+          <div className="my-1 border-t border-[var(--color-border)]" />
           {zones.map((z) => {
             const active = z.id === currentZoneId;
             const ZoneIcon = getZoneIcon(z.icon);

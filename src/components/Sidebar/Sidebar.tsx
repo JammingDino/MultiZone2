@@ -10,6 +10,7 @@ export function Sidebar() {
   const {
     chats,
     zones,
+    providers,
     projects,
     activeChatId,
     defaultZoneId,
@@ -26,6 +27,12 @@ export function Sidebar() {
     loadDefaultZone,
     loadAppSettings,
   } = useApp();
+
+  const defaultProviderId = useApp((s) => s.appSettings.defaultProviderId);
+  const quickProvider = providers.find((p) => p.id === (defaultProviderId ?? providers[0]?.id)) ?? null;
+  const quickAvailable = !!quickProvider?.defaultModel?.trim();
+  // A new chat is possible if there's a zone to bind, or a usable Quick chat.
+  const canNewChat = zones.length > 0 || quickAvailable;
 
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -44,14 +51,22 @@ export function Sidebar() {
       loadThemeFromBackend, loadDefaultZone, loadAppSettings]);
 
   async function onNewChat(projectId?: string) {
+    // The plain "New chat" button drops the user back to the home screen
+    // greeting, where they choose Quick chat or a zone and the chat is created
+    // on first send. Project-scoped "new chat" still creates immediately so the
+    // chat lands in the right folder.
+    if (!projectId) {
+      await setActiveChat(null);
+      return;
+    }
     const hasZone = (id: string | null | undefined): id is string =>
       !!id && zones.some((z) => z.id === id);
-    const project = projectId ? projects.find((p) => p.id === projectId) : null;
+    const project = projects.find((p) => p.id === projectId) ?? null;
     const effectiveZoneId =
       (hasZone(project?.defaultZoneId) ? project!.defaultZoneId : null) ??
       (hasZone(defaultZoneId) ? defaultZoneId : null) ??
       (zones[0]?.id ?? null);
-    const chat = await api.createChat(effectiveZoneId, projectId ?? null);
+    const chat = await api.createChat(effectiveZoneId, projectId);
     await refreshChats();
     await setActiveChat(chat.id);
   }
@@ -98,8 +113,8 @@ export function Sidebar() {
         <div className="flex flex-col items-center gap-1 p-1 pt-2">
           <button
             onClick={() => onNewChat()}
-            disabled={zones.length === 0}
-            title={zones.length === 0 ? "Create a zone first" : "New chat"}
+            disabled={!canNewChat}
+            title={!canNewChat ? "Set a default model or create a zone first" : "New chat"}
             className="flex items-center justify-center rounded p-2 hover:bg-[var(--color-panel-hover)] disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Plus size={16} />
@@ -163,9 +178,9 @@ export function Sidebar() {
       {/* New chat button */}
       <button
         onClick={() => onNewChat()}
-        disabled={zones.length === 0}
+        disabled={!canNewChat}
         className="m-2 flex items-center justify-center gap-2 rounded-md border border-[var(--color-border)] bg-[var(--color-panel-hover)] py-2 text-sm transition hover:border-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
-        title={zones.length === 0 ? "Create a zone first" : "New chat"}
+        title={!canNewChat ? "Set a default model or create a zone first" : "New chat"}
       >
         <Plus size={14} />
         New chat

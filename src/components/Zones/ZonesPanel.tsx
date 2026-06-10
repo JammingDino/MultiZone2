@@ -1,16 +1,33 @@
 import { useState } from "react";
-import { X, Plus, Star } from "lucide-react";
+import { X, Plus, Star, Sparkles, Loader2 } from "lucide-react";
 import { useApp } from "@/store/app";
 import type { Zone } from "@/lib/types";
 import { getZoneIcon } from "@/lib/zoneIcons";
+import { seedDefaultZones } from "@/lib/defaultZones";
 import { ZoneForm } from "./ZoneForm";
 
 export function ZonesPanel() {
   const { providers, zones, defaultZoneId, closeZonesPanel, refreshZones, setDefaultZone } =
     useApp();
+  const defaultProviderId = useApp((s) => s.appSettings.defaultProviderId);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isNewZone, setIsNewZone] = useState(false);
+  const [seeding, setSeeding] = useState(false);
+
+  const quickProvider = providers.find((p) => p.id === (defaultProviderId ?? providers[0]?.id)) ?? null;
+  const quickModel = quickProvider?.defaultModel?.trim() || null;
+
+  async function addStarterZones() {
+    if (!quickProvider || !quickModel) return;
+    setSeeding(true);
+    try {
+      await seedDefaultZones(quickProvider.id, quickModel, zones.map((z) => z.name));
+      await refreshZones();
+    } finally {
+      setSeeding(false);
+    }
+  }
 
   const selectedZone = zones.find((z) => z.id === selectedId) ?? null;
   const showForm = isNewZone || selectedId !== null;
@@ -65,6 +82,19 @@ export function ZonesPanel() {
                 }`}
               >
                 <Plus size={12} /> New Zone
+              </button>
+              <button
+                onClick={addStarterZones}
+                disabled={seeding || !quickModel}
+                title={
+                  !quickModel
+                    ? "Set a default model in Settings → Providers first"
+                    : "Add the built-in starter zones (skips any you already have)"
+                }
+                className="mt-2 flex w-full items-center justify-center gap-1.5 rounded border border-[var(--color-border)] py-2 text-xs transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {seeding ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                Add starter zones
               </button>
             </div>
 

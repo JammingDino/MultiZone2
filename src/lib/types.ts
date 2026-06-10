@@ -3,6 +3,8 @@ export interface Provider {
   name: string;
   baseUrl: string;
   apiKey: string | null;
+  /** Model used for quick/simple chats not bound to a zone. Null until set. */
+  defaultModel: string | null;
   createdAt: number;
 }
 
@@ -41,6 +43,8 @@ export interface Chat {
   projectContextEnabled: boolean;
   /** Per-chat override for perspective execution; null = inherit global setting. */
   perspectiveMode: "sequential" | "parallel" | null;
+  /** When true, the router picks the best zone per turn (Smart chat). */
+  smartRouting: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -169,6 +173,13 @@ export interface AppSettings {
   fontFamily: string;
   /** Fallback filesystem directory when a chat has no project with a directory set. */
   defaultDirectory: string;
+  /**
+   * Provider used for quick/simple chats that aren't bound to a zone. Its
+   * `defaultModel` is what answers those chats. Null = use the oldest provider.
+   */
+  defaultProviderId: string | null;
+  /** Set once the one-time starter-zone seeding has run, so it never repeats. */
+  seededStarterZones: boolean;
   /** When true, the embedded local HTTP API server runs. */
   apiEnabled: boolean;
   /** Port the API server binds to on 127.0.0.1. */
@@ -210,6 +221,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   fontSize: 14,
   fontFamily: "",
   defaultDirectory: "",
+  defaultProviderId: null,
+  seededStarterZones: false,
   apiEnabled: false,
   apiPort: 8765,
   apiToken: "",

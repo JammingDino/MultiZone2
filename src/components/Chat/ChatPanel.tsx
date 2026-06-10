@@ -5,6 +5,7 @@ import * as api from "@/lib/tauri";
 import { MessageThread } from "./MessageThread";
 import { InputBar, type InputBarHandle } from "./InputBar";
 import { ZonePicker } from "./ZonePicker";
+import { HomeScreen } from "./HomeScreen";
 import { SettingsModal } from "@/components/Settings/SettingsModal";
 import { ZoneEditor } from "@/components/Zones/ZoneEditor";
 import { ZonesPanel } from "@/components/Zones/ZonesPanel";
@@ -42,12 +43,22 @@ export function ChatPanel() {
     respondApproval,
   } = useApp();
   const globalPerspectiveMode = useApp((s) => s.appSettings.perspectiveMode);
+  const providers = useApp((s) => s.providers);
+  const defaultProviderId = useApp((s) => s.appSettings.defaultProviderId);
 
   const pendingApprovalByChat = useApp((s) => s.pendingApprovalByChat);
   const pendingApproval = activeChatId ? (pendingApprovalByChat[activeChatId] ?? null) : null;
 
   const activeChat = chats.find((c) => c.id === activeChatId) ?? null;
   const activeZone = activeChat ? zones.find((z) => z.id === activeChat.zoneId) : null;
+
+  // A chat with no zone (Quick) or smart routing enabled needs the quick-chat
+  // provider's default model. Zone chats need their zone to be configured.
+  const quickProvider = providers.find((p) => p.id === (defaultProviderId ?? providers[0]?.id)) ?? null;
+  const quickAvailable = !!quickProvider?.defaultModel?.trim();
+  const isSmartChat = !!activeChat?.smartRouting;
+  const isSimpleChat = !!activeChat && activeChat.zoneId == null && !isSmartChat;
+  const inputDisabled = isSmartChat || isSimpleChat ? !quickAvailable : !activeZone;
   const messagesByChat = useApp((s) => s.messagesByChat);
 
   // Detect a pending ask_user that hasn't been answered yet.
@@ -179,7 +190,7 @@ export function ChatPanel() {
               onRemove={(zoneId) => removePerspectiveZone(activeChat.id, zoneId)}
               onSetMode={(m) => setChatPerspectiveMode(activeChat.id, m)}
             />
-            <ZonePicker chatId={activeChat.id} currentZoneId={activeChat.zoneId} />
+            <ZonePicker chatId={activeChat.id} currentZoneId={activeChat.zoneId} smartRouting={activeChat.smartRouting ?? false} />
             </div>
           </header>
 
@@ -230,11 +241,11 @@ export function ChatPanel() {
               </div>
             </div>
           ) : (
-            <InputBar chatId={activeChat.id} disabled={!activeZone} ref={inputRef} />
+            <InputBar chatId={activeChat.id} disabled={inputDisabled} ref={inputRef} />
           )}
         </>
       ) : (
-        <EmptyState />
+        <HomeScreen />
       )}
       {isDragOver && activeChat && (
         <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-[var(--color-bg)]/70 backdrop-blur-sm">
@@ -655,34 +666,3 @@ function ToolApprovalBanner({
   );
 }
 
-function EmptyState() {
-  const { zones, openSettings, openZoneEditor } = useApp();
-  return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center text-[var(--color-text-muted)]">
-      <div className="text-lg">Welcome to MultiZone</div>
-      {zones.length === 0 ? (
-        <>
-          <div className="max-w-md text-sm">
-            Add a provider in settings, then create a zone to start chatting.
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={openSettings}
-              className="rounded border border-[var(--color-border)] px-3 py-1.5 text-sm hover:border-[var(--color-accent)]"
-            >
-              Open settings
-            </button>
-            <button
-              onClick={() => openZoneEditor(null)}
-              className="rounded bg-[var(--color-accent)] px-3 py-1.5 text-sm text-white hover:bg-[var(--color-accent-hover)]"
-            >
-              Create zone
-            </button>
-          </div>
-        </>
-      ) : (
-        <div className="text-sm">Select a chat or create a new one.</div>
-      )}
-    </div>
-  );
-}

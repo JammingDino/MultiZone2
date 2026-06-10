@@ -7,6 +7,9 @@ pub struct Provider {
     pub name: String,
     pub base_url: String,
     pub api_key: Option<String>,
+    /// Model used for "quick"/simple chats that aren't bound to a zone. Chosen
+    /// alongside the provider during onboarding. None until set.
+    pub default_model: Option<String>,
     pub created_at: i64,
 }
 
@@ -49,6 +52,9 @@ pub struct Chat {
     /// Per-chat override for how perspective zones run: `Some("sequential")`,
     /// `Some("parallel")`, or `None` to inherit the global app setting.
     pub perspective_mode: Option<String>,
+    /// When true, a router model picks the best zone to answer each turn
+    /// (Smart chat). `zone_id` stays NULL while this is on.
+    pub smart_routing: bool,
     pub created_at: i64,
     pub updated_at: i64,
 }

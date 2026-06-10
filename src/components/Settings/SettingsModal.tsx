@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useApp } from "@/store/app";
 import type { BackgroundEffect } from "@/store/app";
 import * as api from "@/lib/tauri";
+import { ModelCombobox } from "@/components/common/ModelCombobox";
 import type { DbStats, Provider } from "@/lib/types";
 
 type Tab = "providers" | "appearance" | "chat" | "api" | "data";
@@ -60,7 +61,11 @@ function TabButton({ active, icon, label, onClick }: { active: boolean; icon: Re
 
 function ProvidersTab() {
   const { providers, refreshProviders } = useApp();
+  const appSettings = useApp((s) => s.appSettings);
+  const setAppSettings = useApp((s) => s.setAppSettings);
   const [editing, setEditing] = useState<Partial<Provider> | null>(null);
+
+  const quickProviderId = appSettings.defaultProviderId ?? providers[0]?.id ?? "";
 
   return (
     <>
@@ -83,6 +88,9 @@ function ProvidersTab() {
           >
             <div className="font-medium">{p.name}</div>
             <div className="text-xs text-[var(--color-text-muted)]">{p.baseUrl}</div>
+            <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">
+              Quick-chat model: {p.defaultModel ? <span className="font-mono">{p.defaultModel}</span> : <span className="italic">none set</span>}
+            </div>
           </div>
         ))}
         {providers.length === 0 && (
@@ -91,6 +99,26 @@ function ProvidersTab() {
           </div>
         )}
       </div>
+
+      {providers.length > 0 && (
+        <section className="mt-5">
+          <h3 className="mb-1 text-sm font-medium">Quick-chat provider</h3>
+          <p className="mb-2 text-xs text-[var(--color-text-muted)]">
+            Which provider answers Quick chats (chats not bound to a zone). Its default model above is used.
+          </p>
+          <select
+            value={quickProviderId}
+            onChange={(e) => setAppSettings({ defaultProviderId: e.target.value || null })}
+            className="w-full rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]"
+          >
+            {providers.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}{p.defaultModel ? ` · ${p.defaultModel}` : " · (no model set)"}
+              </option>
+            ))}
+          </select>
+        </section>
+      )}
 
       {editing && (
         <ProviderForm
@@ -845,15 +873,41 @@ function ProviderForm({ value, onClose, onSaved }: { value: Partial<Provider>; o
   const [name, setName] = useState(value.name ?? "");
   const [baseUrl, setBaseUrl] = useState(value.baseUrl ?? "");
   const [apiKey, setApiKey] = useState(value.apiKey ?? "");
+  const [defaultModel, setDefaultModel] = useState(value.defaultModel ?? "");
+  const [models, setModels] = useState<string[]>([]);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // Auto-load the model list when editing an existing provider so the default
+  // model dropdown is populated without the user having to press Test.
+  useEffect(() => {
+    if (!value.id) return;
+    let cancelled = false;
+    setTesting(true);
+    setTestResult(null);
+    api.fetchModels(value.id)
+      .then((list) => {
+        if (cancelled) return;
+        setModels(list);
+        setTestResult(`Found ${list.length} model${list.length === 1 ? "" : "s"}.`);
+      })
+      .catch((e: any) => { if (!cancelled) setTestResult(`Error: ${e?.message || String(e)}`); })
+      .finally(() => { if (!cancelled) setTesting(false); });
+    return () => { cancelled = true; };
+  }, [value.id]);
 
   async function onSave() {
     if (!name.trim() || !baseUrl.trim()) return;
     setSaving(true);
     try {
-      await api.upsertProvider({ id: value.id, name: name.trim(), baseUrl: baseUrl.trim(), apiKey: apiKey.trim() || null });
+      await api.upsertProvider({
+        id: value.id,
+        name: name.trim(),
+        baseUrl: baseUrl.trim(),
+        apiKey: apiKey.trim() || null,
+        defaultModel: defaultModel.trim() || null,
+      });
       onSaved();
     } finally { setSaving(false); }
   }
@@ -869,8 +923,9 @@ function ProviderForm({ value, onClose, onSaved }: { value: Partial<Provider>; o
     setTesting(true);
     setTestResult(null);
     try {
-      const models = await api.fetchModels(value.id);
-      setTestResult(`Found ${models.length} model${models.length === 1 ? "" : "s"}.`);
+      const list = await api.fetchModels(value.id);
+      setModels(list);
+      setTestResult(`Found ${list.length} model${list.length === 1 ? "" : "s"}.`);
     } catch (e: any) {
       setTestResult(`Error: ${e?.message || String(e)}`);
     } finally { setTesting(false); }
@@ -886,6 +941,15 @@ function ProviderForm({ value, onClose, onSaved }: { value: Partial<Provider>; o
       </Field>
       <Field label="API key (optional)">
         <input value={apiKey} onChange={(e) => setApiKey(e.target.value)} type="password" className="input" placeholder="sk-..." />
+      </Field>
+      <Field label="Default model (for Quick chat)">
+        <ModelCombobox
+          value={defaultModel}
+          onChange={setDefaultModel}
+          options={models}
+          className="input"
+          placeholder={testing ? "Loading models…" : value.id ? "Pick or type a model" : "Save to load models, or type one"}
+        />
       </Field>
       {testResult && (
         <div className="my-2 rounded bg-[var(--color-panel)] p-2 text-xs text-[var(--color-text-muted)]">{testResult}</div>

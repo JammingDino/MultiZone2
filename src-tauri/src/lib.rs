@@ -41,6 +41,7 @@ pub fn run() {
             commands::chats::create_chat,
             commands::chats::rename_chat,
             commands::chats::set_chat_zone,
+            commands::chats::set_chat_smart,
             commands::chats::set_chat_project,
             commands::chats::set_chat_project_context,
             commands::chats::get_chat_tags,

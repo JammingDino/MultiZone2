@@ -9,7 +9,7 @@ use tauri::State;
 #[tauri::command]
 pub async fn list_providers(state: State<'_, AppState>) -> AppResult<Vec<Provider>> {
     let rows = sqlx::query_as::<_, Provider>(
-        "SELECT id, name, base_url, api_key, created_at FROM providers ORDER BY name",
+        "SELECT id, name, base_url, api_key, default_model, created_at FROM providers ORDER BY name",
     )
     .fetch_all(&state.db)
     .await?;
@@ -23,6 +23,7 @@ pub struct ProviderInput {
     pub name: String,
     pub base_url: String,
     pub api_key: Option<String>,
+    pub default_model: Option<String>,
 }
 
 #[tauri::command]
@@ -34,23 +35,25 @@ pub async fn upsert_provider(
     let now = now_ts();
 
     sqlx::query(
-        "INSERT INTO providers (id, name, base_url, api_key, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)
+        "INSERT INTO providers (id, name, base_url, api_key, default_model, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
          ON CONFLICT(id) DO UPDATE SET
            name = excluded.name,
            base_url = excluded.base_url,
-           api_key = excluded.api_key",
+           api_key = excluded.api_key,
+           default_model = excluded.default_model",
     )
     .bind(&id)
     .bind(&provider.name)
     .bind(&provider.base_url)
     .bind(&provider.api_key)
+    .bind(&provider.default_model)
     .bind(now)
     .execute(&state.db)
     .await?;
 
     let row = sqlx::query_as::<_, Provider>(
-        "SELECT id, name, base_url, api_key, created_at FROM providers WHERE id = ?1",
+        "SELECT id, name, base_url, api_key, default_model, created_at FROM providers WHERE id = ?1",
     )
     .bind(&id)
     .fetch_one(&state.db)
@@ -73,7 +76,7 @@ pub async fn fetch_models(
     provider_id: String,
 ) -> AppResult<Vec<String>> {
     let row = sqlx::query_as::<_, Provider>(
-        "SELECT id, name, base_url, api_key, created_at FROM providers WHERE id = ?1",
+        "SELECT id, name, base_url, api_key, default_model, created_at FROM providers WHERE id = ?1",
     )
     .bind(&provider_id)
     .fetch_optional(&state.db)

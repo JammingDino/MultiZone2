@@ -1,5 +1,5 @@
 use crate::commands::{new_id, now_ts};
-use crate::db::models::{Chat, ChatTagEntry, ChatZone, Message, Provider, Zone};
+use crate::db::models::{Chat, ChatTagEntry, ChatZone, Message};
 use crate::error::{AppError, AppResult};
 use crate::llm::client::LlmClient;
 use crate::llm::thinking::strip_thinking_blocks;
@@ -8,7 +8,7 @@ use crate::state::AppState;
 use tauri::{AppHandle, Emitter, State};
 
 const CHAT_COLS: &str =
-    "id, title, zone_id, project_id, project_context_enabled, perspective_mode, created_at, updated_at";
+    "id, title, zone_id, project_id, project_context_enabled, perspective_mode, smart_routing, created_at, updated_at";
 
 #[tauri::command]
 pub async fn list_chats(state: State<'_, AppState>) -> AppResult<Vec<Chat>> {
@@ -87,12 +87,37 @@ pub async fn set_chat_zone(
     id: String,
     zone_id: Option<String>,
 ) -> AppResult<()> {
-    sqlx::query("UPDATE chats SET zone_id = ?1, updated_at = ?2 WHERE id = ?3")
+    // Picking an explicit zone (or Quick chat = NULL) turns off smart routing.
+    sqlx::query("UPDATE chats SET zone_id = ?1, smart_routing = 0, updated_at = ?2 WHERE id = ?3")
         .bind(&zone_id)
         .bind(now_ts())
         .bind(&id)
         .execute(&state.db)
         .await?;
+    Ok(())
+}
+
+/// Toggle Smart chat for a chat. When enabled, the chat's zone is cleared and a
+/// router picks the best zone to answer each turn.
+#[tauri::command]
+pub async fn set_chat_smart(
+    state: State<'_, AppState>,
+    id: String,
+    smart: bool,
+) -> AppResult<()> {
+    if smart {
+        sqlx::query("UPDATE chats SET smart_routing = 1, zone_id = NULL, updated_at = ?1 WHERE id = ?2")
+            .bind(now_ts())
+            .bind(&id)
+            .execute(&state.db)
+            .await?;
+    } else {
+        sqlx::query("UPDATE chats SET smart_routing = 0, updated_at = ?1 WHERE id = ?2")
+            .bind(now_ts())
+            .bind(&id)
+            .execute(&state.db)
+            .await?;
+    }
     Ok(())
 }
 
@@ -318,7 +343,7 @@ pub async fn generate_title(
     state: State<'_, AppState>,
     chat_id: String,
 ) -> AppResult<String> {
-    let chat = sqlx::query_as::<_, Chat>(&format!(
+    sqlx::query_as::<_, Chat>(&format!(
         "SELECT {CHAT_COLS} FROM chats WHERE id = ?1"
     ))
     .bind(&chat_id)
@@ -326,31 +351,9 @@ pub async fn generate_title(
     .await?
     .ok_or_else(|| AppError::NotFound(format!("chat {chat_id}")))?;
 
-    let zone_id = chat.zone_id.clone().ok_or_else(|| {
-        AppError::Invalid("chat has no zone, cannot generate title".into())
-    })?;
-
-    let zone = sqlx::query_as::<_, Zone>(
-        "SELECT id, name, provider_id, model, system_prompt, temperature, max_tokens, top_p,
-                tools_enabled, tool_config, thinking_enabled, include_thinking_in_context,
-                icon, accent_color, created_at, updated_at
-         FROM zones WHERE id = ?1",
-    )
-    .bind(&zone_id)
-    .fetch_optional(&state.db)
-    .await?
-    .ok_or_else(|| AppError::NotFound(format!("zone {zone_id}")))?;
-
-    let provider_id = zone.provider_id.clone().ok_or_else(|| {
-        AppError::Invalid("zone has no provider".into())
-    })?;
-    let provider = sqlx::query_as::<_, Provider>(
-        "SELECT id, name, base_url, api_key, created_at FROM providers WHERE id = ?1",
-    )
-    .bind(&provider_id)
-    .fetch_optional(&state.db)
-    .await?
-    .ok_or_else(|| AppError::NotFound(format!("provider {provider_id}")))?;
+    // Works for both zone-bound chats and simple/quick chats (synthetic zone).
+    let (zone, provider) =
+        crate::commands::messages::effective_zone_and_provider(&state.db, &chat_id).await?;
 
     let first_user = sqlx::query_as::<_, Message>(
         "SELECT id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, created_at

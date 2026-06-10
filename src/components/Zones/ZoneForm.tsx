@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw, Trash2, X, BookOpen, ChevronDown } from "lucide-react";
 import * as api from "@/lib/tauri";
+import { ModelCombobox } from "@/components/common/ModelCombobox";
 import type { Provider, Zone } from "@/lib/types";
 import { ALL_TOOLS } from "@/lib/types";
+import { DEFAULT_ZONES } from "@/lib/defaultZones";
 
 const SAFETY_BADGE: Record<number, { label: string; cls: string }> = {
   0: { label: "Safe",      cls: "border-green-600/40  bg-green-600/10  text-green-500" },
@@ -35,6 +37,15 @@ export const PROMPT_TEMPLATES: PromptTemplate[] = [
     description: "Start with an empty system prompt.",
     prompt: "",
   },
+  // Starter zones (also seeded on first run) — offered here so they're
+  // discoverable when building a zone from scratch.
+  ...DEFAULT_ZONES.map((z) => ({
+    id: `default_${z.name.toLowerCase().replace(/\s+/g, "_")}`,
+    label: z.name,
+    description: z.description,
+    prompt: z.systemPrompt,
+    suggestedTools: z.tools,
+  })),
   {
     id: "study_guide",
     label: "Study Guide (Socratic)",
@@ -558,18 +569,13 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
               </span>
             }
           >
-            <input
+            <ModelCombobox
               value={model}
-              list="zone-model-list"
-              onChange={(e) => setModel(e.target.value)}
+              onChange={setModel}
+              options={models}
               className="input"
               placeholder={loadingModels ? "loading…" : "e.g. gpt-4o-mini"}
             />
-            <datalist id="zone-model-list">
-              {models.map((m) => (
-                <option key={m} value={m} />
-              ))}
-            </datalist>
           </Field>
         </div>
 

@@ -37,6 +37,8 @@ export const renameChat = (id: string, title: string) =>
   invoke<void>("rename_chat", { id, title });
 export const setChatZone = (id: string, zoneId: string | null) =>
   invoke<void>("set_chat_zone", { id, zoneId });
+export const setChatSmart = (id: string, smart: boolean) =>
+  invoke<void>("set_chat_smart", { id, smart });
 export const setChatProject = (chatId: string, projectId: string | null) =>
   invoke<void>("set_chat_project", { chatId, projectId });
 export const setChatProjectContext = (chatId: string, enabled: boolean) =>
@@ -80,8 +82,22 @@ export const generateTitle = (chatId: string) =>
   invoke<string>("generate_title", { chatId });
 
 // Messages
-export const sendMessage = (chatId: string, parts: InputPart[]) =>
-  invoke<void>("send_message", { chatId, parts });
+/**
+ * Send a message. `override` applies to this turn only (the chat's stored zone
+ * is untouched): `zoneId` "__simple__" forces a Quick turn, any other id picks
+ * a one-off zone; `model` overrides the resolved zone's model.
+ */
+export const sendMessage = (
+  chatId: string,
+  parts: InputPart[],
+  override?: { zoneId?: string | null; model?: string | null },
+) =>
+  invoke<void>("send_message", {
+    chatId,
+    parts,
+    overrideZoneId: override?.zoneId ?? null,
+    overrideModel: override?.model ?? null,
+  });
 export const regenerateResponse = (chatId: string) =>
   invoke<void>("regenerate_response", { chatId });
 export const cancelStream = (chatId: string) =>

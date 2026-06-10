@@ -1,9 +1,17 @@
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
-import { Paperclip, Send, X, FileText, Image as ImageIcon, FileType, Loader2, Square, ZoomIn } from "lucide-react";
+import { Paperclip, Send, X, FileText, Image as ImageIcon, FileType, Loader2, Square, ZoomIn, SlidersHorizontal, Zap, Brain } from "lucide-react";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
+import { ModelCombobox } from "@/components/common/ModelCombobox";
 import type { InputPart } from "@/lib/types";
 import { renderPdfToJpegs, extractPdfText } from "@/lib/pdf";
+
+/** Sentinel zone id meaning "Quick chat (no zone)" for a one-shot override. */
+const SIMPLE_ZONE_ID = "__simple__";
+/** Sentinel zone id meaning "Smart chat (router picks zone)" for a one-shot override. */
+const SMART_ZONE_ID = "__smart__";
+const OV_FIELD_CLS =
+  "w-full rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs outline-none focus:border-[var(--color-accent)]";
 
 interface PendingAttachment {
   id: string;
@@ -33,9 +41,52 @@ export function InputBar({ chatId, disabled, ref }: InputBarProps) {
   const refreshChats = useApp((s) => s.refreshChats);
   const sendKey = useApp((s) => s.appSettings.sendKey);
   const pdfMode = useApp((s) => s.appSettings.pdfMode);
+  const chats = useApp((s) => s.chats);
+  const zones = useApp((s) => s.zones);
+  const providers = useApp((s) => s.providers);
+  const defaultProviderId = useApp((s) => s.appSettings.defaultProviderId);
   const fileRef = useRef<HTMLInputElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const isStreaming = useApp((s) => Boolean(s.streamingByChat[chatId]));
+
+  // One-shot overrides for the next send only. ovZone: undefined = use the
+  // chat's own zone, null = Quick chat (no zone), string = a specific zone.
+  // ovModel "" = no model override.
+  const [ovZone, setOvZone] = useState<string | null | undefined>(undefined);
+  const [ovModel, setOvModel] = useState("");
+  const [ovOpen, setOvOpen] = useState(false);
+  const [ovModels, setOvModels] = useState<string[]>([]);
+
+  const chat = chats.find((c) => c.id === chatId) ?? null;
+  const quickProviderId = defaultProviderId ?? providers[0]?.id ?? null;
+  // Which provider's models the override picker should offer, given the chosen
+  // (or default) zone for the turn.
+  const ovProviderId = (() => {
+    if (ovZone === null) return quickProviderId;
+    const zid = ovZone === undefined ? chat?.zoneId ?? null : ovZone;
+    if (zid === null) return quickProviderId;
+    return zones.find((z) => z.id === zid)?.providerId ?? null;
+  })();
+
+  useEffect(() => {
+    if (!ovOpen || !ovProviderId) return;
+    let cancelled = false;
+    api.fetchModels(ovProviderId)
+      .then((m) => { if (!cancelled) setOvModels(m); })
+      .catch(() => { if (!cancelled) setOvModels([]); });
+    return () => { cancelled = true; };
+  }, [ovOpen, ovProviderId]);
+
+  const overrideActive = ovZone !== undefined || ovModel.trim() !== "";
+  const overrideLabel = (() => {
+    const parts: string[] = [];
+    if (ovZone === null) parts.push("Quick chat");
+    else if (ovZone === SMART_ZONE_ID) parts.push("Smart chat");
+    else if (typeof ovZone === "string") parts.push(zones.find((z) => z.id === ovZone)?.name ?? "zone");
+    if (ovModel.trim()) parts.push(ovModel.trim());
+    return parts.join(" · ");
+  })();
+  function clearOverride() { setOvZone(undefined); setOvModel(""); }
 
   useImperativeHandle(ref, () => ({ addFiles: (files) => handleFiles(files) }), [chatId]);
 
@@ -153,11 +204,18 @@ export function InputBar({ chatId, disabled, ref }: InputBarProps) {
         }
       }
 
+      const overrideZoneId =
+        ovZone === undefined ? null
+        : ovZone === null ? SIMPLE_ZONE_ID
+        : ovZone; // includes SMART_ZONE_ID sentinel as-is
+      const overrideModel = ovModel.trim() || null;
+
       setText("");
       setPending([]);
       setSending(false);
+      clearOverride();
 
-      await api.sendMessage(chatId, parts);
+      await api.sendMessage(chatId, parts, { zoneId: overrideZoneId, model: overrideModel });
       refreshChats();
     } catch (e) {
       console.error("send failed:", e);
@@ -207,6 +265,15 @@ export function InputBar({ chatId, disabled, ref }: InputBarProps) {
             onClose={() => setPreviewId(null)}
           />
         )}
+        {overrideActive && (
+          <div className="mb-2 flex w-fit items-center gap-1.5 rounded-full border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/10 px-2.5 py-1 text-xs text-[var(--color-accent)]">
+            <Zap size={11} />
+            <span>This message: {overrideLabel}</span>
+            <button onClick={clearOverride} className="hover:text-[var(--color-text)]" title="Clear override">
+              <X size={11} />
+            </button>
+          </div>
+        )}
         <div className="flex items-end gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 focus-within:border-[var(--color-accent)]">
           <button
             onClick={() => fileRef.current?.click()}
@@ -225,6 +292,57 @@ export function InputBar({ chatId, disabled, ref }: InputBarProps) {
               e.target.value = "";
             }}
           />
+          <div className="relative">
+            <button
+              onClick={() => setOvOpen((v) => !v)}
+              disabled={disabled}
+              title="Options for this message (zone / model)"
+              className={`rounded p-1.5 hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)] disabled:opacity-40 ${
+                overrideActive ? "text-[var(--color-accent)]" : "text-[var(--color-text-muted)]"
+              }`}
+            >
+              <SlidersHorizontal size={16} />
+            </button>
+            {ovOpen && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setOvOpen(false)} />
+                <div className="absolute bottom-full left-0 z-40 mb-2 w-72 rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] p-3 shadow-lg">
+                  <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                    For this message only
+                  </div>
+
+                  <div className="mb-1 text-xs text-[var(--color-text-muted)]">Zone</div>
+                  <div className="mb-3 flex flex-wrap gap-1">
+                    <OvChip label="Chat default" active={ovZone === undefined} onClick={() => setOvZone(undefined)} />
+                    <OvChip label="Quick" icon={<Zap size={10} />} active={ovZone === null} onClick={() => setOvZone(null)} />
+                    <OvChip label="Smart" icon={<Brain size={10} />} active={ovZone === SMART_ZONE_ID} onClick={() => setOvZone(SMART_ZONE_ID)} />
+                    {zones.map((z) => (
+                      <OvChip
+                        key={z.id}
+                        label={z.name}
+                        active={ovZone === z.id}
+                        onClick={() => setOvZone(z.id)}
+                      />
+                    ))}
+                  </div>
+
+                  <div className="mb-1 flex items-center justify-between text-xs text-[var(--color-text-muted)]">
+                    <span>Model</span>
+                    {ovModel.trim() && (
+                      <button onClick={() => setOvModel("")} className="hover:text-[var(--color-text)]">Reset</button>
+                    )}
+                  </div>
+                  <ModelCombobox
+                    value={ovModel}
+                    onChange={setOvModel}
+                    options={ovModels}
+                    className={OV_FIELD_CLS}
+                    placeholder="Zone's default model"
+                  />
+                </div>
+              </>
+            )}
+          </div>
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -265,6 +383,26 @@ export function InputBar({ chatId, disabled, ref }: InputBarProps) {
         </div>
       </div>
     </div>
+  );
+}
+
+function OvChip({
+  label, active, icon, onClick,
+}: {
+  label: string; active: boolean; icon?: React.ReactNode; onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition ${
+        active
+          ? "border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]"
+          : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
+      }`}
+    >
+      {icon}
+      {label}
+    </button>
   );
 }
 

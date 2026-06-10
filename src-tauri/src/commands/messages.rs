@@ -20,11 +20,30 @@ use tokio::sync::{mpsc, oneshot, RwLock};
 
 const MAX_TOOL_ITERATIONS: usize = 8;
 
+/// One-shot overrides for a single send, chosen from the input bar's advanced
+/// menu. They affect only the turn they're passed to — the chat's stored zone
+/// is never modified.
+#[derive(Clone, Default)]
+pub struct TurnOverride {
+    /// Zone to answer as for this turn. `Some(SIMPLE_ZONE_ID)` forces a Quick
+    /// (no-zone) turn even when the chat has a zone bound. `None` = use the
+    /// chat's own zone.
+    pub zone_id: Option<String>,
+    /// Model to use for this turn, overriding the resolved zone's model.
+    pub model: Option<String>,
+}
+
+impl TurnOverride {
+    fn is_active(&self) -> bool {
+        self.zone_id.is_some() || self.model.is_some()
+    }
+}
+
 const ZONE_COLS: &str = "id, name, provider_id, model, system_prompt, temperature, max_tokens, top_p,
     tools_enabled, tool_config, thinking_enabled, include_thinking_in_context,
     icon, accent_color, created_at, updated_at";
 const CHAT_COLS: &str =
-    "id, title, zone_id, project_id, project_context_enabled, perspective_mode, created_at, updated_at";
+    "id, title, zone_id, project_id, project_context_enabled, perspective_mode, smart_routing, created_at, updated_at";
 const MSG_COLS: &str =
     "id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, created_at";
 
@@ -228,7 +247,7 @@ async fn run_regenerate(
     chat_id: &str,
     cancel: Arc<AtomicBool>,
 ) -> AppResult<()> {
-    run_agentic_loop(ctx, sink, chat_id, cancel.clone()).await?;
+    run_agentic_loop(ctx, sink, chat_id, &TurnOverride::default(), cancel.clone()).await?;
     run_perspectives(ctx, sink, chat_id, cancel).await;
     Ok(())
 }
@@ -239,10 +258,16 @@ pub async fn send_message(
     state: State<'_, AppState>,
     chat_id: String,
     parts: Vec<InputPart>,
+    override_zone_id: Option<String>,
+    override_model: Option<String>,
 ) -> AppResult<()> {
     let ctx = EngineCtx::from_state(&state);
     let sink = StreamSink::tauri(app);
-    run_send_entry(&ctx, &sink, &chat_id, parts).await
+    let ov = TurnOverride {
+        zone_id: override_zone_id.filter(|s| !s.is_empty()),
+        model: override_model.filter(|s| !s.trim().is_empty()),
+    };
+    run_send_entry(&ctx, &sink, &chat_id, parts, ov).await
 }
 
 /// Shared entry point for "send" used by both the Tauri command and the HTTP
@@ -252,6 +277,7 @@ pub async fn run_send_entry(
     sink: &StreamSink,
     chat_id: &str,
     parts: Vec<InputPart>,
+    ov: TurnOverride,
 ) -> AppResult<()> {
     let cancel = Arc::new(AtomicBool::new(false));
     ctx.active_streams
@@ -259,7 +285,7 @@ pub async fn run_send_entry(
         .await
         .insert(chat_id.to_string(), cancel.clone());
 
-    let result = run_send(ctx, sink, chat_id, parts, cancel.clone()).await;
+    let result = run_send(ctx, sink, chat_id, parts, &ov, cancel.clone()).await;
 
     ctx.active_streams.write().await.remove(chat_id);
 
@@ -274,10 +300,13 @@ async fn run_send(
     sink: &StreamSink,
     chat_id: &str,
     parts: Vec<InputPart>,
+    ov: &TurnOverride,
     cancel: Arc<AtomicBool>,
 ) -> AppResult<()> {
-    // Validate the chat exists and has a zone before persisting anything.
-    let chat = sqlx::query_as::<_, Chat>(&format!(
+    // Validate the chat exists before persisting anything. A missing zone is
+    // fine — the chat runs in "simple" mode against the default provider — but
+    // we resolve it now so we fail fast if no model can be determined.
+    sqlx::query_as::<_, Chat>(&format!(
         "SELECT {CHAT_COLS} FROM chats WHERE id = ?1"
     ))
     .bind(chat_id)
@@ -285,8 +314,17 @@ async fn run_send(
     .await?
     .ok_or_else(|| AppError::NotFound(format!("chat {chat_id}")))?;
 
-    if chat.zone_id.is_none() {
-        return Err(AppError::Invalid("chat has no zone".into()));
+    // Resolve the mode now (honouring any override) so we fail fast before
+    // persisting. Smart/Simple both just need a usable default provider+model
+    // (Smart uses it as the router); a fixed zone must load.
+    match resolve_turn_mode(&ctx.db, chat_id, ov).await? {
+        TurnMode::Zone(z) => {
+            load_zone_and_provider(&ctx.db, &z).await?;
+        }
+        TurnMode::Simple | TurnMode::Smart => {
+            let p = default_provider(&ctx.db).await?;
+            simple_zone(&p)?;
+        }
     }
 
     // Convert input parts to ContentParts and save user message
@@ -331,7 +369,7 @@ async fn run_send(
     .await?;
     sink.emit(chat_id, StreamPayload::UserMessageSaved { message: &user_msg });
 
-    run_agentic_loop(ctx, sink, chat_id, cancel.clone()).await?;
+    run_agentic_loop(ctx, sink, chat_id, ov, cancel.clone()).await?;
     run_perspectives(ctx, sink, chat_id, cancel).await;
     Ok(())
 }
@@ -355,7 +393,7 @@ async fn load_zone_and_provider(
         .clone()
         .ok_or_else(|| AppError::Invalid("zone has no provider".into()))?;
     let provider = sqlx::query_as::<_, Provider>(
-        "SELECT id, name, base_url, api_key, created_at FROM providers WHERE id = ?1",
+        "SELECT id, name, base_url, api_key, default_model, created_at FROM providers WHERE id = ?1",
     )
     .bind(&provider_id)
     .fetch_optional(db)
@@ -365,26 +403,340 @@ async fn load_zone_and_provider(
     Ok((zone, provider))
 }
 
+/// Synthetic zone id used for "quick"/simple chats that aren't bound to a zone.
+pub const SIMPLE_ZONE_ID: &str = "__simple__";
+/// Sentinel zone id meaning "Smart chat" — route to a zone per turn.
+pub const SMART_ZONE_ID: &str = "__smart__";
+
+/// Resolve the provider used for simple (no-zone) chats: the one named by the
+/// `defaultProviderId` app setting, falling back to the oldest provider.
+async fn default_provider(db: &SqlitePool) -> AppResult<Provider> {
+    let configured: Option<String> = sqlx::query_scalar::<_, Option<String>>(
+        "SELECT value FROM settings WHERE key = 'app_settings'",
+    )
+    .fetch_optional(db)
+    .await?
+    .flatten()
+    .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+    .and_then(|v| {
+        v.get("defaultProviderId")
+            .and_then(|d| d.as_str())
+            .filter(|s| !s.trim().is_empty())
+            .map(String::from)
+    });
+
+    if let Some(pid) = configured {
+        if let Some(p) = sqlx::query_as::<_, Provider>(
+            "SELECT id, name, base_url, api_key, default_model, created_at FROM providers WHERE id = ?1",
+        )
+        .bind(&pid)
+        .fetch_optional(db)
+        .await?
+        {
+            return Ok(p);
+        }
+    }
+
+    sqlx::query_as::<_, Provider>(
+        "SELECT id, name, base_url, api_key, default_model, created_at FROM providers ORDER BY created_at ASC LIMIT 1",
+    )
+    .fetch_optional(db)
+    .await?
+    .ok_or_else(|| AppError::Invalid("no provider configured for quick chat".into()))
+}
+
+/// Build the in-memory synthetic zone for a simple chat from its provider's
+/// default model. No system prompt, no tools — fast, approximate answers.
+fn simple_zone(provider: &Provider) -> AppResult<Zone> {
+    let model = provider
+        .default_model
+        .clone()
+        .filter(|m| !m.trim().is_empty())
+        .ok_or_else(|| {
+            AppError::Invalid("the quick-chat provider has no default model set".into())
+        })?;
+    Ok(Zone {
+        id: SIMPLE_ZONE_ID.to_string(),
+        name: "Quick chat".to_string(),
+        provider_id: Some(provider.id.clone()),
+        model,
+        system_prompt: None,
+        temperature: 0.7,
+        max_tokens: None,
+        top_p: None,
+        // Quick chat gets every safe tool by default (date/time, ask-user,
+        // tagging, graphs/diagrams) so the default model is useful immediately.
+        tools_enabled: serde_json::to_string(&tools::safe_tool_ids())
+            .unwrap_or_else(|_| "[]".to_string()),
+        tool_config: "{}".to_string(),
+        thinking_enabled: false,
+        include_thinking_in_context: false,
+        icon: None,
+        accent_color: None,
+        created_at: 0,
+        updated_at: 0,
+    })
+}
+
+/// Resolve a chat's effective zone + provider. When the chat has a zone bound,
+/// that zone is loaded as usual. When it doesn't (simple/quick chat), a
+/// synthetic zone is built from the default provider's default model.
+pub async fn effective_zone_and_provider(
+    db: &SqlitePool,
+    chat_id: &str,
+) -> AppResult<(Zone, Provider)> {
+    let zone_id: Option<String> = sqlx::query_scalar::<_, Option<String>>(
+        "SELECT zone_id FROM chats WHERE id = ?1",
+    )
+    .bind(chat_id)
+    .fetch_optional(db)
+    .await?
+    .flatten();
+
+    match zone_id {
+        Some(zid) => load_zone_and_provider(db, &zid).await,
+        None => {
+            let provider = default_provider(db).await?;
+            let zone = simple_zone(&provider)?;
+            Ok((zone, provider))
+        }
+    }
+}
+
+/// How a single turn picks its zone.
+#[derive(Clone)]
+enum TurnMode {
+    /// A specific zone id.
+    Zone(String),
+    /// Quick chat — synthetic zone from the default provider's model.
+    Simple,
+    /// Smart chat — a router model picks the zone for this turn.
+    Smart,
+}
+
+/// Decide the turn's mode from any one-shot override, falling back to the
+/// chat's stored state (smart flag → zone → quick).
+async fn resolve_turn_mode(
+    db: &SqlitePool,
+    chat_id: &str,
+    ov: &TurnOverride,
+) -> AppResult<TurnMode> {
+    match ov.zone_id.as_deref() {
+        Some(SMART_ZONE_ID) => Ok(TurnMode::Smart),
+        Some(SIMPLE_ZONE_ID) => Ok(TurnMode::Simple),
+        Some(z) => Ok(TurnMode::Zone(z.to_string())),
+        None => {
+            let row: Option<(Option<String>, bool)> = sqlx::query_as(
+                "SELECT zone_id, smart_routing FROM chats WHERE id = ?1",
+            )
+            .bind(chat_id)
+            .fetch_optional(db)
+            .await?;
+            Ok(match row {
+                Some((_, true)) => TurnMode::Smart,
+                Some((Some(z), false)) => TurnMode::Zone(z),
+                _ => TurnMode::Simple,
+            })
+        }
+    }
+}
+
+/// Materialise a turn mode into a concrete zone + provider, applying any model
+/// override. Smart mode runs the router; if it can't pick (no zones, no router
+/// model, or the pick fails to load) it falls back to a Quick/simple zone.
+async fn zone_for_mode(
+    db: &SqlitePool,
+    http: &reqwest::Client,
+    chat_id: &str,
+    mode: &TurnMode,
+    model_override: Option<&str>,
+) -> AppResult<(Zone, Provider)> {
+    let (mut zone, provider) = match mode {
+        TurnMode::Zone(z) => load_zone_and_provider(db, z).await?,
+        TurnMode::Simple => {
+            let p = default_provider(db).await?;
+            (simple_zone(&p)?, p)
+        }
+        TurnMode::Smart => match route_zone_id(db, http, chat_id).await.ok().flatten() {
+            Some(zid) => match load_zone_and_provider(db, &zid).await {
+                Ok(zp) => zp,
+                Err(_) => {
+                    let p = default_provider(db).await?;
+                    (simple_zone(&p)?, p)
+                }
+            },
+            None => {
+                let p = default_provider(db).await?;
+                (simple_zone(&p)?, p)
+            }
+        },
+    };
+    if let Some(m) = model_override {
+        zone.model = m.to_string();
+    }
+    Ok((zone, provider))
+}
+
+/// Smart-chat router: ask the default model to pick the best zone for the
+/// latest user message. Returns the chosen zone id, or `None` to fall back.
+async fn route_zone_id(
+    db: &SqlitePool,
+    http: &reqwest::Client,
+    chat_id: &str,
+) -> AppResult<Option<String>> {
+    let zones = sqlx::query_as::<_, Zone>(&format!("SELECT {ZONE_COLS} FROM zones ORDER BY name"))
+        .fetch_all(db)
+        .await?;
+    if zones.is_empty() {
+        return Ok(None);
+    }
+
+    let provider = default_provider(db).await?;
+    let model = match provider.default_model.clone().filter(|m| !m.trim().is_empty()) {
+        Some(m) => m,
+        None => return Ok(None),
+    };
+
+    // Latest user message text drives the routing decision.
+    let user_text = sqlx::query_scalar::<_, String>(
+        "SELECT content FROM messages WHERE chat_id = ?1 AND role = 'user' ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(chat_id)
+    .fetch_optional(db)
+    .await?
+    .map(|c| extract_text_parts(&c))
+    .unwrap_or_default();
+    if user_text.trim().is_empty() {
+        return Ok(None);
+    }
+
+    let mut list = String::new();
+    for (i, z) in zones.iter().enumerate() {
+        let blurb = z
+            .system_prompt
+            .as_deref()
+            .map(first_line)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("general assistant");
+        list.push_str(&format!("{}. {} — {}\n", i + 1, z.name, blurb));
+    }
+
+    let prompt = format!(
+        "You are a router that picks the single best assistant to handle a user's message. \
+         The available assistants are:\n\n{list}\nUser message:\n\"\"\"\n{user}\n\"\"\"\n\n\
+         Reply with ONLY the number of the best assistant — nothing else.",
+        list = list,
+        user = user_text.trim(),
+    );
+
+    let req = ChatRequest {
+        model,
+        messages: vec![ChatMessage {
+            role: "user".into(),
+            content: Some(MessageContent::Text(prompt)),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        }],
+        temperature: Some(0.0),
+        max_tokens: Some(2048),
+        top_p: None,
+        tools: None,
+        reasoning_effort: None,
+        stream: false,
+    };
+
+    let client = LlmClient::new(http, &provider.base_url, provider.api_key.as_deref());
+    let resp = client.chat_completion(&req).await?;
+    let raw = resp
+        .choices
+        .first()
+        .and_then(|c| match &c.message.content {
+            Some(MessageContent::Text(s)) => Some(s.clone()),
+            Some(MessageContent::Parts(parts)) => Some(
+                parts
+                    .iter()
+                    .filter_map(|p| match p {
+                        ContentPart::Text { text } => Some(text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            ),
+            None => None,
+        })
+        .unwrap_or_default();
+    let answer = strip_thinking_blocks(&raw);
+
+    // Prefer the first number in the reply (1-based index into `zones`).
+    if let Some(idx) = first_number(&answer) {
+        if idx >= 1 && idx <= zones.len() {
+            return Ok(Some(zones[idx - 1].id.clone()));
+        }
+    }
+    // Fall back to a case-insensitive name match.
+    let lower = answer.to_lowercase();
+    if let Some(z) = zones.iter().find(|z| lower.contains(&z.name.to_lowercase())) {
+        return Ok(Some(z.id.clone()));
+    }
+    Ok(None)
+}
+
+/// First line of a string, trimmed.
+fn first_line(s: &str) -> &str {
+    s.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("")
+}
+
+/// First base-10 integer appearing in `s`, if any.
+fn first_number(s: &str) -> Option<usize> {
+    let mut digits = String::new();
+    for ch in s.chars() {
+        if ch.is_ascii_digit() {
+            digits.push(ch);
+        } else if !digits.is_empty() {
+            break;
+        }
+    }
+    digits.parse().ok()
+}
+
+/// Join the text parts of a stored message's content JSON.
+fn extract_text_parts(content_json: &str) -> String {
+    let parts: Vec<ContentPart> = serde_json::from_str(content_json).unwrap_or_default();
+    parts
+        .iter()
+        .filter_map(|p| match p {
+            ContentPart::Text { text } | ContentPart::HiddenText { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 async fn run_agentic_loop(
     ctx: &EngineCtx,
     sink: &StreamSink,
     chat_id: &str,
+    ov: &TurnOverride,
     cancel: Arc<AtomicBool>,
 ) -> AppResult<()> {
     let tool_ctx = load_tool_context(&ctx.db).await;
 
-    // Resolve the chat's current primary zone. This is re-checked after every
-    // tool-execution phase so the `change_zone` tool can switch zones mid-turn.
-    let mut current_zone_id = sqlx::query_scalar::<_, Option<String>>(
-        "SELECT zone_id FROM chats WHERE id = ?1",
-    )
-    .bind(chat_id)
-    .fetch_optional(&ctx.db)
-    .await?
-    .flatten()
-    .ok_or_else(|| AppError::Invalid("chat has no zone".into()))?;
+    // Resolve the turn's mode (override → chat state) and materialise its zone.
+    // Smart mode routes here via the default model.
+    let mode = resolve_turn_mode(&ctx.db, chat_id, ov).await?;
+    let is_zone_mode = matches!(mode, TurnMode::Zone(_));
+    let (mut zone, mut provider) =
+        zone_for_mode(&ctx.db, &ctx.http, chat_id, &mode, ov.model.as_deref()).await?;
 
-    let (mut zone, mut provider) = load_zone_and_provider(&ctx.db, &current_zone_id).await?;
+    // The chat's stored primary zone, tracked so the `change_zone` tool can
+    // switch zones mid-turn. Only meaningful in plain Zone mode with no
+    // override — Smart and Simple pin their zone for the whole turn.
+    let mut current_zone_id: Option<String> = if !ov.is_active() && is_zone_mode {
+        Some(zone.id.clone())
+    } else {
+        None
+    };
     let mut tools = build_tools_for_zone(&zone, &tool_ctx);
     let mut zone_config: Value =
         serde_json::from_str(&zone.tool_config).unwrap_or(Value::Object(Default::default()));
@@ -716,21 +1068,25 @@ async fn run_agentic_loop(
 
         // A tool may have switched the chat's primary zone (`change_zone`). If so,
         // reload the zone/provider/tools and continue the loop under the new zone.
-        let latest_zone_id = sqlx::query_scalar::<_, Option<String>>(
-            "SELECT zone_id FROM chats WHERE id = ?1",
-        )
-        .bind(chat_id)
-        .fetch_optional(&ctx.db)
-        .await?
-        .flatten();
+        // Skipped while a one-shot override is active, or in Smart/Simple mode,
+        // so the resolved zone holds for the whole turn.
+        let latest_zone_id = if ov.is_active() || !is_zone_mode {
+            None
+        } else {
+            sqlx::query_scalar::<_, Option<String>>("SELECT zone_id FROM chats WHERE id = ?1")
+                .bind(chat_id)
+                .fetch_optional(&ctx.db)
+                .await?
+                .flatten()
+        };
 
         if let Some(new_zone_id) = latest_zone_id {
-            if new_zone_id != current_zone_id {
+            if Some(&new_zone_id) != current_zone_id.as_ref() {
                 // If reloading fails (e.g. the new zone lacks a provider), keep
                 // going on the current zone rather than aborting the turn.
                 match load_zone_and_provider(&ctx.db, &new_zone_id).await {
                     Ok((new_zone, new_provider)) => {
-                        current_zone_id = new_zone_id.clone();
+                        current_zone_id = Some(new_zone_id.clone());
                         zone = new_zone;
                         provider = new_provider;
                         tools = build_tools_for_zone(&zone, &tool_ctx);

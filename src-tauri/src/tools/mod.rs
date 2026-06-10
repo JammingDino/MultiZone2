@@ -149,6 +149,27 @@ impl ToolId {
     }
 }
 
+/// Tool ids classified as "safe" (safety level 0). Used as the default toolset
+/// for quick/simple chats so the default model is useful out of the box without
+/// exposing anything that needs approval.
+pub fn safe_tool_ids() -> Vec<&'static str> {
+    [
+        ToolId::DateTime,
+        ToolId::WebSearch,
+        ToolId::CodeExec,
+        ToolId::FileSystem,
+        ToolId::RenderGraph,
+        ToolId::AskUser,
+        ToolId::ManageTags,
+        ToolId::SwitchZone,
+        ToolId::Shell,
+    ]
+    .into_iter()
+    .filter(|t| t.safety_level() == 0)
+    .map(ToolId::as_str)
+    .collect()
+}
+
 /// Map a raw tool function name to its safety level.
 /// 0 = safe, 1 = moderate, 2 = dangerous.
 pub fn tool_safety_by_name(name: &str) -> u8 {

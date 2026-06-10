@@ -63,6 +63,8 @@ export interface PendingApproval {
 interface AppStore {
   // collections
   providers: Provider[];
+  /** True once the first providers fetch has completed (gates onboarding). */
+  providersLoaded: boolean;
   zones: Zone[];
   chats: Chat[];
   projects: Project[];
@@ -91,6 +93,8 @@ interface AppStore {
   loadThemeFromBackend: () => Promise<void>;
 
   appSettings: AppSettings;
+  /** True once app settings have been read from the backend (gates seeding). */
+  appSettingsLoaded: boolean;
   loadAppSettings: () => Promise<void>;
   setAppSettings: (partial: Partial<AppSettings>) => Promise<void>;
 
@@ -110,6 +114,7 @@ interface AppStore {
   applyStreamEvent: (chatId: string, event: import("@/lib/types").StreamEvent, perspectiveZoneId?: string) => void;
   setChatTitle: (chatId: string, title: string) => void;
   setChatZone: (chatId: string, zoneId: string | null) => Promise<void>;
+  setChatSmart: (chatId: string, smart: boolean) => Promise<void>;
   regenerateTitle: (chatId: string) => Promise<void>;
   respondApproval: (chatId: string, approved: boolean) => Promise<void>;
 
@@ -226,6 +231,7 @@ function applyThemeToDom(theme: ThemePrefs) {
 
 export const useApp = create<AppStore>((set, get) => ({
   providers: [],
+  providersLoaded: false,
   zones: [],
   chats: [],
   projects: [],
@@ -243,6 +249,7 @@ export const useApp = create<AppStore>((set, get) => ({
   statsByMessage: {},
   theme: DEFAULT_THEME,
   appSettings: DEFAULT_APP_SETTINGS,
+  appSettingsLoaded: false,
 
   settingsOpen: false,
   zoneEditorOpen: false,
@@ -254,7 +261,7 @@ export const useApp = create<AppStore>((set, get) => ({
 
   async refreshProviders() {
     const providers = await api.listProviders();
-    set({ providers });
+    set({ providers, providersLoaded: true });
   },
   async refreshZones() {
     const zones = await api.listZones();
@@ -574,7 +581,19 @@ export const useApp = create<AppStore>((set, get) => ({
   async setChatZone(chatId, zoneId) {
     await api.setChatZone(chatId, zoneId);
     set((s) => ({
-      chats: s.chats.map((c) => (c.id === chatId ? { ...c, zoneId } : c)),
+      chats: s.chats.map((c) =>
+        c.id === chatId ? { ...c, zoneId, smartRouting: false } : c,
+      ),
+    }));
+  },
+  async setChatSmart(chatId, smart) {
+    await api.setChatSmart(chatId, smart);
+    set((s) => ({
+      chats: s.chats.map((c) =>
+        c.id === chatId
+          ? { ...c, smartRouting: smart, zoneId: smart ? null : c.zoneId }
+          : c,
+      ),
     }));
   },
   async regenerateTitle(chatId) {
@@ -642,6 +661,8 @@ export const useApp = create<AppStore>((set, get) => ({
       }
     } catch (e) {
       console.warn("failed to load app settings", e);
+    } finally {
+      set({ appSettingsLoaded: true });
     }
   },
   async setAppSettings(partial) {

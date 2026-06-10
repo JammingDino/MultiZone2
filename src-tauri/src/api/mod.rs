@@ -7,7 +7,7 @@
 //! from the Settings UI via the `apply_api_settings` command.
 
 use crate::commands::messages::{
-    run_regenerate_entry, run_send_entry, EngineCtx, InputPart, StreamSink,
+    run_regenerate_entry, run_send_entry, EngineCtx, InputPart, StreamSink, TurnOverride,
 };
 use crate::commands::{new_id, now_ts};
 use crate::db::models::{Chat, ChatZone, Message, Project, Tag, Zone};
@@ -38,7 +38,7 @@ use tokio::sync::{oneshot, RwLock};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 const CHAT_COLS: &str =
-    "id, title, zone_id, project_id, project_context_enabled, perspective_mode, created_at, updated_at";
+    "id, title, zone_id, project_id, project_context_enabled, perspective_mode, smart_routing, created_at, updated_at";
 const MSG_COLS: &str =
     "id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, created_at";
 
@@ -419,7 +419,7 @@ async fn send_message(
         // Blocking: run to completion, then return the turn's new primary messages.
         let start = now_ts();
         let sink = StreamSink::tauri(st.app.clone());
-        run_send_entry(&ctx, &sink, &chat_id, parts).await?;
+        run_send_entry(&ctx, &sink, &chat_id, parts, TurnOverride::default()).await?;
         let rows = sqlx::query_as::<_, Message>(&format!(
             "SELECT {MSG_COLS} FROM messages
              WHERE chat_id = ?1 AND zone_id IS NULL AND created_at >= ?2
@@ -438,7 +438,7 @@ async fn send_message(
     let sink = StreamSink::api(st.app.clone(), tx);
     tokio::spawn(async move {
         // Dropping `sink` (and thus the sender) when this finishes ends the SSE.
-        let _ = run_send_entry(&ctx, &sink, &chat_id, parts).await;
+        let _ = run_send_entry(&ctx, &sink, &chat_id, parts, TurnOverride::default()).await;
     });
 
     let stream = UnboundedReceiverStream::new(rx)

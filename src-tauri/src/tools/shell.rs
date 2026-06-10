@@ -1,7 +1,8 @@
 use crate::error::AppResult;
 use crate::llm::types::{Tool, ToolFunction};
-use serde_json::{json, Value};
 use std::process::Stdio;
+use serde_json::{json, Value};
+use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::time::{timeout, Duration};
 
@@ -10,7 +11,7 @@ pub fn definition() -> Tool {
         tool_type: "function".into(),
         function: ToolFunction {
             name: "run_command".into(),
-            description: "Run a shell/terminal command in the chat's working directory. Returns stdout, stderr, and the exit code. Use for running scripts, listing files, installing packages, building projects, or any terminal operation. On Windows the default shell is cmd; on other platforms it is bash/sh.".into(),
+            description: "Run a shell/terminal command in the chat's working directory. Returns stdout, stderr, and the exit code. Use for running scripts, listing files, installing packages, building projects, or any terminal operation. On Windows the default shell is PowerShell; on other platforms it is bash/sh.".into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -21,13 +22,23 @@ pub fn definition() -> Tool {
                     "shell": {
                         "type": "string",
                         "enum": ["auto", "cmd", "powershell", "bash"],
-                        "description": "Shell to use. 'auto' picks cmd on Windows and bash/sh on Unix."
+                        "description": "Shell to use. 'auto' picks PowerShell on Windows and bash/sh on Unix."
                     }
                 },
                 "required": ["command"]
             }),
         },
     }
+}
+
+/// One way to launch the command. `stdin` carries the script when the shell
+/// reads its command from standard input (the robust path for PowerShell on
+/// Windows, which side-steps argument-quoting bugs); otherwise the command is
+/// already baked into `args` and stdin is left empty.
+struct Candidate {
+    prog: String,
+    args: Vec<String>,
+    stdin: Option<String>,
 }
 
 pub async fn run(args: &Value, zone_config: &Value, project_dir: Option<&str>) -> AppResult<String> {
@@ -45,27 +56,39 @@ pub async fn run(args: &Value, zone_config: &Value, project_dir: Option<&str>) -
     let mut spawned = None;
     let mut last_err = String::new();
 
-    for (prog, prog_args) in &candidates {
-        let mut cmd = Command::new(prog);
-        cmd.args(prog_args)
-            .stdin(Stdio::null())
+    for cand in &candidates {
+        let mut cmd = Command::new(&cand.prog);
+        cmd.args(&cand.args)
+            .stdin(if cand.stdin.is_some() { Stdio::piped() } else { Stdio::null() })
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stderr(Stdio::piped())
+            // Kill the child if we drop it (e.g. on timeout) so it doesn't orphan.
+            .kill_on_drop(true);
 
         if let Some(dir) = project_dir {
             cmd.current_dir(dir);
         }
 
-        // Always suppress console windows for background shell commands on Windows.
+        // Suppress the transient console window on Windows.
         #[cfg(windows)]
         {
-            use std::os::windows::process::CommandExt;
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
 
         match cmd.spawn() {
-            Ok(c) => { spawned = Some(c); break; }
+            Ok(mut child) => {
+                // Feed the command via stdin when the shell expects it.
+                if let Some(script) = &cand.stdin {
+                    if let Some(mut stdin) = child.stdin.take() {
+                        let _ = stdin.write_all(script.as_bytes()).await;
+                        let _ = stdin.shutdown().await;
+                        drop(stdin);
+                    }
+                }
+                spawned = Some(child);
+                break;
+            }
             Err(e) => { last_err = e.to_string(); }
         }
     }
@@ -95,22 +118,47 @@ pub async fn run(args: &Value, zone_config: &Value, project_dir: Option<&str>) -
     }
 }
 
-/// Returns a list of (program, args) candidates to try in order.
-fn build_candidates(command: &str, shell: &str) -> Vec<(String, Vec<String>)> {
+/// Prefix that forces PowerShell to emit UTF-8 on its piped stdout/stderr so the
+/// captured bytes decode cleanly instead of arriving in the OEM code page.
+const PS_UTF8_PREFIX: &str =
+    "$OutputEncoding=[Console]::OutputEncoding=[System.Text.Encoding]::UTF8\n";
+
+/// PowerShell candidate: read the command from stdin (`-Command -`) rather than
+/// passing it as an argument. This avoids Windows argument-quoting corruption
+/// for commands containing quotes, `$`, or newlines.
+fn powershell_candidate(prog: &str, command: &str) -> Candidate {
+    Candidate {
+        prog: prog.into(),
+        args: vec![
+            "-NoProfile".into(),
+            "-NonInteractive".into(),
+            "-Command".into(),
+            "-".into(),
+        ],
+        stdin: Some(format!("{PS_UTF8_PREFIX}{command}")),
+    }
+}
+
+/// Returns the launch candidates to try in order.
+fn build_candidates(command: &str, shell: &str) -> Vec<Candidate> {
+    let arg = |prog: &str, args: Vec<String>| Candidate { prog: prog.into(), args, stdin: None };
     let c = command.to_string();
 
     #[cfg(windows)]
     {
         match shell {
-            "bash" => vec![
-                ("bash".into(), vec!["-c".into(), c]),
-            ],
+            "bash" => vec![arg("bash", vec!["-c".into(), c])],
+            "cmd" => vec![arg("cmd", vec!["/C".into(), c])],
             "powershell" => vec![
-                ("pwsh".into(),        vec!["-NoProfile".into(), "-NonInteractive".into(), "-Command".into(), c.clone()]),
-                ("powershell".into(),  vec!["-NoProfile".into(), "-NonInteractive".into(), "-Command".into(), c]),
+                powershell_candidate("pwsh", command),
+                powershell_candidate("powershell", command),
             ],
+            // auto → PowerShell first (pwsh, then Windows PowerShell), cmd as a
+            // last-resort fallback if no PowerShell is present.
             _ => vec![
-                ("cmd".into(), vec!["/C".into(), c]),
+                powershell_candidate("pwsh", command),
+                powershell_candidate("powershell", command),
+                arg("cmd", vec!["/C".into(), c]),
             ],
         }
     }
@@ -118,16 +166,14 @@ fn build_candidates(command: &str, shell: &str) -> Vec<(String, Vec<String>)> {
     #[cfg(not(windows))]
     {
         match shell {
-            "powershell" => vec![
-                ("pwsh".into(), vec!["-NoProfile".into(), "-NonInteractive".into(), "-Command".into(), c]),
-            ],
+            "powershell" => vec![powershell_candidate("pwsh", command)],
             "cmd" => vec![
-                ("bash".into(), vec!["-c".into(), c.clone()]),
-                ("sh".into(),   vec!["-c".into(), c]),
+                arg("bash", vec!["-c".into(), c.clone()]),
+                arg("sh", vec!["-c".into(), c]),
             ],
             _ => vec![
-                ("bash".into(), vec!["-c".into(), c.clone()]),
-                ("sh".into(),   vec!["-c".into(), c]),
+                arg("bash", vec!["-c".into(), c.clone()]),
+                arg("sh", vec!["-c".into(), c]),
             ],
         }
     }

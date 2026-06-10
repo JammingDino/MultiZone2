@@ -69,7 +69,10 @@ pub async fn run(args: &Value, zone_config: &Value) -> AppResult<String> {
         ),
         "node" => (&["node", "nodejs"][..], vec!["-"]),
         "bash" => (&["bash"][..], vec!["-s"]),
-        "powershell" => (&["pwsh", "powershell"][..], vec!["-Command", "-"]),
+        "powershell" => (
+            &["pwsh", "powershell"][..],
+            vec!["-NoProfile", "-NonInteractive", "-Command", "-"],
+        ),
         _ => {
             return Ok(json!({
                 "error": format!("unsupported language: {language}"),
@@ -92,10 +95,11 @@ pub async fn run(args: &Value, zone_config: &Value) -> AppResult<String> {
         cmd.args(&prog_args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stderr(Stdio::piped())
+            // Kill the child if dropped (e.g. on timeout) so it doesn't orphan.
+            .kill_on_drop(true);
         #[cfg(windows)]
         if headless {
-            use std::os::windows::process::CommandExt;
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
@@ -134,7 +138,17 @@ pub async fn run(args: &Value, zone_config: &Value) -> AppResult<String> {
     };
 
     if let Some(mut stdin) = child.stdin.take() {
+        // For PowerShell, force UTF-8 on its piped output so captured bytes
+        // decode cleanly instead of arriving in the OEM code page.
+        if language == "powershell" {
+            let _ = stdin
+                .write_all(
+                    b"$OutputEncoding=[Console]::OutputEncoding=[System.Text.Encoding]::UTF8\n",
+                )
+                .await;
+        }
         let _ = stdin.write_all(code.as_bytes()).await;
+        let _ = stdin.shutdown().await;
         drop(stdin);
     }
 

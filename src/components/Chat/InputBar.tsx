@@ -13,7 +13,7 @@ const SMART_ZONE_ID = "__smart__";
 const OV_FIELD_CLS =
   "w-full rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs outline-none focus:border-[var(--color-accent)]";
 
-interface PendingAttachment {
+export interface PendingAttachment {
   id: string;
   fileName: string;
   fileType: "image" | "pdf" | "text" | "other";
@@ -406,7 +406,7 @@ function OvChip({
   );
 }
 
-function AttachmentChip({
+export function AttachmentChip({
   attachment,
   onRemove,
   onPreview,
@@ -451,7 +451,7 @@ function AttachmentChip({
   );
 }
 
-function AttachmentPreview({
+export function AttachmentPreview({
   attachment,
   onClose,
 }: {
@@ -538,7 +538,7 @@ function AttachmentPreview({
 // inflate the base64 payload sent to the model on every turn.
 const MAX_IMAGE_PX = 1280;
 
-async function readFileAsDataUrl(file: File): Promise<string> {
+export async function readFileAsDataUrl(file: File): Promise<string> {
   const raw = await new Promise<string>((resolve, reject) => {
     const r = new FileReader();
     r.onload = () => resolve(r.result as string);

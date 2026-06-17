@@ -30,9 +30,103 @@ pub enum StreamEvent {
     Error { message: String },
 }
 
+/// Stateful parser that splits inline `<think>…</think>` blocks out of the
+/// content token stream. Used for models (e.g. Gemma) that embed thinking in
+/// the normal content field rather than a dedicated `reasoning_content` field.
+struct InlineThinkParser {
+    in_think: bool,
+    /// Bytes that might be the start of an opening or closing tag.
+    pending: String,
+}
+
+impl InlineThinkParser {
+    fn new() -> Self {
+        Self { in_think: false, pending: String::new() }
+    }
+
+    /// Feed a new text delta; emits to `on_event` and accumulates into `agg`.
+    fn push<F>(&mut self, text: &str, agg: &mut StreamAggregate, on_event: &mut F)
+    where
+        F: FnMut(StreamEvent),
+    {
+        self.pending.push_str(text);
+        self.drain(agg, on_event);
+    }
+
+    /// Call after the stream ends to flush any remaining buffered text.
+    fn flush<F>(&mut self, agg: &mut StreamAggregate, on_event: &mut F)
+    where
+        F: FnMut(StreamEvent),
+    {
+        if !self.pending.is_empty() {
+            let text = std::mem::take(&mut self.pending);
+            if self.in_think {
+                agg.reasoning.push_str(&text);
+                on_event(StreamEvent::ThinkingToken { delta: text });
+            } else {
+                agg.content.push_str(&text);
+                on_event(StreamEvent::Token { delta: text });
+            }
+        }
+    }
+
+    fn drain<F>(&mut self, agg: &mut StreamAggregate, on_event: &mut F)
+    where
+        F: FnMut(StreamEvent),
+    {
+        const OPEN: &str = "<think>";
+        const CLOSE: &str = "</think>";
+
+        loop {
+            if !self.in_think {
+                if let Some(pos) = self.pending.find(OPEN) {
+                    if pos > 0 {
+                        let before = self.pending[..pos].to_string();
+                        agg.content.push_str(&before);
+                        on_event(StreamEvent::Token { delta: before });
+                    }
+                    self.pending = self.pending[pos + OPEN.len()..].to_string();
+                    self.in_think = true;
+                } else {
+                    // Emit all but the last (tag_len - 1) bytes — they might be
+                    // the start of a tag that spans chunk boundaries.
+                    let safe = self.pending.len().saturating_sub(OPEN.len() - 1);
+                    if safe > 0 {
+                        let emit = self.pending[..safe].to_string();
+                        agg.content.push_str(&emit);
+                        on_event(StreamEvent::Token { delta: emit });
+                        self.pending = self.pending[safe..].to_string();
+                    }
+                    break;
+                }
+            } else {
+                if let Some(pos) = self.pending.find(CLOSE) {
+                    if pos > 0 {
+                        let think = self.pending[..pos].to_string();
+                        agg.reasoning.push_str(&think);
+                        on_event(StreamEvent::ThinkingToken { delta: think });
+                    }
+                    self.pending = self.pending[pos + CLOSE.len()..].to_string();
+                    self.in_think = false;
+                } else {
+                    let safe = self.pending.len().saturating_sub(CLOSE.len() - 1);
+                    if safe > 0 {
+                        let think = self.pending[..safe].to_string();
+                        agg.reasoning.push_str(&think);
+                        on_event(StreamEvent::ThinkingToken { delta: think });
+                        self.pending = self.pending[safe..].to_string();
+                    }
+                    break;
+                }
+            }
+        }
+    }
+}
+
 pub async fn consume_stream<F>(
     response: reqwest::Response,
     cancel: Arc<AtomicBool>,
+    parse_inline_think: bool,
     mut on_event: F,
 ) -> AppResult<StreamAggregate>
 where
@@ -40,6 +134,7 @@ where
 {
     let mut agg = StreamAggregate::default();
     let mut tool_acc: HashMap<usize, ToolCall> = HashMap::new();
+    let mut think_parser = if parse_inline_think { Some(InlineThinkParser::new()) } else { None };
 
     let mut stream = response.bytes_stream().eventsource();
 
@@ -78,8 +173,12 @@ where
                     }
                     if let Some(text) = &choice.delta.content {
                         if !text.is_empty() {
-                            agg.content.push_str(text);
-                            on_event(StreamEvent::Token { delta: text.clone() });
+                            if let Some(parser) = &mut think_parser {
+                                parser.push(text, &mut agg, &mut on_event);
+                            } else {
+                                agg.content.push_str(text);
+                                on_event(StreamEvent::Token { delta: text.clone() });
+                            }
                         }
                     }
                     if let Some(deltas) = choice.delta.tool_calls {
@@ -94,6 +193,11 @@ where
                 return Err(crate::error::AppError::Other(e.to_string()));
             }
         }
+    }
+
+    // Flush any buffered tag fragments from the inline-think parser.
+    if let Some(parser) = &mut think_parser {
+        parser.flush(&mut agg, &mut on_event);
     }
 
     // Flatten tool calls in index order

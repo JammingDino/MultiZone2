@@ -30,9 +30,9 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [x] Migrate gracefully: zones that have web_search config in tool_config — read once, write to global settings, clear from zone
 
 **Gemma thinking support**
-- [ ] Detect Gemma models by model name (contains "gemma")
-- [ ] For Gemma models with thinking enabled: parse `<think>...</think>` tags in streamed output instead of sending `reasoning_effort` parameter (unsupported by Gemma)
-- [ ] Verify thinking blocks render correctly for Gemma output
+- [x] Detect Gemma models by model name (contains "gemma")
+- [x] For Gemma models with thinking enabled: parse `<think>...</think>` tags in streamed output instead of sending `reasoning_effort` parameter (unsupported by Gemma)
+- [x] Verify thinking blocks render correctly for Gemma output
 
 ---
 

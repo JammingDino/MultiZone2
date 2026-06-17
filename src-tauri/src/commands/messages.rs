@@ -832,11 +832,15 @@ async fn run_agentic_loop(
             },
         );
 
-        let reasoning_effort = if zone.thinking_enabled {
+        // Gemma models embed thinking in `<think>…</think>` tags inside the
+        // normal content field; they don't support the reasoning_effort param.
+        let is_gemma = zone.model.to_lowercase().contains("gemma");
+        let reasoning_effort = if zone.thinking_enabled && !is_gemma {
             Some("medium".to_string())
         } else {
             None
         };
+        let parse_inline_think = zone.thinking_enabled && is_gemma;
 
         let req = ChatRequest {
             model: zone.model.clone(),
@@ -853,7 +857,7 @@ async fn run_agentic_loop(
 
         let sink_for_emit = sink.clone();
         let chat_id_for_emit = chat_id.to_string();
-        let agg = consume_stream(response, cancel.clone(), move |ev| match ev {
+        let agg = consume_stream(response, cancel.clone(), parse_inline_think, move |ev| match ev {
             StreamEvent::Token { delta } => {
                 sink_for_emit.emit(&chat_id_for_emit, StreamPayload::Token { delta });
             }
@@ -1285,11 +1289,13 @@ async fn run_perspective(
         StreamPayload::AssistantStart { message_id: msg_id.clone() },
     );
 
-    let reasoning_effort = if zone.thinking_enabled {
+    let is_gemma = zone.model.to_lowercase().contains("gemma");
+    let reasoning_effort = if zone.thinking_enabled && !is_gemma {
         Some("medium".to_string())
     } else {
         None
     };
+    let parse_inline_think = zone.thinking_enabled && is_gemma;
 
     let req = crate::llm::types::ChatRequest {
         model: zone.model.clone(),
@@ -1309,7 +1315,7 @@ async fn run_perspective(
     let chat_id_clone = chat_id.to_string();
     let zone_id_clone = zone_id.to_string();
 
-    let agg = crate::llm::streaming::consume_stream(response, cancel.clone(), move |ev| match ev {
+    let agg = crate::llm::streaming::consume_stream(response, cancel.clone(), parse_inline_think, move |ev| match ev {
         crate::llm::streaming::StreamEvent::Token { delta } => {
             sink_clone.emit_persp(&chat_id_clone, &zone_id_clone, StreamPayload::Token { delta });
         }

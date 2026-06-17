@@ -1,0 +1,124 @@
+<mxfile host="65bd71144e">
+    <diagram id="fl-sQOUl-qu4Ojit61dh" name="Page-1">
+        <mxGraphModel dx="2569" dy="1091" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="400" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="22" value="&lt;h1&gt;Chat modes&lt;/h1&gt;" style="whiteSpace=wrap;html=1;verticalAlign=top;" vertex="1" parent="1">
+                    <mxGeometry x="-20" y="-100" width="2190" height="540" as="geometry"/>
+                </mxCell>
+                <mxCell id="29" value="" style="group;" vertex="1" connectable="0" parent="1">
+                    <mxGeometry y="-40" width="700" height="460" as="geometry"/>
+                </mxCell>
+                <mxCell id="6" value="Multizone mode" style="whiteSpace=wrap;html=1;horizontal=1;verticalAlign=top;movable=1;resizable=1;rotatable=1;deletable=1;editable=1;locked=0;connectable=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="29">
+                    <mxGeometry width="700" height="460" as="geometry"/>
+                </mxCell>
+                <mxCell id="27" value="&lt;p&gt;&lt;span style=&quot;color: rgb(0, 0, 0);&quot;&gt;Most advanced mode, generally seen as a competetor to deep research, though that may eventually become something too, it could be seen as a more multi-step and deeper deep research, as it uses multiple models, will consume lots of tokens and try to be as factual as possible.&lt;/span&gt;&lt;/p&gt;" style="whiteSpace=wrap;html=1;fontSize=10;textShadow=0;labelBorderColor=none;rounded=0;glass=0;shadow=0;fillColor=none;strokeColor=none;" vertex="1" parent="29">
+                    <mxGeometry x="250" y="30" width="200" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="7" value="" style="group" vertex="1" connectable="0" parent="1">
+                    <mxGeometry x="20" y="-20" width="220" height="140" as="geometry"/>
+                </mxCell>
+                <mxCell id="2" value="&lt;h2&gt;Response Leader&lt;/h2&gt;" style="whiteSpace=wrap;html=1;" vertex="1" parent="7">
+                    <mxGeometry width="220" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="5" value="&lt;p&gt;&lt;font style=&quot;line-height: 80%;&quot;&gt;The job of this agent is to directly interact with the user, as well as interact with all the other sub-agents on the users behalf. Each agent will only be able to communicate through the response leader. The leader will manage multiple multi-turn chats between each different agent. It will act as the main coordinator and will present ideas (even if it disagrees with them to other agents), this so agents will only ever be given opposing views, where that view came from doesnt really matter, it is just to ensure that they are all thoughouly thinking about what they are producing.&lt;/font&gt;&lt;/p&gt;" style="whiteSpace=wrap;html=1;fontSize=8;textShadow=0;labelBorderColor=none;fontColor=default;gradientColor=none;strokeColor=default;rounded=0;glass=0;shadow=0;" vertex="1" parent="7">
+                    <mxGeometry y="30" width="220" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="8" value="Quick Chat mode" style="whiteSpace=wrap;html=1;horizontal=1;verticalAlign=top;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+                    <mxGeometry x="1440" y="-40" width="700" height="400" as="geometry"/>
+                </mxCell>
+                <mxCell id="10" value="" style="group" vertex="1" connectable="0" parent="1">
+                    <mxGeometry x="460" y="-20" width="220" height="140" as="geometry"/>
+                </mxCell>
+                <mxCell id="11" value="&lt;h2&gt;Sub-Agent&lt;/h2&gt;" style="whiteSpace=wrap;html=1;" vertex="1" parent="10">
+                    <mxGeometry width="220" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="12" value="&lt;p&gt;&lt;font style=&quot;line-height: 80%;&quot;&gt;The sub-agents will all be given their own unique prompts, or at least will all be a model with a different temperature, though likely a completely different model. They will be givien their tasks from the response leader and will try to provide evidence or clear reasoning alongside any answer or peice of evidence they provide, this is so that it can later be challenged or accepted by a different sub-agent&lt;/font&gt;&lt;/p&gt;" style="whiteSpace=wrap;html=1;fontSize=8;textShadow=0;labelBorderColor=none;fontColor=default;gradientColor=none;strokeColor=default;rounded=0;glass=0;shadow=0;" vertex="1" parent="10">
+                    <mxGeometry y="30" width="220" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="14" value="Tools" style="whiteSpace=wrap;html=1;verticalAlign=top;" vertex="1" parent="1">
+                    <mxGeometry x="20" y="150" width="290" height="250" as="geometry"/>
+                </mxCell>
+                <mxCell id="16" value="&lt;p&gt;&lt;span style=&quot;color: rgb(0, 0, 0);&quot;&gt;Sub-agent tools, this will include things like being able to spawn new subagents and pick which zone to assign to that given subagent, as well as maintain or ask for new pieces of information from that model, it will work similarly to how the chat api works, but instead of any given messages being sent by the user, they will be sent off by the subagents, in what is a subchat. The chat will be between the reponse leader and the sub-agent.&lt;br&gt;&lt;br&gt;Within the UI there will be an in-depth stack tracer that lets you see everything from the perspective of the response leader, however due to the chat api, you will also be able to explore each individual chat between the response lead and all the sub-agents&lt;/span&gt;&lt;/p&gt;" style="whiteSpace=wrap;html=1;fontSize=8;textShadow=0;labelBorderColor=none;fontColor=default;gradientColor=none;strokeColor=default;rounded=0;glass=0;shadow=0;" vertex="1" parent="1">
+                    <mxGeometry x="20" y="170" width="290" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="18" style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;rounded=1;" edge="1" parent="1" source="5" target="14">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="19" value="&lt;p&gt;&lt;font color=&quot;#000000&quot;&gt;Present file tools, these will be used at the end of any given run, and will often be presented as HTML, there will be a specific agent dedicated to creating simple clean elegent and good html to present reports without lossing any data, this is optional, otherwise it will serve markdown like normal with buttons or links to presented files, such as if there is an error within a PDF it will produce a link to a button that will open that PDF at the point of the error&lt;/font&gt;&lt;/p&gt;" style="whiteSpace=wrap;html=1;fontSize=8;textShadow=0;labelBorderColor=none;fontColor=default;gradientColor=none;strokeColor=default;rounded=0;glass=0;shadow=0;" vertex="1" parent="1">
+                    <mxGeometry x="20" y="290" width="290" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="20" value="&lt;p&gt;&lt;font color=&quot;#000000&quot;&gt;While it is by no means a significant tool, only the response leader will be able to ask the user questions, none of the other models will be able to interact with the user&lt;/font&gt;&lt;/p&gt;" style="whiteSpace=wrap;html=1;fontSize=8;textShadow=0;labelBorderColor=none;fontColor=default;gradientColor=none;strokeColor=default;rounded=0;glass=0;shadow=0;" vertex="1" parent="1">
+                    <mxGeometry x="20" y="360" width="290" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="31" value="" style="group" vertex="1" connectable="0" parent="1">
+                    <mxGeometry x="720" y="-40" width="700" height="400" as="geometry"/>
+                </mxCell>
+                <mxCell id="9" value="Smart Zone Mode" style="whiteSpace=wrap;html=1;horizontal=1;verticalAlign=top;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="31">
+                    <mxGeometry width="700" height="400" as="geometry"/>
+                </mxCell>
+                <mxCell id="30" value="&lt;p&gt;&lt;span style=&quot;color: rgb(0, 0, 0);&quot;&gt;This is more similar to a normal chat, however after you send your prompt, an agent similar to the response leader will direct you to the most relevant zone who will then be the one who responds, this means you get a lightly more tailered response from a more relevant zone&lt;/span&gt;&lt;/p&gt;" style="whiteSpace=wrap;html=1;fontSize=10;textShadow=0;labelBorderColor=none;rounded=0;glass=0;shadow=0;fillColor=none;strokeColor=none;" vertex="1" parent="31">
+                    <mxGeometry x="250" y="30" width="200" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="32" value="&lt;p&gt;&lt;span style=&quot;color: rgb(0, 0, 0);&quot;&gt;Most Basic chat mode, you ask a question, and a generic agent with no zone affiliation will resond, best for fast generic question.&lt;/span&gt;&lt;/p&gt;" style="whiteSpace=wrap;html=1;fontSize=10;textShadow=0;labelBorderColor=none;rounded=0;glass=0;shadow=0;fillColor=none;strokeColor=none;" vertex="1" parent="1">
+                    <mxGeometry x="1690" y="-10" width="200" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="33" value="&lt;h1&gt;Settings&lt;/h1&gt;" style="whiteSpace=wrap;html=1;verticalAlign=top;" vertex="1" parent="1">
+                    <mxGeometry x="-920" y="-100" width="880" height="540" as="geometry"/>
+                </mxCell>
+                <mxCell id="37" value="" style="group" vertex="1" connectable="0" parent="1">
+                    <mxGeometry x="-890" y="-40" width="820" height="140" as="geometry"/>
+                </mxCell>
+                <mxCell id="34" value="Providers" style="whiteSpace=wrap;html=1;verticalAlign=top;" vertex="1" parent="37">
+                    <mxGeometry width="820" height="140" as="geometry"/>
+                </mxCell>
+                <mxCell id="35" value="Quick Chat model&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;Pick a model from a given provider, this will be the model that reponds to quick chats&lt;/div&gt;" style="whiteSpace=wrap;html=1;verticalAlign=top;" vertex="1" parent="37">
+                    <mxGeometry x="30" y="30" width="180" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="36" value="New Provider set-up&lt;br&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;Click on the &quot;add provider&quot; button, where you can then name it, add the link to the openai formated api access, and then enter your api key. After saving you can view all the models the providor has to offer.&lt;/div&gt;" style="whiteSpace=wrap;html=1;verticalAlign=top;" vertex="1" parent="37">
+                    <mxGeometry x="230" y="30" width="560" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="38" value="" style="group" connectable="0" vertex="1" parent="1">
+                    <mxGeometry x="-890" y="110" width="820" height="170" as="geometry"/>
+                </mxCell>
+                <mxCell id="39" value="Appearance" style="whiteSpace=wrap;html=1;verticalAlign=top;" vertex="1" parent="38">
+                    <mxGeometry width="820" height="170" as="geometry"/>
+                </mxCell>
+                <mxCell id="40" value="&lt;ul style=&quot;margin-top:0px;&quot;&gt;&lt;li&gt;&lt;b&gt;Color mode:&lt;/b&gt; Toggle between Light and Dark mode&lt;/li&gt;&lt;li&gt;&lt;b&gt;Accent color:&lt;/b&gt; Choose from presets or select a custom color&lt;/li&gt;&lt;li&gt;&lt;b&gt;Typography:&lt;/b&gt; Set custom Google Fonts and adjustable message font size&lt;/li&gt;&lt;li&gt;&lt;b&gt;Visual effects:&lt;/b&gt; Toggle drop shadows and bloom/glow effects&lt;/li&gt;&lt;li&gt;&lt;b&gt;Background effect:&lt;/b&gt; Choose animated background patterns (none, particles, orbs, aurora, grid, stars, etc.) and tweak their speed, density, and opacity&lt;/li&gt;&lt;/ul&gt;" style="whiteSpace=wrap;html=1;verticalAlign=top;align=left;fontSize=11;" vertex="1" parent="38">
+                    <mxGeometry x="30" y="30" width="760" height="120" as="geometry"/>
+                </mxCell>
+                <mxCell id="41" value="" style="group" connectable="0" vertex="1" parent="1">
+                    <mxGeometry x="-890" y="290" width="820" height="140" as="geometry"/>
+                </mxCell>
+                <mxCell id="50" value="" style="group" vertex="1" connectable="0" parent="41">
+                    <mxGeometry width="820" height="140" as="geometry"/>
+                </mxCell>
+                <mxCell id="42" value="Chat" style="whiteSpace=wrap;html=1;verticalAlign=top;" vertex="1" parent="50">
+                    <mxGeometry width="820" height="140" as="geometry"/>
+                </mxCell>
+                <mxCell id="43" value="&lt;ul style=&quot;margin-top:0px;&quot;&gt;&lt;li&gt;&lt;b&gt;Capabilities:&lt;/b&gt; Default zone behavior, Send key (Enter vs Ctrl+Enter), Chat auto-titles, auto-expanding Reasoning blocks&lt;/li&gt;&lt;li&gt;&lt;b&gt;Tool auto-approval:&lt;/b&gt; Control which tool safety classes run automatically (All, Safe+Moderate, Safe only, None)&lt;/li&gt;&lt;li&gt;&lt;b&gt;PDF processing:&lt;/b&gt; How attached PDFs are handled (Images vs Extracted Text) &amp;amp; Default file directory setting&lt;/li&gt;&lt;li&gt;&lt;b&gt;Perspective mode &amp;amp; layout:&lt;/b&gt; Control Sequential vs Parallel running and Stacked vs Column layouts&lt;/li&gt;&lt;/ul&gt;" style="whiteSpace=wrap;html=1;verticalAlign=top;align=left;fontSize=11;" vertex="1" parent="50">
+                    <mxGeometry x="30" y="30" width="760" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="44" value="" style="group" connectable="0" vertex="1" parent="1">
+                    <mxGeometry x="-890" y="440" width="820" height="140" as="geometry"/>
+                </mxCell>
+                <mxCell id="45" value="API" style="whiteSpace=wrap;html=1;verticalAlign=top;" vertex="1" parent="44">
+                    <mxGeometry width="820" height="140" as="geometry"/>
+                </mxCell>
+                <mxCell id="46" value="&lt;ul style=&quot;margin-top:0px;&quot;&gt;&lt;li&gt;&lt;b&gt;Local HTTP API:&lt;/b&gt; Enable and configure a local REST + SSE API to access the app capabilities externally&lt;/li&gt;&lt;li&gt;&lt;b&gt;Configurations:&lt;/b&gt; Specify API server port (default 8765) and automatically generate/copy Secret Bearer Token for authorization&lt;/li&gt;&lt;/ul&gt;" style="whiteSpace=wrap;html=1;verticalAlign=top;align=left;fontSize=11;" vertex="1" parent="44">
+                    <mxGeometry x="30" y="30" width="760" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="47" value="" style="group" connectable="0" vertex="1" parent="1">
+                    <mxGeometry x="-890" y="590" width="820" height="140" as="geometry"/>
+                </mxCell>
+                <mxCell id="48" value="Data" style="whiteSpace=wrap;html=1;verticalAlign=top;" vertex="1" parent="47">
+                    <mxGeometry width="820" height="140" as="geometry"/>
+                </mxCell>
+                <mxCell id="49" value="&lt;ul style=&quot;margin-top:0px;&quot;&gt;&lt;li&gt;&lt;b&gt;Database Stats:&lt;/b&gt; View local metrics (total Chats, Messages, Zones, Projects, and Tags count recorded in the DB)&lt;/li&gt;&lt;li&gt;&lt;b&gt;Reset:&lt;/b&gt; Permanently wipe the database entirely and reset everything back to a clean installation state&lt;/li&gt;&lt;/ul&gt;" style="whiteSpace=wrap;html=1;verticalAlign=top;align=left;fontSize=11;" vertex="1" parent="47">
+                    <mxGeometry x="30" y="30" width="760" height="90" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>

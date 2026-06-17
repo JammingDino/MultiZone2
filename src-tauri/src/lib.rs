@@ -12,6 +12,15 @@ use tracing_subscriber::EnvFilter;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // In release builds windows_subsystem = "windows" silences all console output,
+    // making panics invisible. Write them to a file so crashes are diagnosable.
+    #[cfg(not(debug_assertions))]
+    std::panic::set_hook(Box::new(|info| {
+        let msg = format!("{info}");
+        let path = std::env::temp_dir().join("multizone_crash.txt");
+        let _ = std::fs::write(&path, &msg);
+    }));
+
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env().add_directive("multizone=debug".parse().unwrap()))
         .init();

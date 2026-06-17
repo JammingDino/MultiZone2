@@ -66,6 +66,7 @@ pub fn definition() -> Tool {
 /// }
 /// ```
 /// Recommended default: `"provider": "multi"` — no API key required.
+/// For SearXNG, use a public instance like `https://searx.be` or your own.
 pub async fn run(args: &Value, zone_config: &Value, http: &reqwest::Client) -> AppResult<String> {
     let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("").trim();
     let n = args
@@ -379,17 +380,37 @@ async fn search_searxng(
     endpoint: &str,
 ) -> Result<Vec<SearchHit>, String> {
     if endpoint.is_empty() {
-        return Err("SearXNG endpoint not configured (set endpoint in tool_config)".into());
+        return Err("SearXNG endpoint not configured. Use a public instance like https://searx.be or https://searx.nyc or your own self-hosted instance.".into());
     }
     let url = format!("{}/search", endpoint.trim_end_matches('/'));
     let resp = http
         .get(&url)
+        .header("User-Agent", pick_ua(query))
+        .header("Accept", "application/json")
         .query(&[("q", query), ("format", "json"), ("language", "en")])
         .timeout(std::time::Duration::from_secs(15))
         .send()
         .await
-        .map_err(|e| e.to_string())?;
-    let data: Value = resp.json().await.map_err(|e| e.to_string())?;
+        .map_err(|e| format!("SearXNG request failed: {e}"))?;
+
+    let status = resp.status();
+    if !status.is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!(
+            "SearXNG returned HTTP {}: {}...",
+            status,
+            body.chars().take(200).collect::<String>()
+        ));
+    }
+
+    let text = resp.text().await.map_err(|e| format!("SearXNG read failed: {e}"))?;
+    if !text.trim_start().starts_with('{') {
+        return Err(format!(
+            "SearXNG returned non-JSON response. The instance may be rate-limiting or not support JSON. Got: {}...",
+            text.chars().take(200).collect::<String>()
+        ));
+    }
+    let data: Value = serde_json::from_str(&text).map_err(|e| format!("SearXNG JSON parse failed: {e}"))?;
     Ok(extract_from_array(data.get("results"), n, "url", "title", "content"))
 }
 

@@ -273,15 +273,15 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
       }
       const tc = zone.toolConfig || "{}";
       setToolConfig(tc);
-      try {
-        const parsed = JSON.parse(tc);
-        const ws = parsed?.web_search ?? {};
-        setWsProvider(ws.provider ?? "multi");
-        setWsEndpoint(ws.endpoint ?? "");
-        setWsApiKey(ws.api_key ?? "");
-        const ce = parsed?.code_exec ?? {};
-        setCeHeadless(ce.headless ?? false);
-      } catch { /* ignore */ }
+try {
+         const parsed = JSON.parse(tc);
+         const ws = parsed?.web_search ?? {};
+         setWsProvider(ws.provider ?? "multi");
+         setWsEndpoint(ws.endpoint ?? "");
+         setWsApiKey(ws.api_key ?? "");
+         const ce = parsed?.code_exec ?? {};
+         setCeHeadless(ce.headless ?? false);
+       } catch { /* ignore */ }
       setThinkingEnabled(zone.thinkingEnabled ?? false);
       setIncludeThinkingInContext(zone.includeThinkingInContext ?? false);
       setIcon(zone.icon ?? null);
@@ -296,10 +296,10 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
       setTopP("");
       setTools([]);
       setToolConfig("{}");
-      setWsProvider("multi");
-      setWsEndpoint("");
-      setWsApiKey("");
-      setCeHeadless(false);
+setWsProvider("multi");
+       setWsEndpoint("");
+       setWsApiKey("");
+       setCeHeadless(false);
       setThinkingEnabled(false);
       setIncludeThinkingInContext(false);
       setIcon(null);
@@ -721,17 +721,17 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
                 <option value="serper">serper — Google via Serper API (needs key)</option>
               </select>
             </div>
-            {wsProvider === "searxng" && (
-              <div className="mb-2">
-                <div className="mb-1 text-xs text-[var(--color-text-muted)]">SearXNG endpoint URL</div>
-                <input
-                  value={wsEndpoint}
-                  onChange={(e) => onWsEndpointChange(e.target.value)}
-                  className="input"
-                  placeholder="http://localhost:8080"
-                />
-              </div>
-            )}
+{wsProvider === "searxng" && (
+               <div className="mb-2">
+                 <div className="mb-1 text-xs text-[var(--color-text-muted)]">SearXNG endpoint URL</div>
+                 <input
+                   value={wsEndpoint}
+                   onChange={(e) => onWsEndpointChange(e.target.value)}
+                   className="input"
+                   placeholder="https://searx.be"
+                 />
+               </div>
+             )}
             {["brave", "tavily", "serper"].includes(wsProvider) && (
               <div className="mb-2">
                 <div className="mb-1 text-xs text-[var(--color-text-muted)]">API key</div>

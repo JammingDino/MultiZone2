@@ -1,30 +1,49 @@
 name: Release
 
-# Runs on every push to main, except the automated version-bump commit
-# (which appends "[skip ci]" so GitHub skips this workflow natively).
+# Runs on every push to main, except automated version-bump commits
+# (which append "[skip ci]" so GitHub skips this workflow natively).
+# A build only proceeds when package.json has "releaseBuild": true.
+# After a successful build the bump-version job resets it to false.
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
 jobs:
-  # ── Build MSI + NSIS installer and publish a GitHub Release ──────────────
-  build:
-    name: Build & release
-    runs-on: windows-latest
-    permissions:
-      contents: write   # needed to create releases
+  # ── Check whether a release build was requested ───────────────────────────
+  check:
+    name: Check build flag
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.flag.outputs.should_build }}
+      version: ${{ steps.flag.outputs.version }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Read current version
-        id: ver
+      - name: Read build flag and version
+        id: flag
         shell: bash
         run: |
+          SHOULD_BUILD=$(node -p "require('./package.json').releaseBuild")
           VERSION=$(node -p "require('./package.json').version")
+          echo "should_build=$SHOULD_BUILD" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "releaseBuild=$SHOULD_BUILD  version=$VERSION"
+
+  # ── Build MSI + NSIS installer and publish a GitHub Release ──────────────
+  build:
+    name: Build & release
+    needs: check
+    if: needs.check.outputs.should_build == 'true'
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup Node 20
         uses: actions/setup-node@v4
@@ -38,23 +57,20 @@ jobs:
       - name: Setup Rust (stable)
         uses: dtolnay/rust-toolchain@stable
 
-      # Cache Cargo registry + compiled artifacts between runs.
       - name: Rust build cache
         uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
 
-      # tauri-action builds the app, creates the GitHub Release, and uploads
-      # the bundle files automatically.
       - name: Build Tauri app and publish release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: v${{ steps.ver.outputs.version }}
-          releaseName: MultiZone v${{ steps.ver.outputs.version }}
+          tagName: v${{ needs.check.outputs.version }}
+          releaseName: MultiZone v${{ needs.check.outputs.version }}
           releaseBody: |
-            ## MultiZone v${{ steps.ver.outputs.version }}
+            ## MultiZone v${{ needs.check.outputs.version }}
 
             | Installer | Description |
             |-----------|-------------|
@@ -65,11 +81,9 @@ jobs:
             for a full list of changes since the last release.
           releaseDraft: false
           prerelease: false
-          # msi  → standard Windows installer
-          # nsis → self-contained setup exe (no admin required for portable use)
           args: --bundles msi,nsis
 
-  # ── Bump the patch version (0.x.y → 0.x.y+1) after a successful build ───
+  # ── Bump patch version and reset the build flag ──────────────────────────
   bump-version:
     name: Bump patch version
     needs: build
@@ -89,9 +103,6 @@ jobs:
         with:
           node-version: 20
 
-      # Capture both the current and next version in one step so every
-      # subsequent step can reference ${{ steps.bump.outputs.old }} and
-      # ${{ steps.bump.outputs.new }} without re-reading files.
       - name: Compute versions
         id: bump
         shell: bash
@@ -105,22 +116,20 @@ jobs:
           echo "new=$NEW" >> "$GITHUB_OUTPUT"
           echo "Bumping $OLD → $NEW"
 
-      - name: Bump package.json
+      - name: Bump package.json and reset build flag
         shell: bash
         run: |
           node -e "
             const fs = require('fs');
             const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
             pkg.version = '${{ steps.bump.outputs.new }}';
+            pkg.releaseBuild = false;
             fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
           "
 
       - name: Bump src-tauri/Cargo.toml
         shell: bash
         run: |
-          # Replace only the standalone `version = "…"` line (the [package]
-          # entry).  Dependency lines like `tauri = { version = "2.1", … }`
-          # are not line-anchored so the ^ guard keeps them untouched.
           sed -i \
             's/^version = "${{ steps.bump.outputs.old }}"$/version = "${{ steps.bump.outputs.new }}"/' \
             src-tauri/Cargo.toml

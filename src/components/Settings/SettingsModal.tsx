@@ -367,19 +367,6 @@ function AppearanceTab() {
         )}
       </section>
 
-      <section>
-        <h3 className="mb-2 text-sm font-medium">Preview</h3>
-        <div className="rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3 text-sm">
-          <div className="mb-2 flex items-center gap-2">
-            <span className="rounded-2xl rounded-tr-sm px-3 py-1.5 text-white" style={{ background: theme.accent }}>
-              Hello!
-            </span>
-          </div>
-          <div className="text-[var(--color-text-muted)]">
-            User bubbles use your accent color. Bot replies use the panel color.
-          </div>
-        </div>
-      </section>
     </div>
   );
 }

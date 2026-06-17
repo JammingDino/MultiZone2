@@ -20,8 +20,8 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 ### 0.1.7 — Bug fixes & tool improvements
 
 **list_dir tool**
-- [ ] Add optional `depth` argument (integer, default `1`) — controls how many levels of child directories to recurse
-- [ ] Token-efficient output format: compact tree representation, omit metadata by default
+- [x] Add optional `depth` argument (integer, default `1`) — controls how many levels of child directories to recurse
+- [x] Token-efficient output format: compact tree representation, omit metadata by default
 
 **Web search — move config to global settings**
 - [ ] Add web search provider settings to the Settings modal (provider dropdown, endpoint field for SearXNG, API key field for Brave/Tavily/Serper)

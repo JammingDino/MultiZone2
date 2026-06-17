@@ -240,9 +240,6 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
   const [topP, setTopP] = useState("");
   const [tools, setTools] = useState<string[]>([]);
   const [toolConfig, setToolConfig] = useState("{}");
-  const [wsProvider, setWsProvider] = useState("multi");
-  const [wsEndpoint, setWsEndpoint] = useState("");
-  const [wsApiKey, setWsApiKey] = useState("");
   const [ceHeadless, setCeHeadless] = useState(false);
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const [includeThinkingInContext, setIncludeThinkingInContext] = useState(false);
@@ -273,15 +270,11 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
       }
       const tc = zone.toolConfig || "{}";
       setToolConfig(tc);
-try {
-         const parsed = JSON.parse(tc);
-         const ws = parsed?.web_search ?? {};
-         setWsProvider(ws.provider ?? "multi");
-         setWsEndpoint(ws.endpoint ?? "");
-         setWsApiKey(ws.api_key ?? "");
-         const ce = parsed?.code_exec ?? {};
-         setCeHeadless(ce.headless ?? false);
-       } catch { /* ignore */ }
+      try {
+        const parsed = JSON.parse(tc);
+        const ce = parsed?.code_exec ?? {};
+        setCeHeadless(ce.headless ?? false);
+      } catch { /* ignore */ }
       setThinkingEnabled(zone.thinkingEnabled ?? false);
       setIncludeThinkingInContext(zone.includeThinkingInContext ?? false);
       setIcon(zone.icon ?? null);
@@ -296,10 +289,7 @@ try {
       setTopP("");
       setTools([]);
       setToolConfig("{}");
-setWsProvider("multi");
-       setWsEndpoint("");
-       setWsApiKey("");
-       setCeHeadless(false);
+      setCeHeadless(false);
       setThinkingEnabled(false);
       setIncludeThinkingInContext(false);
       setIcon(null);
@@ -326,39 +316,18 @@ setWsProvider("multi");
 
   const activeColor = accentColor ?? "var(--color-accent)";
 
-  function buildToolConfig(
-    base: string,
-    provider: string,
-    endpoint: string,
-    apiKey: string,
-    headless: boolean,
-  ): string {
+  function buildToolConfig(base: string, headless: boolean): string {
     let obj: Record<string, unknown> = {};
     try { obj = JSON.parse(base); } catch { /* keep empty */ }
-    const ws: Record<string, string> = { provider };
-    if (endpoint.trim()) ws.endpoint = endpoint.trim();
-    if (apiKey.trim()) ws.api_key = apiKey.trim();
-    obj.web_search = ws;
+    delete obj.web_search;
     const ce = typeof obj.code_exec === "object" && obj.code_exec !== null ? { ...obj.code_exec as object } : {};
     obj.code_exec = { ...ce, headless };
     return JSON.stringify(obj, null, 2);
   }
 
-  function onWsProviderChange(p: string) {
-    setWsProvider(p);
-    setToolConfig((tc) => buildToolConfig(tc, p, wsEndpoint, wsApiKey, ceHeadless));
-  }
-  function onWsEndpointChange(v: string) {
-    setWsEndpoint(v);
-    setToolConfig((tc) => buildToolConfig(tc, wsProvider, v, wsApiKey, ceHeadless));
-  }
-  function onWsApiKeyChange(v: string) {
-    setWsApiKey(v);
-    setToolConfig((tc) => buildToolConfig(tc, wsProvider, wsEndpoint, v, ceHeadless));
-  }
   function onCeHeadlessChange(v: boolean) {
     setCeHeadless(v);
-    setToolConfig((tc) => buildToolConfig(tc, wsProvider, wsEndpoint, wsApiKey, v));
+    setToolConfig((tc) => buildToolConfig(tc, v));
   }
 
   async function onSave() {
@@ -701,56 +670,6 @@ setWsProvider("multi");
             })}
           </div>
         </Field>
-
-        {tools.includes("web_search") && (
-          <div className="mb-3 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
-            <div className="mb-2 text-xs font-medium text-[var(--color-text)]">Web Search settings</div>
-            <div className="mb-2">
-              <div className="mb-1 text-xs text-[var(--color-text-muted)]">Provider</div>
-              <select
-                value={wsProvider}
-                onChange={(e) => onWsProviderChange(e.target.value)}
-                className="input"
-              >
-                <option value="multi">multi — DDG + Marginalia, no key (recommended)</option>
-                <option value="duckduckgo">duckduckgo — DDG Lite only, no key</option>
-                <option value="marginalia">marginalia — independent index, no key</option>
-                <option value="searxng">searxng — self-hosted (needs endpoint)</option>
-                <option value="brave">brave — Brave Search API (needs key)</option>
-                <option value="tavily">tavily — Tavily API (needs key)</option>
-                <option value="serper">serper — Google via Serper API (needs key)</option>
-              </select>
-            </div>
-{wsProvider === "searxng" && (
-               <div className="mb-2">
-                 <div className="mb-1 text-xs text-[var(--color-text-muted)]">SearXNG endpoint URL</div>
-                 <input
-                   value={wsEndpoint}
-                   onChange={(e) => onWsEndpointChange(e.target.value)}
-                   className="input"
-                   placeholder="https://searx.be"
-                 />
-               </div>
-             )}
-            {["brave", "tavily", "serper"].includes(wsProvider) && (
-              <div className="mb-2">
-                <div className="mb-1 text-xs text-[var(--color-text-muted)]">API key</div>
-                <input
-                  type="password"
-                  value={wsApiKey}
-                  onChange={(e) => onWsApiKeyChange(e.target.value)}
-                  className="input"
-                  placeholder="sk-…"
-                />
-              </div>
-            )}
-            {(wsProvider === "multi" || wsProvider === "duckduckgo" || wsProvider === "marginalia") && (
-              <div className="text-[11px] text-[var(--color-text-muted)]">
-                No API key required — results are fetched directly.
-              </div>
-            )}
-          </div>
-        )}
 
         {tools.includes("code_exec") && (
           <div className="mb-3 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3">

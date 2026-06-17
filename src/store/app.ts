@@ -269,6 +269,37 @@ export const useApp = create<AppStore>((set, get) => ({
   async refreshZones() {
     const zones = await api.listZones();
     set({ zones });
+
+    // One-time migration: move web_search config from per-zone tool_config to global app settings.
+    const zonesWithWs = zones.filter((z) => {
+      try { return JSON.parse(z.toolConfig)?.web_search != null; } catch { return false; }
+    });
+    if (zonesWithWs.length === 0) return;
+
+    // Promote first non-default zone config to global settings (only if user hasn't configured it yet).
+    const current = get().appSettings;
+    if (current.webSearchProvider === "multi" && !current.webSearchEndpoint && !current.webSearchApiKey) {
+      const firstWs = (JSON.parse(zonesWithWs[0].toolConfig) as Record<string, any>)?.web_search ?? {};
+      if (firstWs.provider !== "multi" || firstWs.endpoint || firstWs.api_key) {
+        await get().setAppSettings({
+          webSearchProvider: firstWs.provider ?? "multi",
+          webSearchEndpoint: firstWs.endpoint ?? "",
+          webSearchApiKey: firstWs.api_key ?? "",
+        });
+      }
+    }
+
+    // Strip web_search from every zone's tool_config.
+    for (const z of zonesWithWs) {
+      try {
+        const tc = JSON.parse(z.toolConfig) as Record<string, unknown>;
+        delete tc.web_search;
+        await api.upsertZone({ ...z, toolConfig: JSON.stringify(tc) });
+      } catch { /* skip */ }
+    }
+
+    // Reload after migration so the store reflects cleaned zones.
+    set({ zones: await api.listZones() });
   },
   async refreshChats() {
     const chats = await api.listChats();

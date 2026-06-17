@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { X, Plus, Trash2, RefreshCw, Server, Palette, MessageSquare, Database, AlertTriangle, Loader2, Folder, FolderOpen, Globe, Copy, Check } from "lucide-react";
+import { X, Plus, Trash2, RefreshCw, Server, Palette, MessageSquare, Database, AlertTriangle, Loader2, Folder, FolderOpen, Globe, Copy, Check, Search } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useApp } from "@/store/app";
 import type { BackgroundEffect } from "@/store/app";
@@ -7,7 +7,7 @@ import * as api from "@/lib/tauri";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
 import type { DbStats, Provider } from "@/lib/types";
 
-type Tab = "providers" | "appearance" | "chat" | "api" | "data";
+type Tab = "providers" | "appearance" | "chat" | "search" | "api" | "data";
 
 export function SettingsModal() {
   const { closeSettings } = useApp();
@@ -27,6 +27,7 @@ export function SettingsModal() {
             <TabButton active={tab === "providers"} icon={<Server size={14} />} label="Providers" onClick={() => setTab("providers")} />
             <TabButton active={tab === "appearance"} icon={<Palette size={14} />} label="Appearance" onClick={() => setTab("appearance")} />
             <TabButton active={tab === "chat"} icon={<MessageSquare size={14} />} label="Chat" onClick={() => setTab("chat")} />
+            <TabButton active={tab === "search"} icon={<Search size={14} />} label="Search" onClick={() => setTab("search")} />
             <TabButton active={tab === "api"} icon={<Globe size={14} />} label="API" onClick={() => setTab("api")} />
             <TabButton active={tab === "data"} icon={<Database size={14} />} label="Data" onClick={() => setTab("data")} />
           </nav>
@@ -34,6 +35,7 @@ export function SettingsModal() {
             {tab === "providers" && <ProvidersTab />}
             {tab === "appearance" && <AppearanceTab />}
             {tab === "chat" && <ChatTab />}
+            {tab === "search" && <SearchTab />}
             {tab === "api" && <ApiTab />}
             {tab === "data" && <DataTab />}
           </div>
@@ -590,6 +592,72 @@ function ChatTab() {
           ))}
         </div>
       </section>
+    </div>
+  );
+}
+
+// ─── Search ───────────────────────────────────────────────────────────────────
+
+function SearchTab() {
+  const appSettings = useApp((s) => s.appSettings);
+  const setAppSettings = useApp((s) => s.setAppSettings);
+
+  const provider = appSettings.webSearchProvider ?? "multi";
+  const endpoint = appSettings.webSearchEndpoint ?? "";
+  const apiKey = appSettings.webSearchApiKey ?? "";
+
+  return (
+    <div className="flex flex-col gap-6">
+      <section>
+        <h3 className="mb-1 text-sm font-medium">Web search provider</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          Applied to all zones that have the web search tool enabled.
+        </p>
+        <select
+          value={provider}
+          onChange={(e) => setAppSettings({ webSearchProvider: e.target.value, webSearchEndpoint: "", webSearchApiKey: "" })}
+          className="w-full rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]"
+        >
+          <option value="multi">multi — DDG + Marginalia, no key (recommended)</option>
+          <option value="duckduckgo">duckduckgo — DDG Lite only, no key</option>
+          <option value="marginalia">marginalia — independent index, no key</option>
+          <option value="searxng">searxng — self-hosted (needs endpoint URL)</option>
+          <option value="brave">brave — Brave Search API (needs key)</option>
+          <option value="tavily">tavily — Tavily API (needs key)</option>
+          <option value="serper">serper — Google via Serper API (needs key)</option>
+        </select>
+      </section>
+
+      {provider === "searxng" && (
+        <section>
+          <h3 className="mb-1 text-sm font-medium">SearXNG endpoint URL</h3>
+          <input
+            value={endpoint}
+            onChange={(e) => setAppSettings({ webSearchEndpoint: e.target.value })}
+            className="w-full rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]"
+            placeholder="https://searx.be"
+          />
+        </section>
+      )}
+
+      {["brave", "tavily", "serper"].includes(provider) && (
+        <section>
+          <h3 className="mb-1 text-sm font-medium">API key</h3>
+          <input
+            type="password"
+            value={apiKey}
+            onChange={(e) => setAppSettings({ webSearchApiKey: e.target.value })}
+            className="w-full rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]"
+            placeholder="sk-…"
+          />
+        </section>
+      )}
+
+      {["multi", "duckduckgo", "marginalia"].includes(provider) && (
+        <p className="text-xs text-[var(--color-text-muted)]">
+          No API key required — results are fetched directly.
+        </p>
+      )}
     </div>
   );
 }

@@ -755,6 +755,29 @@ async fn run_agentic_loop(
     let mut zone_config: Value =
         serde_json::from_str(&zone.tool_config).unwrap_or(Value::Object(Default::default()));
 
+    // Read global web-search config once; injected into zone_config (and on
+    // zone-switch) so every zone uses the same provider/credentials without
+    // storing them in per-zone tool_config.
+    let global_ws_cfg: Option<Value> = {
+        let raw: Option<String> = sqlx::query_scalar(
+            "SELECT value FROM settings WHERE key = 'app_settings'",
+        )
+        .fetch_optional(&ctx.db)
+        .await?
+        .flatten();
+        raw.and_then(|s| serde_json::from_str::<Value>(&s).ok()).map(|app_cfg| {
+            let provider = app_cfg.get("webSearchProvider").and_then(|v| v.as_str()).unwrap_or("multi");
+            let endpoint = app_cfg.get("webSearchEndpoint").and_then(|v| v.as_str()).unwrap_or("");
+            let api_key = app_cfg.get("webSearchApiKey").and_then(|v| v.as_str()).unwrap_or("");
+            serde_json::json!({ "provider": provider, "endpoint": endpoint, "api_key": api_key })
+        })
+    };
+    if let Some(ws) = &global_ws_cfg {
+        if let Some(obj) = zone_config.as_object_mut() {
+            obj.insert("web_search".to_string(), ws.clone());
+        }
+    }
+
     // The project directory scopes the filesystem tools. If no project directory
     // is set, fall back to the app-level default directory from settings.
     let project_dir: Option<String> = {
@@ -1107,6 +1130,11 @@ async fn run_agentic_loop(
                         tools = build_tools_for_zone(&zone, &tool_ctx);
                         zone_config = serde_json::from_str(&zone.tool_config)
                             .unwrap_or(Value::Object(Default::default()));
+                        if let Some(ws) = &global_ws_cfg {
+                            if let Some(obj) = zone_config.as_object_mut() {
+                                obj.insert("web_search".to_string(), ws.clone());
+                            }
+                        }
                         client = LlmClient::new(
                             &ctx.http,
                             &provider.base_url,

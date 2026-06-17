@@ -216,6 +216,15 @@ export interface AppSettings {
    * "columns" — side-by-side columns for direct comparison
    */
   perspectiveLayout: "stacked" | "columns";
+  /**
+   * Web search provider used by all zones.
+   * "multi" = DDG + Marginalia (default, no key required).
+   */
+  webSearchProvider: string;
+  /** SearXNG instance URL — only used when webSearchProvider is "searxng". */
+  webSearchEndpoint: string;
+  /** API key — only used for providers that require one (brave, tavily, serper). */
+  webSearchApiKey: string;
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -234,6 +243,9 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   pdfMode: "images",
   perspectiveMode: "sequential",
   perspectiveLayout: "stacked",
+  webSearchProvider: "multi",
+  webSearchEndpoint: "",
+  webSearchApiKey: "",
 };
 
 export interface DbStats {

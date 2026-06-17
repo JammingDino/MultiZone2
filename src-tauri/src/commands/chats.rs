@@ -328,7 +328,7 @@ pub async fn get_messages(
     chat_id: String,
 ) -> AppResult<Vec<Message>> {
     let rows = sqlx::query_as::<_, Message>(
-        "SELECT id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, created_at
+        "SELECT id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, created_at
          FROM messages WHERE chat_id = ?1 ORDER BY created_at ASC",
     )
     .bind(&chat_id)
@@ -356,7 +356,7 @@ pub async fn generate_title(
         crate::commands::messages::effective_zone_and_provider(&state.db, &chat_id).await?;
 
     let first_user = sqlx::query_as::<_, Message>(
-        "SELECT id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, created_at
+        "SELECT id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, created_at
          FROM messages WHERE chat_id = ?1 AND role = 'user' ORDER BY created_at ASC LIMIT 1",
     )
     .bind(&chat_id)

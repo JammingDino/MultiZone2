@@ -40,7 +40,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 const CHAT_COLS: &str =
     "id, title, zone_id, project_id, project_context_enabled, perspective_mode, smart_routing, created_at, updated_at";
 const MSG_COLS: &str =
-    "id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, created_at";
+    "id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, created_at";
 
 /// Cheap-to-clone state shared by every request handler.
 #[derive(Clone)]

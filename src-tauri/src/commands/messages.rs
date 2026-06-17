@@ -45,7 +45,7 @@ const ZONE_COLS: &str = "id, name, provider_id, model, system_prompt, temperatur
 const CHAT_COLS: &str =
     "id, title, zone_id, project_id, project_context_enabled, perspective_mode, smart_routing, created_at, updated_at";
 const MSG_COLS: &str =
-    "id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, created_at";
+    "id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, created_at";
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -878,14 +878,15 @@ async fn run_agentic_loop(
         };
         let now = now_ts();
         sqlx::query(
-            "INSERT INTO messages (id, chat_id, role, content, tool_calls, tool_call_id, reasoning, created_at)
-             VALUES (?1, ?2, 'assistant', ?3, ?4, NULL, ?5, ?6)",
+            "INSERT INTO messages (id, chat_id, role, content, tool_calls, tool_call_id, reasoning, active_zone_id, created_at)
+             VALUES (?1, ?2, 'assistant', ?3, ?4, NULL, ?5, ?6, ?7)",
         )
         .bind(&assistant_msg_id)
         .bind(chat_id)
         .bind(&assistant_content_json)
         .bind(&tool_calls_json)
         .bind(&reasoning_save)
+        .bind(&zone.id)
         .bind(now)
         .execute(&ctx.db)
         .await?;

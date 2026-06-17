@@ -154,39 +154,6 @@ function ToolStepView({
     ? renderToolOutput(name, args, resultText, chatId, () => setMermaidFailed(true))
     : null;
 
-  // ask_user gets its own visual treatment, no folder header.
-  if (name === "ask_user" && toolResult && !isError) {
-    const parsed = (() => {
-      try {
-        return JSON.parse(resultText ?? "");
-      } catch {
-        return null;
-      }
-    })();
-    if (parsed?.rendered === "ask_user") {
-      // Multi-question mode
-      if (parsed.mode === "multi" && Array.isArray(parsed.questions)) {
-        return (
-          <AskUserCard
-            chatId={chatId}
-            questions={parsed.questions}
-          />
-        );
-      }
-      // Single-question mode (legacy and current)
-      return (
-        <AskUserCard
-          chatId={chatId}
-          questions={[{
-            question: parsed.question ?? "",
-            options: Array.isArray(parsed.options) ? parsed.options : [],
-            allow_free_text: parsed.allow_free_text !== false,
-          }]}
-        />
-      );
-    }
-  }
-
   let status: "running" | "done" | "error" | "warning" | "pending";
   if (pending) status = "pending";
   else if (!toolResult) status = "running";
@@ -407,35 +374,37 @@ export function AskUserCard({
   questions: AskQuestion[];
 }) {
   const [answers, setAnswers] = useState<string[]>(() => questions.map(() => ""));
+  const [idx, setIdx] = useState(0);
   const [sent, setSent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const refreshChats = useApp((s) => s.refreshChats);
   const isStreaming = useApp((s) => Boolean(s.streamingByChat[chatId]));
 
-  function setAnswer(i: number, val: string) {
-    setAnswers((prev) => prev.map((a, idx) => (idx === i ? val : a)));
+  const total = questions.length;
+  const isLast = idx === total - 1;
+  const q = questions[idx];
+  const allowFreeText = q.allow_free_text !== false;
+  const opts = q.options ?? [];
+  const currentAnswer = answers[idx] ?? "";
+
+  function setAnswer(val: string) {
+    setAnswers((prev) => prev.map((a, i) => (i === idx ? val : a)));
   }
 
-  const allAnswered = questions.every((q, i) => {
-    const a = answers[i]?.trim() ?? "";
-    return a.length > 0;
-  });
-
-  async function submitAll() {
-    if (!allAnswered || sent || submitting || isStreaming) return;
+  async function submit() {
+    if (sent || submitting || isStreaming) return;
     setSubmitting(true);
     setSent(true);
     try {
       let text: string;
-      if (questions.length === 1) {
+      if (total === 1) {
         text = answers[0].trim();
       } else {
         text = questions
           .map((q, i) => `Q: ${q.question}\nA: ${answers[i].trim()}`)
           .join("\n\n");
       }
-      const parts: InputPart[] = [{ type: "text", text }];
-      await api.sendMessage(chatId, parts);
+      await api.sendMessage(chatId, [{ type: "text", text }]);
       refreshChats();
     } catch (e) {
       console.error(e);
@@ -445,16 +414,15 @@ export function AskUserCard({
     }
   }
 
-  async function submitSingle(i: number, text: string) {
-    if (!text.trim() || sent || submitting || isStreaming) return;
-    // For single-question cards, submit immediately on option click.
-    // For multi-question, just fill the answer slot.
-    if (questions.length === 1) {
-      setAnswers([text]);
+  async function pickOption(opt: string) {
+    if (sent || submitting || isStreaming) return;
+    if (total === 1) {
+      // Single question: selecting an option submits immediately.
+      setAnswers([opt]);
       setSubmitting(true);
       setSent(true);
       try {
-        await api.sendMessage(chatId, [{ type: "text", text: text.trim() }]);
+        await api.sendMessage(chatId, [{ type: "text", text: opt }]);
         refreshChats();
       } catch (e) {
         console.error(e);
@@ -463,113 +431,107 @@ export function AskUserCard({
         setSubmitting(false);
       }
     } else {
-      setAnswer(i, text);
+      // Multi-question: fill the slot and advance.
+      setAnswers((prev) => prev.map((a, i) => (i === idx ? opt : a)));
+      if (!isLast) setIdx((v) => v + 1);
     }
   }
 
-  const isMulti = questions.length > 1;
-
   return (
     <div className="my-1 rounded-md border border-[var(--color-accent)] bg-[var(--color-panel)] p-3">
-      <div className="mb-2 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-        <HelpCircle size={12} className="text-[var(--color-accent)]" />
-        <span>
-          {isMulti
-            ? `The assistant has ${questions.length} questions for you`
-            : "The assistant is asking you a question"}
-        </span>
-      </div>
-
-      <div className={isMulti ? "flex flex-col gap-4" : ""}>
-        {questions.map((q, i) => {
-          const allowFreeText = q.allow_free_text !== false;
-          const opts = q.options ?? [];
-          return (
-            <div key={i} className={isMulti ? "rounded border border-[var(--color-border)] p-2" : ""}>
-              {isMulti && (
-                <div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">
-                  Question {i + 1}
-                </div>
-              )}
-              <div className="mb-2 text-sm">{q.question}</div>
-
-              {opts.length > 0 && (
-                <div className="mb-2 flex flex-wrap gap-1.5">
-                  {opts.map((opt) => (
-                    <button
-                      key={opt}
-                      onClick={() => submitSingle(i, opt)}
-                      disabled={sent || submitting || isStreaming}
-                      className={`rounded border px-2.5 py-1 text-xs transition
-                        ${answers[i]?.trim() === opt
-                          ? "border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]"
-                          : "border-[var(--color-border)] bg-[var(--color-bg)] hover:border-[var(--color-accent)] hover:bg-[var(--color-panel-hover)]"
-                        } disabled:cursor-not-allowed disabled:opacity-50`}
-                    >
-                      {opt}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {allowFreeText && (
-                <div className="flex items-center gap-2">
-                  <input
-                    value={answers[i] ?? ""}
-                    onChange={(e) => setAnswer(i, e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !isMulti) submitSingle(i, answers[i] ?? "");
-                    }}
-                    placeholder={
-                      sent
-                        ? "Answer sent…"
-                        : opts.length
-                          ? "Or type your own answer…"
-                          : "Type your answer…"
-                    }
-                    disabled={sent || submitting || isStreaming}
-                    className="flex-1 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-sm outline-none focus:border-[var(--color-accent)] disabled:opacity-50"
-                  />
-                  {!isMulti && (
-                    <button
-                      onClick={() => submitSingle(i, answers[i] ?? "")}
-                      disabled={!answers[i]?.trim() || sent || submitting || isStreaming}
-                      className="rounded bg-[var(--color-accent)] p-1.5 text-white disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      <Send size={12} />
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {isMulti && !sent && (
-        <div className="mt-3 flex items-center justify-between border-t border-[var(--color-border)] pt-2">
-          <span className="text-xs text-[var(--color-text-muted)]">
-            {answers.filter((a) => a.trim()).length}/{questions.length} answered
+      {/* Header */}
+      <div className="mb-3 flex items-center justify-between text-xs text-[var(--color-text-muted)]">
+        <div className="flex items-center gap-2">
+          <HelpCircle size={12} className="text-[var(--color-accent)]" />
+          <span>
+            {total > 1
+              ? `The assistant has ${total} questions for you`
+              : "The assistant is asking you a question"}
           </span>
+        </div>
+        {total > 1 && (
+          <span className="tabular-nums">
+            {idx + 1} / {total}
+          </span>
+        )}
+      </div>
+
+      {/* Question */}
+      <div className="mb-3 text-sm font-medium">{q.question}</div>
+
+      {/* Options */}
+      {opts.length > 0 && (
+        <div className="mb-3 flex flex-wrap gap-1.5">
+          {opts.map((opt) => (
+            <button
+              key={opt}
+              onClick={() => pickOption(opt)}
+              disabled={sent || submitting || isStreaming}
+              className={`rounded border px-2.5 py-1 text-xs transition
+                ${currentAnswer === opt
+                  ? "border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]"
+                  : "border-[var(--color-border)] bg-[var(--color-bg)] hover:border-[var(--color-accent)] hover:bg-[var(--color-panel-hover)]"
+                } disabled:cursor-not-allowed disabled:opacity-50`}
+            >
+              {opt}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Free text input */}
+      {allowFreeText && (
+        <input
+          value={currentAnswer}
+          onChange={(e) => setAnswer(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              if (total === 1) submit();
+              else if (isLast && currentAnswer.trim()) submit();
+              else if (currentAnswer.trim()) setIdx((v) => v + 1);
+            }
+          }}
+          placeholder={sent ? "Answer sent…" : opts.length ? "Or type your own answer…" : "Type your answer…"}
+          disabled={sent || submitting || isStreaming}
+          className="mb-3 w-full rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-sm outline-none focus:border-[var(--color-accent)] disabled:opacity-50"
+          autoFocus
+        />
+      )}
+
+      {/* Navigation row */}
+      {!sent && (
+        <div className="flex items-center justify-between gap-2">
           <button
-            onClick={submitAll}
-            disabled={!allAnswered || submitting || isStreaming}
-            className="flex items-center gap-1.5 rounded bg-[var(--color-accent)] px-3 py-1.5 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={() => setIdx((v) => v - 1)}
+            disabled={idx === 0 || submitting || isStreaming}
+            className="rounded border border-[var(--color-border)] px-3 py-1.5 text-xs hover:bg-[var(--color-panel-hover)] disabled:cursor-not-allowed disabled:opacity-30"
           >
-            {submitting ? (
-              <Loader2 size={11} className="animate-spin" />
-            ) : (
-              <Send size={11} />
-            )}
-            Submit all answers
+            ← Back
           </button>
+
+          {isLast ? (
+            <button
+              onClick={submit}
+              disabled={!currentAnswer.trim() || submitting || isStreaming}
+              className="flex items-center gap-1.5 rounded bg-[var(--color-accent)] px-3 py-1.5 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {submitting ? <Loader2 size={11} className="animate-spin" /> : <Send size={11} />}
+              {total > 1 ? "Submit all" : "Submit"}
+            </button>
+          ) : (
+            <button
+              onClick={() => setIdx((v) => v + 1)}
+              disabled={!currentAnswer.trim() || submitting || isStreaming}
+              className="rounded bg-[var(--color-accent)] px-3 py-1.5 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Next →
+            </button>
+          )}
         </div>
       )}
 
       {sent && (
-        <div className="mt-2 text-xs text-[var(--color-text-muted)]">
-          Answers sent to the model.
-        </div>
+        <div className="text-xs text-[var(--color-text-muted)]">Answers sent to the model.</div>
       )}
     </div>
   );

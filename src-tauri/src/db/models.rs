@@ -122,6 +122,9 @@ pub struct Message {
     /// Non-null for perspective assistant messages; identifies the zone that
     /// produced this turn. Null for all primary-conversation messages.
     pub zone_id: Option<String>,
+    /// Zone that answered this primary assistant message. Null for user/tool
+    /// messages and for messages saved before migration 012.
+    pub active_zone_id: Option<String>,
     pub created_at: i64,
 }
 

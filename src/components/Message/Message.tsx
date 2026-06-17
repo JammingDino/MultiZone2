@@ -328,10 +328,7 @@ export function BotTurnView({ turn }: { turn: BotTurn }) {
   const hasAnything = turn.blocks.length > 0 || isStreaming;
 
   const chatId = useApp((s) => s.activeChatId) ?? "";
-  const zone = useApp((s) => {
-    const chat = s.chats.find((c) => c.id === chatId);
-    return chat ? s.zones.find((z) => z.id === chat.zoneId) : null;
-  });
+  const zone = useApp((s) => s.zones.find((z) => z.id === turn.zoneId));
   const [collapsed, setCollapsed] = useState(false);
 
   if (!hasAnything) return null;

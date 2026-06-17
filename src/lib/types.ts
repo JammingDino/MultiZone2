@@ -103,6 +103,8 @@ export interface Message {
   reasoning: string | null;
   /** Set for perspective assistant messages; null for primary conversation messages. */
   zoneId: string | null;
+  /** Zone that answered this primary assistant turn. Null for user/tool messages. */
+  activeZoneId: string | null;
   createdAt: number;
 }
 

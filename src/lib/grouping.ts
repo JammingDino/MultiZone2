@@ -43,6 +43,8 @@ export interface BotTurn {
   streaming?: StreamingState;
   /** Perspective zone responses attached to this turn. */
   perspectives: PerspectiveTurn[];
+  /** The zone that answered this turn (from the first assistant message's activeZoneId). */
+  zoneId: string | null;
 }
 
 export interface UserUnit {
@@ -75,7 +77,7 @@ function parseToolCalls(json: string | null): ToolCall[] {
 }
 
 function newTurn(): BotTurn {
-  return { type: "bot", messageIds: [], blocks: [], perspectives: [] };
+  return { type: "bot", messageIds: [], blocks: [], perspectives: [], zoneId: null };
 }
 
 export function groupMessages(
@@ -105,6 +107,8 @@ export function groupMessages(
       if (turn === null) turn = newTurn();
       const t: BotTurn = turn;
       t.messageIds.push(m.id);
+      // Capture the zone from the first assistant message in the turn.
+      if (t.zoneId === null && m.activeZoneId) t.zoneId = m.activeZoneId;
       const text = extractText(m.content);
       const calls = parseToolCalls(m.toolCalls);
 

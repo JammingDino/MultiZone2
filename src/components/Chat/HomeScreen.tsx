@@ -63,6 +63,7 @@ export function HomeScreen() {
 
   const quickSelectedButUnavailable =
     (mode.type === "quick" || mode.type === "smart") && !quickAvailable;
+  const smartWithNoZones = mode.type === "smart" && zones.length === 0 && quickAvailable;
   const canSend = (text.trim().length > 0 || pending.length > 0) && !sending && !quickSelectedButUnavailable;
 
   const greeting = useMemo(() => {
@@ -406,6 +407,14 @@ export function HomeScreen() {
             {mode.type === "smart" ? "Smart chat" : "Quick chat"} needs a default model.
             <button onClick={openSettings} className="inline-flex items-center gap-1 text-[var(--color-accent)] hover:underline">
               <SettingsIcon size={11} /> Open settings
+            </button>
+          </div>
+        )}
+        {smartWithNoZones && (
+          <div className="mt-2 flex items-center justify-center gap-1 text-xs text-[var(--color-text-muted)]">
+            No zones yet — Smart chat will fall back to Quick chat until you
+            <button onClick={() => openZoneEditor(null)} className="inline-flex items-center gap-1 text-[var(--color-accent)] hover:underline">
+              create one
             </button>
           </div>
         )}

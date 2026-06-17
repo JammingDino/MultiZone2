@@ -67,6 +67,10 @@ pub enum StreamPayload<'a> {
     ThinkingToken { delta: String },
     ToolCallStart { index: usize, id: String, name: String },
     ToolCallArgsDelta { index: usize, delta: String },
+    /// Emitted at the start of a Smart-chat routing call (before the LLM picks a zone).
+    RoutingStarted,
+    /// Emitted once the router has resolved a zone for this turn.
+    RoutingDone { zone_id: String, zone_name: String },
     /// Emitted when a tool requires user approval before it can run.
     ToolApprovalRequired { index: usize, name: String, arguments: String },
     ToolCallExecuting { index: usize, name: String },
@@ -726,8 +730,18 @@ async fn run_agentic_loop(
     // Smart mode routes here via the default model.
     let mode = resolve_turn_mode(&ctx.db, chat_id, ov).await?;
     let is_zone_mode = matches!(mode, TurnMode::Zone(_));
+    let is_smart = matches!(mode, TurnMode::Smart);
+    if is_smart {
+        sink.emit(chat_id, StreamPayload::RoutingStarted);
+    }
     let (mut zone, mut provider) =
         zone_for_mode(&ctx.db, &ctx.http, chat_id, &mode, ov.model.as_deref()).await?;
+    if is_smart {
+        sink.emit(chat_id, StreamPayload::RoutingDone {
+            zone_id: zone.id.clone(),
+            zone_name: zone.name.clone(),
+        });
+    }
 
     // The chat's stored primary zone, tracked so the `change_zone` tool can
     // switch zones mid-turn. Only meaningful in plain Zone mode with no

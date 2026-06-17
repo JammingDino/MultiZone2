@@ -144,6 +144,8 @@ export type StreamEvent =
   | { type: "thinking_token"; delta: string }
   | { type: "tool_call_start"; index: number; id: string; name: string }
   | { type: "tool_call_args_delta"; index: number; delta: string }
+  | { type: "routing_started" }
+  | { type: "routing_done"; zoneId: string; zoneName: string }
   | { type: "tool_approval_required"; index: number; name: string; arguments: string }
   | { type: "tool_call_executing"; index: number; name: string }
   | { type: "tool_call_result"; index: number; name: string; result: string }

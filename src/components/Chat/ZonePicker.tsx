@@ -1,15 +1,21 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, Check, Plus, Layers, Zap, Brain } from "lucide-react";
+import { ChevronDown, Check, Plus, Layers, Zap, Brain, Loader2 } from "lucide-react";
 import { useApp } from "@/store/app";
 import { getZoneIcon } from "@/lib/zoneIcons";
+
+type RoutingState =
+  | { status: "routing" }
+  | { status: "done"; zoneId: string; zoneName: string }
+  | null;
 
 interface Props {
   chatId: string;
   currentZoneId: string | null;
   smartRouting: boolean;
+  routingState?: RoutingState;
 }
 
-export function ZonePicker({ chatId, currentZoneId, smartRouting }: Props) {
+export function ZonePicker({ chatId, currentZoneId, smartRouting, routingState }: Props) {
   const zones = useApp((s) => s.zones);
   const setChatZone = useApp((s) => s.setChatZone);
   const setChatSmart = useApp((s) => s.setChatSmart);
@@ -20,6 +26,13 @@ export function ZonePicker({ chatId, currentZoneId, smartRouting }: Props) {
   const current = zones.find((z) => z.id === currentZoneId) ?? null;
   const CurrentIcon = getZoneIcon(current?.icon);
   const currentColor = current?.accentColor ?? null;
+
+  // The zone the router picked last turn (null while idle or routing).
+  const routedZone =
+    smartRouting && routingState?.status === "done"
+      ? (zones.find((z) => z.id === routingState.zoneId) ?? null)
+      : null;
+  const RoutedIcon = getZoneIcon(routedZone?.icon);
 
   useEffect(() => {
     if (!open) return;
@@ -53,7 +66,17 @@ export function ZonePicker({ chatId, currentZoneId, smartRouting }: Props) {
         className="flex items-center gap-1.5 rounded border border-transparent px-1.5 py-0.5 text-xs text-[var(--color-text-muted)] hover:border-[var(--color-border)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]"
         title="Change zone"
       >
-        {smartRouting ? (
+        {smartRouting && routingState?.status === "routing" ? (
+          <Loader2 size={12} className="animate-spin text-[var(--color-accent)]" />
+        ) : routedZone ? (
+          // Show the routed zone's own icon + color so it's visually distinct
+          <span
+            className="flex h-4 w-4 items-center justify-center rounded"
+            style={{ background: routedZone.accentColor ?? "var(--color-accent)" }}
+          >
+            <RoutedIcon size={10} color="white" />
+          </span>
+        ) : smartRouting ? (
           <Brain size={12} className="text-[var(--color-accent)]" />
         ) : current ? (
           <span
@@ -66,17 +89,21 @@ export function ZonePicker({ chatId, currentZoneId, smartRouting }: Props) {
           <Zap size={12} className="text-[var(--color-accent)]" />
         )}
         <span>
-          {smartRouting
-            ? "Smart chat"
-            : current
-              ? `${current.name} · ${current.model}`
-              : "Quick chat"}
+          {smartRouting && routingState?.status === "routing"
+            ? "Routing…"
+            : routedZone
+              ? `Smart → ${routedZone.name}`
+              : smartRouting
+                ? "Smart chat"
+                : current
+                  ? `${current.name} · ${current.model}`
+                  : "Quick chat"}
         </span>
         <ChevronDown size={12} />
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full z-40 mt-1 min-w-[260px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg">
+        <div className="absolute right-0 top-full z-40 mt-1 min-w-[260px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg">
           <button
             onClick={() => pick(null)}
             className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)]"

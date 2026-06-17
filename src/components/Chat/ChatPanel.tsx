@@ -47,6 +47,7 @@ export function ChatPanel() {
   const defaultProviderId = useApp((s) => s.appSettings.defaultProviderId);
 
   const pendingApprovalByChat = useApp((s) => s.pendingApprovalByChat);
+  const routingByChat = useApp((s) => s.routingByChat);
   const pendingApproval = activeChatId ? (pendingApprovalByChat[activeChatId] ?? null) : null;
 
   const activeChat = chats.find((c) => c.id === activeChatId) ?? null;
@@ -190,7 +191,17 @@ export function ChatPanel() {
               onRemove={(zoneId) => removePerspectiveZone(activeChat.id, zoneId)}
               onSetMode={(m) => setChatPerspectiveMode(activeChat.id, m)}
             />
-            <ZonePicker chatId={activeChat.id} currentZoneId={activeChat.zoneId} smartRouting={activeChat.smartRouting ?? false} />
+            <ZonePicker
+              chatId={activeChat.id}
+              currentZoneId={activeChat.zoneId}
+              smartRouting={activeChat.smartRouting ?? false}
+              routingState={routingByChat[activeChat.id] ?? null}
+            />
+            {isSmartChat && zones.length === 0 && (
+              <span className="text-xs text-[var(--color-text-muted)]">
+                No zones — add one to enable routing
+              </span>
+            )}
             </div>
           </header>
 

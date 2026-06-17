@@ -85,6 +85,8 @@ interface AppStore {
   regeneratingTitles: Set<string>;
   /** Pending tool approval per chat: chatId → approval info, or absent when none pending. */
   pendingApprovalByChat: Record<string, PendingApproval>;
+  /** Smart routing state per chat. null = idle, "routing" = LLM call in progress, done = zone was resolved. */
+  routingByChat: Record<string, { status: "routing" } | { status: "done"; zoneId: string; zoneName: string } | null>;
   /** Per-message generation stats, keyed by message id. */
   statsByMessage: Record<string, MessageStats>;
   /** Current visual theme. Persisted via the backend settings table. */
@@ -246,6 +248,7 @@ export const useApp = create<AppStore>((set, get) => ({
   turnByChat: {},
   regeneratingTitles: new Set(),
   pendingApprovalByChat: {},
+  routingByChat: {},
   statsByMessage: {},
   theme: DEFAULT_THEME,
   appSettings: DEFAULT_APP_SETTINGS,
@@ -366,11 +369,22 @@ export const useApp = create<AppStore>((set, get) => ({
       const statsByMessage = { ...s.statsByMessage };
       const turnByChat = { ...s.turnByChat };
       const pendingApprovalByChat = { ...s.pendingApprovalByChat };
+      const routingByChat = { ...s.routingByChat };
       const current = streaming[chatId];
 
       switch (event.type) {
+        case "routing_started":
+          routingByChat[chatId] = { status: "routing" };
+          break;
+
+        case "routing_done":
+          routingByChat[chatId] = { status: "done", zoneId: event.zoneId, zoneName: event.zoneName };
+          break;
+
         case "user_message_saved":
           messagesByChat[chatId] = [...msgs, event.message];
+          // Clear any previous routing indicator — new turn is starting.
+          routingByChat[chatId] = null;
           // The user just kicked off a new turn — reset turn-level totals so
           // the live banner starts at zero, not from the previous turn.
           turnByChat[chatId] = {
@@ -542,6 +556,7 @@ export const useApp = create<AppStore>((set, get) => ({
         statsByMessage,
         turnByChat,
         pendingApprovalByChat,
+        routingByChat,
       };
     });
 

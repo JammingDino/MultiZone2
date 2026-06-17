@@ -9,11 +9,11 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ### 0.1.6 — Smart chat routing (current)
 
-- [~] `smart_routing` boolean on `Chat` — router picks best zone per turn
-- [~] Smart chat mode in `HomeScreen` mode picker (`setChatSmart` action)
-- [ ] Visual feedback while the router is running (spinner or status text in chat header)
-- [ ] Post-routing indicator: show which zone was selected for the current turn
-- [ ] Smart chat graceful degradation when no zones exist
+- [x] `smart_routing` boolean on `Chat` — router picks best zone per turn
+- [x] Smart chat mode in `HomeScreen` mode picker (`setChatSmart` action)
+- [x] Visual feedback while the router is running (spinner or status text in chat header)
+- [x] Post-routing indicator: show which zone was selected for the current turn
+- [x] Smart chat graceful degradation when no zones exist
 
 ---
 

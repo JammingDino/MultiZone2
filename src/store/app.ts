@@ -133,6 +133,10 @@ interface AppStore {
   projectsPanelInitId: string | null;
   openProjectsPanel: (projectId?: string) => void;
   closeProjectsPanel: () => void;
+
+  /** Project pre-selected for the next new chat (set by sidebar, consumed by HomeScreen). */
+  newChatProjectId: string | null;
+  setNewChatProjectId: (id: string | null) => void;
   refreshProjects: () => Promise<void>;
   refreshTags: () => Promise<void>;
   loadChatTags: (chatId: string) => Promise<void>;
@@ -261,6 +265,7 @@ export const useApp = create<AppStore>((set, get) => ({
   defaultZoneId: null,
   projectsPanelOpen: false,
   projectsPanelInitId: null,
+  newChatProjectId: null,
 
   async refreshProviders() {
     const providers = await api.listProviders();
@@ -746,6 +751,7 @@ export const useApp = create<AppStore>((set, get) => ({
 
   openProjectsPanel: (projectId?: string) => set({ projectsPanelOpen: true, projectsPanelInitId: projectId ?? null }),
   closeProjectsPanel: () => set({ projectsPanelOpen: false, projectsPanelInitId: null }),
+  setNewChatProjectId: (id) => set({ newChatProjectId: id }),
 
   async refreshProjects() {
     const projects = await api.listProjects();

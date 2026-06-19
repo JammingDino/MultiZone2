@@ -27,6 +27,7 @@ export function Sidebar() {
     loadDefaultZone,
     loadAppSettings,
   } = useApp();
+  const setNewChatProjectId = useApp((s) => s.setNewChatProjectId);
 
   const defaultProviderId = useApp((s) => s.appSettings.defaultProviderId);
   const quickProvider = providers.find((p) => p.id === (defaultProviderId ?? providers[0]?.id)) ?? null;
@@ -51,24 +52,10 @@ export function Sidebar() {
       loadThemeFromBackend, loadDefaultZone, loadAppSettings]);
 
   async function onNewChat(projectId?: string) {
-    // The plain "New chat" button drops the user back to the home screen
-    // greeting, where they choose Quick chat or a zone and the chat is created
-    // on first send. Project-scoped "new chat" still creates immediately so the
-    // chat lands in the right folder.
-    if (!projectId) {
-      await setActiveChat(null);
-      return;
-    }
-    const hasZone = (id: string | null | undefined): id is string =>
-      !!id && zones.some((z) => z.id === id);
-    const project = projects.find((p) => p.id === projectId) ?? null;
-    const effectiveZoneId =
-      (hasZone(project?.defaultZoneId) ? project!.defaultZoneId : null) ??
-      (hasZone(defaultZoneId) ? defaultZoneId : null) ??
-      (zones[0]?.id ?? null);
-    const chat = await api.createChat(effectiveZoneId, projectId);
-    await refreshChats();
-    await setActiveChat(chat.id);
+    // Always go to HomeScreen. When a project is specified, store it so
+    // HomeScreen can pre-populate the project picker.
+    if (projectId) setNewChatProjectId(projectId);
+    await setActiveChat(null);
   }
 
   function openProjectMenu(e: React.MouseEvent, projectId: string) {

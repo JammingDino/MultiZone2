@@ -39,20 +39,20 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 ### 0.1.8 — New chat consistency & zone state
 
 **Eliminate no-zone state**
-- [ ] Add "base zone" setting in Settings → Chat: a zone selected as the fallback for Quick Chat
-- [ ] Quick Chat uses the base zone instead of a raw provider/model pair
-- [ ] Remove the provider-only code path from the backend send logic
-- [ ] Home screen: clarify mode picker labels — "Quick" should reflect that it uses the base zone, not a bare model; add tooltip distinguishing Quick vs Smart vs Zone-specific
+- [x] Add "base zone" setting in Settings → Chat: a zone selected as the fallback for Quick Chat
+- [x] Quick Chat uses the base zone instead of a raw provider/model pair
+- [x] Remove the provider-only code path from the backend send logic
+- [x] Home screen: clarify mode picker labels — "Quick" should reflect that it uses the base zone, not a bare model; add tooltip distinguishing Quick vs Smart vs Zone-specific
 
 **New chat flow consistency**
-- [ ] Unify the app-start home screen and the in-app "New chat" button into one consistent flow
-- [ ] New chat dialog: add options to select perspective zones, assign a project, assign tags, and enable project context upfront — not just a zone picker
-- [ ] Project new chat: pre-selects the project but is otherwise identical to regular new chat
-- [ ] Settings → Providers: rename "quick chat provider" label to "Default provider"
+- [x] Unify the app-start home screen and the in-app "New chat" button into one consistent flow
+- [x] New chat dialog: add options to assign a project and tags upfront
+- [x] Project new chat: pre-selects the project but is otherwise identical to regular new chat
+- [x] Settings → Providers: rename "quick chat provider" label to "Default provider"
 
 **Save & autosave behavior**
-- [ ] Save buttons in zone editor, project editor, and tag editor close the relevant panel on save
-- [ ] Provider settings: remove save button; all provider fields autosave on change
+- [x] Save buttons in zone editor, project editor, and tag editor close the relevant panel on save
+- [x] Provider settings: remove save button; all provider fields autosave on change
 
 ---
 
@@ -137,6 +137,13 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [ ] New branched chat linked to parent in DB (`parent_chat_id`, `branched_from_message_id`)
 - [ ] Sidebar: branched chats appear as a collapsible sub-list under the parent
 - [ ] Branched chat inherits zone, project, and tag assignments from the parent
+
+### 0.3.3 — Chat interaction polish
+
+- [ ] Live tokens/second counter: displayed in the message footer while the model is generating; shows current throughput as a running figure
+- [ ] Fix token counter and elapsed timer for complex tasks: correctly accumulates counts and time across multi-step reasoning and back-to-back tool calls; does not reset or stall between tool invocations
+- [ ] Copy response as markdown: copy button on each assistant message; copies raw markdown source (not rendered HTML) to clipboard
+- [ ] Edit AI responses: click-to-edit mode on any assistant message; changes saved to DB; an "edited" marker is shown on the message; branching from an edited message uses the edited content
 
 ---
 
@@ -261,6 +268,13 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [ ] Message thread: spacing between messages, avatar sizes, alignment
 - [ ] Confirm all save buttons close panels as expected (from 0.1.8 and 0.2.x checklists)
 
+### 0.7.3 — Chat export
+
+- [ ] Export chat as Markdown: full chat exported as a single `.md` file (distinct from the live-mirror in 0.7.1) — frontmatter with chat title, zone, project, tags, dates; messages as timestamped blocks
+- [ ] Export chat as PDF: theme-aware PDF styled to match the currently active app theme (accent color, background, font family, message bubble layout)
+- [ ] PDF page header: chat title, zone name, and export date; page numbers in footer
+- [ ] Export entry point in the chat header or chat context menu
+
 ---
 
 ## 1.0.0 — Hardening & Public Release
@@ -282,6 +296,5 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [ ] Diffusion LLM support: text generation via diffusion-first models; architecturally isolated from the chat-completion pipeline
 - [ ] Voice I/O: STT input, TTS output
 - [ ] Mobile: Tauri mobile target (iOS/Android)
-- [ ] Chat export: Markdown, JSON, PDF
 - [ ] Deep research mode: multi-step sourced research using subchats; requires design session before scheduling
 - [ ] Zone snapshot/versioning: save zone config at chat creation time so editing a zone does not alter historical context

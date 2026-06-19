@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState } from "react";
-import { Send, ChevronDown, Zap, Check, Layers, Settings as SettingsIcon, Loader2, Brain, Paperclip } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Send, ChevronDown, Zap, Check, Layers, Settings as SettingsIcon, Loader2, Brain, Paperclip, Folder, Tag, X } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { getZoneIcon } from "@/lib/zoneIcons";
@@ -23,6 +23,8 @@ type Mode = { type: "quick" } | { type: "smart" } | { type: "zone"; id: string }
 export function HomeScreen() {
   const zones = useApp((s) => s.zones);
   const providers = useApp((s) => s.providers);
+  const projects = useApp((s) => s.projects);
+  const tags = useApp((s) => s.tags);
   const defaultZoneId = useApp((s) => s.defaultZoneId);
   const defaultProviderId = useApp((s) => s.appSettings.defaultProviderId);
   const baseZoneId = useApp((s) => s.appSettings.baseZoneId);
@@ -31,8 +33,11 @@ export function HomeScreen() {
   const refreshChats = useApp((s) => s.refreshChats);
   const setActiveChat = useApp((s) => s.setActiveChat);
   const setChatSmart = useApp((s) => s.setChatSmart);
+  const addChatTag = useApp((s) => s.addChatTag);
   const openSettings = useApp((s) => s.openSettings);
   const openZoneEditor = useApp((s) => s.openZoneEditor);
+  const newChatProjectId = useApp((s) => s.newChatProjectId);
+  const setNewChatProjectId = useApp((s) => s.setNewChatProjectId);
 
   // The base zone for Quick Chat (if configured), or legacy provider fallback.
   const baseZone = zones.find((z) => z.id === baseZoneId) ?? null;
@@ -57,9 +62,20 @@ export function HomeScreen() {
   const [previewId, setPreviewId] = useState<string | null>(null);
   const previewAtt = pending.find((a) => a.id === previewId) ?? null;
   const [menuOpen, setMenuOpen] = useState(false);
+  const [tagMenuOpen, setTagMenuOpen] = useState(false);
   const [sending, setSending] = useState(false);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Consume the pre-selected project from sidebar "new chat in project".
+  useEffect(() => {
+    if (newChatProjectId) {
+      setSelectedProjectId(newChatProjectId);
+      setNewChatProjectId(null);
+    }
+  }, [newChatProjectId, setNewChatProjectId]);
 
   const selectedZone =
     mode.type === "zone" ? zones.find((z) => z.id === mode.id) ?? null : null;
@@ -192,6 +208,9 @@ export function HomeScreen() {
       }
     }
 
+    const currentProjectId = selectedProjectId;
+    const currentTagIds = new Set(selectedTagIds);
+
     // Quick mode uses the base zone if one is configured, otherwise null (legacy provider path).
     const zoneId =
       currentMode.type === "zone"
@@ -200,9 +219,13 @@ export function HomeScreen() {
         ? (baseZoneId ?? null)
         : null;
     try {
-      const chat = await api.createChat(zoneId, null);
+      const chat = await api.createChat(zoneId, currentProjectId);
       if (currentMode.type === "smart") {
         await setChatSmart(chat.id, true);
+      }
+      // Assign selected tags (fire-and-forget; non-critical).
+      for (const tagId of currentTagIds) {
+        addChatTag(chat.id, tagId).catch(console.error);
       }
       await refreshChats();
       await setActiveChat(chat.id);
@@ -272,6 +295,88 @@ export function HomeScreen() {
             placeholder="Send a message…"
             className="max-h-48 min-h-[52px] w-full resize-none bg-transparent px-2 py-1.5 text-sm outline-none"
           />
+          {/* Project + tag pickers — only shown when there's something to pick */}
+          {(projects.length > 0 || tags.length > 0) && (
+            <div className="flex flex-wrap items-center gap-1.5 border-t border-[var(--color-border)] px-2 py-1.5">
+              {projects.length > 0 && (
+                <div className="flex items-center gap-1">
+                  <Folder size={11} className="text-[var(--color-text-muted)]" />
+                  <select
+                    value={selectedProjectId ?? ""}
+                    onChange={(e) => setSelectedProjectId(e.target.value || null)}
+                    className="rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-1.5 py-0.5 text-xs outline-none focus:border-[var(--color-accent)]"
+                  >
+                    <option value="">No project</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {tags.length > 0 && (
+                <div className="relative flex items-center gap-1">
+                  <Tag size={11} className="text-[var(--color-text-muted)]" />
+                  {/* Selected tag chips */}
+                  {Array.from(selectedTagIds).map((tid) => {
+                    const t = tags.find((tg) => tg.id === tid);
+                    if (!t) return null;
+                    return (
+                      <span
+                        key={tid}
+                        className="flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs text-white"
+                        style={{ background: t.color ?? "var(--color-accent)" }}
+                      >
+                        {t.name}
+                        <button
+                          onClick={() => setSelectedTagIds((s) => { const n = new Set(s); n.delete(tid); return n; })}
+                          className="opacity-70 hover:opacity-100"
+                        >
+                          <X size={9} />
+                        </button>
+                      </span>
+                    );
+                  })}
+                  <button
+                    onClick={() => setTagMenuOpen((v) => !v)}
+                    className="rounded border border-[var(--color-border)] px-1.5 py-0.5 text-xs text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
+                  >
+                    + Tag
+                  </button>
+                  {tagMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-30" onClick={() => setTagMenuOpen(false)} />
+                      <div className="absolute bottom-full left-0 z-40 mb-1 min-w-[160px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg">
+                        {tags.map((t) => {
+                          const active = selectedTagIds.has(t.id);
+                          return (
+                            <button
+                              key={t.id}
+                              onClick={() => {
+                                setSelectedTagIds((s) => {
+                                  const n = new Set(s);
+                                  if (active) n.delete(t.id); else n.add(t.id);
+                                  return n;
+                                });
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-[var(--color-panel-hover)]"
+                            >
+                              <span
+                                className="h-2 w-2 shrink-0 rounded-full"
+                                style={{ background: t.color ?? "var(--color-accent)" }}
+                              />
+                              {t.name}
+                              {active && <Check size={10} className="ml-auto text-[var(--color-accent)]" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="flex items-center justify-between gap-2 px-1 pt-1">
             {/* Left side: attach button + mode dropdown */}
             <div className="flex items-center gap-1">

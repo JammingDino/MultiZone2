@@ -91,7 +91,7 @@ function ProvidersTab() {
             <div className="font-medium">{p.name}</div>
             <div className="text-xs text-[var(--color-text-muted)]">{p.baseUrl}</div>
             <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">
-              Quick-chat model: {p.defaultModel ? <span className="font-mono">{p.defaultModel}</span> : <span className="italic">none set</span>}
+              Default model: {p.defaultModel ? <span className="font-mono">{p.defaultModel}</span> : <span className="italic">none set</span>}
             </div>
           </div>
         ))}
@@ -104,9 +104,9 @@ function ProvidersTab() {
 
       {providers.length > 0 && (
         <section className="mt-5">
-          <h3 className="mb-1 text-sm font-medium">Quick-chat provider</h3>
+          <h3 className="mb-1 text-sm font-medium">Default provider</h3>
           <p className="mb-2 text-xs text-[var(--color-text-muted)]">
-            Which provider answers Quick chats (chats not bound to a zone). Its default model above is used.
+            Fallback provider used when no base zone is configured. Its default model is used.
           </p>
           <select
             value={quickProviderId}

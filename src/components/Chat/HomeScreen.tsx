@@ -58,6 +58,7 @@ export function HomeScreen() {
   const [previewId, setPreviewId] = useState<string | null>(null);
   const previewAtt = pending.find((a) => a.id === previewId) ?? null;
   const [menuOpen, setMenuOpen] = useState(false);
+  const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [tagMenuOpen, setTagMenuOpen] = useState(false);
   const [sending, setSending] = useState(false);
   // Initialize project from any pending new-chat context set by the sidebar.
@@ -315,8 +316,8 @@ export function HomeScreen() {
               onChange={(e) => { handleFiles(e.target.files); e.target.value = ""; }}
             />
 
-            {/* Center group: mode + project + tags — natural width, centered in available space */}
-            <div className="flex flex-1 items-center justify-center gap-2">
+            {/* Center group — items at natural width, spread left/center/right */}
+            <div className="flex flex-1 items-center justify-between">
 
             {/* Mode */}
             <div className="relative shrink-0">
@@ -430,18 +431,43 @@ export function HomeScreen() {
                 )}
               </div>
 
-            {/* Project */}
+            {/* Project — custom dropdown */}
             {projects.length > 0 && (
-              <select
-                value={selectedProjectId ?? ""}
-                onChange={(e) => setSelectedProjectId(e.target.value || null)}
-                className="shrink-0 cursor-pointer rounded-full border border-[var(--color-border)] bg-[var(--color-panel)] px-2.5 py-1 text-xs text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
-              >
-                <option value="">No project</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
+              <div className="relative shrink-0">
+                <button
+                  onClick={() => setProjectMenuOpen((v) => !v)}
+                  className="flex items-center gap-1.5 rounded-full border border-[var(--color-border)] px-2.5 py-1 text-xs text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
+                >
+                  <Layers size={12} className={selectedProjectId ? "text-[var(--color-accent)]" : ""} />
+                  {selectedProjectId ? (projects.find((p) => p.id === selectedProjectId)?.name ?? "Project") : "No project"}
+                  <ChevronDown size={12} />
+                </button>
+                {projectMenuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-30" onClick={() => setProjectMenuOpen(false)} />
+                    <div className="absolute bottom-full left-1/2 z-40 mb-1 min-w-[180px] -translate-x-1/2 rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg">
+                      <button
+                        onClick={() => { setSelectedProjectId(null); setProjectMenuOpen(false); }}
+                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-[var(--color-panel-hover)]"
+                      >
+                        <span className="text-[var(--color-text-muted)]">No project</span>
+                        {!selectedProjectId && <Check size={10} className="ml-auto text-[var(--color-accent)]" />}
+                      </button>
+                      {projects.length > 0 && <div className="my-1 border-t border-[var(--color-border)]" />}
+                      {projects.map((p) => (
+                        <button
+                          key={p.id}
+                          onClick={() => { setSelectedProjectId(p.id); setProjectMenuOpen(false); }}
+                          className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-[var(--color-panel-hover)]"
+                        >
+                          {p.name}
+                          {selectedProjectId === p.id && <Check size={10} className="ml-auto text-[var(--color-accent)]" />}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
             )}
 
             {/* Tags */}

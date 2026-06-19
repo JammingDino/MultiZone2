@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Send, ChevronDown, Zap, Check, Layers, Settings as SettingsIcon, Loader2, Brain, Paperclip, Folder, Tag, X } from "lucide-react";
+import { Send, ChevronDown, Zap, Check, Layers, Settings as SettingsIcon, Loader2, Brain, Paperclip, Tag, X } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { getZoneIcon } from "@/lib/zoneIcons";
@@ -36,7 +36,9 @@ export function HomeScreen() {
   const openSettings = useApp((s) => s.openSettings);
   const openZoneEditor = useApp((s) => s.openZoneEditor);
   const newChatProjectId = useApp((s) => s.newChatProjectId);
-  const setNewChatProjectId = useApp((s) => s.setNewChatProjectId);
+  const newChatTimestamp = useApp((s) => s.newChatTimestamp);
+  const homeScreenDraft = useApp((s) => s.homeScreenDraft);
+  const setHomeScreenDraft = useApp((s) => s.setHomeScreenDraft);
 
   // The base zone for Quick Chat (if configured), or legacy provider fallback.
   const baseZone = zones.find((z) => z.id === baseZoneId) ?? null;
@@ -51,25 +53,31 @@ export function HomeScreen() {
     if (zones[0]) return { type: "zone", id: zones[0].id };
     return { type: "quick" };
   });
-  const [text, setText] = useState("");
+  const [text, setText] = useState(homeScreenDraft);
   const [pending, setPending] = useState<PendingAttachment[]>([]);
   const [previewId, setPreviewId] = useState<string | null>(null);
   const previewAtt = pending.find((a) => a.id === previewId) ?? null;
   const [menuOpen, setMenuOpen] = useState(false);
   const [tagMenuOpen, setTagMenuOpen] = useState(false);
   const [sending, setSending] = useState(false);
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  // Initialize project from any pending new-chat context set by the sidebar.
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(newChatProjectId);
   const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const isFirstNewChatTick = useRef(true);
 
-  // Consume the pre-selected project from sidebar "new chat in project".
+  // Persist draft text across navigations.
+  useEffect(() => { setHomeScreenDraft(text); }, [text, setHomeScreenDraft]);
+
+  // React to new-chat triggers (handles "new chat button while already on HomeScreen").
+  // Skip the first tick (that's just the initial mount value).
   useEffect(() => {
-    if (newChatProjectId) {
-      setSelectedProjectId(newChatProjectId);
-      setNewChatProjectId(null);
-    }
-  }, [newChatProjectId, setNewChatProjectId]);
+    if (isFirstNewChatTick.current) { isFirstNewChatTick.current = false; return; }
+    setSelectedProjectId(newChatProjectId);
+    setSelectedTagIds(new Set());
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newChatTimestamp]);
 
   const selectedZone =
     mode.type === "zone" ? zones.find((z) => z.id === mode.id) ?? null : null;
@@ -229,6 +237,7 @@ export function HomeScreen() {
       }
 
       setText("");
+      setHomeScreenDraft("");
       setPending([]);
       api.sendMessage(chat.id, parts).catch(console.error);
     } catch (e) {
@@ -289,33 +298,29 @@ export function HomeScreen() {
             placeholder="Send a message…"
             className="max-h-48 min-h-[52px] w-full resize-none bg-transparent px-2 py-1.5 text-sm outline-none"
           />
-          <div className="flex items-center justify-between gap-2 px-1 pt-1">
-            {/* Left side: attach + mode + project + tags */}
-            <div className="flex flex-wrap items-center gap-1">
-              <button
-                onClick={() => fileRef.current?.click()}
-                className="rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
-                title="Attach file"
-              >
-                <Paperclip size={15} />
-              </button>
-              <input
-                ref={fileRef}
-                type="file"
-                multiple
-                className="hidden"
-                onChange={(e) => {
-                  handleFiles(e.target.files);
-                  e.target.value = "";
-                }}
-              />
+          <div className="flex items-center gap-2 px-1 pt-1">
+            {/* Attach */}
+            <button
+              onClick={() => fileRef.current?.click()}
+              className="shrink-0 rounded-full p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
+              title="Attach file"
+            >
+              <Paperclip size={15} />
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={(e) => { handleFiles(e.target.files); e.target.value = ""; }}
+            />
 
-              {/* Mode dropdown */}
-              <div className="relative">
-                <button
-                  onClick={() => setMenuOpen((v) => !v)}
-                  className="flex items-center gap-1.5 rounded-full border border-[var(--color-border)] px-2.5 py-1 text-xs text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
-                >
+            {/* Mode — flex-1 */}
+            <div className="relative min-w-0 flex-1">
+              <button
+                onClick={() => setMenuOpen((v) => !v)}
+                className="flex w-full items-center gap-1.5 rounded-full border border-[var(--color-border)] px-2.5 py-1 text-xs text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
+              >
                   {mode.type === "quick" ? (
                     <>
                       <Zap size={12} className="text-[var(--color-accent)]" />
@@ -344,7 +349,7 @@ export function HomeScreen() {
                       <Layers size={12} /> Choose a zone
                     </>
                   )}
-                  <ChevronDown size={12} />
+                  <ChevronDown size={12} className="ml-auto shrink-0" />
                 </button>
 
                 {menuOpen && (
@@ -422,92 +427,77 @@ export function HomeScreen() {
                 )}
               </div>
 
-              {/* Project picker */}
-              {projects.length > 0 && (
-                <div className="flex items-center gap-1">
-                  <div className="h-3 w-px bg-[var(--color-border)]" />
-                  <Folder size={11} className="text-[var(--color-text-muted)]" />
-                  <select
-                    value={selectedProjectId ?? ""}
-                    onChange={(e) => setSelectedProjectId(e.target.value || null)}
-                    className="rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-1.5 py-0.5 text-xs outline-none focus:border-[var(--color-accent)]"
-                  >
-                    <option value="">No project</option>
-                    {projects.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
+            {/* Project — flex-1 */}
+            {projects.length > 0 && (
+              <div className="relative min-w-0 flex-1">
+                <select
+                  value={selectedProjectId ?? ""}
+                  onChange={(e) => setSelectedProjectId(e.target.value || null)}
+                  className="w-full cursor-pointer appearance-none rounded-full border border-[var(--color-border)] bg-[var(--color-panel)] py-1 pl-2.5 pr-6 text-xs text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
+                >
+                  <option value="">No project</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+                <ChevronDown size={10} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />
+              </div>
+            )}
 
-              {/* Tag picker */}
-              {tags.length > 0 && (
-                <div className="relative flex items-center gap-1">
-                  <div className="h-3 w-px bg-[var(--color-border)]" />
-                  <Tag size={11} className="text-[var(--color-text-muted)]" />
-                  {Array.from(selectedTagIds).map((tid) => {
-                    const t = tags.find((tg) => tg.id === tid);
-                    if (!t) return null;
-                    return (
-                      <span
-                        key={tid}
-                        className="flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs text-white"
-                        style={{ background: t.color ?? "var(--color-accent)" }}
-                      >
-                        {t.name}
-                        <button
-                          onClick={() => setSelectedTagIds((s) => { const n = new Set(s); n.delete(tid); return n; })}
-                          className="opacity-70 hover:opacity-100"
-                        >
-                          <X size={9} />
-                        </button>
-                      </span>
-                    );
-                  })}
-                  <button
-                    onClick={() => setTagMenuOpen((v) => !v)}
-                    className="rounded border border-[var(--color-border)] px-1.5 py-0.5 text-xs text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
-                  >
-                    + Tag
-                  </button>
-                  {tagMenuOpen && (
-                    <>
-                      <div className="fixed inset-0 z-30" onClick={() => setTagMenuOpen(false)} />
-                      <div className="absolute bottom-full left-0 z-40 mb-1 min-w-[160px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg">
-                        {tags.map((t) => {
-                          const active = selectedTagIds.has(t.id);
-                          return (
-                            <button
-                              key={t.id}
-                              onClick={() => {
-                                setSelectedTagIds((s) => {
-                                  const n = new Set(s);
-                                  if (active) n.delete(t.id); else n.add(t.id);
-                                  return n;
-                                });
-                              }}
-                              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-[var(--color-panel-hover)]"
-                            >
-                              <span
-                                className="h-2 w-2 shrink-0 rounded-full"
-                                style={{ background: t.color ?? "var(--color-accent)" }}
-                              />
-                              {t.name}
-                              {active && <Check size={10} className="ml-auto text-[var(--color-accent)]" />}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
+            {/* Tags — flex-1 */}
+            {tags.length > 0 && (
+              <div className="relative flex min-w-0 flex-1 items-center gap-1">
+                {Array.from(selectedTagIds).map((tid) => {
+                  const t = tags.find((tg) => tg.id === tid);
+                  if (!t) return null;
+                  return (
+                    <span
+                      key={tid}
+                      className="flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs text-white"
+                      style={{ background: t.color ?? "var(--color-accent)" }}
+                    >
+                      {t.name}
+                      <button onClick={() => setSelectedTagIds((s) => { const n = new Set(s); n.delete(tid); return n; })} className="opacity-70 hover:opacity-100">
+                        <X size={9} />
+                      </button>
+                    </span>
+                  );
+                })}
+                <button
+                  onClick={() => setTagMenuOpen((v) => !v)}
+                  className="flex flex-1 items-center justify-center gap-1 rounded-full border border-[var(--color-border)] px-2.5 py-1 text-xs text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
+                >
+                  <Tag size={10} /> + Tag
+                </button>
+                {tagMenuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-30" onClick={() => setTagMenuOpen(false)} />
+                    <div className="absolute bottom-full right-0 z-40 mb-1 min-w-[160px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg">
+                      {tags.map((t) => {
+                        const active = selectedTagIds.has(t.id);
+                        return (
+                          <button
+                            key={t.id}
+                            onClick={() => { setSelectedTagIds((s) => { const n = new Set(s); if (active) n.delete(t.id); else n.add(t.id); return n; }); }}
+                            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-[var(--color-panel-hover)]"
+                          >
+                            <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: t.color ?? "var(--color-accent)" }} />
+                            {t.name}
+                            {active && <Check size={10} className="ml-auto text-[var(--color-accent)]" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
 
+            {/* Send */}
             <button
               onClick={start}
               disabled={!canSend}
-              className="flex items-center gap-1.5 rounded-lg bg-[var(--color-accent)] px-3 py-1.5 text-sm text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              className="shrink-0 flex items-center gap-1.5 rounded-full bg-[var(--color-accent)] px-3 py-1.5 text-sm text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
               title={quickSelectedButUnavailable ? "Set a default model first" : "Send"}
             >
               {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}

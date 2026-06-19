@@ -27,7 +27,7 @@ export function Sidebar() {
     loadDefaultZone,
     loadAppSettings,
   } = useApp();
-  const setNewChatProjectId = useApp((s) => s.setNewChatProjectId);
+  const triggerNewChat = useApp((s) => s.triggerNewChat);
 
   const defaultProviderId = useApp((s) => s.appSettings.defaultProviderId);
   const quickProvider = providers.find((p) => p.id === (defaultProviderId ?? providers[0]?.id)) ?? null;
@@ -52,9 +52,7 @@ export function Sidebar() {
       loadThemeFromBackend, loadDefaultZone, loadAppSettings]);
 
   async function onNewChat(projectId?: string) {
-    // Always go to HomeScreen. When a project is specified, store it so
-    // HomeScreen can pre-populate the project picker.
-    if (projectId) setNewChatProjectId(projectId);
+    triggerNewChat(projectId ?? null);
     await setActiveChat(null);
   }
 

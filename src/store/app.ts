@@ -134,9 +134,15 @@ interface AppStore {
   openProjectsPanel: (projectId?: string) => void;
   closeProjectsPanel: () => void;
 
-  /** Project pre-selected for the next new chat (set by sidebar, consumed by HomeScreen). */
+  /** Project pre-selected for the next new chat, consumed by HomeScreen. */
   newChatProjectId: string | null;
-  setNewChatProjectId: (id: string | null) => void;
+  /** Bumped every time a new-chat action is triggered; HomeScreen watches this to reset its state. */
+  newChatTimestamp: number;
+  triggerNewChat: (projectId?: string | null) => void;
+
+  /** Persists the HomeScreen composer text across navigations. */
+  homeScreenDraft: string;
+  setHomeScreenDraft: (text: string) => void;
   refreshProjects: () => Promise<void>;
   refreshTags: () => Promise<void>;
   loadChatTags: (chatId: string) => Promise<void>;
@@ -266,6 +272,8 @@ export const useApp = create<AppStore>((set, get) => ({
   projectsPanelOpen: false,
   projectsPanelInitId: null,
   newChatProjectId: null,
+  newChatTimestamp: 0,
+  homeScreenDraft: "",
 
   async refreshProviders() {
     const providers = await api.listProviders();
@@ -757,7 +765,11 @@ export const useApp = create<AppStore>((set, get) => ({
 
   openProjectsPanel: (projectId?: string) => set({ projectsPanelOpen: true, projectsPanelInitId: projectId ?? null }),
   closeProjectsPanel: () => set({ projectsPanelOpen: false, projectsPanelInitId: null }),
-  setNewChatProjectId: (id) => set({ newChatProjectId: id }),
+  triggerNewChat: (projectId) => set((s) => ({
+    newChatProjectId: projectId ?? null,
+    newChatTimestamp: s.newChatTimestamp + 1,
+  })),
+  setHomeScreenDraft: (text) => set({ homeScreenDraft: text }),
 
   async refreshProjects() {
     const projects = await api.listProjects();

@@ -25,7 +25,6 @@ export function HomeScreen() {
   const providers = useApp((s) => s.providers);
   const projects = useApp((s) => s.projects);
   const tags = useApp((s) => s.tags);
-  const defaultZoneId = useApp((s) => s.defaultZoneId);
   const defaultProviderId = useApp((s) => s.appSettings.defaultProviderId);
   const baseZoneId = useApp((s) => s.appSettings.baseZoneId);
   const sendKey = useApp((s) => s.appSettings.sendKey);
@@ -47,12 +46,7 @@ export function HomeScreen() {
   // Quick Chat is available if a base zone is set, or a provider with a default model exists.
   const quickAvailable = !!(baseZone ?? quickModel);
 
-  const defaultZone = zones.find((z) => z.id === defaultZoneId) ?? null;
-
-  // Default mode: the user's default zone if set, else Quick chat when usable,
-  // else the first zone.
   const [mode, setMode] = useState<Mode>(() => {
-    if (defaultZone) return { type: "zone", id: defaultZone.id };
     if (quickAvailable) return { type: "quick" };
     if (zones[0]) return { type: "zone", id: zones[0].id };
     return { type: "quick" };
@@ -295,91 +289,9 @@ export function HomeScreen() {
             placeholder="Send a message…"
             className="max-h-48 min-h-[52px] w-full resize-none bg-transparent px-2 py-1.5 text-sm outline-none"
           />
-          {/* Project + tag pickers — only shown when there's something to pick */}
-          {(projects.length > 0 || tags.length > 0) && (
-            <div className="flex flex-wrap items-center gap-1.5 border-t border-[var(--color-border)] px-2 py-1.5">
-              {projects.length > 0 && (
-                <div className="flex items-center gap-1">
-                  <Folder size={11} className="text-[var(--color-text-muted)]" />
-                  <select
-                    value={selectedProjectId ?? ""}
-                    onChange={(e) => setSelectedProjectId(e.target.value || null)}
-                    className="rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-1.5 py-0.5 text-xs outline-none focus:border-[var(--color-accent)]"
-                  >
-                    <option value="">No project</option>
-                    {projects.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              {tags.length > 0 && (
-                <div className="relative flex items-center gap-1">
-                  <Tag size={11} className="text-[var(--color-text-muted)]" />
-                  {/* Selected tag chips */}
-                  {Array.from(selectedTagIds).map((tid) => {
-                    const t = tags.find((tg) => tg.id === tid);
-                    if (!t) return null;
-                    return (
-                      <span
-                        key={tid}
-                        className="flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs text-white"
-                        style={{ background: t.color ?? "var(--color-accent)" }}
-                      >
-                        {t.name}
-                        <button
-                          onClick={() => setSelectedTagIds((s) => { const n = new Set(s); n.delete(tid); return n; })}
-                          className="opacity-70 hover:opacity-100"
-                        >
-                          <X size={9} />
-                        </button>
-                      </span>
-                    );
-                  })}
-                  <button
-                    onClick={() => setTagMenuOpen((v) => !v)}
-                    className="rounded border border-[var(--color-border)] px-1.5 py-0.5 text-xs text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
-                  >
-                    + Tag
-                  </button>
-                  {tagMenuOpen && (
-                    <>
-                      <div className="fixed inset-0 z-30" onClick={() => setTagMenuOpen(false)} />
-                      <div className="absolute bottom-full left-0 z-40 mb-1 min-w-[160px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg">
-                        {tags.map((t) => {
-                          const active = selectedTagIds.has(t.id);
-                          return (
-                            <button
-                              key={t.id}
-                              onClick={() => {
-                                setSelectedTagIds((s) => {
-                                  const n = new Set(s);
-                                  if (active) n.delete(t.id); else n.add(t.id);
-                                  return n;
-                                });
-                              }}
-                              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-[var(--color-panel-hover)]"
-                            >
-                              <span
-                                className="h-2 w-2 shrink-0 rounded-full"
-                                style={{ background: t.color ?? "var(--color-accent)" }}
-                              />
-                              {t.name}
-                              {active && <Check size={10} className="ml-auto text-[var(--color-accent)]" />}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
           <div className="flex items-center justify-between gap-2 px-1 pt-1">
-            {/* Left side: attach button + mode dropdown */}
-            <div className="flex items-center gap-1">
+            {/* Left side: attach + mode + project + tags */}
+            <div className="flex flex-wrap items-center gap-1">
               <button
                 onClick={() => fileRef.current?.click()}
                 className="rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
@@ -509,6 +421,87 @@ export function HomeScreen() {
                   </>
                 )}
               </div>
+
+              {/* Project picker */}
+              {projects.length > 0 && (
+                <div className="flex items-center gap-1">
+                  <div className="h-3 w-px bg-[var(--color-border)]" />
+                  <Folder size={11} className="text-[var(--color-text-muted)]" />
+                  <select
+                    value={selectedProjectId ?? ""}
+                    onChange={(e) => setSelectedProjectId(e.target.value || null)}
+                    className="rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-1.5 py-0.5 text-xs outline-none focus:border-[var(--color-accent)]"
+                  >
+                    <option value="">No project</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Tag picker */}
+              {tags.length > 0 && (
+                <div className="relative flex items-center gap-1">
+                  <div className="h-3 w-px bg-[var(--color-border)]" />
+                  <Tag size={11} className="text-[var(--color-text-muted)]" />
+                  {Array.from(selectedTagIds).map((tid) => {
+                    const t = tags.find((tg) => tg.id === tid);
+                    if (!t) return null;
+                    return (
+                      <span
+                        key={tid}
+                        className="flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xs text-white"
+                        style={{ background: t.color ?? "var(--color-accent)" }}
+                      >
+                        {t.name}
+                        <button
+                          onClick={() => setSelectedTagIds((s) => { const n = new Set(s); n.delete(tid); return n; })}
+                          className="opacity-70 hover:opacity-100"
+                        >
+                          <X size={9} />
+                        </button>
+                      </span>
+                    );
+                  })}
+                  <button
+                    onClick={() => setTagMenuOpen((v) => !v)}
+                    className="rounded border border-[var(--color-border)] px-1.5 py-0.5 text-xs text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
+                  >
+                    + Tag
+                  </button>
+                  {tagMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-30" onClick={() => setTagMenuOpen(false)} />
+                      <div className="absolute bottom-full left-0 z-40 mb-1 min-w-[160px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg">
+                        {tags.map((t) => {
+                          const active = selectedTagIds.has(t.id);
+                          return (
+                            <button
+                              key={t.id}
+                              onClick={() => {
+                                setSelectedTagIds((s) => {
+                                  const n = new Set(s);
+                                  if (active) n.delete(t.id); else n.add(t.id);
+                                  return n;
+                                });
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-[var(--color-panel-hover)]"
+                            >
+                              <span
+                                className="h-2 w-2 shrink-0 rounded-full"
+                                style={{ background: t.color ?? "var(--color-accent)" }}
+                              />
+                              {t.name}
+                              {active && <Check size={10} className="ml-auto text-[var(--color-accent)]" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
 
             <button

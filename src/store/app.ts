@@ -282,7 +282,13 @@ export const useApp = create<AppStore>((set, get) => ({
     if (zonesWithWs.length === 0) return;
 
     // Promote first non-default zone config to global settings (only if user hasn't configured it yet).
-    const current = get().appSettings;
+    // Read directly from DB — do NOT use get().appSettings which may not be loaded yet at startup.
+    let savedSettings: Partial<AppSettings> = {};
+    try {
+      const raw = await api.getSetting("app_settings");
+      if (raw) savedSettings = JSON.parse(raw) as Partial<AppSettings>;
+    } catch { /* ignore */ }
+    const current = { ...DEFAULT_APP_SETTINGS, ...savedSettings };
     if (current.webSearchProvider === "multi" && !current.webSearchEndpoint && !current.webSearchApiKey) {
       const firstWs = (JSON.parse(zonesWithWs[0].toolConfig) as Record<string, any>)?.web_search ?? {};
       if (firstWs.provider !== "multi" || firstWs.endpoint || firstWs.api_key) {

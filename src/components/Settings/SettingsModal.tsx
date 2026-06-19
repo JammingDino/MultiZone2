@@ -384,9 +384,6 @@ function ChatTab() {
     const selected = await open({ directory: true, multiple: false });
     if (typeof selected === "string") setAppSettings({ defaultDirectory: selected });
   }
-  const defaultZoneId = useApp((s) => s.defaultZoneId);
-  const setDefaultZone = useApp((s) => s.setDefaultZone);
-
   return (
     <div className="flex flex-col gap-6">
       <section>
@@ -403,30 +400,6 @@ function ChatTab() {
           {zones.map((z) => (
             <option key={z.id} value={z.id}>
               {z.name} · {z.model}
-            </option>
-          ))}
-        </select>
-        {zones.length === 0 && (
-          <p className="mt-2 text-xs text-[var(--color-text-muted)]">
-            No zones yet — create one from "Configure Zones".
-          </p>
-        )}
-      </section>
-
-      <section>
-        <h3 className="mb-1 text-sm font-medium">Default zone</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          The zone new chats start with. A project's own default zone overrides this for chats created inside that project.
-        </p>
-        <select
-          value={defaultZoneId ?? ""}
-          onChange={(e) => setDefaultZone(e.target.value || null)}
-          className="w-full rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]"
-        >
-          <option value="">No default (use first zone)</option>
-          {zones.map((z) => (
-            <option key={z.id} value={z.id}>
-              {z.name}
             </option>
           ))}
         </select>

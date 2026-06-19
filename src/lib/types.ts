@@ -225,6 +225,11 @@ export interface AppSettings {
   webSearchEndpoint: string;
   /** API key — only used for providers that require one (brave, tavily, serper). */
   webSearchApiKey: string;
+  /**
+   * Zone used by Quick Chat as a fallback when no specific zone is chosen.
+   * Null = legacy fallback: use defaultProviderId + its defaultModel.
+   */
+  baseZoneId: string | null;
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -246,6 +251,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   webSearchProvider: "multi",
   webSearchEndpoint: "",
   webSearchApiKey: "",
+  baseZoneId: null,
 };
 
 export interface DbStats {

@@ -412,6 +412,25 @@ pub const SIMPLE_ZONE_ID: &str = "__simple__";
 /// Sentinel zone id meaning "Smart chat" — route to a zone per turn.
 pub const SMART_ZONE_ID: &str = "__smart__";
 
+/// Read the `baseZoneId` from app_settings, if one has been configured.
+async fn base_zone_id(db: &SqlitePool) -> Option<String> {
+    sqlx::query_scalar::<_, Option<String>>(
+        "SELECT value FROM settings WHERE key = 'app_settings'",
+    )
+    .fetch_optional(db)
+    .await
+    .ok()
+    .flatten()
+    .flatten()
+    .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+    .and_then(|v| {
+        v.get("baseZoneId")
+            .and_then(|d| d.as_str())
+            .filter(|s| !s.trim().is_empty())
+            .map(String::from)
+    })
+}
+
 /// Resolve the provider used for simple (no-zone) chats: the one named by the
 /// `defaultProviderId` app setting, falling back to the oldest provider.
 async fn default_provider(db: &SqlitePool) -> AppResult<Provider> {
@@ -500,6 +519,11 @@ pub async fn effective_zone_and_provider(
     match zone_id {
         Some(zid) => load_zone_and_provider(db, &zid).await,
         None => {
+            if let Some(zid) = base_zone_id(db).await {
+                if let Ok(zp) = load_zone_and_provider(db, &zid).await {
+                    return Ok(zp);
+                }
+            }
             let provider = default_provider(db).await?;
             let zone = simple_zone(&provider)?;
             Ok((zone, provider))
@@ -558,8 +582,19 @@ async fn zone_for_mode(
     let (mut zone, provider) = match mode {
         TurnMode::Zone(z) => load_zone_and_provider(db, z).await?,
         TurnMode::Simple => {
-            let p = default_provider(db).await?;
-            (simple_zone(&p)?, p)
+            // Try the configured base zone first; fall back to the legacy
+            // default-provider + synthetic zone when none is set.
+            if let Some(zid) = base_zone_id(db).await {
+                if let Ok(zp) = load_zone_and_provider(db, &zid).await {
+                    zp
+                } else {
+                    let p = default_provider(db).await?;
+                    (simple_zone(&p)?, p)
+                }
+            } else {
+                let p = default_provider(db).await?;
+                (simple_zone(&p)?, p)
+            }
         }
         TurnMode::Smart => match route_zone_id(db, http, chat_id).await.ok().flatten() {
             Some(zid) => match load_zone_and_provider(db, &zid).await {

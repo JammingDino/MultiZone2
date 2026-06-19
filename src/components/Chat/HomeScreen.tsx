@@ -25,6 +25,7 @@ export function HomeScreen() {
   const providers = useApp((s) => s.providers);
   const defaultZoneId = useApp((s) => s.defaultZoneId);
   const defaultProviderId = useApp((s) => s.appSettings.defaultProviderId);
+  const baseZoneId = useApp((s) => s.appSettings.baseZoneId);
   const sendKey = useApp((s) => s.appSettings.sendKey);
   const pdfMode = useApp((s) => s.appSettings.pdfMode);
   const refreshChats = useApp((s) => s.refreshChats);
@@ -33,11 +34,13 @@ export function HomeScreen() {
   const openSettings = useApp((s) => s.openSettings);
   const openZoneEditor = useApp((s) => s.openZoneEditor);
 
-  // The provider that answers Quick chats, and whether it actually has a model.
+  // The base zone for Quick Chat (if configured), or legacy provider fallback.
+  const baseZone = zones.find((z) => z.id === baseZoneId) ?? null;
   const quickProvider =
     providers.find((p) => p.id === (defaultProviderId ?? providers[0]?.id)) ?? null;
   const quickModel = quickProvider?.defaultModel?.trim() || null;
-  const quickAvailable = !!quickModel;
+  // Quick Chat is available if a base zone is set, or a provider with a default model exists.
+  const quickAvailable = !!(baseZone ?? quickModel);
 
   const defaultZone = zones.find((z) => z.id === defaultZoneId) ?? null;
 
@@ -189,7 +192,13 @@ export function HomeScreen() {
       }
     }
 
-    const zoneId = currentMode.type === "zone" ? currentMode.id : null;
+    // Quick mode uses the base zone if one is configured, otherwise null (legacy provider path).
+    const zoneId =
+      currentMode.type === "zone"
+        ? currentMode.id
+        : currentMode.type === "quick"
+        ? (baseZoneId ?? null)
+        : null;
     try {
       const chat = await api.createChat(zoneId, null);
       if (currentMode.type === "smart") {
@@ -228,7 +237,7 @@ export function HomeScreen() {
         <div className="mb-6 text-center">
           <h1 className="text-2xl font-semibold text-[var(--color-text)]">{greeting}</h1>
           <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-            Ask anything to start. Quick chat is fast and approximate — pick a zone for a tailored assistant.
+            Ask anything to start, or pick a zone for a tailored assistant.
           </p>
         </div>
 
@@ -293,12 +302,12 @@ export function HomeScreen() {
                   {mode.type === "quick" ? (
                     <>
                       <Zap size={12} className="text-[var(--color-accent)]" />
-                      Quick chat
+                      {baseZone ? `Quick · ${baseZone.name}` : "Quick"}
                     </>
                   ) : mode.type === "smart" ? (
                     <>
                       <Brain size={12} className="text-[var(--color-accent)]" />
-                      Smart chat
+                      Smart
                     </>
                   ) : selectedZone ? (
                     <>
@@ -328,12 +337,17 @@ export function HomeScreen() {
                       <button
                         onClick={() => { setMode({ type: "quick" }); setMenuOpen(false); }}
                         className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)]"
+                        title="Uses the base zone (Settings → Chat) for every message — fast and consistent"
                       >
                         <Zap size={13} className="text-[var(--color-accent)]" />
                         <div className="flex-1">
-                          <div>Quick chat</div>
+                          <div>Quick</div>
                           <div className="text-xs text-[var(--color-text-muted)]">
-                            {quickAvailable ? `No zone · ${quickModel}` : "No default model set"}
+                            {baseZone
+                              ? `Base zone · ${baseZone.name}`
+                              : quickAvailable
+                              ? `Legacy · ${quickModel}`
+                              : "No base zone set"}
                           </div>
                         </div>
                         {mode.type === "quick" && <Check size={12} className="text-[var(--color-accent)]" />}
@@ -341,12 +355,13 @@ export function HomeScreen() {
                       <button
                         onClick={() => { setMode({ type: "smart" }); setMenuOpen(false); }}
                         className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)]"
+                        title="A router model picks the best zone for each individual message"
                       >
                         <Brain size={13} className="text-[var(--color-accent)]" />
                         <div className="flex-1">
-                          <div>Smart chat</div>
+                          <div>Smart</div>
                           <div className="text-xs text-[var(--color-text-muted)]">
-                            Router picks the best zone for each message
+                            Router picks the best zone per message
                           </div>
                         </div>
                         {mode.type === "smart" && <Check size={12} className="text-[var(--color-accent)]" />}
@@ -361,6 +376,7 @@ export function HomeScreen() {
                             key={z.id}
                             onClick={() => { setMode({ type: "zone", id: z.id }); setMenuOpen(false); }}
                             className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)]"
+                            title={`Use the "${z.name}" zone for every message in this chat`}
                           >
                             <span
                               className="flex h-5 w-5 shrink-0 items-center justify-center rounded"

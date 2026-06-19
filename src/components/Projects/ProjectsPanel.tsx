@@ -63,15 +63,15 @@ function ProjectsTab({
   onDeleted: () => void;
 }) {
   const initId = useApp((s) => s.projectsPanelInitId);
+  const closeProjectsPanel = useApp((s) => s.closeProjectsPanel);
   const [selectedId, setSelectedId] = useState<string | null>(initId ?? null);
   const [isNew, setIsNew] = useState(false);
   const selected = projects.find((p) => p.id === selectedId) ?? null;
   const showForm = isNew || selectedId !== null;
 
-  async function onSaveProject(saved: Project) {
+  async function onSaveProject(_saved: Project) {
     await onSaved();
-    setSelectedId(saved.id);
-    setIsNew(false);
+    closeProjectsPanel();
   }
 
   async function onDeleteProject() {
@@ -391,12 +391,13 @@ function TagsTab({
   onSaved: () => void;
   onDeleted: () => void;
 }) {
+  const closeProjectsPanel = useApp((s) => s.closeProjectsPanel);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isNew, setIsNew] = useState(false);
   const selected = tags.find((t) => t.id === selectedId) ?? null;
   const showForm = isNew || selectedId !== null;
 
-  async function onSaveTag(saved: Tag) { await onSaved(); setSelectedId(saved.id); setIsNew(false); }
+  async function onSaveTag(_saved: Tag) { await onSaved(); closeProjectsPanel(); }
   async function onDeleteTag() { await onDeleted(); setSelectedId(null); setIsNew(false); }
 
   return (

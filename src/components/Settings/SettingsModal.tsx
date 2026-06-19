@@ -390,6 +390,30 @@ function ChatTab() {
   return (
     <div className="flex flex-col gap-6">
       <section>
+        <h3 className="mb-1 text-sm font-medium">Quick Chat base zone</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          The zone Quick Chat uses when no specific zone is selected. Defines the model, system prompt, and tools for Quick chats.
+        </p>
+        <select
+          value={appSettings.baseZoneId ?? ""}
+          onChange={(e) => setAppSettings({ baseZoneId: e.target.value || null })}
+          className="w-full rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]"
+        >
+          <option value="">— none (use provider default model) —</option>
+          {zones.map((z) => (
+            <option key={z.id} value={z.id}>
+              {z.name} · {z.model}
+            </option>
+          ))}
+        </select>
+        {zones.length === 0 && (
+          <p className="mt-2 text-xs text-[var(--color-text-muted)]">
+            No zones yet — create one from "Configure Zones".
+          </p>
+        )}
+      </section>
+
+      <section>
         <h3 className="mb-1 text-sm font-medium">Default zone</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
           The zone new chats start with. A project's own default zone overrides this for chats created inside that project.
@@ -408,7 +432,7 @@ function ChatTab() {
         </select>
         {zones.length === 0 && (
           <p className="mt-2 text-xs text-[var(--color-text-muted)]">
-            No zones yet — create one from “Configure Zones”.
+            No zones yet — create one from "Configure Zones".
           </p>
         )}
       </section>
@@ -925,6 +949,7 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
 }
 
 function ProviderForm({ value, onClose, onSaved }: { value: Partial<Provider>; onClose: () => void; onSaved: () => void }) {
+  const refreshProviders = useApp((s) => s.refreshProviders);
   const [name, setName] = useState(value.name ?? "");
   const [baseUrl, setBaseUrl] = useState(value.baseUrl ?? "");
   const [apiKey, setApiKey] = useState(value.apiKey ?? "");
@@ -934,8 +959,7 @@ function ProviderForm({ value, onClose, onSaved }: { value: Partial<Provider>; o
   const [testResult, setTestResult] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // Auto-load the model list when editing an existing provider so the default
-  // model dropdown is populated without the user having to press Test.
+  // Auto-load the model list when editing an existing provider.
   useEffect(() => {
     if (!value.id) return;
     let cancelled = false;
@@ -952,7 +976,28 @@ function ProviderForm({ value, onClose, onSaved }: { value: Partial<Provider>; o
     return () => { cancelled = true; };
   }, [value.id]);
 
-  async function onSave() {
+  // Autosave for existing providers: debounce 500 ms after any field change.
+  useEffect(() => {
+    if (!value.id) return;
+    if (!name.trim() || !baseUrl.trim()) return;
+    const timer = setTimeout(async () => {
+      try {
+        await api.upsertProvider({
+          id: value.id,
+          name: name.trim(),
+          baseUrl: baseUrl.trim(),
+          apiKey: apiKey.trim() || null,
+          defaultModel: defaultModel.trim() || null,
+        });
+        await refreshProviders();
+      } catch (e) {
+        console.error("provider autosave failed", e);
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [name, baseUrl, apiKey, defaultModel, value.id]);
+
+  async function onCreate() {
     if (!name.trim() || !baseUrl.trim()) return;
     setSaving(true);
     try {
@@ -997,13 +1042,13 @@ function ProviderForm({ value, onClose, onSaved }: { value: Partial<Provider>; o
       <Field label="API key (optional)">
         <input value={apiKey} onChange={(e) => setApiKey(e.target.value)} type="password" className="input" placeholder="sk-..." />
       </Field>
-      <Field label="Default model (for Quick chat)">
+      <Field label="Default model">
         <ModelCombobox
           value={defaultModel}
           onChange={setDefaultModel}
           options={models}
           className="input"
-          placeholder={testing ? "Loading models…" : value.id ? "Pick or type a model" : "Save to load models, or type one"}
+          placeholder={testing ? "Loading models…" : value.id ? "Pick or type a model" : "Add provider first, or type a model name"}
         />
       </Field>
       {testResult && (
@@ -1019,11 +1064,13 @@ function ProviderForm({ value, onClose, onSaved }: { value: Partial<Provider>; o
           <RefreshCw size={12} className={testing ? "animate-spin" : ""} /> Test
         </button>
         <button onClick={onClose} className="rounded border border-[var(--color-border)] px-2 py-1 text-xs hover:border-[var(--color-accent)]">
-          Cancel
+          {value.id ? "Done" : "Cancel"}
         </button>
-        <button onClick={onSave} disabled={saving} className="rounded bg-[var(--color-accent)] px-3 py-1 text-xs text-white hover:bg-[var(--color-accent-hover)] disabled:opacity-50">
-          Save
-        </button>
+        {!value.id && (
+          <button onClick={onCreate} disabled={saving || !name.trim() || !baseUrl.trim()} className="rounded bg-[var(--color-accent)] px-3 py-1 text-xs text-white hover:bg-[var(--color-accent-hover)] disabled:opacity-50">
+            Add provider
+          </button>
+        )}
       </div>
       <style>{`.input { width: 100%; border: 1px solid var(--color-border); border-radius: 4px; padding: 6px 8px; background: var(--color-panel); font-size: 13px; } .input:focus { border-color: var(--color-accent); }`}</style>
     </div>

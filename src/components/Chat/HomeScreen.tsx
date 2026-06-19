@@ -315,11 +315,14 @@ export function HomeScreen() {
               onChange={(e) => { handleFiles(e.target.files); e.target.value = ""; }}
             />
 
-            {/* Mode — flex-1 */}
-            <div className="relative min-w-0 flex-1">
+            {/* Center group: mode + project + tags — natural width, centered in available space */}
+            <div className="flex flex-1 items-center justify-center gap-2">
+
+            {/* Mode */}
+            <div className="relative shrink-0">
               <button
                 onClick={() => setMenuOpen((v) => !v)}
-                className="flex w-full items-center gap-1.5 rounded-full border border-[var(--color-border)] px-2.5 py-1 text-xs text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
+                className="flex items-center gap-1.5 rounded-full border border-[var(--color-border)] px-2.5 py-1 text-xs text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
               >
                   {mode.type === "quick" ? (
                     <>
@@ -427,26 +430,23 @@ export function HomeScreen() {
                 )}
               </div>
 
-            {/* Project — flex-1 */}
+            {/* Project */}
             {projects.length > 0 && (
-              <div className="relative min-w-0 flex-1">
-                <select
-                  value={selectedProjectId ?? ""}
-                  onChange={(e) => setSelectedProjectId(e.target.value || null)}
-                  className="w-full cursor-pointer appearance-none rounded-full border border-[var(--color-border)] bg-[var(--color-panel)] py-1 pl-2.5 pr-6 text-xs text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
-                >
-                  <option value="">No project</option>
-                  {projects.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
-                <ChevronDown size={10} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />
-              </div>
+              <select
+                value={selectedProjectId ?? ""}
+                onChange={(e) => setSelectedProjectId(e.target.value || null)}
+                className="shrink-0 cursor-pointer rounded-full border border-[var(--color-border)] bg-[var(--color-panel)] px-2.5 py-1 text-xs text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
+              >
+                <option value="">No project</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
             )}
 
-            {/* Tags — flex-1 */}
+            {/* Tags */}
             {tags.length > 0 && (
-              <div className="relative flex min-w-0 flex-1 items-center gap-1">
+              <div className="relative flex shrink-0 items-center gap-1">
                 {Array.from(selectedTagIds).map((tid) => {
                   const t = tags.find((tg) => tg.id === tid);
                   if (!t) return null;
@@ -465,7 +465,7 @@ export function HomeScreen() {
                 })}
                 <button
                   onClick={() => setTagMenuOpen((v) => !v)}
-                  className="flex flex-1 items-center justify-center gap-1 rounded-full border border-[var(--color-border)] px-2.5 py-1 text-xs text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
+                  className="flex items-center gap-1 rounded-full border border-[var(--color-border)] px-2.5 py-1 text-xs text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
                 >
                   <Tag size={10} /> + Tag
                 </button>
@@ -492,6 +492,8 @@ export function HomeScreen() {
                 )}
               </div>
             )}
+
+            </div>{/* end center group */}
 
             {/* Send */}
             <button

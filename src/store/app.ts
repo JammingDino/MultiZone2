@@ -234,6 +234,7 @@ function applyThemeToDom(theme: ThemePrefs) {
   const html = document.documentElement;
   html.classList.toggle("light", theme.mode === "light");
   html.classList.toggle("dark", theme.mode === "dark");
+  html.style.colorScheme = theme.mode; // makes native form controls (select, input) match the theme
   html.style.setProperty("--color-accent", theme.accent);
   html.style.setProperty("--color-accent-hover", theme.accent);
   html.classList.toggle("bloom", !!theme.bloomEnabled);

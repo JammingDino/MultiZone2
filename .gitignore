@@ -12,3 +12,8 @@ src-tauri/Cargo.lock
 .idea/
 .vscode/
 *.swp
+
+videos/
+.agents/
+.claude/
+skills-lock.json

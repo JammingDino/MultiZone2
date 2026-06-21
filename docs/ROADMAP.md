@@ -53,9 +53,9 @@ The organizational layer. Users can group chats into project folders in the side
 
 ### 0.3.x — Context & Knowledge
 
-Skills are injectable knowledge packages assigned to a zone — a user writes or imports a skill (e.g. a frontend design guide or a framework reference) and the skill's content is prepended to the system context when that zone is active. Memory is AI-written at three scopes: global (persists across all chats), project (persists within a project), and chat (local to one conversation). Conversation branching lets users fork from any message to explore an alternate direction without losing the original thread.
+Skills are injectable knowledge packages assigned to a zone — a user writes or imports a skill (e.g. a frontend design guide or a framework reference) and the skill's content is prepended to the system context when that zone is active. Memory is AI-written at three scopes: global (persists across all chats), project (persists within a project), and chat (local to one conversation). Conversation branching lets users fork from any message to explore an alternate direction without losing the original thread. Chat interaction polish rounds out the release: a live tokens/second counter, a fixed token counter that works correctly across multi-step tool chains, copy-as-markdown on any response, and the ability to edit AI responses inline.
 
-**Done when:** a zone with skills assigned demonstrably outperforms the same zone without them on the relevant topic; the model writes and reads memory correctly across all three scopes; any message in any chat can be branched.
+**Done when:** a zone with skills assigned demonstrably outperforms the same zone without them on the relevant topic; the model writes and reads memory correctly across all three scopes; any message in any chat can be branched; the tokens/second counter and copy/edit actions work reliably across all message types.
 
 ---
 
@@ -85,9 +85,9 @@ The flagship mode. A Response Leader zone coordinates multiple sub-agents via su
 
 ### 0.7.x — Settings Rework & UI/UX Polish
 
-A full settings audit and consistency pass. Every panel is reviewed for clarity, completeness, and visual consistency. The database/markdown toggle is introduced: users can choose to persist chats and zone configs as markdown files alongside the SQLite database, making everything viewable and editable in any text editor. Visual and interaction inconsistencies accumulated during 0.1.x–0.6.x are resolved here before the 1.0 release.
+A full settings audit and consistency pass. Every panel is reviewed for clarity, completeness, and visual consistency. The database/markdown toggle is introduced: users can choose to persist chats and zone configs as markdown files alongside the SQLite database, making everything viewable and editable in any text editor. Visual and interaction inconsistencies accumulated during 0.1.x–0.6.x are resolved here before the 1.0 release. Chat export lands here too: one-shot export of any chat as Markdown or a theme-aware PDF, styled to match the active app theme.
 
-**Done when:** settings are internally consistent, the DB/markdown export works reliably, and the UI passes a fresh-eyes review with no jarring inconsistencies.
+**Done when:** settings are internally consistent, the DB/markdown export works reliably, chat export produces correct Markdown and correctly themed PDFs, and the UI passes a fresh-eyes review with no jarring inconsistencies.
 
 ---
 
@@ -109,4 +109,3 @@ Performance audit (startup time, large chat scroll, streaming), installer polish
 | Mobile app | Tauri mobile target (iOS/Android); post-desktop-stable |
 | Multi-user/team | Shared zones, shared projects, access control |
 | Shareable zone marketplace | Community-contributed zones beyond the local library |
-| Chat export | Export chat to Markdown, JSON, or PDF |

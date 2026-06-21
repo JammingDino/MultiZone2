@@ -8,5 +8,8 @@
       "Bash(node scripts/make-icon.mjs)",
       "Bash(npx @tauri-apps/cli icon src-tauri/icons/source.png)"
     ]
+  },
+  "enabledPlugins": {
+    "hyperframes@claude-plugins-official": true
   }
 }

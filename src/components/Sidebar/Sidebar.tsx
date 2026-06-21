@@ -38,6 +38,7 @@ export function Sidebar() {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [projectMenu, setProjectMenu] = useState<{ projectId: string; x: number; y: number } | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<Project | null>(null);
 
   useEffect(() => {
     refreshProviders();
@@ -62,11 +63,18 @@ export function Sidebar() {
     setProjectMenu({ projectId, x: e.clientX, y: e.clientY });
   }
 
-  async function deleteProjectFromMenu(projectId: string) {
-    setProjectMenu(null);
-    await api.deleteProject(projectId);
+  async function confirmDeleteProject(deleteChats: boolean) {
+    if (!deleteConfirm) return;
+    const project = deleteConfirm;
+    setDeleteConfirm(null);
+    await api.deleteProject(project.id, deleteChats);
     await refreshProjects();
     await refreshChats();
+    // If the active chat lived in a deleted-with-chats project, it's gone now.
+    if (deleteChats && activeChatId) {
+      const stillExists = (await api.listChats()).some((c) => c.id === activeChatId);
+      if (!stillExists) await setActiveChat(null);
+    }
   }
 
   function toggleCollapse(projectId: string) {
@@ -160,16 +168,25 @@ export function Sidebar() {
         </div>
       </div>
 
-      {/* New chat button */}
-      <button
-        onClick={() => onNewChat()}
-        disabled={!canNewChat}
-        className="m-2 flex items-center justify-center gap-2 rounded-md border border-[var(--color-border)] bg-[var(--color-panel-hover)] py-2 text-sm transition hover:border-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
-        title={!canNewChat ? "Set a default model or create a zone first" : "New chat"}
-      >
-        <Plus size={14} />
-        New chat
-      </button>
+      {/* New chat + New project */}
+      <div className="m-2 flex gap-2">
+        <button
+          onClick={() => onNewChat()}
+          disabled={!canNewChat}
+          className="flex flex-1 items-center justify-center gap-2 rounded-md border border-[var(--color-border)] bg-[var(--color-panel-hover)] py-2 text-sm transition hover:border-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+          title={!canNewChat ? "Set a default model or create a zone first" : "New chat"}
+        >
+          <Plus size={14} />
+          New chat
+        </button>
+        <button
+          onClick={() => openProjectsPanel("__new__")}
+          className="flex items-center justify-center gap-1.5 rounded-md border border-[var(--color-border)] px-2.5 text-sm text-[var(--color-text-muted)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+          title="New project"
+        >
+          <FolderPlus size={15} />
+        </button>
+      </div>
 
       {/* Chat list with project folders */}
       <div className="flex-1 overflow-y-auto">
@@ -207,7 +224,9 @@ export function Sidebar() {
         {ungroupedChats.length > 0 && (
           <>
             {projects.length > 0 && (
-              <div className="mx-2 my-1 border-t border-[var(--color-border)]" />
+              <div className="mx-2 mb-0.5 mt-2 px-2 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                Ungrouped
+              </div>
             )}
             <ChatList
               chats={ungroupedChats}
@@ -247,13 +266,28 @@ export function Sidebar() {
             </button>
             <div className="my-0.5 border-t border-[var(--color-border)]" />
             <button
-              onClick={() => deleteProjectFromMenu(projectMenu.projectId)}
+              onClick={() => {
+                const project = projects.find((p) => p.id === projectMenu.projectId) ?? null;
+                setProjectMenu(null);
+                setDeleteConfirm(project);
+              }}
               className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[var(--color-danger)] hover:bg-[var(--color-panel-hover)]"
             >
               <Trash2 size={14} /> Delete project
             </button>
           </div>
         </>
+      )}
+
+      {/* Delete-project confirmation: keep chats (move to Ungrouped) or delete all */}
+      {deleteConfirm && (
+        <DeleteProjectDialog
+          project={deleteConfirm}
+          chatCount={chats.filter((c) => c.projectId === deleteConfirm.id).length}
+          onKeepChats={() => confirmDeleteProject(false)}
+          onDeleteChats={() => confirmDeleteProject(true)}
+          onCancel={() => setDeleteConfirm(null)}
+        />
       )}
 
       {/* Footer buttons */}
@@ -324,6 +358,67 @@ function ProjectFolderHeader({
       >
         <Plus size={13} />
       </button>
+    </div>
+  );
+}
+
+function DeleteProjectDialog({
+  project,
+  chatCount,
+  onKeepChats,
+  onDeleteChats,
+  onCancel,
+}: {
+  project: Project;
+  chatCount: number;
+  onKeepChats: () => void;
+  onDeleteChats: () => void;
+  onCancel: () => void;
+}) {
+  const chatLabel = `${chatCount} chat${chatCount === 1 ? "" : "s"}`;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onCancel}>
+      <div
+        className="w-[380px] rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] p-4 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-1 text-sm font-medium">Delete “{project.name}”?</div>
+        <p className="mb-4 text-xs text-[var(--color-text-muted)]">
+          {chatCount === 0
+            ? "This project has no chats."
+            : `This project has ${chatLabel}. Choose what to do with them.`}
+        </p>
+        <div className="flex flex-col gap-2">
+          {chatCount > 0 && (
+            <button
+              onClick={onKeepChats}
+              className="flex flex-col items-start rounded border border-[var(--color-border)] px-3 py-2 text-left transition hover:border-[var(--color-accent)]"
+            >
+              <span className="text-sm">Keep {chatLabel}</span>
+              <span className="text-xs text-[var(--color-text-muted)]">Move them to Ungrouped</span>
+            </button>
+          )}
+          <button
+            onClick={onDeleteChats}
+            className="flex flex-col items-start rounded border border-[var(--color-danger)]/50 px-3 py-2 text-left text-[var(--color-danger)] transition hover:bg-[var(--color-danger)]/10"
+          >
+            <span className="text-sm">
+              {chatCount > 0 ? `Delete project and ${chatLabel}` : "Delete project"}
+            </span>
+            {chatCount > 0 && (
+              <span className="text-xs opacity-80">Permanently removes the chats and their messages</span>
+            )}
+          </button>
+        </div>
+        <div className="mt-3 flex justify-end">
+          <button
+            onClick={onCancel}
+            className="rounded px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

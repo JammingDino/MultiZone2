@@ -64,8 +64,11 @@ function ProjectsTab({
 }) {
   const initId = useApp((s) => s.projectsPanelInitId);
   const closeProjectsPanel = useApp((s) => s.closeProjectsPanel);
-  const [selectedId, setSelectedId] = useState<string | null>(initId ?? null);
-  const [isNew, setIsNew] = useState(false);
+  // The sidebar's "New project" button opens the panel with the "__new__"
+  // sentinel so we land straight in the create form.
+  const initNew = initId === "__new__";
+  const [selectedId, setSelectedId] = useState<string | null>(initNew ? null : initId ?? null);
+  const [isNew, setIsNew] = useState(initNew);
   const selected = projects.find((p) => p.id === selectedId) ?? null;
   const showForm = isNew || selectedId !== null;
 

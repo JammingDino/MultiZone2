@@ -71,8 +71,22 @@ pub async fn upsert_project(state: State<'_, AppState>, project: ProjectInput) -
     Ok(row)
 }
 
+/// Delete a project. By default its chats are kept and moved to "Ungrouped"
+/// (the `chats.project_id` FK is `ON DELETE SET NULL`). Pass `delete_chats =
+/// true` to also delete every chat in the project (and, via cascade, their
+/// messages) before removing the project.
 #[tauri::command]
-pub async fn delete_project(state: State<'_, AppState>, id: String) -> AppResult<()> {
+pub async fn delete_project(
+    state: State<'_, AppState>,
+    id: String,
+    delete_chats: Option<bool>,
+) -> AppResult<()> {
+    if delete_chats.unwrap_or(false) {
+        sqlx::query("DELETE FROM chats WHERE project_id = ?1")
+            .bind(&id)
+            .execute(&state.db)
+            .await?;
+    }
     sqlx::query("DELETE FROM projects WHERE id = ?1")
         .bind(&id)
         .execute(&state.db)

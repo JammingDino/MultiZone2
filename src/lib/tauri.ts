@@ -67,7 +67,9 @@ export const deleteChat = (id: string) => invoke<void>("delete_chat", { id });
 export const listProjects = () => invoke<Project[]>("list_projects");
 export const upsertProject = (project: Partial<Project> & { name: string }) =>
   invoke<Project>("upsert_project", { project });
-export const deleteProject = (id: string) => invoke<void>("delete_project", { id });
+/** Delete a project. `deleteChats` false (default) moves its chats to Ungrouped; true deletes them too. */
+export const deleteProject = (id: string, deleteChats = false) =>
+  invoke<void>("delete_project", { id, deleteChats });
 
 // Tags
 export const listTags = () => invoke<Tag[]>("list_tags");

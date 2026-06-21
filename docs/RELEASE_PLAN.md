@@ -73,13 +73,13 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ### 0.2.0 — Projects: sidebar & grouping
 
-- [ ] Sidebar: project folders render above the flat chat list; each folder collapses/expands
-- [ ] "New project" button in sidebar alongside "New chat"
-- [ ] Clicking a project folder filters the chat list to that project's chats
-- [ ] "Ungrouped" section shows chats with no project
-- [ ] Move a chat into a project from the chat context menu
-- [ ] Project editor: name, icon, accent color, default zone, context snippet, directory path (for filesystem tool scoping)
-- [ ] Deleting a project: option to keep chats (move to ungrouped) or delete all
+- [x] Sidebar: project folders render above the flat chat list; each folder collapses/expands
+- [x] "New project" button in sidebar alongside "New chat"
+- [x] Clicking a project folder filters the chat list to that project's chats — implemented as inline collapsible folders (each project's chats nest under it; collapse others to focus) rather than a separate filtered view
+- [x] "Ungrouped" section shows chats with no project
+- [x] Move a chat into a project from the chat context menu
+- [x] Project editor: name, icon, accent color, default zone, context snippet, directory path (for filesystem tool scoping)
+- [x] Deleting a project: option to keep chats (move to ungrouped) or delete all
 
 ### 0.2.1 — Projects: context injection
 

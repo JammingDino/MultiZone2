@@ -41,6 +41,7 @@ export function ChatPanel() {
     removePerspectiveZone,
     setChatPerspectiveMode,
     respondApproval,
+    openZoneEditor,
   } = useApp();
   const globalPerspectiveMode = useApp((s) => s.appSettings.perspectiveMode);
   const providers = useApp((s) => s.providers);
@@ -48,7 +49,7 @@ export function ChatPanel() {
 
   const pendingApprovalByChat = useApp((s) => s.pendingApprovalByChat);
   const routingByChat = useApp((s) => s.routingByChat);
-  const pendingApproval = activeChatId ? (pendingApprovalByChat[activeChatId] ?? null) : null;
+  const pendingApprovals = activeChatId ? (pendingApprovalByChat[activeChatId] ?? []) : [];
 
   const activeChat = chats.find((c) => c.id === activeChatId) ?? null;
   const activeZone = activeChat ? zones.find((z) => z.id === activeChat.zoneId) : null;
@@ -68,7 +69,9 @@ export function ChatPanel() {
   // message, the question is still waiting.
   const pendingAskUser = useMemo(() => {
     if (!activeChatId) return null;
-    const msgs = messagesByChat[activeChatId] ?? [];
+    // Only the primary conversation surfaces an ask_user widget; perspective
+    // tool messages (zone_id set) are ignored so they don't trip the scan.
+    const msgs = (messagesByChat[activeChatId] ?? []).filter((m) => !m.zoneId);
     for (let i = msgs.length - 1; i >= 0; i--) {
       const m = msgs[i];
       if (m.role === "user") return null;
@@ -179,6 +182,12 @@ export function ChatPanel() {
         <>
           <header className="flex min-h-12 flex-wrap items-center gap-2 border-b border-[var(--color-border)] px-3 py-1.5 sm:flex-nowrap sm:gap-3 sm:px-4">
             <div className="min-w-0 flex-1 truncate text-sm font-medium">{activeChat.title}</div>
+            <PerspectiveZoneChips
+              zones={(chatZonesByChat[activeChat.id] ?? [])
+                .map((cz) => zones.find((z) => z.id === cz.zoneId))
+                .filter((z): z is Zone => !!z)}
+              onOpen={(zoneId) => openZoneEditor(zoneId)}
+            />
             <div className="flex shrink-0 items-center gap-2">
             <PerspectiveZonePicker
               chatId={activeChat.id}
@@ -222,13 +231,25 @@ export function ChatPanel() {
           />
 
           <MessageThread chatId={activeChat.id} />
-          {pendingApproval ? (
-            <ToolApprovalBanner
-              toolName={pendingApproval.name}
-              toolArguments={pendingApproval.arguments}
-              onApprove={() => respondApproval(activeChatId!, true)}
-              onDeny={() => respondApproval(activeChatId!, false)}
-            />
+          {pendingApprovals.length > 0 ? (
+            <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3">
+              <div className="mx-auto flex max-w-3xl flex-col gap-2">
+                {pendingApprovals.map((pa) => (
+                  <ToolApprovalBanner
+                    key={pa.zoneId ?? "__primary__"}
+                    toolName={pa.name}
+                    toolArguments={pa.arguments}
+                    zoneName={
+                      pa.zoneId
+                        ? zones.find((z) => z.id === pa.zoneId)?.name ?? "Perspective"
+                        : null
+                    }
+                    onApprove={() => respondApproval(activeChatId!, pa.zoneId, true)}
+                    onDeny={() => respondApproval(activeChatId!, pa.zoneId, false)}
+                  />
+                ))}
+              </div>
+            </div>
           ) : pendingAskUser ? (
             <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3">
               <div className="mx-auto max-w-3xl">
@@ -471,6 +492,42 @@ function ProjectTagStrip({
   );
 }
 
+/** Avatar + name chips for the chat's active perspective zones. Clicking a chip
+ * opens that zone's editor (its details). */
+function PerspectiveZoneChips({
+  zones,
+  onOpen,
+}: {
+  zones: Zone[];
+  onOpen: (zoneId: string) => void;
+}) {
+  if (zones.length === 0) return null;
+  return (
+    <div className="flex min-w-0 shrink items-center gap-1.5 overflow-x-auto">
+      {zones.map((z) => {
+        const Icon = getZoneIcon(z.icon);
+        const color = z.accentColor ?? "var(--color-accent)";
+        return (
+          <button
+            key={z.id}
+            onClick={() => onOpen(z.id)}
+            title={`${z.name} — open zone details`}
+            className="flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--color-border)] py-0.5 pl-0.5 pr-2 text-xs text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
+          >
+            <span
+              className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full"
+              style={{ background: color }}
+            >
+              <Icon size={10} color="white" />
+            </span>
+            <span className="max-w-[120px] truncate">{z.name}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function PerspectiveZonePicker({
   chatId,
   primaryZoneId,
@@ -617,11 +674,14 @@ function PerspectiveZonePicker({
 function ToolApprovalBanner({
   toolName,
   toolArguments,
+  zoneName,
   onApprove,
   onDeny,
 }: {
   toolName: string;
   toolArguments: string;
+  /** Perspective zone the approval belongs to, or null for the primary turn. */
+  zoneName: string | null;
   onApprove: () => void;
   onDeny: () => void;
 }) {
@@ -635,15 +695,18 @@ function ToolApprovalBanner({
   const displayName = toolName.replace(/_/g, " ");
 
   return (
-    <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3">
-      <div className="mx-auto max-w-3xl">
-        <div className="rounded border border-[var(--color-accent)]/40 bg-[var(--color-panel)] p-3">
+    <div className="rounded border border-[var(--color-accent)]/40 bg-[var(--color-panel)] p-3">
           <div className="mb-2 flex items-center gap-2">
             <ShieldAlert size={14} className="shrink-0 text-[var(--color-accent)]" />
             <span className="text-sm font-medium">Tool approval required</span>
+            {zoneName && (
+              <span className="rounded-full border border-[var(--color-border)] px-2 py-0.5 text-[10px] text-[var(--color-text-muted)]">
+                {zoneName}
+              </span>
+            )}
           </div>
           <p className="mb-2 text-xs text-[var(--color-text-muted)]">
-            The model wants to run{" "}
+            {zoneName ? `${zoneName} wants to run ` : "The model wants to run "}
             <span className="font-mono font-medium text-[var(--color-text)]">{displayName}</span>
           </p>
           <button
@@ -671,8 +734,6 @@ function ToolApprovalBanner({
               Deny
             </button>
           </div>
-        </div>
-      </div>
     </div>
   );
 }

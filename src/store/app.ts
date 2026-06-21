@@ -58,6 +58,8 @@ export interface PendingApproval {
   index: number;
   name: string;
   arguments: string;
+  /** Perspective zone awaiting approval; undefined = the primary turn. */
+  zoneId?: string;
 }
 
 interface AppStore {
@@ -83,8 +85,9 @@ interface AppStore {
   turnByChat: Record<string, TurnAggregate>;
   /** Chat IDs whose title is currently being regenerated. */
   regeneratingTitles: Set<string>;
-  /** Pending tool approval per chat: chatId → approval info, or absent when none pending. */
-  pendingApprovalByChat: Record<string, PendingApproval>;
+  /** Pending tool approvals per chat: chatId → one entry per participant (primary
+   * + perspective zones) currently awaiting approval. */
+  pendingApprovalByChat: Record<string, PendingApproval[]>;
   /** Smart routing state per chat. null = idle, "routing" = LLM call in progress, done = zone was resolved. */
   routingByChat: Record<string, { status: "routing" } | { status: "done"; zoneId: string; zoneName: string } | null>;
   /** Per-message generation stats, keyed by message id. */
@@ -118,7 +121,7 @@ interface AppStore {
   setChatZone: (chatId: string, zoneId: string | null) => Promise<void>;
   setChatSmart: (chatId: string, smart: boolean) => Promise<void>;
   regenerateTitle: (chatId: string) => Promise<void>;
-  respondApproval: (chatId: string, approved: boolean) => Promise<void>;
+  respondApproval: (chatId: string, zoneId: string | undefined, approved: boolean) => Promise<void>;
 
   openSettings: () => void;
   closeSettings: () => void;
@@ -159,6 +162,15 @@ interface AppStore {
     chatId: string,
     mode: "sequential" | "parallel" | null,
   ) => Promise<void>;
+}
+
+/** Remove the pending approval for one participant (matched by zoneId; the
+ * primary's is the one with no zoneId) from a chat's approval list. */
+function dropApproval(
+  list: PendingApproval[] | undefined,
+  zoneId: string | undefined,
+): PendingApproval[] {
+  return (list ?? []).filter((a) => a.zoneId !== zoneId);
 }
 
 function freshStreaming(messageId: string): StreamingState {
@@ -347,13 +359,17 @@ export const useApp = create<AppStore>((set, get) => ({
     set((s) => ({ messagesByChat: { ...s.messagesByChat, [chatId]: messages } }));
   },
   applyStreamEvent(chatId, event, perspectiveZoneId) {
-    // Route perspective events to the separate perspective streams map.
+    // Route perspective events to the separate perspective streams map. A
+    // perspective runs the same agentic loop as the primary, so it emits the
+    // full set of token/tool/approval events — handled here mirroring the
+    // primary branch but scoped to this zone's stream.
     if (perspectiveZoneId) {
       set((s) => {
         const chatPersp = { ...(s.perspectiveStreamsByChat[chatId] ?? {}) };
         const perspectiveStreamsByChat = { ...s.perspectiveStreamsByChat };
         const messagesByChat = { ...s.messagesByChat };
         const statsByMessage = { ...s.statsByMessage };
+        const pendingApprovalByChat = { ...s.pendingApprovalByChat };
         const msgs = messagesByChat[chatId] ?? [];
         const current = chatPersp[perspectiveZoneId];
 
@@ -381,6 +397,52 @@ export const useApp = create<AppStore>((set, get) => ({
               };
             }
             break;
+          case "tool_call_start":
+            if (current) {
+              const exists = current.pendingTools.some((t) => t.index === event.index);
+              chatPersp[perspectiveZoneId] = {
+                ...current,
+                phase: "tool_calling",
+                pendingTools: exists
+                  ? current.pendingTools.map((t) =>
+                      t.index === event.index ? { ...t, name: event.name } : t,
+                    )
+                  : [...current.pendingTools, { index: event.index, name: event.name, args: "" }],
+              };
+            }
+            break;
+          case "tool_call_args_delta":
+            if (current) {
+              chatPersp[perspectiveZoneId] = {
+                ...current,
+                phase: "tool_calling",
+                pendingTools: current.pendingTools.map((t) =>
+                  t.index === event.index ? { ...t, args: t.args + event.delta } : t,
+                ),
+              };
+            }
+            break;
+          case "tool_approval_required":
+            pendingApprovalByChat[chatId] = [
+              ...dropApproval(pendingApprovalByChat[chatId], perspectiveZoneId),
+              { index: event.index, name: event.name, arguments: event.arguments, zoneId: perspectiveZoneId },
+            ];
+            break;
+          case "tool_call_executing":
+            if (current) {
+              chatPersp[perspectiveZoneId] = { ...current, phase: "tool_running", runningTool: event.name };
+            }
+            pendingApprovalByChat[chatId] = dropApproval(pendingApprovalByChat[chatId], perspectiveZoneId);
+            break;
+          case "tool_call_result":
+            if (current) {
+              chatPersp[perspectiveZoneId] = { ...current, runningTool: null };
+            }
+            pendingApprovalByChat[chatId] = dropApproval(pendingApprovalByChat[chatId], perspectiveZoneId);
+            break;
+          case "tool_message_saved":
+            messagesByChat[chatId] = [...msgs, event.message];
+            break;
           case "assistant_saved":
             messagesByChat[chatId] = [...msgs, event.message];
             // Record generation stats for this perspective response so its block
@@ -404,11 +466,12 @@ export const useApp = create<AppStore>((set, get) => ({
           case "cancelled":
           case "error":
             delete chatPersp[perspectiveZoneId];
+            pendingApprovalByChat[chatId] = dropApproval(pendingApprovalByChat[chatId], perspectiveZoneId);
             break;
         }
 
         perspectiveStreamsByChat[chatId] = chatPersp;
-        return { perspectiveStreamsByChat, messagesByChat, statsByMessage };
+        return { perspectiveStreamsByChat, messagesByChat, statsByMessage, pendingApprovalByChat };
       });
       return;
     }
@@ -541,11 +604,10 @@ export const useApp = create<AppStore>((set, get) => ({
           break;
 
         case "tool_approval_required":
-          pendingApprovalByChat[chatId] = {
-            index: event.index,
-            name: event.name,
-            arguments: event.arguments,
-          };
+          pendingApprovalByChat[chatId] = [
+            ...dropApproval(pendingApprovalByChat[chatId], undefined),
+            { index: event.index, name: event.name, arguments: event.arguments },
+          ];
           break;
 
         case "tool_call_executing":
@@ -556,8 +618,8 @@ export const useApp = create<AppStore>((set, get) => ({
               runningTool: event.name,
             };
           }
-          // Clear approval banner — the tool is now actually executing.
-          delete pendingApprovalByChat[chatId];
+          // Clear the primary's approval banner — the tool is now executing.
+          pendingApprovalByChat[chatId] = dropApproval(pendingApprovalByChat[chatId], undefined);
           break;
 
         case "tool_call_result":
@@ -565,7 +627,7 @@ export const useApp = create<AppStore>((set, get) => ({
             streaming[chatId] = { ...current, runningTool: null };
           }
           // Also clear any lingering approval state (e.g. denied tool).
-          delete pendingApprovalByChat[chatId];
+          pendingApprovalByChat[chatId] = dropApproval(pendingApprovalByChat[chatId], undefined);
           break;
 
         case "tool_message_saved":
@@ -598,7 +660,9 @@ export const useApp = create<AppStore>((set, get) => ({
         case "error":
           delete streaming[chatId];
           delete turnByChat[chatId];
-          delete pendingApprovalByChat[chatId];
+          // Only clear the primary's approval; perspective zones may still be
+          // mid-stream with their own pending approvals.
+          pendingApprovalByChat[chatId] = dropApproval(pendingApprovalByChat[chatId], undefined);
           break;
       }
       return {
@@ -614,7 +678,9 @@ export const useApp = create<AppStore>((set, get) => ({
     // After the first assistant response completes, set the chat title.
     if (event.type === "done") {
       const msgs = get().messagesByChat[chatId] ?? [];
-      const assistantCount = msgs.filter((m) => m.role === "assistant").length;
+      // Count only primary answers — perspective zones add their own assistant
+      // messages, which must not throw off the "first response" detection.
+      const assistantCount = msgs.filter((m) => m.role === "assistant" && !m.zoneId).length;
       if (assistantCount === 1 && !get().regeneratingTitles.has(chatId)) {
         if (get().appSettings.autoTitle) {
           get().regenerateTitle(chatId).catch(console.error);
@@ -679,13 +745,14 @@ export const useApp = create<AppStore>((set, get) => ({
       });
     }
   },
-  async respondApproval(chatId, approved) {
-    set((s) => {
-      const next = { ...s.pendingApprovalByChat };
-      delete next[chatId];
-      return { pendingApprovalByChat: next };
-    });
-    await api.respondToolApproval(chatId, approved);
+  async respondApproval(chatId, zoneId, approved) {
+    set((s) => ({
+      pendingApprovalByChat: {
+        ...s.pendingApprovalByChat,
+        [chatId]: dropApproval(s.pendingApprovalByChat[chatId], zoneId),
+      },
+    }));
+    await api.respondToolApproval(chatId, zoneId ?? null, approved);
   },
   async setTheme(partial) {
     const next = { ...get().theme, ...partial };

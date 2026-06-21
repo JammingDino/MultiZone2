@@ -323,6 +323,38 @@ function MessagePreviewModal({
   );
 }
 
+/**
+ * Renders an ordered block list (thinking / tool steps / text) for one
+ * participant's turn. Shared by the primary turn and every perspective turn so
+ * they render with identical structure — only avatar and accent differ.
+ */
+function TurnBody({
+  blocks,
+  isStreaming,
+  chatId,
+}: {
+  blocks: TurnBlock[];
+  isStreaming: boolean;
+  chatId: string;
+}) {
+  let stepIdx = 0;
+  const blockElements = blocks.map((block, i) => {
+    if (block.kind === "text") {
+      return <TextBlockView key={`text-${i}`} text={block.text} streaming={!!block.streaming} />;
+    }
+    stepIdx += 1;
+    return <StepBlock key={block.step.key} step={block.step} index={stepIdx} chatId={chatId} />;
+  });
+  return (
+    <>
+      {blockElements.length > 0 && <div className="flex flex-col gap-2">{blockElements}</div>}
+      {isStreaming && blocks.length === 0 && (
+        <span className="animate-pulse text-[var(--color-text-muted)]">▌</span>
+      )}
+    </>
+  );
+}
+
 export function BotTurnView({ turn }: { turn: BotTurn }) {
   const isStreaming = Boolean(turn.streaming);
   const hasAnything = turn.blocks.length > 0 || isStreaming;
@@ -344,29 +376,6 @@ export function BotTurnView({ turn }: { turn: BotTurn }) {
 
   const ZoneIcon = getZoneIcon(zone?.icon);
   const zoneColor = zone?.accentColor ?? null;
-
-  // Build ordered block elements, tracking step index for labelling.
-  let stepIdx = 0;
-  const blockElements = turn.blocks.map((block, i) => {
-    if (block.kind === "text") {
-      return (
-        <TextBlockView
-          key={`text-${i}`}
-          text={block.text}
-          streaming={!!block.streaming}
-        />
-      );
-    }
-    stepIdx += 1;
-    return (
-      <StepBlock
-        key={block.step.key}
-        step={block.step}
-        index={stepIdx}
-        chatId={chatId}
-      />
-    );
-  });
 
   // When a turn has perspectives, the primary answer becomes a peer to them:
   // it gets the same collapse control (a chevron beneath the avatar) and a name
@@ -420,16 +429,7 @@ export function BotTurnView({ turn }: { turn: BotTurn }) {
               Response collapsed
             </span>
           ) : (
-            <>
-              {blockElements.length > 0 && (
-                <div className="flex flex-col gap-2">
-                  {blockElements}
-                </div>
-              )}
-              {isStreaming && turn.blocks.length === 0 && (
-                <span className="animate-pulse text-[var(--color-text-muted)]">▌</span>
-              )}
-            </>
+            <TurnBody blocks={turn.blocks} isStreaming={isStreaming} chatId={chatId} />
           )}
         </div>
       </div>
@@ -469,10 +469,10 @@ function PerspectiveGroup({
 }
 
 /**
- * Renders a perspective zone's answer with the same visual language as the
- * primary message (avatar + zone-coloured left border + plain markdown), plus a
- * collapse toggle directly beneath the avatar so each model's response can be
- * folded away.
+ * Renders a perspective zone's answer using the exact same block pipeline as
+ * the primary turn (thinking / tool steps / text via `TurnBody`). The zone
+ * avatar and accent colour are the only visual differentiators; a collapse
+ * toggle beneath the avatar folds the response away.
  */
 function PerspectiveResponseView({
   persp,
@@ -484,12 +484,11 @@ function PerspectiveResponseView({
   layout: "stacked" | "columns";
 }) {
   const [expanded, setExpanded] = useState(true);
-  const [showReasoning, setShowReasoning] = useState(false);
   const isStreaming = Boolean(persp.streaming);
   const zone = useApp((s) => s.zones.find((z) => z.id === persp.zoneId));
   const ZoneIcon = getZoneIcon(zone?.icon);
   const color = zone?.accentColor ?? null;
-  const visibleText = useThrottledStreaming(persp.text, isStreaming);
+  const hasContent = persp.blocks.length > 0;
 
   return (
     <div className={`msg-row ${layout === "columns" ? "min-w-[280px] flex-1" : ""}`}>
@@ -534,32 +533,12 @@ function PerspectiveResponseView({
 
           {expanded ? (
             <>
-              {persp.reasoning && (
-                <div className="mb-2">
-                  <button
-                    onClick={() => setShowReasoning((v) => !v)}
-                    className="flex items-center gap-1 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-                  >
-                    {showReasoning ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
-                    Reasoning
-                  </button>
-                  {showReasoning && (
-                    <div className="mt-1 whitespace-pre-wrap rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1.5 font-mono text-xs text-[var(--color-text-muted)] opacity-80">
-                      {persp.reasoning}
-                    </div>
-                  )}
-                </div>
+              {hasContent || isStreaming ? (
+                <TurnBody blocks={persp.blocks} isStreaming={isStreaming} chatId={chatId} />
+              ) : (
+                <span className="text-xs italic text-[var(--color-text-muted)]">No response.</span>
               )}
-              <div className="text-sm">
-                {visibleText ? (
-                  <Markdown source={visibleText} />
-                ) : isStreaming ? (
-                  <span className="animate-pulse text-[var(--color-text-muted)]">▌</span>
-                ) : (
-                  <span className="text-xs italic text-[var(--color-text-muted)]">No response.</span>
-                )}
-              </div>
-              {!isStreaming && visibleText && (
+              {!isStreaming && persp.text && (
                 <div className="msg-actions">
                   <MessageActions
                     text={persp.text}

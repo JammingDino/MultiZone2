@@ -141,6 +141,15 @@ impl StreamSink {
         }));
     }
 
+    /// Emit on the primary channel when `persp` is `None`, or on a perspective
+    /// zone's channel when `Some`. Lets one code path drive both kinds of turn.
+    fn emit_for(&self, chat_id: &str, persp: Option<&str>, payload: StreamPayload) {
+        match persp {
+            Some(z) => self.emit_persp(chat_id, z, payload),
+            None => self.emit(chat_id, payload),
+        }
+    }
+
     /// Side-channel app events (tag/title/zone refreshes). GUI-only; no SSE.
     fn emit_event(&self, event: &str, payload: Value) {
         let _ = self.app.emit(event, payload);
@@ -155,23 +164,51 @@ pub async fn cancel_stream(state: State<'_, AppState>, chat_id: String) -> AppRe
             flag.store(true, Ordering::Relaxed);
         }
     }
-    // Deny any pending tool approval so the backend loop isn't stuck.
+    // Deny every pending tool approval for this chat — the primary (keyed by
+    // chat id) and any perspective zones (keyed `chat_id::zone_id`) — so no
+    // participant's loop is left blocked waiting on the user.
     let mut approvals = state.tool_approvals.lock().await;
-    if let Some(tx) = approvals.remove(&chat_id) {
-        let _ = tx.send(false);
+    let keys: Vec<String> = approvals
+        .keys()
+        .filter(|k| approval_key_belongs_to_chat(k, &chat_id))
+        .cloned()
+        .collect();
+    for k in keys {
+        if let Some(tx) = approvals.remove(&k) {
+            let _ = tx.send(false);
+        }
     }
     Ok(())
 }
 
-/// Called by the frontend to approve or deny a pending tool execution.
+/// The approval-map key for a participant: the chat id for the primary, or
+/// `chat_id::zone_id` for a perspective zone.
+fn approval_key(chat_id: &str, persp_zone_id: Option<&str>) -> String {
+    match persp_zone_id {
+        Some(z) => format!("{chat_id}::{z}"),
+        None => chat_id.to_string(),
+    }
+}
+
+/// True when an approval key targets the given chat (primary or any of its
+/// perspective zones).
+fn approval_key_belongs_to_chat(key: &str, chat_id: &str) -> bool {
+    key == chat_id || key.starts_with(&format!("{chat_id}::"))
+}
+
+/// Called by the frontend to approve or deny a pending tool execution. A
+/// `zone_id` targets a specific perspective zone's pending approval; `None`
+/// targets the primary turn.
 #[tauri::command]
 pub async fn respond_tool_approval(
     state: State<'_, AppState>,
     chat_id: String,
+    zone_id: Option<String>,
     approved: bool,
 ) -> AppResult<()> {
+    let key = approval_key(&chat_id, zone_id.as_deref());
     let mut map = state.tool_approvals.lock().await;
-    if let Some(tx) = map.remove(&chat_id) {
+    if let Some(tx) = map.remove(&key) {
         let _ = tx.send(approved);
     }
     Ok(())
@@ -251,8 +288,7 @@ async fn run_regenerate(
     chat_id: &str,
     cancel: Arc<AtomicBool>,
 ) -> AppResult<()> {
-    run_agentic_loop(ctx, sink, chat_id, &TurnOverride::default(), cancel.clone()).await?;
-    run_perspectives(ctx, sink, chat_id, cancel).await;
+    run_turn(ctx, sink, chat_id, &TurnOverride::default(), cancel).await;
     Ok(())
 }
 
@@ -373,8 +409,7 @@ async fn run_send(
     .await?;
     sink.emit(chat_id, StreamPayload::UserMessageSaved { message: &user_msg });
 
-    run_agentic_loop(ctx, sink, chat_id, ov, cancel.clone()).await?;
-    run_perspectives(ctx, sink, chat_id, cancel).await;
+    run_turn(ctx, sink, chat_id, ov, cancel).await;
     Ok(())
 }
 
@@ -752,6 +787,106 @@ fn extract_text_parts(content_json: &str) -> String {
         .join("\n")
 }
 
+/// Drives a full turn: the primary zone plus any perspective zones. In
+/// `parallel` mode they all stream concurrently as equal participants; in
+/// `sequential` mode the primary runs first, then each perspective in turn.
+/// Every participant shares the one cancel flag, so cancelling stops them all.
+async fn run_turn(
+    ctx: &EngineCtx,
+    sink: &StreamSink,
+    chat_id: &str,
+    ov: &TurnOverride,
+    cancel: Arc<AtomicBool>,
+) {
+    let persp_ids: Vec<String> =
+        sqlx::query_scalar("SELECT zone_id FROM chat_zones WHERE chat_id = ?1")
+            .bind(chat_id)
+            .fetch_all(&ctx.db)
+            .await
+            .unwrap_or_default();
+
+    // No perspective zones → ordinary single-zone turn.
+    if persp_ids.is_empty() {
+        if let Err(e) = run_agentic_loop(ctx, sink, chat_id, ov, cancel).await {
+            sink.emit(chat_id, StreamPayload::Error { message: e.to_string() });
+        }
+        return;
+    }
+
+    let mode = resolve_perspective_mode(&ctx.db, chat_id).await;
+
+    if mode == "parallel" {
+        // Primary + every perspective stream at once. They're all blind to the
+        // current round's sibling answers (history is snapshotted before any of
+        // this round's assistant turns are saved).
+        let mut handles = Vec::new();
+        {
+            let ctx = ctx.clone();
+            let sink = sink.clone();
+            let chat_id = chat_id.to_string();
+            let ov = ov.clone();
+            let cancel = cancel.clone();
+            handles.push(tokio::spawn(async move {
+                if let Err(e) = run_agentic_loop(&ctx, &sink, &chat_id, &ov, cancel).await {
+                    sink.emit(&chat_id, StreamPayload::Error { message: e.to_string() });
+                }
+            }));
+        }
+        for zone_id in persp_ids {
+            let ctx = ctx.clone();
+            let sink = sink.clone();
+            let chat_id = chat_id.to_string();
+            let cancel = cancel.clone();
+            handles.push(tokio::spawn(async move {
+                if let Err(e) = run_perspective(&ctx, &sink, &chat_id, &zone_id, cancel).await {
+                    tracing::warn!("perspective zone {zone_id} error: {e}");
+                    sink.emit_persp(
+                        &chat_id,
+                        &zone_id,
+                        StreamPayload::Error { message: e.to_string() },
+                    );
+                }
+            }));
+        }
+        for h in handles {
+            let _ = h.await;
+        }
+    } else {
+        // Sequential: primary first, then one perspective at a time (gentler on
+        // local model VRAM). Each still only sees prior rounds.
+        if let Err(e) = run_agentic_loop(ctx, sink, chat_id, ov, cancel.clone()).await {
+            sink.emit(chat_id, StreamPayload::Error { message: e.to_string() });
+        }
+        for zone_id in persp_ids {
+            if cancel.load(Ordering::Relaxed) {
+                break;
+            }
+            if let Err(e) = run_perspective(ctx, sink, chat_id, &zone_id, cancel.clone()).await {
+                tracing::warn!("perspective zone {zone_id} error: {e}");
+                sink.emit_persp(
+                    chat_id,
+                    &zone_id,
+                    StreamPayload::Error { message: e.to_string() },
+                );
+            }
+        }
+    }
+}
+
+/// Distinguishes a participant in a turn: the primary zone or a perspective.
+struct TurnParticipant {
+    zone: Zone,
+    provider: Provider,
+    /// `None` = primary turn (events on the main channel; assistant messages
+    /// stored with `active_zone_id`, `zone_id` NULL). `Some(id)` = perspective
+    /// turn (events on the per-zone channel; messages stored with `zone_id`).
+    persp_zone_id: Option<String>,
+    /// Honour a mid-turn `change_zone` switch (primary, zone mode, no override).
+    allow_zone_switch: bool,
+}
+
+/// Primary-zone wrapper: resolves the turn's mode (override → chat state →
+/// smart/simple/zone), emits routing events, then runs the shared loop.
 async fn run_agentic_loop(
     ctx: &EngineCtx,
     sink: &StreamSink,
@@ -759,8 +894,6 @@ async fn run_agentic_loop(
     ov: &TurnOverride,
     cancel: Arc<AtomicBool>,
 ) -> AppResult<()> {
-    let tool_ctx = load_tool_context(&ctx.db).await;
-
     // Resolve the turn's mode (override → chat state) and materialise its zone.
     // Smart mode routes here via the default model.
     let mode = resolve_turn_mode(&ctx.db, chat_id, ov).await?;
@@ -769,7 +902,7 @@ async fn run_agentic_loop(
     if is_smart {
         sink.emit(chat_id, StreamPayload::RoutingStarted);
     }
-    let (mut zone, mut provider) =
+    let (zone, provider) =
         zone_for_mode(&ctx.db, &ctx.http, chat_id, &mode, ov.model.as_deref()).await?;
     if is_smart {
         sink.emit(chat_id, StreamPayload::RoutingDone {
@@ -777,11 +910,37 @@ async fn run_agentic_loop(
             zone_name: zone.name.clone(),
         });
     }
+    let participant = TurnParticipant {
+        zone,
+        provider,
+        persp_zone_id: None,
+        allow_zone_switch: !ov.is_active() && is_zone_mode,
+    };
+    run_participant_turn(ctx, sink, chat_id, participant, cancel).await
+}
+
+/// The shared agentic loop run by both the primary zone and each perspective
+/// zone. Streams tokens/tools, executes tool calls (with per-participant
+/// approval), and persists messages tagged for the right participant.
+async fn run_participant_turn(
+    ctx: &EngineCtx,
+    sink: &StreamSink,
+    chat_id: &str,
+    participant: TurnParticipant,
+    cancel: Arc<AtomicBool>,
+) -> AppResult<()> {
+    let TurnParticipant {
+        mut zone,
+        mut provider,
+        persp_zone_id,
+        allow_zone_switch,
+    } = participant;
+    let persp = persp_zone_id.as_deref();
+    let tool_ctx = load_tool_context(&ctx.db).await;
 
     // The chat's stored primary zone, tracked so the `change_zone` tool can
-    // switch zones mid-turn. Only meaningful in plain Zone mode with no
-    // override — Smart and Simple pin their zone for the whole turn.
-    let mut current_zone_id: Option<String> = if !ov.is_active() && is_zone_mode {
+    // switch zones mid-turn. Only the primary in plain Zone mode can switch.
+    let mut current_zone_id: Option<String> = if allow_zone_switch {
         Some(zone.id.clone())
     } else {
         None
@@ -855,13 +1014,14 @@ async fn run_agentic_loop(
     // Agentic loop
     for _iteration in 0..MAX_TOOL_ITERATIONS {
         if cancel.load(Ordering::Relaxed) {
-            sink.emit(chat_id, StreamPayload::Cancelled);
+            sink.emit_for(chat_id, persp, StreamPayload::Cancelled);
             return Ok(());
         }
 
         let assistant_msg_id = new_id();
-        sink.emit(
+        sink.emit_for(
             chat_id,
+            persp,
             StreamPayload::AssistantStart {
                 message_id: assistant_msg_id.clone(),
             },
@@ -892,30 +1052,38 @@ async fn run_agentic_loop(
 
         let sink_for_emit = sink.clone();
         let chat_id_for_emit = chat_id.to_string();
-        let agg = consume_stream(response, cancel.clone(), parse_inline_think, move |ev| match ev {
-            StreamEvent::Token { delta } => {
-                sink_for_emit.emit(&chat_id_for_emit, StreamPayload::Token { delta });
-            }
-            StreamEvent::ThinkingToken { delta } => {
-                sink_for_emit
-                    .emit(&chat_id_for_emit, StreamPayload::ThinkingToken { delta });
-            }
-            StreamEvent::ToolCallStart { index, name, id } => {
-                sink_for_emit.emit(
-                    &chat_id_for_emit,
-                    StreamPayload::ToolCallStart { index, id, name },
-                );
-            }
-            StreamEvent::ToolCallDeltaArgs { index, delta } => {
-                sink_for_emit.emit(
-                    &chat_id_for_emit,
-                    StreamPayload::ToolCallArgsDelta { index, delta },
-                );
-            }
-            StreamEvent::Done { .. } => {}
-            StreamEvent::Error { message } => {
-                sink_for_emit
-                    .emit(&chat_id_for_emit, StreamPayload::Error { message });
+        let persp_for_emit = persp_zone_id.clone();
+        let agg = consume_stream(response, cancel.clone(), parse_inline_think, move |ev| {
+            let persp = persp_for_emit.as_deref();
+            match ev {
+                StreamEvent::Token { delta } => {
+                    sink_for_emit.emit_for(&chat_id_for_emit, persp, StreamPayload::Token { delta });
+                }
+                StreamEvent::ThinkingToken { delta } => {
+                    sink_for_emit.emit_for(
+                        &chat_id_for_emit,
+                        persp,
+                        StreamPayload::ThinkingToken { delta },
+                    );
+                }
+                StreamEvent::ToolCallStart { index, name, id } => {
+                    sink_for_emit.emit_for(
+                        &chat_id_for_emit,
+                        persp,
+                        StreamPayload::ToolCallStart { index, id, name },
+                    );
+                }
+                StreamEvent::ToolCallDeltaArgs { index, delta } => {
+                    sink_for_emit.emit_for(
+                        &chat_id_for_emit,
+                        persp,
+                        StreamPayload::ToolCallArgsDelta { index, delta },
+                    );
+                }
+                StreamEvent::Done { .. } => {}
+                StreamEvent::Error { message } => {
+                    sink_for_emit.emit_for(&chat_id_for_emit, persp, StreamPayload::Error { message });
+                }
             }
         })
         .await?;
@@ -939,16 +1107,21 @@ async fn run_agentic_loop(
             Some(agg.reasoning.clone())
         };
         let now = now_ts();
+        // Primary turns record the answering zone in `active_zone_id` (zone_id
+        // stays NULL); perspective turns record it in `zone_id` so they're
+        // filtered out of the primary conversation and grouped per-zone.
+        let active_zone_col: Option<&str> = if persp.is_some() { None } else { Some(zone.id.as_str()) };
         sqlx::query(
-            "INSERT INTO messages (id, chat_id, role, content, tool_calls, tool_call_id, reasoning, active_zone_id, created_at)
-             VALUES (?1, ?2, 'assistant', ?3, ?4, NULL, ?5, ?6, ?7)",
+            "INSERT INTO messages (id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, created_at)
+             VALUES (?1, ?2, 'assistant', ?3, ?4, NULL, ?5, ?6, ?7, ?8)",
         )
         .bind(&assistant_msg_id)
         .bind(chat_id)
         .bind(&assistant_content_json)
         .bind(&tool_calls_json)
         .bind(&reasoning_save)
-        .bind(&zone.id)
+        .bind(persp)
+        .bind(active_zone_col)
         .bind(now)
         .execute(&ctx.db)
         .await?;
@@ -964,10 +1137,10 @@ async fn run_agentic_loop(
         .bind(&assistant_msg_id)
         .fetch_one(&ctx.db)
         .await?;
-        sink.emit(chat_id, StreamPayload::AssistantSaved { message: &saved });
+        sink.emit_for(chat_id, persp, StreamPayload::AssistantSaved { message: &saved });
 
         if agg.cancelled {
-            sink.emit(chat_id, StreamPayload::Cancelled);
+            sink.emit_for(chat_id, persp, StreamPayload::Cancelled);
             return Ok(());
         }
 
@@ -1020,9 +1193,10 @@ async fn run_agentic_loop(
 
         // Execute tools, persist results, push into history
         let auto_approve_level = get_auto_approve_level(&ctx.db).await;
+        let approval_key = approval_key(chat_id, persp);
         for tc in &agg.tool_calls {
             if cancel.load(Ordering::Relaxed) {
-                sink.emit(chat_id, StreamPayload::Cancelled);
+                sink.emit_for(chat_id, persp, StreamPayload::Cancelled);
                 return Ok(());
             }
 
@@ -1032,9 +1206,9 @@ async fn run_agentic_loop(
 
             let approved = if needs_approval {
                 let (tx, rx) = oneshot::channel::<bool>();
-                ctx.tool_approvals.lock().await.insert(chat_id.to_string(), tx);
+                ctx.tool_approvals.lock().await.insert(approval_key.clone(), tx);
 
-                sink.emit(chat_id, StreamPayload::ToolApprovalRequired {
+                sink.emit_for(chat_id, persp, StreamPayload::ToolApprovalRequired {
                     index: 0,
                     name: tc.function.name.clone(),
                     arguments: tc.function.arguments.clone(),
@@ -1049,15 +1223,16 @@ async fn run_agentic_loop(
                 .unwrap_or(Ok(false))
                 .unwrap_or(false);
 
-                ctx.tool_approvals.lock().await.remove(chat_id);
+                ctx.tool_approvals.lock().await.remove(&approval_key);
                 result
             } else {
                 true
             };
 
             let result = if approved {
-                sink.emit(
+                sink.emit_for(
                     chat_id,
+                    persp,
                     StreamPayload::ToolCallExecuting {
                         index: 0,
                         name: tc.function.name.clone(),
@@ -1092,8 +1267,9 @@ async fn run_agentic_loop(
                 );
             }
 
-            sink.emit(
+            sink.emit_for(
                 chat_id,
+                persp,
                 StreamPayload::ToolCallResult {
                     index: 0,
                     name: tc.function.name.clone(),
@@ -1110,14 +1286,17 @@ async fn run_agentic_loop(
             let tool_msg_id = new_id();
             let tnow = now_ts();
             let tool_content_json = serde_json::to_string(&tool_content_parts)?;
+            // Tag perspective tool messages with their zone so they group under
+            // the right participant and stay out of the primary conversation.
             sqlx::query(
-                "INSERT INTO messages (id, chat_id, role, content, tool_calls, tool_call_id, reasoning, created_at)
-                 VALUES (?1, ?2, 'tool', ?3, NULL, ?4, NULL, ?5)",
+                "INSERT INTO messages (id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, created_at)
+                 VALUES (?1, ?2, 'tool', ?3, NULL, ?4, NULL, ?5, ?6)",
             )
             .bind(&tool_msg_id)
             .bind(chat_id)
             .bind(&tool_content_json)
             .bind(&tc.id)
+            .bind(persp)
             .bind(tnow)
             .execute(&ctx.db)
             .await?;
@@ -1128,7 +1307,7 @@ async fn run_agentic_loop(
             .bind(&tool_msg_id)
             .fetch_one(&ctx.db)
             .await?;
-            sink.emit(chat_id, StreamPayload::ToolMessageSaved { message: &saved_tool });
+            sink.emit_for(chat_id, persp, StreamPayload::ToolMessageSaved { message: &saved_tool });
 
             api_messages.push(ChatMessage {
                 role: "tool".into(),
@@ -1145,9 +1324,9 @@ async fn run_agentic_loop(
 
         // A tool may have switched the chat's primary zone (`change_zone`). If so,
         // reload the zone/provider/tools and continue the loop under the new zone.
-        // Skipped while a one-shot override is active, or in Smart/Simple mode,
-        // so the resolved zone holds for the whole turn.
-        let latest_zone_id = if ov.is_active() || !is_zone_mode {
+        // Only the primary in plain Zone mode switches; perspectives and
+        // Smart/Simple turns hold their resolved zone for the whole turn.
+        let latest_zone_id = if !allow_zone_switch {
             None
         } else {
             sqlx::query_scalar::<_, Option<String>>("SELECT zone_id FROM chats WHERE id = ?1")
@@ -1193,72 +1372,8 @@ async fn run_agentic_loop(
         // Loop for follow-up assistant turn
     }
 
-    sink.emit(chat_id, StreamPayload::Done);
+    sink.emit_for(chat_id, persp, StreamPayload::Done);
     Ok(())
-}
-
-// ─── Perspective zone runners ─────────────────────────────────────────────────
-
-async fn run_perspectives(
-    ctx: &EngineCtx,
-    sink: &StreamSink,
-    chat_id: &str,
-    cancel: Arc<AtomicBool>,
-) {
-    let zone_ids: Vec<String> =
-        sqlx::query_scalar("SELECT zone_id FROM chat_zones WHERE chat_id = ?1")
-            .bind(chat_id)
-            .fetch_all(&ctx.db)
-            .await
-            .unwrap_or_default();
-
-    if zone_ids.is_empty() {
-        return;
-    }
-
-    let mode = resolve_perspective_mode(&ctx.db, chat_id).await;
-
-    if mode == "parallel" {
-        // Fire every perspective at once. They're still blind to each other:
-        // history is snapshotted at the last user message, so none can observe a
-        // sibling's in-flight answer.
-        let mut handles = Vec::new();
-        for zone_id in zone_ids {
-            let ctx = ctx.clone();
-            let sink = sink.clone();
-            let chat_id = chat_id.to_string();
-            let cancel = cancel.clone();
-            handles.push(tokio::spawn(async move {
-                if let Err(e) = run_perspective(&ctx, &sink, &chat_id, &zone_id, cancel).await {
-                    tracing::warn!("perspective zone {zone_id} error: {e}");
-                    sink.emit_persp(
-                        &chat_id,
-                        &zone_id,
-                        StreamPayload::Error { message: e.to_string() },
-                    );
-                }
-            }));
-        }
-        for h in handles {
-            let _ = h.await;
-        }
-    } else {
-        // Sequential: run one zone at a time (gentler on local model VRAM).
-        // Each still only sees prior rounds, never the current round's answers.
-        for zone_id in zone_ids {
-            if cancel.load(Ordering::Relaxed) {
-                break;
-            }
-            if let Err(e) = run_perspective(ctx, sink, chat_id, &zone_id, cancel.clone()).await {
-                tracing::warn!("perspective zone {zone_id} error: {e}");
-                sink.emit_persp(
-                    chat_id,
-                    &zone_id,
-                    StreamPayload::Error { message: e.to_string() },
-                );
-            }
-        }
-    }
 }
 
 /// Resolves the effective perspective execution mode for a chat:
@@ -1302,6 +1417,9 @@ async fn resolve_perspective_mode(db: &SqlitePool, chat_id: &str) -> String {
     }
 }
 
+/// Perspective-zone wrapper: loads the fixed zone and runs the shared agentic
+/// loop. Perspectives get the same tool use as the primary; they just can't
+/// switch zones mid-turn and stream on their own per-zone channel.
 async fn run_perspective(
     ctx: &EngineCtx,
     sink: &StreamSink,
@@ -1312,100 +1430,14 @@ async fn run_perspective(
     if cancel.load(Ordering::Relaxed) {
         return Ok(());
     }
-
     let (zone, provider) = load_zone_and_provider(&ctx.db, zone_id).await?;
-
-    let api_messages = build_message_history(&ctx.db, chat_id, &zone).await?;
-
-    let msg_id = new_id();
-    sink.emit_persp(
-        chat_id,
-        zone_id,
-        StreamPayload::AssistantStart { message_id: msg_id.clone() },
-    );
-
-    let is_gemma = zone.model.to_lowercase().contains("gemma");
-    let reasoning_effort = if zone.thinking_enabled && !is_gemma {
-        Some("medium".to_string())
-    } else {
-        None
+    let participant = TurnParticipant {
+        zone,
+        provider,
+        persp_zone_id: Some(zone_id.to_string()),
+        allow_zone_switch: false,
     };
-    let parse_inline_think = zone.thinking_enabled && is_gemma;
-
-    let req = crate::llm::types::ChatRequest {
-        model: zone.model.clone(),
-        messages: api_messages,
-        temperature: Some(zone.temperature),
-        max_tokens: zone.max_tokens,
-        top_p: zone.top_p,
-        tools: None, // perspectives are read-only, no tool use
-        reasoning_effort,
-        stream: true,
-    };
-
-    let client = crate::llm::client::LlmClient::new(&ctx.http, &provider.base_url, provider.api_key.as_deref());
-    let response = client.chat_stream(&req).await?;
-
-    let sink_clone = sink.clone();
-    let chat_id_clone = chat_id.to_string();
-    let zone_id_clone = zone_id.to_string();
-
-    let agg = crate::llm::streaming::consume_stream(response, cancel.clone(), parse_inline_think, move |ev| match ev {
-        crate::llm::streaming::StreamEvent::Token { delta } => {
-            sink_clone.emit_persp(&chat_id_clone, &zone_id_clone, StreamPayload::Token { delta });
-        }
-        crate::llm::streaming::StreamEvent::ThinkingToken { delta } => {
-            sink_clone.emit_persp(
-                &chat_id_clone,
-                &zone_id_clone,
-                StreamPayload::ThinkingToken { delta },
-            );
-        }
-        _ => {}
-    })
-    .await?;
-
-    let content_json = if agg.content.is_empty() {
-        "[]".to_string()
-    } else {
-        serde_json::to_string(&vec![ContentPart::Text { text: agg.content.clone() }])?
-    };
-    let reasoning_save = if agg.reasoning.is_empty() {
-        None
-    } else {
-        Some(agg.reasoning.clone())
-    };
-    let now = now_ts();
-
-    sqlx::query(
-        "INSERT INTO messages (id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, created_at)
-         VALUES (?1, ?2, 'assistant', ?3, NULL, NULL, ?4, ?5, ?6)",
-    )
-    .bind(&msg_id)
-    .bind(chat_id)
-    .bind(&content_json)
-    .bind(&reasoning_save)
-    .bind(zone_id)
-    .bind(now)
-    .execute(&ctx.db)
-    .await?;
-
-    let saved = sqlx::query_as::<_, Message>(&format!(
-        "SELECT {MSG_COLS} FROM messages WHERE id = ?1"
-    ))
-    .bind(&msg_id)
-    .fetch_one(&ctx.db)
-    .await?;
-
-    sink.emit_persp(chat_id, zone_id, StreamPayload::AssistantSaved { message: &saved });
-
-    if agg.cancelled {
-        sink.emit_persp(chat_id, zone_id, StreamPayload::Cancelled);
-    } else {
-        sink.emit_persp(chat_id, zone_id, StreamPayload::Done);
-    }
-
-    Ok(())
+    run_participant_turn(ctx, sink, chat_id, participant, cancel).await
 }
 
 // ─── Message history ──────────────────────────────────────────────────────────

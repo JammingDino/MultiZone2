@@ -28,9 +28,14 @@ export type TurnBlock =
 
 export interface PerspectiveTurn {
   zoneId: string;
+  /** Last assistant message id in the turn (for copy/regenerate targeting). */
   messageId: string;
+  /** All assistant message ids in this perspective turn, ordered. */
+  messageIds: string[];
+  /** Ordered text/step blocks — identical structure to the primary turn. */
+  blocks: TurnBlock[];
+  /** Combined plain text of the answer (for the copy action). */
   text: string;
-  reasoning: string | null;
   streaming?: StreamingState;
 }
 
@@ -76,73 +81,44 @@ function parseToolCalls(json: string | null): ToolCall[] {
   return [];
 }
 
-function newTurn(): BotTurn {
-  return { type: "bot", messageIds: [], blocks: [], perspectives: [], zoneId: null };
+/** Joins the text of a block list (for the copy action). */
+function blocksText(blocks: TurnBlock[]): string {
+  return blocks
+    .filter((b): b is Extract<TurnBlock, { kind: "text" }> => b.kind === "text")
+    .map((b) => b.text)
+    .join("\n\n");
 }
 
-export function groupMessages(
-  messages: Message[],
-  streaming: StreamingState | undefined,
-  perspectiveStreams: Record<string, StreamingState> = {},
-): RenderUnit[] {
-  // Split primary (zone_id null) from perspective messages.
-  const primaryMsgs = messages.filter((m) => !m.zoneId);
-  const perspMsgs = messages.filter((m) => !!m.zoneId);
+/**
+ * Builds the ordered block list for one participant's turn from its persisted
+ * assistant + tool messages (in chronological order). Shared by the primary
+ * turn and each perspective turn so they render identically.
+ */
+function buildBlocks(msgs: Message[]): { blocks: TurnBlock[]; messageIds: string[] } {
+  const blocks: TurnBlock[] = [];
+  const messageIds: string[] = [];
 
-  const units: RenderUnit[] = [];
-  let turn: BotTurn | null = null;
-
-  for (const m of primaryMsgs) {
-    if (m.role === "user") {
-      if (turn) {
-        units.push(turn);
-        turn = null;
-      }
-      units.push({ type: "user", message: m });
-      continue;
-    }
-    if (m.role === "system") continue;
-
+  for (const m of msgs) {
     if (m.role === "assistant") {
-      if (turn === null) turn = newTurn();
-      const t: BotTurn = turn;
-      t.messageIds.push(m.id);
-      // Capture the zone from the first assistant message in the turn.
-      if (t.zoneId === null && m.activeZoneId) t.zoneId = m.activeZoneId;
-      const text = extractText(m.content);
-      const calls = parseToolCalls(m.toolCalls);
-
-      // Emit blocks in the order the model produced them: reasoning → text → tool calls.
+      messageIds.push(m.id);
+      // Emit blocks in the order the model produced them: reasoning → text → tools.
       if (m.reasoning && m.reasoning.trim()) {
-        t.blocks.push({
+        blocks.push({
           kind: "step",
-          step: {
-            kind: "thinking",
-            key: `${m.id}:thinking`,
-            text: m.reasoning,
-            streaming: false,
-          },
+          step: { kind: "thinking", key: `${m.id}:thinking`, text: m.reasoning, streaming: false },
         });
       }
-      if (text) {
-        t.blocks.push({ kind: "text", text });
-      }
-      for (const tc of calls) {
-        t.blocks.push({
+      const text = extractText(m.content);
+      if (text) blocks.push({ kind: "text", text });
+      for (const tc of parseToolCalls(m.toolCalls)) {
+        blocks.push({
           kind: "step",
-          step: {
-            kind: "tool",
-            key: `${m.id}:${tc.id}`,
-            toolCall: tc,
-            toolResult: null,
-            pending: false,
-          },
+          step: { kind: "tool", key: `${m.id}:${tc.id}`, toolCall: tc, toolResult: null, pending: false },
         });
       }
-    } else if (m.role === "tool" && turn !== null) {
-      const t: BotTurn = turn;
+    } else if (m.role === "tool") {
       // Attach the tool result to its matching pending ToolStep block.
-      for (const block of t.blocks) {
+      for (const block of blocks) {
         if (
           block.kind === "step" &&
           block.step.kind === "tool" &&
@@ -156,53 +132,101 @@ export function groupMessages(
     }
   }
 
-  if (streaming) {
-    if (turn === null) turn = newTurn();
-    const t: BotTurn = turn;
-    t.streaming = streaming;
+  return { blocks, messageIds };
+}
 
-    if (streaming.reasoning) {
-      t.blocks.push({
-        kind: "step",
-        step: {
-          kind: "thinking",
-          key: `streaming:${streaming.messageId}:thinking`,
-          text: streaming.reasoning,
-          streaming: true,
+/** Appends the live streaming state (reasoning / text / pending tools) to a block list. */
+function appendStreamingBlocks(blocks: TurnBlock[], streaming: StreamingState): void {
+  if (streaming.reasoning) {
+    blocks.push({
+      kind: "step",
+      step: {
+        kind: "thinking",
+        key: `streaming:${streaming.messageId}:thinking`,
+        text: streaming.reasoning,
+        streaming: true,
+      },
+    });
+  }
+  if (streaming.content) {
+    blocks.push({ kind: "text", text: streaming.content, streaming: true });
+  }
+  for (const pt of streaming.pendingTools) {
+    blocks.push({
+      kind: "step",
+      step: {
+        kind: "tool",
+        key: `streaming:${streaming.messageId}:${pt.index}`,
+        toolCall: {
+          id: `pending-${pt.index}`,
+          callType: "function",
+          function: { name: pt.name, arguments: pt.args },
         },
-      });
+        toolResult: null,
+        pending: true,
+      },
+    });
+  }
+}
+
+export function groupMessages(
+  messages: Message[],
+  streaming: StreamingState | undefined,
+  perspectiveStreams: Record<string, StreamingState> = {},
+): RenderUnit[] {
+  // Split primary (zone_id null) from perspective messages.
+  const primaryMsgs = messages.filter((m) => !m.zoneId);
+  const perspMsgs = messages.filter((m) => !!m.zoneId);
+
+  const units: RenderUnit[] = [];
+  // Messages collected for the bot turn currently being built.
+  let turnMsgs: Message[] = [];
+  let turnZoneId: string | null = null;
+  let turnOpen = false;
+
+  const flushTurn = (turnStreaming?: StreamingState) => {
+    if (!turnOpen && !turnStreaming) return;
+    const { blocks, messageIds } = buildBlocks(turnMsgs);
+    if (turnStreaming) appendStreamingBlocks(blocks, turnStreaming);
+    units.push({
+      type: "bot",
+      messageIds,
+      blocks,
+      perspectives: [],
+      zoneId: turnZoneId,
+      streaming: turnStreaming,
+    });
+    turnMsgs = [];
+    turnZoneId = null;
+    turnOpen = false;
+  };
+
+  for (const m of primaryMsgs) {
+    if (m.role === "user") {
+      flushTurn();
+      units.push({ type: "user", message: m });
+      continue;
     }
-    if (streaming.content) {
-      t.blocks.push({ kind: "text", text: streaming.content, streaming: true });
-    }
-    for (const pt of streaming.pendingTools) {
-      t.blocks.push({
-        kind: "step",
-        step: {
-          kind: "tool",
-          key: `streaming:${streaming.messageId}:${pt.index}`,
-          toolCall: {
-            id: `pending-${pt.index}`,
-            callType: "function",
-            function: { name: pt.name, arguments: pt.args },
-          },
-          toolResult: null,
-          pending: true,
-        },
-      });
+    if (m.role === "system") continue;
+    turnOpen = true;
+    turnMsgs.push(m);
+    if (m.role === "assistant" && turnZoneId === null && m.activeZoneId) {
+      turnZoneId = m.activeZoneId;
     }
   }
+  // The trailing turn folds in any active primary stream.
+  flushTurn(streaming);
 
-  if (turn) units.push(turn);
-
-  // ── Attach persisted perspective messages to their user turns ──────────────
+  // ── Attach perspective turns (persisted) to their rounds ───────────────────
   const userTimestamps: number[] = units
     .filter((u): u is UserUnit => u.type === "user")
     .map((u) => u.message.createdAt);
 
-  const perspByTurnIdx = new Map<number, PerspectiveTurn[]>();
+  // turnIdx → zoneId → ordered messages (assistant + tool) for that participant.
+  const byTurn = new Map<number, Map<string, Message[]>>();
   for (const pm of perspMsgs) {
-    if (pm.role !== "assistant" || !pm.zoneId) continue;
+    if (!pm.zoneId) continue;
+    if (pm.role !== "assistant" && pm.role !== "tool") continue;
     let turnIdx = -1;
     for (let i = userTimestamps.length - 1; i >= 0; i--) {
       if (pm.createdAt >= userTimestamps[i]) {
@@ -211,55 +235,51 @@ export function groupMessages(
       }
     }
     if (turnIdx < 0) continue;
-
-    const list = perspByTurnIdx.get(turnIdx) ?? [];
-    const text = extractText(pm.content);
-    const existing = list.find((p) => p.zoneId === pm.zoneId);
-    if (existing) {
-      if (text) existing.text = existing.text ? `${existing.text}\n\n${text}` : text;
-    } else {
-      list.push({
-        zoneId: pm.zoneId,
-        messageId: pm.id,
-        text,
-        reasoning: pm.reasoning ?? null,
-      });
-    }
-    perspByTurnIdx.set(turnIdx, list);
+    const zmap = byTurn.get(turnIdx) ?? new Map<string, Message[]>();
+    const list = zmap.get(pm.zoneId) ?? [];
+    list.push(pm);
+    zmap.set(pm.zoneId, list);
+    byTurn.set(turnIdx, zmap);
   }
 
-  let userIdx = 0;
+  let precedingUserIdx = -1;
   for (const unit of units) {
     if (unit.type === "user") {
-      userIdx++;
+      precedingUserIdx++;
     } else if (unit.type === "bot") {
-      const saved = perspByTurnIdx.get(userIdx - 1) ?? [];
-      unit.perspectives = saved;
+      const zmap = byTurn.get(precedingUserIdx);
+      if (!zmap) continue;
+      for (const [zoneId, msgs] of zmap.entries()) {
+        const { blocks, messageIds } = buildBlocks(msgs);
+        unit.perspectives.push({
+          zoneId,
+          messageIds,
+          messageId: messageIds[messageIds.length - 1] ?? "",
+          blocks,
+          text: blocksText(blocks),
+        });
+      }
     }
   }
 
-  // ── Attach active streaming perspectives to the last BotTurn ────────────────
+  // ── Attach active streaming perspectives to the last bot turn ──────────────
   if (Object.keys(perspectiveStreams).length > 0) {
-    const lastBot = [...units].reverse().find((u): u is BotTurn => u.type === "bot");
-    if (lastBot) {
-      for (const [zoneId, streamState] of Object.entries(perspectiveStreams)) {
-        const existing = lastBot.perspectives.find((p) => p.zoneId === zoneId);
-        if (existing) {
-          existing.streaming = streamState;
-          if (streamState.content && !existing.text.includes(streamState.content)) {
-            existing.text = streamState.content;
-          }
-          if (streamState.reasoning) existing.reasoning = streamState.reasoning;
-        } else {
-          lastBot.perspectives.push({
-            zoneId,
-            messageId: streamState.messageId,
-            text: streamState.content,
-            reasoning: streamState.reasoning || null,
-            streaming: streamState,
-          });
-        }
+    let lastBot = [...units].reverse().find((u): u is BotTurn => u.type === "bot");
+    if (!lastBot) {
+      // No primary turn yet this round (e.g. primary errored) — create one so
+      // the streaming perspectives still have somewhere to render.
+      lastBot = { type: "bot", messageIds: [], blocks: [], perspectives: [], zoneId: null };
+      units.push(lastBot);
+    }
+    for (const [zoneId, st] of Object.entries(perspectiveStreams)) {
+      let pt = lastBot.perspectives.find((p) => p.zoneId === zoneId);
+      if (!pt) {
+        pt = { zoneId, messageId: st.messageId, messageIds: [], blocks: [], text: "" };
+        lastBot.perspectives.push(pt);
       }
+      appendStreamingBlocks(pt.blocks, st);
+      pt.streaming = st;
+      pt.text = blocksText(pt.blocks);
     }
   }
 

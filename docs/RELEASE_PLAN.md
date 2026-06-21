@@ -58,12 +58,14 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ### 0.1.9 — Perspective mode polish
 
-- [ ] Perspective zones can use tools (tool calls execute the same way as for the primary zone)
-- [ ] Perspective zone responses render with identical styling to primary zone responses; zone avatar and accent color are the only visual differentiator
-- [ ] Perspective zones shown in the chat header with their zone name and avatar; clicking opens zone details
-- [ ] Add/remove perspective zones from an active chat without breaking existing history
-- [ ] Per-chat perspective mode override (sequential vs parallel) saved and restored on reload
-- [ ] Cancelling mid-stream cancels all active perspective zone streams, not just the primary
+- [x] Perspective zones can use tools (tool calls execute the same way as for the primary zone) — primary and perspectives now run the same shared agentic loop
+- [x] Perspective zone responses render with identical styling to primary zone responses; zone avatar and accent color are the only visual differentiator — shared `TurnBody` block renderer
+- [x] Perspective zones shown in the chat header with their zone name and avatar; clicking opens zone details
+- [x] Add/remove perspective zones from an active chat without breaking existing history
+- [x] Per-chat perspective mode override (sequential vs parallel) saved and restored on reload
+- [x] Cancelling mid-stream cancels all active perspective zone streams, not just the primary — all participants share one cancel flag; cancel also denies every pending per-zone tool approval
+
+**Execution model:** the primary zone and all perspective zones are equal participants in a turn. In `parallel` mode they stream concurrently (one message → all responses stream side by side); in `sequential` mode the primary runs first, then each perspective. Tool approvals are keyed per participant (`chat_id` / `chat_id::zone_id`) so concurrent zones don't collide.
 
 ---
 

@@ -371,7 +371,7 @@ export function BotTurnView({ turn, isLatest = false }: { turn: BotTurn; isLates
     (routing && routing.status === "done" ? routing.zoneId : null) ??
     chatZoneId;
   const zone = useApp((s) => s.zones.find((z) => z.id === resolvedZoneId));
-  const [collapsed, setCollapsed] = useState(false);
+  const layout = useApp((s) => s.appSettings.perspectiveLayout);
 
   if (!hasAnything) return null;
 
@@ -386,13 +386,48 @@ export function BotTurnView({ turn, isLatest = false }: { turn: BotTurn; isLates
 
   const ZoneIcon = getZoneIcon(zone?.icon);
   const zoneColor = zone?.accentColor ?? null;
-
-  // When a turn has perspectives, the primary answer becomes a peer to them:
-  // it gets the same collapse control (a chevron beneath the avatar) and a name
-  // label so every participant in the turn reads at equal priority.
   const hasPerspectives = turn.perspectives.length > 0;
-  const showCollapsed = hasPerspectives && collapsed && !isStreaming;
 
+  // ── Multi-zone turn: the primary and every perspective are equal cards laid
+  // out together — side-by-side columns or stacked. They share one renderer so
+  // the zone avatar/accent is the only thing that differs between them. ──
+  if (hasPerspectives) {
+    return (
+      <div className="msg-row">
+        <div className={layout === "columns" ? "flex flex-wrap items-start gap-4" : "flex flex-col gap-5"}>
+          <ParticipantCard
+            zoneId={resolvedZoneId}
+            fallbackName="Primary"
+            blocks={turn.blocks}
+            isStreaming={isStreaming}
+            chatId={chatId}
+            text={allText}
+            actionMessageId={lastMessageId}
+            regenerateZoneId={null}
+            canRegenerate={isLatest}
+            layout={layout}
+          />
+          {turn.perspectives.map((p) => (
+            <ParticipantCard
+              key={p.zoneId}
+              zoneId={p.zoneId}
+              fallbackName="Perspective"
+              blocks={p.blocks}
+              isStreaming={Boolean(p.streaming)}
+              chatId={chatId}
+              text={p.text}
+              actionMessageId={p.messageId}
+              regenerateZoneId={p.zoneId}
+              canRegenerate={isLatest}
+              layout={layout}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Ordinary single-zone turn (unchanged look) ──
   return (
     <div className="msg-row">
       <div className="flex gap-3">
@@ -403,15 +438,6 @@ export function BotTurnView({ turn, isLatest = false }: { turn: BotTurn; isLates
           >
             <ZoneIcon size={14} color={zoneColor ? "white" : "var(--color-text-muted)"} />
           </div>
-          {hasPerspectives && !isStreaming && (
-            <button
-              onClick={() => setCollapsed((v) => !v)}
-              title={collapsed ? "Expand response" : "Collapse response"}
-              className="flex h-5 w-5 items-center justify-center rounded text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
-            >
-              {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
-            </button>
-          )}
         </div>
         <div
           className="flex-1 min-w-0 overflow-hidden border-l-2 pl-3"
@@ -421,29 +447,10 @@ export function BotTurnView({ turn, isLatest = false }: { turn: BotTurn; isLates
               : "color-mix(in srgb, var(--color-accent) 33%, transparent)",
           }}
         >
-          {hasPerspectives && (
-            <div className="mb-1 flex items-center gap-2 text-xs">
-              <span
-                className="font-medium"
-                style={{ color: zoneColor ?? "var(--color-accent)" }}
-              >
-                {zone?.name ?? "Primary"}
-              </span>
-              {zone?.model && (
-                <span className="truncate text-[var(--color-text-muted)]">{zone.model}</span>
-              )}
-            </div>
-          )}
-          {showCollapsed ? (
-            <span className="text-xs italic text-[var(--color-text-muted)]">
-              Response collapsed
-            </span>
-          ) : (
-            <TurnBody blocks={turn.blocks} isStreaming={isStreaming} chatId={chatId} />
-          )}
+          <TurnBody blocks={turn.blocks} isStreaming={isStreaming} chatId={chatId} />
         </div>
       </div>
-      {!isStreaming && chatId && pivotMessageId && !showCollapsed && (
+      {!isStreaming && chatId && pivotMessageId && (
         <div className="msg-actions">
           <MessageActions
             text={allText}
@@ -455,55 +462,45 @@ export function BotTurnView({ turn, isLatest = false }: { turn: BotTurn; isLates
           />
         </div>
       )}
-      {hasPerspectives && (
-        <PerspectiveGroup perspectives={turn.perspectives} chatId={chatId} isLatest={isLatest} />
-      )}
-    </div>
-  );
-}
-
-function PerspectiveGroup({
-  perspectives,
-  chatId,
-  isLatest,
-}: {
-  perspectives: PerspectiveTurn[];
-  chatId: string;
-  isLatest: boolean;
-}) {
-  const layout = useApp((s) => s.appSettings.perspectiveLayout);
-  return (
-    <div className={layout === "columns" ? "mt-5 flex flex-wrap gap-4" : "mt-5 flex flex-col gap-5"}>
-      {perspectives.map((p) => (
-        <PerspectiveResponseView key={p.zoneId} persp={p} chatId={chatId} layout={layout} isLatest={isLatest} />
-      ))}
     </div>
   );
 }
 
 /**
- * Renders a perspective zone's answer using the exact same block pipeline as
- * the primary turn (thinking / tool steps / text via `TurnBody`). The zone
- * avatar and accent colour are the only visual differentiators; a collapse
- * toggle beneath the avatar folds the response away.
+ * One participant's response in a multi-zone turn — the primary or a
+ * perspective — rendered identically: zone avatar + collapse toggle + name
+ * label + bordered body (thinking / tool / text via `TurnBody`). The zone
+ * avatar and accent colour are the only things that differ between cards.
  */
-function PerspectiveResponseView({
-  persp,
+function ParticipantCard({
+  zoneId,
+  fallbackName,
+  blocks,
+  isStreaming,
   chatId,
+  text,
+  actionMessageId,
+  regenerateZoneId,
+  canRegenerate,
   layout,
-  isLatest,
 }: {
-  persp: PerspectiveTurn;
+  zoneId: string | null;
+  fallbackName: string;
+  blocks: TurnBlock[];
+  isStreaming: boolean;
   chatId: string;
+  text: string;
+  actionMessageId: string;
+  regenerateZoneId: string | null;
+  canRegenerate: boolean;
   layout: "stacked" | "columns";
-  isLatest: boolean;
 }) {
-  const [expanded, setExpanded] = useState(true);
-  const isStreaming = Boolean(persp.streaming);
-  const zone = useApp((s) => s.zones.find((z) => z.id === persp.zoneId));
+  const [collapsed, setCollapsed] = useState(false);
+  const zone = useApp((s) => s.zones.find((z) => z.id === zoneId));
   const ZoneIcon = getZoneIcon(zone?.icon);
   const color = zone?.accentColor ?? null;
-  const hasContent = persp.blocks.length > 0;
+  const hasContent = blocks.length > 0;
+  const showCollapsed = collapsed && !isStreaming;
 
   return (
     <div className={`msg-row ${layout === "columns" ? "min-w-[280px] flex-1" : ""}`}>
@@ -516,13 +513,15 @@ function PerspectiveResponseView({
           >
             <ZoneIcon size={14} color={color ? "white" : "var(--color-text-muted)"} />
           </div>
-          <button
-            onClick={() => setExpanded((v) => !v)}
-            title={expanded ? "Collapse response" : "Expand response"}
-            className="flex h-5 w-5 items-center justify-center rounded text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
-          >
-            {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-          </button>
+          {!isStreaming && (
+            <button
+              onClick={() => setCollapsed((v) => !v)}
+              title={collapsed ? "Expand response" : "Collapse response"}
+              className="flex h-5 w-5 items-center justify-center rounded text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
+            >
+              {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+            </button>
+          )}
         </div>
 
         <div
@@ -533,10 +532,9 @@ function PerspectiveResponseView({
               : "color-mix(in srgb, var(--color-accent) 33%, transparent)",
           }}
         >
-          {/* Subtle name label so multiple models stay distinguishable. */}
           <div className="mb-1 flex items-center gap-2 text-xs">
             <span className="font-medium" style={{ color: color ?? "var(--color-accent)" }}>
-              {zone?.name ?? "Perspective"}
+              {zone?.name ?? fallbackName}
             </span>
             {zone?.model && (
               <span className="truncate text-[var(--color-text-muted)]">{zone.model}</span>
@@ -546,30 +544,27 @@ function PerspectiveResponseView({
             )}
           </div>
 
-          {expanded ? (
-            <>
-              {hasContent || isStreaming ? (
-                <TurnBody blocks={persp.blocks} isStreaming={isStreaming} chatId={chatId} />
-              ) : (
-                <span className="text-xs italic text-[var(--color-text-muted)]">No response.</span>
-              )}
-              {!isStreaming && persp.text && (
-                <div className="msg-actions">
-                  <MessageActions
-                    text={persp.text}
-                    messageId={persp.messageId}
-                    chatId={chatId}
-                    variant="perspective"
-                    regenerateZoneId={persp.zoneId}
-                    canRegenerate={isLatest}
-                  />
-                </div>
-              )}
-            </>
-          ) : (
+          {showCollapsed ? (
             <span className="text-xs italic text-[var(--color-text-muted)]">
               Response collapsed
             </span>
+          ) : hasContent || isStreaming ? (
+            <TurnBody blocks={blocks} isStreaming={isStreaming} chatId={chatId} />
+          ) : (
+            <span className="text-xs italic text-[var(--color-text-muted)]">No response.</span>
+          )}
+
+          {!isStreaming && (text || hasContent) && (
+            <div className="msg-actions">
+              <MessageActions
+                text={text}
+                messageId={actionMessageId}
+                chatId={chatId}
+                variant="perspective"
+                regenerateZoneId={regenerateZoneId}
+                canRegenerate={canRegenerate}
+              />
+            </div>
           )}
         </div>
       </div>

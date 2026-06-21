@@ -225,6 +225,16 @@ function StatusBanner({
   const toolCallChars = turn?.toolCallChars ?? 0;
   const elapsed = useLiveElapsed(firstTokenAt);
 
+  // In a multi-zone chat, prefix the primary's status with its zone dot + name
+  // so it reads symmetrically with the perspective banners below it.
+  const hasPerspectives = useApp((s) => (s.chatZonesByChat[chatId] ?? []).length > 0);
+  const chatZoneId = useApp((s) => s.chats.find((c) => c.id === chatId)?.zoneId ?? null);
+  const routing = useApp((s) => s.routingByChat[chatId]);
+  const resolvedZoneId =
+    (routing && routing.status === "done" ? routing.zoneId : null) ?? chatZoneId;
+  const zone = useApp((s) => s.zones.find((z) => z.id === resolvedZoneId));
+  const zoneColor = zone?.accentColor ?? "var(--color-accent)";
+
   let icon = <Loader2 size={12} className="animate-spin" />;
   let label = "Generating…";
   if (firstTokenAt === null) {
@@ -249,6 +259,15 @@ function StatusBanner({
   const liveTokens = estimateTokens(contentChars + reasoningChars + toolCallChars);
   return (
     <div className="ml-10 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+      {hasPerspectives && zone && (
+        <>
+          <span
+            className="h-2.5 w-2.5 shrink-0 rounded-full animate-pulse"
+            style={{ background: zoneColor }}
+          />
+          <span style={{ color: zoneColor }}>{zone.name}</span>
+        </>
+      )}
       {icon}
       <span>{label}</span>
       {firstTokenAt !== null && (

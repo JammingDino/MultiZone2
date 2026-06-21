@@ -47,7 +47,14 @@ export function InputBar({ chatId, disabled, ref }: InputBarProps) {
   const defaultProviderId = useApp((s) => s.appSettings.defaultProviderId);
   const fileRef = useRef<HTMLInputElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
-  const isStreaming = useApp((s) => Boolean(s.streamingByChat[chatId]));
+  // Busy while any participant is generating — the primary OR a perspective
+  // zone — so the stop button stays available until the whole turn settles.
+  // cancel_stream cancels every participant at once (shared cancel flag).
+  const isStreaming = useApp(
+    (s) =>
+      Boolean(s.streamingByChat[chatId]) ||
+      Object.keys(s.perspectiveStreamsByChat[chatId] ?? {}).length > 0,
+  );
 
   // One-shot overrides for the next send only. ovZone: undefined = use the
   // chat's own zone, null = Quick chat (no zone), string = a specific zone.

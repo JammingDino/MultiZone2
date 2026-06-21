@@ -411,7 +411,39 @@ async fn search_searxng(
         ));
     }
     let data: Value = serde_json::from_str(&text).map_err(|e| format!("SearXNG JSON parse failed: {e}"))?;
-    Ok(extract_from_array(data.get("results"), n, "url", "title", "content"))
+    let results = extract_from_array(data.get("results"), n, "url", "title", "content");
+
+    // SearXNG returns HTTP 200 with an empty `results` array when its *upstream*
+    // engines fail — typically because Google/Bing/etc. are rate-limiting this
+    // SearXNG instance's IP (the classic "one good search, then empties for a
+    // while" pattern). The reason is in `unresponsive_engines`; surface it so the
+    // caller sees an actionable error instead of a silent "no results".
+    if results.is_empty() {
+        if let Some(unresp) = data.get("unresponsive_engines").and_then(|v| v.as_array()) {
+            if !unresp.is_empty() {
+                let reasons: Vec<String> = unresp
+                    .iter()
+                    .filter_map(|e| {
+                        let arr = e.as_array()?;
+                        let engine = arr.first()?.as_str()?;
+                        let reason = arr.get(1).and_then(|v| v.as_str()).unwrap_or("no reason given");
+                        Some(format!("{engine} ({reason})"))
+                    })
+                    .collect();
+                if !reasons.is_empty() {
+                    return Err(format!(
+                        "SearXNG returned no results because its upstream engines did not \
+                         respond: {}. This almost always means those engines are rate-limiting \
+                         your instance's IP — not SearXNG limiting you. Wait a minute, enable \
+                         more/different engines in SearXNG, or use the 'multi' provider which \
+                         queries DuckDuckGo + Marginalia directly.",
+                        reasons.join(", ")
+                    ));
+                }
+            }
+        }
+    }
+    Ok(results)
 }
 
 async fn search_brave(

@@ -7,7 +7,7 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ## 0.1.x — Foundation & Polish
 
-### 0.1.6 — Smart chat routing (current)
+### 0.1.6 — Smart chat routing
 
 - [x] `smart_routing` boolean on `Chat` — router picks best zone per turn
 - [x] Smart chat mode in `HomeScreen` mode picker (`setChatSmart` action)
@@ -56,7 +56,7 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ---
 
-### 0.1.9 — Perspective mode polish
+### 0.1.9 — Perspective mode polish (current — release)
 
 - [x] Perspective zones can use tools (tool calls execute the same way as for the primary zone) — primary and perspectives now run the same shared agentic loop
 - [x] Perspective zone responses render with identical styling to primary zone responses; zone avatar and accent color are the only visual differentiator — shared `TurnBody` block renderer

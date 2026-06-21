@@ -313,6 +313,48 @@ pub async fn delete_messages_from(
     Ok(())
 }
 
+/// Deletes one participant's messages in the latest round (everything that
+/// participant produced since the last user message). `zone_id = None` targets
+/// the primary turn; `Some(z)` targets that perspective zone. Used by
+/// per-participant regenerate so siblings and earlier rounds stay intact.
+#[tauri::command]
+pub async fn delete_participant_messages(
+    state: State<'_, AppState>,
+    chat_id: String,
+    zone_id: Option<String>,
+) -> AppResult<()> {
+    let last_user_ts: Option<i64> = sqlx::query_scalar(
+        "SELECT created_at FROM messages WHERE chat_id = ?1 AND role = 'user' ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(&chat_id)
+    .fetch_optional(&state.db)
+    .await?;
+    let Some(ts) = last_user_ts else { return Ok(()); };
+
+    match zone_id {
+        Some(z) => {
+            sqlx::query(
+                "DELETE FROM messages WHERE chat_id = ?1 AND created_at >= ?2 AND role != 'user' AND zone_id = ?3",
+            )
+            .bind(&chat_id)
+            .bind(ts)
+            .bind(&z)
+            .execute(&state.db)
+            .await?;
+        }
+        None => {
+            sqlx::query(
+                "DELETE FROM messages WHERE chat_id = ?1 AND created_at >= ?2 AND role != 'user' AND zone_id IS NULL",
+            )
+            .bind(&chat_id)
+            .bind(ts)
+            .execute(&state.db)
+            .await?;
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn delete_chat(state: State<'_, AppState>, id: String) -> AppResult<()> {
     sqlx::query("DELETE FROM chats WHERE id = ?1")

@@ -355,12 +355,22 @@ function TurnBody({
   );
 }
 
-export function BotTurnView({ turn }: { turn: BotTurn }) {
+export function BotTurnView({ turn, isLatest = false }: { turn: BotTurn; isLatest?: boolean }) {
   const isStreaming = Boolean(turn.streaming);
   const hasAnything = turn.blocks.length > 0 || isStreaming;
 
   const chatId = useApp((s) => s.activeChatId) ?? "";
-  const zone = useApp((s) => s.zones.find((z) => z.id === turn.zoneId));
+  // While streaming, no assistant message is saved yet so `turn.zoneId` is null.
+  // Resolve the answering zone early — from the live routing result, else the
+  // chat's bound zone — so the avatar/accent show the zone's colours from the
+  // first token instead of a generic theme that only "fills in" once saved.
+  const chatZoneId = useApp((s) => s.chats.find((c) => c.id === chatId)?.zoneId ?? null);
+  const routing = useApp((s) => s.routingByChat[chatId]);
+  const resolvedZoneId =
+    turn.zoneId ??
+    (routing && routing.status === "done" ? routing.zoneId : null) ??
+    chatZoneId;
+  const zone = useApp((s) => s.zones.find((z) => z.id === resolvedZoneId));
   const [collapsed, setCollapsed] = useState(false);
 
   if (!hasAnything) return null;
@@ -438,14 +448,15 @@ export function BotTurnView({ turn }: { turn: BotTurn }) {
           <MessageActions
             text={allText}
             messageId={lastMessageId}
-            pivotMessageId={pivotMessageId}
             chatId={chatId}
             variant="assistant"
+            regenerateZoneId={null}
+            canRegenerate={isLatest}
           />
         </div>
       )}
       {hasPerspectives && (
-        <PerspectiveGroup perspectives={turn.perspectives} chatId={chatId} />
+        <PerspectiveGroup perspectives={turn.perspectives} chatId={chatId} isLatest={isLatest} />
       )}
     </div>
   );
@@ -454,15 +465,17 @@ export function BotTurnView({ turn }: { turn: BotTurn }) {
 function PerspectiveGroup({
   perspectives,
   chatId,
+  isLatest,
 }: {
   perspectives: PerspectiveTurn[];
   chatId: string;
+  isLatest: boolean;
 }) {
   const layout = useApp((s) => s.appSettings.perspectiveLayout);
   return (
     <div className={layout === "columns" ? "mt-5 flex flex-wrap gap-4" : "mt-5 flex flex-col gap-5"}>
       {perspectives.map((p) => (
-        <PerspectiveResponseView key={p.zoneId} persp={p} chatId={chatId} layout={layout} />
+        <PerspectiveResponseView key={p.zoneId} persp={p} chatId={chatId} layout={layout} isLatest={isLatest} />
       ))}
     </div>
   );
@@ -478,10 +491,12 @@ function PerspectiveResponseView({
   persp,
   chatId,
   layout,
+  isLatest,
 }: {
   persp: PerspectiveTurn;
   chatId: string;
   layout: "stacked" | "columns";
+  isLatest: boolean;
 }) {
   const [expanded, setExpanded] = useState(true);
   const isStreaming = Boolean(persp.streaming);
@@ -545,6 +560,8 @@ function PerspectiveResponseView({
                     messageId={persp.messageId}
                     chatId={chatId}
                     variant="perspective"
+                    regenerateZoneId={persp.zoneId}
+                    canRegenerate={isLatest}
                   />
                 </div>
               )}

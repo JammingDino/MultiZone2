@@ -30,6 +30,12 @@ export function MessageThread({ chatId }: { chatId: string }) {
     () => groupMessages(messages, streaming, perspectiveStreams),
     [messages, streaming, perspectiveStreams],
   );
+  // Index of the most recent bot turn — regenerate is only offered there so
+  // re-running a participant always appends cleanly at the end of the chat.
+  let lastBotIdx = -1;
+  units.forEach((u, i) => {
+    if (u.type === "bot") lastBotIdx = i;
+  });
 
   useEffect(() => {
     if (!messagesByChat[chatId]) loadMessages(chatId);
@@ -177,7 +183,7 @@ export function MessageThread({ chatId }: { chatId: string }) {
             unit.type === "user" ? (
               <UserMessage key={unit.message.id} message={unit.message} />
             ) : (
-              <BotTurnView key={`bot-${i}`} turn={unit} />
+              <BotTurnView key={`bot-${i}`} turn={unit} isLatest={i === lastBotIdx} />
             ),
           )}
           {streaming && <StatusBanner streaming={streaming} chatId={chatId} />}

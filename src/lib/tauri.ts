@@ -100,6 +100,12 @@ export const sendMessage = (
   });
 export const regenerateResponse = (chatId: string) =>
   invoke<void>("regenerate_response", { chatId });
+/** Re-run a single participant for the latest round: null = primary, otherwise a perspective zone. */
+export const regenerateParticipant = (chatId: string, zoneId: string | null) =>
+  invoke<void>("regenerate_participant", { chatId, zoneId });
+/** Delete one participant's latest-round messages (null = primary, otherwise a perspective zone). */
+export const deleteParticipantMessages = (chatId: string, zoneId: string | null) =>
+  invoke<void>("delete_participant_messages", { chatId, zoneId });
 export const cancelStream = (chatId: string) =>
   invoke<void>("cancel_stream", { chatId });
 export const respondToolApproval = (

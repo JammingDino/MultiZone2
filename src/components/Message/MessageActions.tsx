@@ -9,14 +9,19 @@ interface Props {
   /** Assistant message id for stats lookup. */
   messageId?: string;
   /**
-   * Required for regenerate / edit. The id of the first message to delete
-   * before re-running the loop. For regenerate on a bot turn, this is the
-   * first assistant message in the turn. For editing a user message, this is
-   * the user message itself.
+   * Editing a user message: the id of the user message to delete from before
+   * resending. Only used for `variant === "user"`.
    */
   pivotMessageId?: string;
   chatId: string;
   variant: "user" | "assistant" | "perspective";
+  /**
+   * Regenerate target for assistant/perspective turns: `null` = the primary
+   * turn, a zone id = that perspective zone. Only that participant is re-run.
+   */
+  regenerateZoneId?: string | null;
+  /** Whether this turn is the latest round (regenerate is only offered there). */
+  canRegenerate?: boolean;
   onEdit?: () => void;
 }
 
@@ -26,12 +31,20 @@ export function MessageActions({
   pivotMessageId,
   chatId,
   variant,
+  regenerateZoneId = null,
+  canRegenerate = false,
   onEdit,
 }: Props) {
   const [copied, setCopied] = useState(false);
   const [showStats, setShowStats] = useState(false);
   const stats = useApp((s) => (messageId ? s.statsByMessage[messageId] : undefined));
-  const isStreaming = useApp((s) => Boolean(s.streamingByChat[chatId]));
+  // Busy if any participant (primary or a perspective) is streaming in this
+  // chat — regenerate is disabled until the whole turn settles.
+  const primaryStreaming = useApp((s) => Boolean(s.streamingByChat[chatId]));
+  const perspStreaming = useApp(
+    (s) => Object.keys(s.perspectiveStreamsByChat[chatId] ?? {}).length > 0,
+  );
+  const isBusy = primaryStreaming || perspStreaming;
   const refreshChats = useApp((s) => s.refreshChats);
   const loadMessages = useApp((s) => s.loadMessages);
 
@@ -42,11 +55,12 @@ export function MessageActions({
   }
 
   async function onRegenerate() {
-    if (!pivotMessageId || isStreaming) return;
+    if (isBusy || !canRegenerate) return;
     try {
-      await api.deleteMessagesFrom(chatId, pivotMessageId);
+      // Drop just this participant's latest-round messages, then re-run only it.
+      await api.deleteParticipantMessages(chatId, regenerateZoneId);
       await loadMessages(chatId);
-      await api.regenerateResponse(chatId);
+      await api.regenerateParticipant(chatId, regenerateZoneId);
       refreshChats();
     } catch (e) {
       console.error(e);
@@ -63,18 +77,18 @@ export function MessageActions({
         {copied ? <Check size={11} /> : <Copy size={11} />}
       </ActionButton>
 
-      {variant === "assistant" && (
+      {variant !== "user" && canRegenerate && (
         <ActionButton
           onClick={onRegenerate}
           label="Regenerate"
-          disabled={!pivotMessageId || isStreaming}
+          disabled={isBusy}
         >
           <RotateCcw size={11} />
         </ActionButton>
       )}
 
       {variant === "user" && onEdit && (
-        <ActionButton onClick={onEdit} label="Edit" disabled={isStreaming}>
+        <ActionButton onClick={onEdit} label="Edit" disabled={isBusy}>
           <Pencil size={11} />
         </ActionButton>
       )}

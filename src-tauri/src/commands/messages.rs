@@ -292,6 +292,49 @@ async fn run_regenerate(
     Ok(())
 }
 
+/// Re-runs a single participant for the latest round — the primary
+/// (`zone_id = None`) or one perspective zone (`Some(z)`) — leaving every other
+/// participant's answer untouched. The caller deletes that participant's old
+/// messages first (via `delete_participant_messages`).
+#[tauri::command]
+pub async fn regenerate_participant(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    chat_id: String,
+    zone_id: Option<String>,
+) -> AppResult<()> {
+    let ctx = EngineCtx::from_state(&state);
+    let sink = StreamSink::tauri(app);
+    run_regenerate_participant_entry(&ctx, &sink, &chat_id, zone_id).await
+}
+
+/// Shared entry for per-participant regenerate (Tauri + HTTP API): registers a
+/// cancel flag, runs just the one participant, cleans up.
+pub async fn run_regenerate_participant_entry(
+    ctx: &EngineCtx,
+    sink: &StreamSink,
+    chat_id: &str,
+    zone_id: Option<String>,
+) -> AppResult<()> {
+    let cancel = Arc::new(AtomicBool::new(false));
+    ctx.active_streams
+        .write()
+        .await
+        .insert(chat_id.to_string(), cancel.clone());
+
+    let result = match &zone_id {
+        Some(z) => run_perspective(ctx, sink, chat_id, z, cancel.clone()).await,
+        None => run_agentic_loop(ctx, sink, chat_id, &TurnOverride::default(), cancel.clone()).await,
+    };
+
+    ctx.active_streams.write().await.remove(chat_id);
+
+    if let Err(e) = &result {
+        sink.emit_for(chat_id, zone_id.as_deref(), StreamPayload::Error { message: e.to_string() });
+    }
+    result
+}
+
 #[tauri::command]
 pub async fn send_message(
     app: AppHandle,

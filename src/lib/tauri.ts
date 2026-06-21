@@ -4,6 +4,7 @@ import type {
   Attachment,
   Chat,
   ChatTagEntry,
+  ChatTagLink,
   ChatZone,
   DbStats,
   InputPart,
@@ -45,6 +46,8 @@ export const setChatProjectContext = (chatId: string, enabled: boolean) =>
   invoke<void>("set_chat_project_context", { chatId, enabled });
 export const getChatTags = (chatId: string) =>
   invoke<ChatTagEntry[]>("get_chat_tags", { chatId });
+export const getAllChatTags = () =>
+  invoke<ChatTagLink[]>("get_all_chat_tags");
 export const addChatTag = (chatId: string, tagId: string) =>
   invoke<void>("add_chat_tag", { chatId, tagId });
 export const removeChatTag = (chatId: string, tagId: string) =>

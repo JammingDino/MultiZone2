@@ -54,6 +54,7 @@ pub fn run() {
             commands::chats::set_chat_project,
             commands::chats::set_chat_project_context,
             commands::chats::get_chat_tags,
+            commands::chats::get_all_chat_tags,
             commands::chats::add_chat_tag,
             commands::chats::remove_chat_tag,
             commands::chats::set_chat_tag_context,

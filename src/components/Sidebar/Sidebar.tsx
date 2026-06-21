@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Plus, Settings, Layers, ChevronRight, ChevronDown, FolderPlus, ChevronLeft, Pencil, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Plus, Settings, Layers, ChevronRight, ChevronDown, FolderPlus, ChevronLeft, Pencil, Trash2, Tag as TagIcon, X } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { ChatList } from "./ChatList";
@@ -39,6 +39,27 @@ export function Sidebar() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [projectMenu, setProjectMenu] = useState<{ projectId: string; x: number; y: number } | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<Project | null>(null);
+
+  // Tag filtering: a chat matches when no filter is set, or it carries any of
+  // the selected tags (union). Built from the flat chat↔tag link list.
+  const tags = useApp((s) => s.tags);
+  const chatTagLinks = useApp((s) => s.chatTagLinks);
+  const [tagFilter, setTagFilter] = useState<Set<string>>(new Set());
+  const tagIdsByChat = useMemo(() => {
+    const m: Record<string, Set<string>> = {};
+    for (const l of chatTagLinks) (m[l.chatId] ??= new Set()).add(l.tagId);
+    return m;
+  }, [chatTagLinks]);
+  const matchesTagFilter = (chatId: string) =>
+    tagFilter.size === 0 || [...tagFilter].some((tid) => tagIdsByChat[chatId]?.has(tid));
+  function toggleTagFilter(tagId: string) {
+    setTagFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(tagId)) next.delete(tagId);
+      else next.add(tagId);
+      return next;
+    });
+  }
 
   useEffect(() => {
     refreshProviders();
@@ -86,7 +107,8 @@ export function Sidebar() {
     });
   }
 
-  const ungroupedChats = chats.filter((c) => !c.projectId);
+  const ungroupedChats = chats.filter((c) => !c.projectId && matchesTagFilter(c.id));
+  const filtering = tagFilter.size > 0;
 
   if (!sidebarOpen) {
     return (
@@ -188,11 +210,53 @@ export function Sidebar() {
         </button>
       </div>
 
+      {/* Tag filter bar */}
+      {tags.length > 0 && (
+        <div className="mx-2 mb-1 flex flex-wrap items-center gap-1">
+          <TagIcon size={11} className="mr-0.5 shrink-0 text-[var(--color-text-muted)]" />
+          {tags.map((t) => {
+            const active = tagFilter.has(t.id);
+            return (
+              <button
+                key={t.id}
+                onClick={() => toggleTagFilter(t.id)}
+                className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition ${
+                  active ? "text-white" : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                }`}
+                style={
+                  active
+                    ? { background: t.color ?? "var(--color-accent)", borderColor: "transparent" }
+                    : { borderColor: t.color ?? "var(--color-border)" }
+                }
+                title={active ? `Filtering by “${t.name}”` : `Filter by “${t.name}”`}
+              >
+                <span
+                  className="h-1.5 w-1.5 rounded-full"
+                  style={{ background: active ? "white" : t.color ?? "var(--color-text-muted)" }}
+                />
+                {t.name}
+              </button>
+            );
+          })}
+          {filtering && (
+            <button
+              onClick={() => setTagFilter(new Set())}
+              className="flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+              title="Clear tag filter"
+            >
+              <X size={10} /> clear
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Chat list with project folders */}
       <div className="flex-1 overflow-y-auto">
         {projects.map((project) => {
-          const projectChats = chats.filter((c) => c.projectId === project.id);
-          const isOpen = !collapsed.has(project.id);
+          const projectChats = chats.filter((c) => c.projectId === project.id && matchesTagFilter(c.id));
+          // While a tag filter is active, hide projects with no matching chats.
+          if (filtering && projectChats.length === 0) return null;
+          const isOpen = !collapsed.has(project.id) || filtering;
           const color = project.accentColor ?? "var(--color-text-muted)";
           const ProjectIcon = getZoneIcon(project.icon);
           return (
@@ -240,6 +304,12 @@ export function Sidebar() {
         {chats.length === 0 && projects.length === 0 && (
           <div className="px-3 py-8 text-center text-xs text-[var(--color-text-muted)]">
             No chats yet
+          </div>
+        )}
+
+        {filtering && !chats.some((c) => matchesTagFilter(c.id)) && (
+          <div className="px-3 py-8 text-center text-xs text-[var(--color-text-muted)]">
+            No chats match this tag filter.
           </div>
         )}
       </div>

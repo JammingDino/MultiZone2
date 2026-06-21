@@ -91,13 +91,13 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ### 0.2.2 — Tags
 
-- [ ] Tags tab in ProjectsPanel: create, edit, delete tags (name, color, context snippet)
-- [ ] Tag chips on chat items in sidebar
-- [ ] Assign tags to a chat from the chat header (tag picker)
-- [ ] `manage_tags` tool: verify it creates tags and assigns them correctly; confirm it is available in relevant default zone configurations
-- [ ] Per-tag context toggle in chat header (enable/disable each tag's snippet independently)
-- [ ] Filter sidebar by tag: clicking a tag filters the chat list
-- [ ] Multiple active tags inject all their snippets independently
+- [x] Tags tab in ProjectsPanel: create, edit, delete tags (name, color, context snippet)
+- [x] Tag chips on chat items in sidebar
+- [x] Assign tags to a chat from the chat header (tag picker)
+- [x] `manage_tags` tool: verify it creates tags and assigns them correctly; confirm it is available in relevant default zone configurations
+- [x] Per-tag context toggle in chat header (enable/disable each tag's snippet independently)
+- [x] Filter sidebar by tag: clicking a tag filters the chat list
+- [x] Multiple active tags inject all their snippets independently
 
 ### 0.2.3 — Zone library
 

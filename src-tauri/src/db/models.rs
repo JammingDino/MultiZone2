@@ -100,6 +100,17 @@ pub struct ChatTagEntry {
     pub context_enabled: bool,
 }
 
+/// A flat chat↔tag link for the sidebar — every chat's tags in one query so
+/// chips and tag-filtering don't need a per-chat round trip.
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatTagLink {
+    pub chat_id: String,
+    pub tag_id: String,
+    pub name: String,
+    pub color: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatZone {

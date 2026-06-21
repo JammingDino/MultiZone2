@@ -1,5 +1,5 @@
-import { useRef, useState } from "react";
-import type { Chat } from "@/lib/types";
+import { useMemo, useRef, useState } from "react";
+import type { Chat, ChatTagLink } from "@/lib/types";
 import { MessageSquare, Pencil, Trash2, Sparkles, Loader2, FolderInput, FolderMinus } from "lucide-react";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
@@ -24,8 +24,16 @@ export function ChatList({ chats, activeId, onSelect, projectId }: Props) {
   const [editValue, setEditValue] = useState("");
   const { projects, refreshChats, setChatTitle, regenerateTitle, setChatProject } = useApp();
   const regenerating = useApp((s) => s.regeneratingTitles);
+  const chatTagLinks = useApp((s) => s.chatTagLinks);
   const [movingTo, setMovingTo] = useState(false);
   const moveRef = useRef<HTMLDivElement>(null);
+
+  // Group every chat↔tag link by chat so each item can show its tag chips.
+  const tagsByChatId = useMemo(() => {
+    const m: Record<string, ChatTagLink[]> = {};
+    for (const l of chatTagLinks) (m[l.chatId] ??= []).push(l);
+    return m;
+  }, [chatTagLinks]);
 
   function openMenu(e: React.MouseEvent, chatId: string) {
     e.preventDefault();
@@ -87,37 +95,62 @@ export function ChatList({ chats, activeId, onSelect, projectId }: Props) {
             key={chat.id}
             onClick={() => onSelect(chat.id)}
             onContextMenu={(e) => openMenu(e, chat.id)}
-            className={`group mx-1 my-0.5 flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm ${
+            className={`group mx-1 my-0.5 cursor-pointer rounded px-2 py-1.5 text-sm ${
               active
                 ? "bg-[var(--color-panel-hover)] text-[var(--color-text)]"
                 : "text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
             }`}
           >
-            {isRegenerating ? (
-              <Loader2 size={14} className="flex-shrink-0 animate-spin text-[var(--color-accent)]" />
-            ) : (
-              <MessageSquare size={14} className="flex-shrink-0" />
-            )}
-            {editing ? (
-              <input
-                autoFocus
-                value={editValue}
-                onChange={(e) => setEditValue(e.target.value)}
-                onBlur={() => commitRename(chat)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") commitRename(chat);
-                  if (e.key === "Escape") setEditingId(null);
-                }}
-                onClick={(e) => e.stopPropagation()}
-                className="flex-1 rounded bg-[var(--color-bg)] px-1 text-sm"
-              />
-            ) : (
-              <span className="flex-1 truncate">
-                {chat.title}
-                {isRegenerating && (
-                  <span className="ml-2 text-xs text-[var(--color-text-muted)]">renaming…</span>
+            <div className="flex items-center gap-2">
+              {isRegenerating ? (
+                <Loader2 size={14} className="flex-shrink-0 animate-spin text-[var(--color-accent)]" />
+              ) : (
+                <MessageSquare size={14} className="flex-shrink-0" />
+              )}
+              {editing ? (
+                <input
+                  autoFocus
+                  value={editValue}
+                  onChange={(e) => setEditValue(e.target.value)}
+                  onBlur={() => commitRename(chat)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") commitRename(chat);
+                    if (e.key === "Escape") setEditingId(null);
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                  className="flex-1 rounded bg-[var(--color-bg)] px-1 text-sm"
+                />
+              ) : (
+                <span className="flex-1 truncate">
+                  {chat.title}
+                  {isRegenerating && (
+                    <span className="ml-2 text-xs text-[var(--color-text-muted)]">renaming…</span>
+                  )}
+                </span>
+              )}
+            </div>
+            {!editing && (tagsByChatId[chat.id]?.length ?? 0) > 0 && (
+              <div className="mt-1 flex flex-wrap gap-1 pl-6">
+                {tagsByChatId[chat.id].slice(0, 4).map((t) => (
+                  <span
+                    key={t.tagId}
+                    className="flex max-w-[90px] items-center gap-1 rounded-full px-1.5 py-px text-[10px] leading-tight"
+                    style={{
+                      color: t.color ?? "var(--color-text-muted)",
+                      background: `color-mix(in srgb, ${t.color ?? "var(--color-text-muted)"} 14%, transparent)`,
+                    }}
+                    title={t.name}
+                  >
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: t.color ?? "var(--color-text-muted)" }} />
+                    <span className="truncate">{t.name}</span>
+                  </span>
+                ))}
+                {tagsByChatId[chat.id].length > 4 && (
+                  <span className="text-[10px] text-[var(--color-text-muted)]">
+                    +{tagsByChatId[chat.id].length - 4}
+                  </span>
                 )}
-              </span>
+              </div>
             )}
           </div>
         );

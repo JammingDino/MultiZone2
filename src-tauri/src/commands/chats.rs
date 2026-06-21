@@ -171,6 +171,20 @@ pub async fn get_chat_tags(
     Ok(rows)
 }
 
+/// Every chat↔tag link in one query, for sidebar chips and tag-filtering.
+#[tauri::command]
+pub async fn get_all_chat_tags(state: State<'_, AppState>) -> AppResult<Vec<crate::db::models::ChatTagLink>> {
+    let rows = sqlx::query_as::<_, crate::db::models::ChatTagLink>(
+        "SELECT ct.chat_id, ct.tag_id, t.name, t.color
+         FROM chat_tags ct
+         JOIN tags t ON t.id = ct.tag_id
+         ORDER BY t.name",
+    )
+    .fetch_all(&state.db)
+    .await?;
+    Ok(rows)
+}
+
 #[tauri::command]
 pub async fn add_chat_tag(
     state: State<'_, AppState>,

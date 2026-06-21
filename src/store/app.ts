@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { DEFAULT_APP_SETTINGS, type AppSettings, type Chat, type ChatTagEntry, type ChatZone, type Message, type Project, type Provider, type Tag, type Zone } from "@/lib/types";
+import { DEFAULT_APP_SETTINGS, type AppSettings, type Chat, type ChatTagEntry, type ChatTagLink, type ChatZone, type Message, type Project, type Provider, type Tag, type Zone } from "@/lib/types";
 import * as api from "@/lib/tauri";
 
 export type StreamPhase =
@@ -72,6 +72,8 @@ interface AppStore {
   projects: Project[];
   tags: Tag[];
   tagsByChat: Record<string, ChatTagEntry[]>;
+  /** Every chat's tags in one flat list — drives sidebar chips + tag filtering. */
+  chatTagLinks: ChatTagLink[];
   /** Perspective zones per chat: chatId → ChatZone[] */
   chatZonesByChat: Record<string, ChatZone[]>;
 
@@ -148,6 +150,7 @@ interface AppStore {
   setHomeScreenDraft: (text: string) => void;
   refreshProjects: () => Promise<void>;
   refreshTags: () => Promise<void>;
+  refreshChatTagLinks: () => Promise<void>;
   loadChatTags: (chatId: string) => Promise<void>;
   setChatProject: (chatId: string, projectId: string | null) => Promise<void>;
   toggleProjectContext: (chatId: string, enabled: boolean) => Promise<void>;
@@ -262,6 +265,7 @@ export const useApp = create<AppStore>((set, get) => ({
   projects: [],
   tags: [],
   tagsByChat: {},
+  chatTagLinks: [],
   chatZonesByChat: {},
 
   activeChatId: null,
@@ -846,6 +850,11 @@ export const useApp = create<AppStore>((set, get) => ({
   async refreshTags() {
     const tags = await api.listTags();
     set({ tags });
+    get().refreshChatTagLinks().catch(console.error);
+  },
+  async refreshChatTagLinks() {
+    const chatTagLinks = await api.getAllChatTags();
+    set({ chatTagLinks });
   },
   async loadChatTags(chatId) {
     const entries = await api.getChatTags(chatId);
@@ -868,6 +877,7 @@ export const useApp = create<AppStore>((set, get) => ({
   async addChatTag(chatId, tagId) {
     await api.addChatTag(chatId, tagId);
     await get().loadChatTags(chatId);
+    get().refreshChatTagLinks().catch(console.error);
   },
   async removeChatTag(chatId, tagId) {
     await api.removeChatTag(chatId, tagId);
@@ -876,6 +886,7 @@ export const useApp = create<AppStore>((set, get) => ({
         ...s.tagsByChat,
         [chatId]: (s.tagsByChat[chatId] ?? []).filter((t) => t.tagId !== tagId),
       },
+      chatTagLinks: s.chatTagLinks.filter((l) => !(l.chatId === chatId && l.tagId === tagId)),
     }));
   },
   async toggleChatTagContext(chatId, tagId, enabled) {

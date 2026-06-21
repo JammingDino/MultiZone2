@@ -88,6 +88,14 @@ export interface ChatTagEntry {
   contextEnabled: boolean;
 }
 
+/** Flat chat↔tag link for the sidebar (all chats' tags in one fetch). */
+export interface ChatTagLink {
+  chatId: string;
+  tagId: string;
+  name: string;
+  color: string | null;
+}
+
 export type Role = "user" | "assistant" | "tool" | "system";
 
 export interface Message {

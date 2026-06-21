@@ -524,38 +524,43 @@ function ParticipantCard({
           )}
         </div>
 
-        <div
-          className="flex-1 min-w-0 overflow-hidden border-l-2 pl-3"
-          style={{
-            borderColor: color
-              ? `${color}55`
-              : "color-mix(in srgb, var(--color-accent) 33%, transparent)",
-          }}
-        >
-          <div className="mb-1 flex items-center gap-2 text-xs">
-            <span className="font-medium" style={{ color: color ?? "var(--color-accent)" }}>
-              {zone?.name ?? fallbackName}
-            </span>
-            {zone?.model && (
-              <span className="truncate text-[var(--color-text-muted)]">{zone.model}</span>
-            )}
-            {isStreaming && (
-              <span className="animate-pulse text-[var(--color-text-muted)]">generating…</span>
+        {/* The `overflow-hidden` clip is scoped to the response body only, so
+            long content can't blow out the column — while the actions' stats
+            popup (rendered below) is free of the clip and won't be cut off. */}
+        <div className="flex-1 min-w-0">
+          <div
+            className="overflow-hidden border-l-2 pl-3"
+            style={{
+              borderColor: color
+                ? `${color}55`
+                : "color-mix(in srgb, var(--color-accent) 33%, transparent)",
+            }}
+          >
+            <div className="mb-1 flex items-center gap-2 text-xs">
+              <span className="font-medium" style={{ color: color ?? "var(--color-accent)" }}>
+                {zone?.name ?? fallbackName}
+              </span>
+              {zone?.model && (
+                <span className="truncate text-[var(--color-text-muted)]">{zone.model}</span>
+              )}
+              {isStreaming && (
+                <span className="animate-pulse text-[var(--color-text-muted)]">generating…</span>
+              )}
+            </div>
+
+            {showCollapsed ? (
+              <span className="text-xs italic text-[var(--color-text-muted)]">
+                Response collapsed
+              </span>
+            ) : hasContent || isStreaming ? (
+              <TurnBody blocks={blocks} isStreaming={isStreaming} chatId={chatId} />
+            ) : (
+              <span className="text-xs italic text-[var(--color-text-muted)]">No response.</span>
             )}
           </div>
 
-          {showCollapsed ? (
-            <span className="text-xs italic text-[var(--color-text-muted)]">
-              Response collapsed
-            </span>
-          ) : hasContent || isStreaming ? (
-            <TurnBody blocks={blocks} isStreaming={isStreaming} chatId={chatId} />
-          ) : (
-            <span className="text-xs italic text-[var(--color-text-muted)]">No response.</span>
-          )}
-
           {!isStreaming && (text || hasContent) && (
-            <div className="msg-actions">
+            <div className="msg-actions pl-3">
               <MessageActions
                 text={text}
                 messageId={actionMessageId}

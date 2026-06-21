@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Send, ChevronDown, Zap, Check, Layers, Settings as SettingsIcon, Loader2, Brain, Paperclip, Tag, X } from "lucide-react";
+import { Send, ChevronDown, Zap, Check, Layers, Settings as SettingsIcon, Loader2, Brain, Paperclip, Tag, X, SplitSquareHorizontal } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { getZoneIcon } from "@/lib/zoneIcons";
-import type { InputPart } from "@/lib/types";
+import type { InputPart, Zone } from "@/lib/types";
 import { renderPdfToJpegs, extractPdfText } from "@/lib/pdf";
 import {
   type PendingAttachment,
@@ -34,6 +34,7 @@ export function HomeScreen() {
   const setChatSmart = useApp((s) => s.setChatSmart);
   const addChatTag = useApp((s) => s.addChatTag);
   const openSettings = useApp((s) => s.openSettings);
+  const globalPerspectiveMode = useApp((s) => s.appSettings.perspectiveMode);
   const openZoneEditor = useApp((s) => s.openZoneEditor);
   const newChatProjectId = useApp((s) => s.newChatProjectId);
   const newChatTimestamp = useApp((s) => s.newChatTimestamp);
@@ -64,6 +65,9 @@ export function HomeScreen() {
   // Initialize project from any pending new-chat context set by the sidebar.
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(newChatProjectId);
   const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
+  // Extra zones to answer alongside the primary (mode) zone as perspectives.
+  const [selectedPerspectiveIds, setSelectedPerspectiveIds] = useState<Set<string>>(new Set());
+  const [perspMenuOpen, setPerspMenuOpen] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const isFirstNewChatTick = useRef(true);
@@ -77,6 +81,7 @@ export function HomeScreen() {
     if (isFirstNewChatTick.current) { isFirstNewChatTick.current = false; return; }
     setSelectedProjectId(newChatProjectId);
     setSelectedTagIds(new Set());
+    setSelectedPerspectiveIds(new Set());
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [newChatTimestamp]);
 
@@ -213,6 +218,7 @@ export function HomeScreen() {
 
     const currentProjectId = selectedProjectId;
     const currentTagIds = new Set(selectedTagIds);
+    const currentPerspectiveIds = new Set(selectedPerspectiveIds);
 
     // Quick mode uses the base zone if one is configured, otherwise null (legacy provider path).
     const zoneId =
@@ -225,6 +231,17 @@ export function HomeScreen() {
       const chat = await api.createChat(zoneId, currentProjectId);
       if (currentMode.type === "smart") {
         await setChatSmart(chat.id, true);
+      }
+      // Add perspective zones BEFORE sending so the first turn already runs
+      // them. Skip any that match the primary zone. Run mode inherits the
+      // global default (no per-chat override).
+      for (const zid of currentPerspectiveIds) {
+        if (zid === zoneId) continue;
+        try {
+          await api.addPerspectiveZone(chat.id, zid);
+        } catch (e) {
+          console.error(e);
+        }
       }
       // Assign selected tags (fire-and-forget; non-critical).
       for (const tagId of currentTagIds) {
@@ -431,6 +448,26 @@ export function HomeScreen() {
                 )}
               </div>
 
+            {/* Perspectives — extra zones that answer alongside the primary */}
+            {zones.length > 0 && (
+              <PerspectivePicker
+                zones={zones}
+                primaryZoneId={mode.type === "zone" ? mode.id : null}
+                selected={selectedPerspectiveIds}
+                open={perspMenuOpen}
+                setOpen={setPerspMenuOpen}
+                globalMode={globalPerspectiveMode}
+                onToggle={(id) =>
+                  setSelectedPerspectiveIds((s) => {
+                    const n = new Set(s);
+                    if (n.has(id)) n.delete(id);
+                    else n.add(id);
+                    return n;
+                  })
+                }
+              />
+            )}
+
             {/* Project — custom dropdown */}
             {projects.length > 0 && (
               <div className="relative shrink-0">
@@ -550,7 +587,97 @@ export function HomeScreen() {
             </button>
           </div>
         )}
+        {selectedPerspectiveIds.size > 0 && (
+          <p className="mt-2 text-center text-xs text-[var(--color-text-muted)]">
+            You'll get {selectedPerspectiveIds.size + 1} answers side by side — the
+            primary plus {selectedPerspectiveIds.size} perspective
+            {selectedPerspectiveIds.size > 1 ? "s" : ""}. Run mode: {globalPerspectiveMode} (change in Settings → Chat).
+          </p>
+        )}
       </div>
+    </div>
+  );
+}
+
+/** New-chat composer control for adding perspective zones — extra zones that
+ * answer alongside the primary (mode) zone. Mirrors the in-chat header picker. */
+function PerspectivePicker({
+  zones,
+  primaryZoneId,
+  selected,
+  open,
+  setOpen,
+  globalMode,
+  onToggle,
+}: {
+  zones: Zone[];
+  primaryZoneId: string | null;
+  selected: Set<string>;
+  open: boolean;
+  setOpen: (v: boolean | ((p: boolean) => boolean)) => void;
+  globalMode: "sequential" | "parallel";
+  onToggle: (zoneId: string) => void;
+}) {
+  // The primary zone can't also be a perspective of itself.
+  const addable = zones.filter((z) => z.id !== primaryZoneId);
+  const count = addable.filter((z) => selected.has(z.id)).length;
+
+  return (
+    <div className="relative shrink-0">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title="Perspectives — get answers from multiple zones side by side"
+        className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition ${
+          count > 0
+            ? "border-[var(--color-accent)] text-[var(--color-accent)]"
+            : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
+        }`}
+      >
+        <SplitSquareHorizontal size={12} />
+        {count > 0 ? `${count} perspective${count > 1 ? "s" : ""}` : "Perspectives"}
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div className="absolute bottom-full left-1/2 z-40 mb-1 max-h-72 min-w-[240px] -translate-x-1/2 overflow-y-auto rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg">
+            <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+              Answer alongside the primary
+            </div>
+            {addable.length === 0 && (
+              <div className="px-3 py-2 text-xs text-[var(--color-text-muted)]">
+                No other zones to add.
+              </div>
+            )}
+            {addable.map((z) => {
+              const ZoneIcon = getZoneIcon(z.icon);
+              const active = selected.has(z.id);
+              return (
+                <button
+                  key={z.id}
+                  onClick={() => onToggle(z.id)}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)]"
+                >
+                  <span
+                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded"
+                    style={{ background: z.accentColor ?? "var(--color-accent)" }}
+                  >
+                    <ZoneIcon size={11} color="white" />
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="truncate">{z.name}</div>
+                    <div className="truncate text-xs text-[var(--color-text-muted)]">{z.model}</div>
+                  </div>
+                  {active && <Check size={12} className="shrink-0 text-[var(--color-accent)]" />}
+                </button>
+              );
+            })}
+            <div className="my-1 border-t border-[var(--color-border)]" />
+            <div className="px-3 py-1.5 text-[11px] text-[var(--color-text-muted)]">
+              Runs {globalMode} (set in Settings → Chat). The mode picker is the primary.
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

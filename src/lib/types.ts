@@ -79,6 +79,32 @@ export interface ChatZone {
   zoneId: string;
 }
 
+/**
+ * A portable zone preset in the on-disk zone library. Provider/model are not
+ * bound — installing resolves them from the user's settings. `curated` entries
+ * ship with the app; the rest are user "Save to library" snapshots.
+ */
+export interface LibraryEntry {
+  id: string;
+  name: string;
+  curated: boolean;
+  icon: string | null;
+  accentColor: string | null;
+  model: string | null;
+  systemPrompt: string | null;
+  temperature: number;
+  maxTokens: number | null;
+  topP: number | null;
+  /** JSON array string of tool ids. */
+  toolsEnabled: string;
+  /** JSON object string of per-tool config. */
+  toolConfig: string;
+  thinkingEnabled: boolean;
+  includeThinkingInContext: boolean;
+  description: string | null;
+  createdAt: number;
+}
+
 /** Joined tag info + per-chat context toggle returned by get_chat_tags. */
 export interface ChatTagEntry {
   tagId: string;
@@ -192,6 +218,8 @@ export interface AppSettings {
   defaultProviderId: string | null;
   /** Set once the one-time starter-zone seeding has run, so it never repeats. */
   seededStarterZones: boolean;
+  /** Set once the curated zone library has been written to disk, so it never repeats. */
+  seededLibrary: boolean;
   /** When true, the embedded local HTTP API server runs. */
   apiEnabled: boolean;
   /** Port the API server binds to on 127.0.0.1. */
@@ -249,6 +277,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   defaultDirectory: "",
   defaultProviderId: null,
   seededStarterZones: false,
+  seededLibrary: false,
   apiEnabled: false,
   apiPort: 8765,
   apiToken: "",

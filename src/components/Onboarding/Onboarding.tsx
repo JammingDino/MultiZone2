@@ -71,18 +71,11 @@ export function Onboarding() {
         apiKey: apiKey.trim() || null,
         defaultModel: model.trim(),
       });
-      // Mark seeding done up front so the app-level one-time seeder doesn't also
-      // fire while we seed here.
-      await setAppSettings({ defaultProviderId: providerId, seededStarterZones: true });
+      await setAppSettings({ defaultProviderId: providerId });
 
-      // Seed a starter set of zones (bound to this provider + model) so the user
-      // lands with a useful spread of assistants. We don't set a default zone —
-      // the home screen starts on Quick chat and the user can pick a default in
-      // Settings if they want one.
-      if (existingZones.length === 0) {
-        await seedDefaultZones(providerId, model.trim());
-        await refreshZones();
-      }
+      // Curated zones are no longer auto-created; they're seeded into the Zone
+      // Library (by the app-level one-time seeder) for the user to install. The
+      // home screen starts on Quick chat, so the user is productive immediately.
 
       await refreshProviders();
       // The gate condition (provider with default model) is now satisfied, so

@@ -101,13 +101,15 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ### 0.2.3 — Zone library
 
-- [ ] Zone library panel: browsable list of curated and user-saved zones
-- [ ] "Save to library" button on any zone — saves a snapshot of current config
-- [ ] "Install from library" — creates a new zone from a library entry; duplicate detection by name
-- [ ] Curated default zones presented here rather than seeded invisibly on first run
-- [ ] Base zone for Quick Chat is selected from the library or the user's zones (Settings → Chat)
-- [ ] Export zone as JSON file; import zone from JSON file
-- [ ] Library zone card shows: icon, accent color, system prompt preview, enabled tools
+*Storage: the library is a folder of JSON files on disk (`app_data_dir/zone_library/`). Curated presets are seeded there on first run; user snapshots are written alongside. Live zones are no longer auto-seeded — new users install from the library.*
+
+- [x] Zone library panel: browsable list of curated and user-saved zones
+- [x] "Save to library" button on any zone — saves a snapshot of current config (via "Save a zone…" in the library)
+- [x] "Install from library" — creates a new zone from a library entry; duplicate detection by name
+- [x] Curated default zones presented here rather than seeded invisibly on first run
+- [ ] Base zone for Quick Chat is selected from the library or the user's zones (Settings → Chat) — *deferred to follow-up*
+- [ ] Export zone as JSON file; import zone from JSON file — *deferred to follow-up*
+- [x] Library zone card shows: icon, accent color, system prompt preview, enabled tools
 
 ---
 

@@ -110,6 +110,7 @@ interface AppStore {
   zoneEditorOpen: boolean;
   editingZoneId: string | null;
   zonesPanelOpen: boolean;
+  zoneLibraryOpen: boolean;
   defaultZoneId: string | null;
 
   // actions
@@ -131,6 +132,8 @@ interface AppStore {
   closeZoneEditor: () => void;
   openZonesPanel: () => void;
   closeZonesPanel: () => void;
+  openZoneLibrary: () => void;
+  closeZoneLibrary: () => void;
   setDefaultZone: (id: string | null) => Promise<void>;
   loadDefaultZone: () => Promise<void>;
 
@@ -285,6 +288,7 @@ export const useApp = create<AppStore>((set, get) => ({
   zoneEditorOpen: false,
   editingZoneId: null,
   zonesPanelOpen: false,
+  zoneLibraryOpen: false,
   defaultZoneId: null,
   projectsPanelOpen: false,
   projectsPanelInitId: null,
@@ -818,6 +822,8 @@ export const useApp = create<AppStore>((set, get) => ({
   closeZoneEditor: () => set({ zoneEditorOpen: false, editingZoneId: null }),
   openZonesPanel: () => set({ zonesPanelOpen: true }),
   closeZonesPanel: () => set({ zonesPanelOpen: false }),
+  openZoneLibrary: () => set({ zoneLibraryOpen: true }),
+  closeZoneLibrary: () => set({ zoneLibraryOpen: false }),
   async setDefaultZone(id) {
     set({ defaultZoneId: id });
     try {

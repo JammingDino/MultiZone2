@@ -6,6 +6,7 @@ import type {
   ChatTagEntry,
   ChatTagLink,
   ChatZone,
+  LibraryEntry,
   DbStats,
   InputPart,
   Message,
@@ -79,6 +80,13 @@ export const listTags = () => invoke<Tag[]>("list_tags");
 export const upsertTag = (tag: Partial<Tag> & { name: string }) =>
   invoke<Tag>("upsert_tag", { tag });
 export const deleteTag = (id: string) => invoke<void>("delete_tag", { id });
+
+// Zone library
+export const listLibraryEntries = () => invoke<LibraryEntry[]>("list_library_entries");
+export const upsertLibraryEntry = (entry: LibraryEntry) =>
+  invoke<LibraryEntry>("upsert_library_entry", { entry });
+export const deleteLibraryEntry = (id: string) =>
+  invoke<void>("delete_library_entry", { id });
 export const deleteMessagesFrom = (chatId: string, messageId: string) =>
   invoke<void>("delete_messages_from", { chatId, messageId });
 export const getMessages = (chatId: string) =>

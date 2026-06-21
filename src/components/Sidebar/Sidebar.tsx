@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Settings, Layers, ChevronRight, ChevronDown, FolderPlus, ChevronLeft, Pencil, Trash2, Tag as TagIcon, X } from "lucide-react";
+import { Plus, Settings, Layers, ChevronRight, ChevronDown, FolderPlus, ChevronLeft, Pencil, Trash2, Tag as TagIcon, X, Sparkles } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { ChatList } from "./ChatList";
@@ -22,6 +22,7 @@ export function Sidebar() {
     setActiveChat,
     openSettings,
     openZonesPanel,
+    openZoneLibrary,
     openProjectsPanel,
     loadThemeFromBackend,
     loadDefaultZone,
@@ -144,6 +145,13 @@ export function Sidebar() {
             className="rounded p-2 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-accent)]"
           >
             <Layers size={15} />
+          </button>
+          <button
+            onClick={openZoneLibrary}
+            title="Zone Library"
+            className="rounded p-2 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-accent)]"
+          >
+            <Sparkles size={15} />
           </button>
           <button
             onClick={() => openProjectsPanel()}
@@ -368,6 +376,13 @@ export function Sidebar() {
         >
           <Layers size={13} />
           Configure Zones
+        </button>
+        <button
+          onClick={openZoneLibrary}
+          className="flex w-full items-center justify-center gap-2 rounded-md border border-[var(--color-border)] py-2 text-xs transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+        >
+          <Sparkles size={13} />
+          Zone Library
         </button>
         <button
           onClick={() => openProjectsPanel()}

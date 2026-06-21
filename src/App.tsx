@@ -5,8 +5,7 @@ import { BackgroundEffect } from "./components/BackgroundEffect";
 import { TitleBar } from "./components/TitleBar";
 import { Onboarding } from "./components/Onboarding/Onboarding";
 import { useApp } from "./store/app";
-import { seedDefaultZones } from "./lib/defaultZones";
-import * as api from "./lib/tauri";
+import { seedCuratedLibrary } from "./lib/zoneLibrary";
 
 export default function App() {
   const providersLoaded = useApp((s) => s.providersLoaded);
@@ -14,8 +13,7 @@ export default function App() {
   const defaultProviderId = useApp((s) => s.appSettings.defaultProviderId);
   const setAppSettings = useApp((s) => s.setAppSettings);
   const appSettingsLoaded = useApp((s) => s.appSettingsLoaded);
-  const seededStarterZones = useApp((s) => s.appSettings.seededStarterZones);
-  const refreshZones = useApp((s) => s.refreshZones);
+  const seededLibrary = useApp((s) => s.appSettings.seededLibrary);
   // Guard against concurrent invocations of the one-time seeder.
   const seedingRef = useRef(false);
 
@@ -28,34 +26,23 @@ export default function App() {
     }
   }, [providersLoaded, providers, defaultProviderId, setAppSettings]);
 
-  // One-time starter-zone seeding for existing installs (new users get them via
-  // onboarding, which sets the flag itself). Only seeds when the user has no
-  // zones and a quick-chat model is available; never re-runs and never sets a
-  // default zone — that stays a user choice in Settings.
-  //
-  // `zones` is intentionally excluded from deps: we fetch from the API directly
-  // to avoid acting on stale store state (zones may not have loaded yet when
-  // this effect first fires). The seedingRef guard prevents concurrent runs.
+  // One-time seeding of the curated zone library onto disk. The curated presets
+  // are presented in the Zone Library for the user to install — they are no
+  // longer auto-created as live zones. Provider-independent, so it runs as soon
+  // as settings load; the seedingRef guard prevents concurrent runs.
   useEffect(() => {
-    if (!providersLoaded || !appSettingsLoaded || seededStarterZones || seedingRef.current) return;
-    const quick = providers.find((p) => p.id === (defaultProviderId ?? providers[0]?.id)) ?? null;
-    const model = quick?.defaultModel?.trim();
-    if (!quick || !model) return;
+    if (!appSettingsLoaded || seededLibrary || seedingRef.current) return;
     seedingRef.current = true;
     (async () => {
       try {
-        const existingZones = await api.listZones();
-        if (existingZones.length === 0) {
-          await seedDefaultZones(quick.id, model);
-          await refreshZones();
-        }
-        await setAppSettings({ seededStarterZones: true });
+        await seedCuratedLibrary();
+        await setAppSettings({ seededLibrary: true });
       } finally {
         seedingRef.current = false;
       }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [providersLoaded, appSettingsLoaded, seededStarterZones, providers, defaultProviderId]);
+  }, [appSettingsLoaded, seededLibrary]);
 
   // Lock the app behind onboarding until at least one provider exists.
   const showOnboarding = providersLoaded && providers.length === 0;

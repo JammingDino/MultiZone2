@@ -83,11 +83,11 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ### 0.2.1 — Projects: context injection
 
-- [ ] "Include project context" toggle in chat header (persists per chat as `project_context_enabled`)
-- [ ] Project context snippet prepended to system prompt when toggle is on
-- [ ] `default_context_enabled` on project: new chats in that project start with context on
-- [ ] Filesystem tool respects project `directory` as the scoped root when set
-- [ ] Project context visible in an expandable section in the chat header so the user knows what is being injected
+- [x] "Include project context" toggle in chat header (persists per chat as `project_context_enabled`)
+- [x] Project context snippet prepended to system prompt when toggle is on
+- [x] `default_context_enabled` on project: new chats in that project start with context on
+- [x] Filesystem tool respects project `directory` as the scoped root when set
+- [x] Project context visible in an expandable section in the chat header so the user knows what is being injected — shows the project snippet + every enabled tag snippet currently prepended
 
 ### 0.2.2 — Tags
 

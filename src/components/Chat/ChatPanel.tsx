@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Upload, Tag as TagIcon, X, Zap, Folder, FolderX, ChevronDown, SplitSquareHorizontal, Plus, ShieldAlert } from "lucide-react";
+import { Upload, Tag as TagIcon, X, Zap, Folder, FolderX, ChevronDown, ChevronRight, SplitSquareHorizontal, Plus, ShieldAlert, Eye } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { MessageThread } from "./MessageThread";
@@ -327,14 +327,29 @@ function ProjectTagStrip({
 }) {
   const [showTagPicker, setShowTagPicker] = useState(false);
   const [showProjectPicker, setShowProjectPicker] = useState(false);
+  const [showContext, setShowContext] = useState(false);
   const project = projects.find((p) => p.id === projectId) ?? null;
   const ProjectIcon = project ? getZoneIcon(project.icon) : null;
   const projectColor = project?.accentColor ?? "var(--color-accent)";
   const unassignedTags = allTags.filter((t) => !chatTags.some((ct) => ct.tagId === t.id));
   const projectHasSnippet = !!project?.contextSnippet?.trim();
 
+  // Everything currently being prepended to the system prompt for this chat:
+  // the project snippet (when its context is on) and each enabled tag snippet.
+  // Surfaced in an expandable panel so the user can see exactly what's injected.
+  const injectedContext: { label: string; color: string; text: string }[] = [];
+  if (projectContextEnabled && project?.contextSnippet?.trim()) {
+    injectedContext.push({ label: project.name, color: projectColor, text: project.contextSnippet.trim() });
+  }
+  for (const ct of chatTags) {
+    if (ct.contextEnabled && ct.contextSnippet?.trim()) {
+      injectedContext.push({ label: ct.name, color: ct.color ?? "var(--color-accent)", text: ct.contextSnippet.trim() });
+    }
+  }
+
   return (
-    <div className="flex flex-wrap items-center gap-1.5 border-b border-[var(--color-border)] px-4 py-1.5">
+    <div className="border-b border-[var(--color-border)]">
+    <div className="flex flex-wrap items-center gap-1.5 px-4 py-1.5">
       {/* Project selector */}
       <div className="relative">
         <button
@@ -488,6 +503,41 @@ function ProjectTagStrip({
           no tags yet — create them in Manage Projects
         </span>
       )}
+
+      {/* Injected-context preview toggle */}
+      {injectedContext.length > 0 && (
+        <button
+          onClick={() => setShowContext((v) => !v)}
+          title="Show the context being prepended to this chat's system prompt"
+          className="ml-auto flex items-center gap-1 rounded-full border border-[var(--color-border)] px-2 py-0.5 text-xs text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
+        >
+          {showContext ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+          <Eye size={11} />
+          Context ({injectedContext.length})
+        </button>
+      )}
+    </div>
+
+    {showContext && injectedContext.length > 0 && (
+      <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-2">
+        <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+          Prepended to the system prompt
+        </div>
+        <div className="flex flex-col gap-2">
+          {injectedContext.map((item, i) => (
+            <div key={i} className="rounded border border-[var(--color-border)] bg-[var(--color-panel)] p-2">
+              <div className="mb-1 flex items-center gap-1.5 text-xs font-medium" style={{ color: item.color }}>
+                <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: item.color }} />
+                {item.label}
+              </div>
+              <div className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+                {item.text}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )}
     </div>
   );
 }

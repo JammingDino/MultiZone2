@@ -8,7 +8,6 @@ import { ZonePicker } from "./ZonePicker";
 import { HomeScreen } from "./HomeScreen";
 import { SettingsModal } from "@/components/Settings/SettingsModal";
 import { ZoneEditor } from "@/components/Zones/ZoneEditor";
-import { ZonesPanel } from "@/components/Zones/ZonesPanel";
 import { ZoneLibrary } from "@/components/Zones/ZoneLibrary";
 import { ProjectsPanel } from "@/components/Projects/ProjectsPanel";
 import { getZoneIcon } from "@/lib/zoneIcons";
@@ -25,7 +24,6 @@ export function ChatPanel() {
     chatZonesByChat,
     settingsOpen,
     zoneEditorOpen,
-    zonesPanelOpen,
     zoneLibraryOpen,
     projectsPanelOpen,
     applyStreamEvent,
@@ -294,7 +292,6 @@ export function ChatPanel() {
       )}
       {settingsOpen && <SettingsModal />}
       {zoneEditorOpen && <ZoneEditor />}
-      {zonesPanelOpen && <ZonesPanel />}
       {zoneLibraryOpen && <ZoneLibrary />}
       {projectsPanelOpen && <ProjectsPanel />}
     </main>

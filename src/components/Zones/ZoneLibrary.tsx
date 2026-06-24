@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   X, Download, Check, Loader2, Sparkles, Bookmark, ChevronLeft, ChevronRight,
-  ChevronDown, Plus, Upload, Settings as SettingsIcon, MessageSquare, Trash2,
+  ChevronDown, Plus, Upload, Settings as SettingsIcon, MessageSquare, Trash2, Star,
 } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
-import type { LibraryEntry, Zone } from "@/lib/types";
+import type { LibraryEntry, Provider, Zone } from "@/lib/types";
 import { ALL_TOOLS } from "@/lib/types";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import { installEntry, saveZoneToLibrary, importEntryFromJson } from "@/lib/zoneLibrary";
+import { ZoneForm } from "./ZoneForm";
 
-const PAGE_SIZE = 6;
+type View = "library" | "detail" | "editor";
 
 function toolLabel(id: string): string {
   return ALL_TOOLS.find((t) => t.id === id)?.label ?? id;
@@ -32,16 +33,20 @@ function parseTools(json: string): string[] {
  */
 export function ZoneLibrary() {
   const closeZoneLibrary = useApp((s) => s.closeZoneLibrary);
-  const openZoneEditor = useApp((s) => s.openZoneEditor);
   const zones = useApp((s) => s.zones);
   const providers = useApp((s) => s.providers);
   const defaultProviderId = useApp((s) => s.appSettings.defaultProviderId);
+  const pageSize = useApp((s) => s.appSettings.zoneLibraryPageSize) || 6;
   const refreshZones = useApp((s) => s.refreshZones);
+  const defaultZoneId = useApp((s) => s.defaultZoneId);
+  const setDefaultZone = useApp((s) => s.setDefaultZone);
 
   const [entries, setEntries] = useState<LibraryEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<"library" | "detail">("library");
+  const [view, setView] = useState<View>("library");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Zone being edited in the embedded editor (null = creating a new zone).
+  const [editorZoneId, setEditorZoneId] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const [addOpen, setAddOpen] = useState(false);
   const [urlValue, setUrlValue] = useState("");
@@ -82,12 +87,18 @@ export function ZoneLibrary() {
 
   const curated = entries.filter((e) => e.curated);
   const saved = entries.filter((e) => !e.curated);
-  const totalPages = Math.max(1, Math.ceil(curated.length / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(curated.length / pageSize));
   const pageSafe = Math.min(page, totalPages - 1);
-  const start = pageSafe * PAGE_SIZE;
-  const pageCurated = curated.slice(start, start + PAGE_SIZE);
+  const start = pageSafe * pageSize;
+  const pageCurated = curated.slice(start, start + pageSize);
 
   const selected = entries.find((e) => e.id === selectedId) ?? null;
+  const editorZone = editorZoneId ? zones.find((z) => z.id === editorZoneId) ?? null : null;
+
+  function openEditor(zoneId: string | null) {
+    setEditorZoneId(zoneId);
+    setView("editor");
+  }
 
   async function onInstall(e: LibraryEntry) {
     if (!quickProvider || busy) return;
@@ -105,9 +116,7 @@ export function ZoneLibrary() {
 
   function onConfigure(e: LibraryEntry) {
     const z = liveZoneFor(e);
-    if (!z) return;
-    closeZoneLibrary();
-    openZoneEditor(z.id);
+    if (z) openEditor(z.id);
   }
 
   async function onUninstall(e: LibraryEntry) {
@@ -204,15 +213,17 @@ export function ZoneLibrary() {
           <div className="flex w-56 flex-shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-bg)]/40">
             <div className="flex flex-col gap-2 p-3">
               <button
-                onClick={() => { closeZoneLibrary(); openZoneEditor(null); }}
-                className="flex h-9 items-center justify-center gap-1.5 rounded-lg border border-dashed border-[var(--color-border)] text-sm font-medium text-[var(--color-accent)] transition hover:border-[var(--color-accent)] hover:bg-[var(--color-panel-hover)]"
+                onClick={() => openEditor(null)}
+                className={`flex h-9 items-center justify-center gap-1.5 rounded-lg border border-dashed text-sm font-medium text-[var(--color-accent)] transition hover:border-[var(--color-accent)] hover:bg-[var(--color-panel-hover)] ${
+                  view === "editor" && !editorZoneId ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]" : "border-[var(--color-border)]"
+                }`}
               >
                 <Plus size={15} /> New Zone
               </button>
               <button
                 onClick={() => setView("library")}
                 className={`flex h-9 items-center justify-center gap-2 rounded-lg border text-sm font-semibold transition ${
-                  view === "library"
+                  view === "library" || view === "detail"
                     ? "border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]"
                     : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-accent)]"
                 }`}
@@ -231,11 +242,12 @@ export function ZoneLibrary() {
               {zones.map((z) => {
                 const Icon = getZoneIcon(z.icon);
                 const accent = z.accentColor ?? "var(--color-accent)";
+                const active = view === "editor" && editorZoneId === z.id;
                 return (
                   <button
                     key={z.id}
-                    onClick={() => { closeZoneLibrary(); openZoneEditor(z.id); }}
-                    className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-[var(--color-panel-hover)]"
+                    onClick={() => openEditor(z.id)}
+                    className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-[var(--color-panel-hover)] ${active ? "bg-[var(--color-panel-hover)]" : ""}`}
                   >
                     <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg" style={{ background: accent }}>
                       <Icon size={15} color="white" />
@@ -256,6 +268,16 @@ export function ZoneLibrary() {
               <div className="flex flex-1 items-center justify-center text-[var(--color-text-muted)]">
                 <Loader2 size={18} className="animate-spin" />
               </div>
+            ) : view === "editor" ? (
+              <EditorView
+                zone={editorZone}
+                providers={providers}
+                isDefault={!!editorZone && defaultZoneId === editorZone.id}
+                onToggleDefault={() => { if (editorZone) setDefaultZone(defaultZoneId === editorZone.id ? null : editorZone.id); }}
+                onBack={() => setView("library")}
+                onSaved={async () => { await refreshZones(); setView("library"); }}
+                onDeleted={async () => { await refreshZones(); setView("library"); }}
+              />
             ) : view === "detail" && selected ? (
               <DetailView
                 entry={selected}
@@ -585,6 +607,45 @@ function ZoneCard({
           <Download size={14} /> Install
         </button>
       )}
+    </div>
+  );
+}
+
+// ─── Editor view (embedded zone form) ───────────────────────────────────────
+
+function EditorView({
+  zone, providers, isDefault, onToggleDefault, onBack, onSaved, onDeleted,
+}: {
+  zone: Zone | null;
+  providers: Provider[];
+  isDefault: boolean;
+  onToggleDefault: () => void;
+  onBack: () => void;
+  onSaved: (z: Zone) => void;
+  onDeleted: () => void;
+}) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex flex-shrink-0 items-center justify-between border-b border-[var(--color-border)] px-6 py-3">
+        <button onClick={onBack} className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[12.5px] font-semibold text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]">
+          <ChevronLeft size={15} /> Zone Library
+        </button>
+        <div className="flex items-center gap-2.5">
+          <span className="text-[13px] font-semibold">{zone ? "Edit zone" : "New zone"}</span>
+          {zone && (
+            <button
+              onClick={onToggleDefault}
+              title={isDefault ? "This is the default zone for new chats" : "Make this the default zone for new chats"}
+              className={`flex h-8 items-center gap-1.5 rounded-lg border px-3 text-[12px] font-medium transition ${
+                isDefault ? "border-[var(--color-accent)] text-[var(--color-accent)]" : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-accent)]"
+              }`}
+            >
+              <Star size={13} className={isDefault ? "fill-current" : ""} /> {isDefault ? "Default" : "Make default"}
+            </button>
+          )}
+        </div>
+      </div>
+      <ZoneForm zone={zone} providers={providers} onSaved={onSaved} onDeleted={onDeleted} />
     </div>
   );
 }

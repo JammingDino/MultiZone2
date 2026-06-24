@@ -229,6 +229,8 @@ export interface AppSettings {
   seededLibrary: boolean;
   /** Highest curated-library version seeded to disk; re-seeds when the shipped set grows. */
   libraryCuratedVersion: number;
+  /** Zone-library cards shown per page. One of 6 / 9 / 12 / 15 / 30. */
+  zoneLibraryPageSize: number;
   /** When true, the embedded local HTTP API server runs. */
   apiEnabled: boolean;
   /** Port the API server binds to on 127.0.0.1. */
@@ -288,6 +290,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   seededStarterZones: false,
   seededLibrary: false,
   libraryCuratedVersion: 0,
+  zoneLibraryPageSize: 6,
   apiEnabled: false,
   apiPort: 8765,
   apiToken: "",

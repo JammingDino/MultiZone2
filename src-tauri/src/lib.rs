@@ -63,6 +63,7 @@ pub fn run() {
             commands::chats::remove_perspective_zone,
             commands::chats::set_chat_perspective_mode,
             commands::chats::delete_chat,
+            commands::chats::branch_chat,
             commands::chats::delete_messages_from,
             commands::chats::delete_participant_messages,
             commands::chats::get_messages,

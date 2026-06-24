@@ -128,11 +128,11 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ### 0.3.0 — Conversation branching
 
-- [ ] "Branch from here" button on any user or assistant message
-- [ ] Branching creates a new chat with history up to (and including) that message
-- [ ] New branched chat linked to parent in DB (`parent_chat_id`, `branched_from_message_id`)
-- [ ] Sidebar: branched chats appear as a collapsible sub-list under the parent
-- [ ] Branched chat inherits zone, project, and tag assignments from the parent
+- [x] "Branch from here" button on any user or assistant message
+- [x] Branching creates a new chat with history up to (and including) that message
+- [x] New branched chat linked to parent in DB (`parent_chat_id`, `branched_from_message_id`)
+- [x] Sidebar: branched chats appear as a collapsible sub-list under the parent
+- [x] Branched chat inherits zone, project, and tag assignments from the parent — *also copies tool messages, reasoning, attachments and perspective zones; built, not yet runtime-tested*
 
 ### 0.3.1 — Chat interaction polish
 

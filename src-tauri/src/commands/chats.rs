@@ -8,7 +8,7 @@ use crate::state::AppState;
 use tauri::{AppHandle, Emitter, State};
 
 const CHAT_COLS: &str =
-    "id, title, zone_id, project_id, project_context_enabled, perspective_mode, smart_routing, created_at, updated_at";
+    "id, title, zone_id, project_id, project_context_enabled, perspective_mode, smart_routing, parent_chat_id, branched_from_message_id, created_at, updated_at";
 
 #[tauri::command]
 pub async fn list_chats(state: State<'_, AppState>) -> AppResult<Vec<Chat>> {
@@ -296,6 +296,161 @@ pub async fn remove_perspective_zone(
         .execute(&state.db)
         .await?;
     Ok(())
+}
+
+/// Forks a chat at `message_id` into a brand-new chat containing a copy of all
+/// history up to and including that message. The source chat is untouched. The
+/// new chat inherits the source's zone, project, tags and perspective zones, and
+/// is linked back to the source via `parent_chat_id` / `branched_from_message_id`
+/// so the sidebar can nest it under its parent. Returns the new chat.
+#[tauri::command]
+pub async fn branch_chat(
+    state: State<'_, AppState>,
+    chat_id: String,
+    message_id: String,
+) -> AppResult<Chat> {
+    // Resolve the pivot's timestamp — history is copied up to and including it.
+    let pivot_ts: Option<i64> =
+        sqlx::query_scalar("SELECT created_at FROM messages WHERE id = ?1 AND chat_id = ?2")
+            .bind(&message_id)
+            .bind(&chat_id)
+            .fetch_optional(&state.db)
+            .await?;
+    let Some(pivot_ts) = pivot_ts else {
+        return Err(AppError::NotFound(format!("message {message_id}")));
+    };
+
+    let source = sqlx::query_as::<_, Chat>(&format!(
+        "SELECT {CHAT_COLS} FROM chats WHERE id = ?1"
+    ))
+    .bind(&chat_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::NotFound(format!("chat {chat_id}")))?;
+
+    let new_id = new_id();
+    let now = now_ts();
+    let new_title = format!("{} (branch)", source.title);
+
+    // Create the branch, inheriting the source's chat-level settings and linking
+    // it back to the parent at the pivot message.
+    sqlx::query(
+        "INSERT INTO chats
+           (id, title, zone_id, project_id, project_context_enabled, perspective_mode,
+            smart_routing, parent_chat_id, branched_from_message_id, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
+    )
+    .bind(&new_id)
+    .bind(&new_title)
+    .bind(&source.zone_id)
+    .bind(&source.project_id)
+    .bind(source.project_context_enabled)
+    .bind(&source.perspective_mode)
+    .bind(source.smart_routing)
+    .bind(&chat_id)
+    .bind(&message_id)
+    .bind(now)
+    .execute(&state.db)
+    .await?;
+
+    // Copy messages up to and including the pivot. Each gets a fresh primary key;
+    // tool_call_id is the model-supplied id (not a row PK) so copying it verbatim
+    // keeps tool calls matched within the branch. Map old→new ids for attachments.
+    let msgs = sqlx::query_as::<_, Message>(
+        "SELECT id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, created_at
+         FROM messages WHERE chat_id = ?1 AND created_at <= ?2 ORDER BY created_at ASC",
+    )
+    .bind(&chat_id)
+    .bind(pivot_ts)
+    .fetch_all(&state.db)
+    .await?;
+
+    let mut id_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for m in &msgs {
+        let nid = crate::commands::new_id();
+        id_map.insert(m.id.clone(), nid.clone());
+        sqlx::query(
+            "INSERT INTO messages
+               (id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        )
+        .bind(&nid)
+        .bind(&new_id)
+        .bind(&m.role)
+        .bind(&m.content)
+        .bind(&m.tool_calls)
+        .bind(&m.tool_call_id)
+        .bind(&m.reasoning)
+        .bind(&m.zone_id)
+        .bind(&m.active_zone_id)
+        .bind(m.created_at)
+        .execute(&state.db)
+        .await?;
+    }
+
+    // Copy attachments for the copied messages, remapping to the new message ids.
+    let attachments = sqlx::query_as::<_, crate::db::models::Attachment>(
+        "SELECT id, message_id, chat_id, file_name, file_type, storage_path, content, page_count, created_at
+         FROM attachments WHERE chat_id = ?1 AND created_at <= ?2",
+    )
+    .bind(&chat_id)
+    .bind(pivot_ts)
+    .fetch_all(&state.db)
+    .await?;
+    for a in &attachments {
+        // Drop attachments whose owning message wasn't copied (defensive).
+        let new_msg_id = match &a.message_id {
+            Some(mid) => match id_map.get(mid) {
+                Some(nid) => Some(nid.clone()),
+                None => continue,
+            },
+            None => None,
+        };
+        sqlx::query(
+            "INSERT INTO attachments
+               (id, message_id, chat_id, file_name, file_type, storage_path, content, page_count, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        )
+        .bind(crate::commands::new_id())
+        .bind(&new_msg_id)
+        .bind(&new_id)
+        .bind(&a.file_name)
+        .bind(&a.file_type)
+        .bind(&a.storage_path)
+        .bind(&a.content)
+        .bind(a.page_count)
+        .bind(a.created_at)
+        .execute(&state.db)
+        .await?;
+    }
+
+    // Inherit tag links (and their per-chat context toggles).
+    sqlx::query(
+        "INSERT INTO chat_tags (chat_id, tag_id, context_enabled)
+         SELECT ?1, tag_id, context_enabled FROM chat_tags WHERE chat_id = ?2",
+    )
+    .bind(&new_id)
+    .bind(&chat_id)
+    .execute(&state.db)
+    .await?;
+
+    // Inherit perspective zones.
+    sqlx::query(
+        "INSERT INTO chat_zones (chat_id, zone_id)
+         SELECT ?1, zone_id FROM chat_zones WHERE chat_id = ?2",
+    )
+    .bind(&new_id)
+    .bind(&chat_id)
+    .execute(&state.db)
+    .await?;
+
+    let chat = sqlx::query_as::<_, Chat>(&format!(
+        "SELECT {CHAT_COLS} FROM chats WHERE id = ?1"
+    ))
+    .bind(&new_id)
+    .fetch_one(&state.db)
+    .await?;
+    Ok(chat)
 }
 
 /// Deletes the given message and everything chronologically after it in the same chat.

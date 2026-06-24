@@ -45,6 +45,10 @@ export interface Chat {
   perspectiveMode: "sequential" | "parallel" | null;
   /** When true, the router picks the best zone per turn (Smart chat). */
   smartRouting: boolean;
+  /** Set on chats created via "Branch from here" — the chat this forked from. */
+  parentChatId: string | null;
+  /** The parent message this branch was forked at. */
+  branchedFromMessageId: string | null;
   createdAt: number;
   updatedAt: number;
 }

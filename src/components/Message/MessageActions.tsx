@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Copy, Check, RotateCcw, BarChart3, Pencil, Trash2 } from "lucide-react";
+import { Copy, Check, RotateCcw, BarChart3, Pencil, GitBranch } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 
@@ -23,6 +23,11 @@ interface Props {
   /** Whether this turn is the latest round (regenerate is only offered there). */
   canRegenerate?: boolean;
   onEdit?: () => void;
+  /**
+   * Pivot message id for "Branch from here". When set, a branch button is shown
+   * that forks the chat at this message into a new chat.
+   */
+  branchFromMessageId?: string;
 }
 
 export function MessageActions({
@@ -34,8 +39,10 @@ export function MessageActions({
   regenerateZoneId = null,
   canRegenerate = false,
   onEdit,
+  branchFromMessageId,
 }: Props) {
   const [copied, setCopied] = useState(false);
+  const [branching, setBranching] = useState(false);
   const [showStats, setShowStats] = useState(false);
   const stats = useApp((s) => (messageId ? s.statsByMessage[messageId] : undefined));
   // Busy if any participant (primary or a perspective) is streaming in this
@@ -47,11 +54,24 @@ export function MessageActions({
   const isBusy = primaryStreaming || perspStreaming;
   const refreshChats = useApp((s) => s.refreshChats);
   const loadMessages = useApp((s) => s.loadMessages);
+  const branchFromMessage = useApp((s) => s.branchFromMessage);
 
   async function onCopy() {
     await navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
+  }
+
+  async function onBranch() {
+    if (isBusy || branching || !branchFromMessageId) return;
+    setBranching(true);
+    try {
+      await branchFromMessage(chatId, branchFromMessageId);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setBranching(false);
+    }
   }
 
   async function onRegenerate() {
@@ -90,6 +110,16 @@ export function MessageActions({
       {variant === "user" && onEdit && (
         <ActionButton onClick={onEdit} label="Edit" disabled={isBusy}>
           <Pencil size={11} />
+        </ActionButton>
+      )}
+
+      {branchFromMessageId && (
+        <ActionButton
+          onClick={onBranch}
+          label={branching ? "Branching…" : "Branch"}
+          disabled={isBusy || branching}
+        >
+          <GitBranch size={11} />
         </ActionButton>
       )}
 

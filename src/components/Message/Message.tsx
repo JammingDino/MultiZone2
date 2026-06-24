@@ -242,6 +242,7 @@ export function UserMessage({ message }: { message: Message }) {
           chatId={message.chatId}
           variant="user"
           onEdit={() => setEditing(true)}
+          branchFromMessageId={message.id}
         />
       </div>
       {preview && (
@@ -406,6 +407,7 @@ export function BotTurnView({ turn, isLatest = false }: { turn: BotTurn; isLates
             regenerateZoneId={null}
             canRegenerate={isLatest}
             layout={layout}
+            branchFromMessageId={lastMessageId}
           />
           {turn.perspectives.map((p) => (
             <ParticipantCard
@@ -459,6 +461,7 @@ export function BotTurnView({ turn, isLatest = false }: { turn: BotTurn; isLates
             variant="assistant"
             regenerateZoneId={null}
             canRegenerate={isLatest}
+            branchFromMessageId={lastMessageId}
           />
         </div>
       )}
@@ -483,6 +486,7 @@ function ParticipantCard({
   regenerateZoneId,
   canRegenerate,
   layout,
+  branchFromMessageId,
 }: {
   zoneId: string | null;
   fallbackName: string;
@@ -494,6 +498,7 @@ function ParticipantCard({
   regenerateZoneId: string | null;
   canRegenerate: boolean;
   layout: "stacked" | "columns";
+  branchFromMessageId?: string;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const zone = useApp((s) => s.zones.find((z) => z.id === zoneId));
@@ -568,6 +573,7 @@ function ParticipantCard({
                 variant="perspective"
                 regenerateZoneId={regenerateZoneId}
                 canRegenerate={canRegenerate}
+                branchFromMessageId={branchFromMessageId}
               />
             </div>
           )}

@@ -66,6 +66,9 @@ export const setChatPerspectiveMode = (
   mode: "sequential" | "parallel" | null,
 ) => invoke<void>("set_chat_perspective_mode", { chatId, mode });
 export const deleteChat = (id: string) => invoke<void>("delete_chat", { id });
+/** Fork a chat at `messageId` into a new chat copying history up to & including it. */
+export const branchChat = (chatId: string, messageId: string) =>
+  invoke<Chat>("branch_chat", { chatId, messageId });
 
 // Projects
 export const listProjects = () => invoke<Project[]>("list_projects");

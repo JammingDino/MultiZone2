@@ -55,6 +55,12 @@ pub struct Chat {
     /// When true, a router model picks the best zone to answer each turn
     /// (Smart chat). `zone_id` stays NULL while this is on.
     pub smart_routing: bool,
+    /// Set on chats created via "Branch from here" — the chat this was forked
+    /// from. Null for ordinary chats. Cleared to NULL if the parent is deleted.
+    pub parent_chat_id: Option<String>,
+    /// The message in the parent that this branch was forked at (history was
+    /// copied up to and including it). Null for ordinary chats.
+    pub branched_from_message_id: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }

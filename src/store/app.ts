@@ -118,6 +118,8 @@ interface AppStore {
   refreshZones: () => Promise<void>;
   refreshChats: () => Promise<void>;
   setActiveChat: (id: string | null) => Promise<void>;
+  /** Fork a chat at a message into a new chat and switch to it. */
+  branchFromMessage: (chatId: string, messageId: string) => Promise<void>;
   loadMessages: (chatId: string) => Promise<void>;
   applyStreamEvent: (chatId: string, event: import("@/lib/types").StreamEvent, perspectiveZoneId?: string) => void;
   setChatTitle: (chatId: string, title: string) => void;
@@ -361,6 +363,11 @@ export const useApp = create<AppStore>((set, get) => ({
       if (!get().tagsByChat[id]) await get().loadChatTags(id);
       await get().loadChatZones(id);
     }
+  },
+  async branchFromMessage(chatId, messageId) {
+    const branch = await api.branchChat(chatId, messageId);
+    await get().refreshChats();
+    await get().setActiveChat(branch.id);
   },
   async loadMessages(chatId) {
     const messages = await api.getMessages(chatId);

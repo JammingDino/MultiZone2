@@ -45,7 +45,7 @@ const ZONE_COLS: &str = "id, name, provider_id, model, system_prompt, temperatur
 const CHAT_COLS: &str =
     "id, title, zone_id, project_id, project_context_enabled, perspective_mode, smart_routing, created_at, updated_at";
 const MSG_COLS: &str =
-    "id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, created_at";
+    "id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at";
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -212,6 +212,48 @@ pub async fn respond_tool_approval(
         let _ = tx.send(approved);
     }
     Ok(())
+}
+
+/// Replace a message's text content in place and flag it as user-edited.
+/// Used by "edit AI response": the new text becomes the message's sole text
+/// part, `edited` is set so the UI can show the marker, and the chat's
+/// `updated_at` bumps. Returns the updated message. History/order is untouched,
+/// so a later branch from this message copies the edited content verbatim.
+#[tauri::command]
+pub async fn update_message(
+    state: State<'_, AppState>,
+    chat_id: String,
+    message_id: String,
+    text: String,
+) -> AppResult<Message> {
+    // Confirm the message belongs to this chat before mutating it.
+    sqlx::query_scalar::<_, String>("SELECT id FROM messages WHERE id = ?1 AND chat_id = ?2")
+        .bind(&message_id)
+        .bind(&chat_id)
+        .fetch_optional(&state.db)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("message {message_id}")))?;
+
+    let content_json = serde_json::to_string(&vec![ContentPart::Text { text }])?;
+    let now = now_ts();
+    sqlx::query("UPDATE messages SET content = ?1, edited = 1 WHERE id = ?2")
+        .bind(&content_json)
+        .bind(&message_id)
+        .execute(&state.db)
+        .await?;
+    sqlx::query("UPDATE chats SET updated_at = ?1 WHERE id = ?2")
+        .bind(now)
+        .bind(&chat_id)
+        .execute(&state.db)
+        .await?;
+
+    sqlx::query_as::<_, Message>(&format!(
+        "SELECT {MSG_COLS} FROM messages WHERE id = ?1"
+    ))
+    .bind(&message_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(Into::into)
 }
 
 /// Read the auto-approve level from persisted app_settings.

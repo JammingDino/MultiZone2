@@ -356,6 +356,87 @@ function TurnBody({
   );
 }
 
+/**
+ * Inline click-to-edit textarea for an assistant message's final answer text.
+ * Saving persists the new text to the DB and flags the message as edited;
+ * the surrounding turn re-renders from the reloaded messages.
+ */
+function AssistantEditor({
+  initial,
+  onCancel,
+  onSave,
+}: {
+  initial: string;
+  onCancel: () => void;
+  onSave: (text: string) => Promise<void> | void;
+}) {
+  const [draft, setDraft] = useState(initial);
+  const [saving, setSaving] = useState(false);
+
+  async function commit() {
+    const next = draft.trim();
+    if (!next || next === initial.trim()) {
+      onCancel();
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave(next);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <textarea
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            commit();
+          } else if (e.key === "Escape") {
+            onCancel();
+          }
+        }}
+        autoFocus
+        rows={Math.max(3, draft.split("\n").length)}
+        className="w-full rounded-lg border border-[var(--color-accent)] bg-[var(--color-panel)] px-3 py-2 text-sm"
+      />
+      <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+        <button
+          onClick={onCancel}
+          className="flex items-center gap-1 rounded px-2 py-1 hover:bg-[var(--color-panel-hover)]"
+        >
+          <X size={11} />
+          Cancel
+        </button>
+        <button
+          onClick={commit}
+          disabled={saving}
+          className="flex items-center gap-1 rounded bg-[var(--color-accent)] px-2 py-1 text-white disabled:opacity-50"
+        >
+          <Check size={11} />
+          {saving ? "Saving…" : "Save"}
+        </button>
+        <span>Ctrl+Enter to save, Esc to cancel</span>
+      </div>
+    </div>
+  );
+}
+
+/** Index of the last text block in a turn (the final answer), or -1 if none. */
+function lastTextBlockIndex(blocks: TurnBlock[]): number {
+  let idx = -1;
+  blocks.forEach((b, i) => {
+    if (b.kind === "text") idx = i;
+  });
+  return idx;
+}
+
 export function BotTurnView({ turn, isLatest = false }: { turn: BotTurn; isLatest?: boolean }) {
   const isStreaming = Boolean(turn.streaming);
   const hasAnything = turn.blocks.length > 0 || isStreaming;
@@ -373,6 +454,16 @@ export function BotTurnView({ turn, isLatest = false }: { turn: BotTurn; isLates
     chatZoneId;
   const zone = useApp((s) => s.zones.find((z) => z.id === resolvedZoneId));
   const layout = useApp((s) => s.appSettings.perspectiveLayout);
+
+  const editMessage = useApp((s) => s.editMessage);
+  const [editing, setEditing] = useState(false);
+  // The turn's final assistant message — the edit target / "edited" marker source.
+  const lastMsgId = turn.messageIds[turn.messageIds.length - 1] ?? "";
+  const finalEdited = useApp((s) =>
+    lastMsgId
+      ? s.messagesByChat[chatId]?.find((m) => m.id === lastMsgId)?.edited ?? false
+      : false,
+  );
 
   if (!hasAnything) return null;
 
@@ -449,10 +540,39 @@ export function BotTurnView({ turn, isLatest = false }: { turn: BotTurn; isLates
               : "color-mix(in srgb, var(--color-accent) 33%, transparent)",
           }}
         >
-          <TurnBody blocks={turn.blocks} isStreaming={isStreaming} chatId={chatId} />
+          {editing ? (
+            (() => {
+              const idx = lastTextBlockIndex(turn.blocks);
+              const finalText =
+                idx >= 0
+                  ? (turn.blocks[idx] as Extract<TurnBlock, { kind: "text" }>).text
+                  : allText;
+              return (
+                <div className="flex flex-col gap-2">
+                  {idx >= 0 && (
+                    <TurnBody
+                      blocks={turn.blocks.filter((_, i) => i !== idx)}
+                      isStreaming={false}
+                      chatId={chatId}
+                    />
+                  )}
+                  <AssistantEditor
+                    initial={finalText}
+                    onCancel={() => setEditing(false)}
+                    onSave={async (text) => {
+                      await editMessage(chatId, lastMessageId, text);
+                      setEditing(false);
+                    }}
+                  />
+                </div>
+              );
+            })()
+          ) : (
+            <TurnBody blocks={turn.blocks} isStreaming={isStreaming} chatId={chatId} />
+          )}
         </div>
       </div>
-      {!isStreaming && chatId && pivotMessageId && (
+      {!isStreaming && !editing && chatId && pivotMessageId && (
         <div className="msg-actions">
           <MessageActions
             text={allText}
@@ -462,6 +582,8 @@ export function BotTurnView({ turn, isLatest = false }: { turn: BotTurn; isLates
             regenerateZoneId={null}
             canRegenerate={isLatest}
             branchFromMessageId={lastMessageId}
+            onEdit={allText ? () => setEditing(true) : undefined}
+            edited={finalEdited}
           />
         </div>
       )}
@@ -501,6 +623,13 @@ function ParticipantCard({
   branchFromMessageId?: string;
 }) {
   const [collapsed, setCollapsed] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const editMessage = useApp((s) => s.editMessage);
+  const edited = useApp((s) =>
+    actionMessageId
+      ? s.messagesByChat[chatId]?.find((m) => m.id === actionMessageId)?.edited ?? false
+      : false,
+  );
   const zone = useApp((s) => s.zones.find((z) => z.id === zoneId));
   const ZoneIcon = getZoneIcon(zone?.icon);
   const color = zone?.accentColor ?? null;
@@ -557,6 +686,33 @@ function ParticipantCard({
               <span className="text-xs italic text-[var(--color-text-muted)]">
                 Response collapsed
               </span>
+            ) : editing ? (
+              (() => {
+                const idx = lastTextBlockIndex(blocks);
+                const finalText =
+                  idx >= 0
+                    ? (blocks[idx] as Extract<TurnBlock, { kind: "text" }>).text
+                    : text;
+                return (
+                  <div className="flex flex-col gap-2">
+                    {idx >= 0 && (
+                      <TurnBody
+                        blocks={blocks.filter((_, i) => i !== idx)}
+                        isStreaming={false}
+                        chatId={chatId}
+                      />
+                    )}
+                    <AssistantEditor
+                      initial={finalText}
+                      onCancel={() => setEditing(false)}
+                      onSave={async (next) => {
+                        await editMessage(chatId, actionMessageId, next);
+                        setEditing(false);
+                      }}
+                    />
+                  </div>
+                );
+              })()
             ) : hasContent || isStreaming ? (
               <TurnBody blocks={blocks} isStreaming={isStreaming} chatId={chatId} />
             ) : (
@@ -564,7 +720,7 @@ function ParticipantCard({
             )}
           </div>
 
-          {!isStreaming && (text || hasContent) && (
+          {!isStreaming && !editing && (text || hasContent) && (
             <div className="msg-actions pl-3">
               <MessageActions
                 text={text}
@@ -574,6 +730,8 @@ function ParticipantCard({
                 regenerateZoneId={regenerateZoneId}
                 canRegenerate={canRegenerate}
                 branchFromMessageId={branchFromMessageId}
+                onEdit={text || hasContent ? () => setEditing(true) : undefined}
+                edited={edited}
               />
             </div>
           )}

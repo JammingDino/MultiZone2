@@ -257,6 +257,10 @@ function StatusBanner({
       : "Running tool…";
   }
   const liveTokens = estimateTokens(contentChars + reasoningChars + toolCallChars);
+  // Live throughput: tokens produced so far over generation time. Needs a little
+  // elapsed time before it's meaningful, so we hold off under ~300 ms.
+  const liveTps =
+    elapsed > 300 && liveTokens > 0 ? liveTokens / (elapsed / 1000) : null;
   return (
     <div className="ml-10 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
       {hasPerspectives && zone && (
@@ -275,6 +279,12 @@ function StatusBanner({
           <span className="font-mono tabular-nums">{formatElapsed(elapsed)}</span>
           <span className="text-[var(--color-text-muted)]/70">·</span>
           <span className="font-mono tabular-nums">~{liveTokens} tok</span>
+          {liveTps !== null && (
+            <>
+              <span className="text-[var(--color-text-muted)]/70">·</span>
+              <span className="font-mono tabular-nums">{liveTps.toFixed(1)} tok/s</span>
+            </>
+          )}
         </>
       )}
     </div>

@@ -28,6 +28,8 @@ interface Props {
    * that forks the chat at this message into a new chat.
    */
   branchFromMessageId?: string;
+  /** When true, show an "edited" marker (message content was hand-edited). */
+  edited?: boolean;
 }
 
 export function MessageActions({
@@ -40,6 +42,7 @@ export function MessageActions({
   canRegenerate = false,
   onEdit,
   branchFromMessageId,
+  edited = false,
 }: Props) {
   const [copied, setCopied] = useState(false);
   const [branching, setBranching] = useState(false);
@@ -107,7 +110,7 @@ export function MessageActions({
         </ActionButton>
       )}
 
-      {variant === "user" && onEdit && (
+      {onEdit && (
         <ActionButton onClick={onEdit} label="Edit" disabled={isBusy}>
           <Pencil size={11} />
         </ActionButton>
@@ -166,6 +169,12 @@ export function MessageActions({
             </div>
           )}
         </div>
+      )}
+
+      {edited && (
+        <span className="px-1 italic text-[var(--color-text-muted)]/80" title="This message was edited">
+          edited
+        </span>
       )}
     </div>
   );

@@ -150,6 +150,8 @@ export interface Message {
   zoneId: string | null;
   /** Zone that answered this primary assistant turn. Null for user/tool messages. */
   activeZoneId: string | null;
+  /** True when the user hand-edited this message's content after it was saved. */
+  edited: boolean;
   createdAt: number;
 }
 

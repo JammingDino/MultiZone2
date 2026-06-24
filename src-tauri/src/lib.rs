@@ -82,6 +82,7 @@ pub fn run() {
             commands::messages::regenerate_participant,
             commands::messages::cancel_stream,
             commands::messages::respond_tool_approval,
+            commands::messages::update_message,
             commands::settings::get_setting,
             commands::settings::set_setting,
             commands::settings::get_db_stats,

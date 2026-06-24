@@ -136,10 +136,10 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ### 0.3.1 — Chat interaction polish
 
-- [ ] Live tokens/second counter: displayed in the message footer while the model is generating; shows current throughput as a running figure
-- [ ] Fix token counter and elapsed timer for complex tasks: correctly accumulates counts and time across multi-step reasoning and back-to-back tool calls; does not reset or stall between tool invocations
-- [ ] Copy response as markdown: copy button on each assistant message; copies raw markdown source (not rendered HTML) to clipboard
-- [ ] Edit AI responses: click-to-edit mode on any assistant message; changes saved to DB; an "edited" marker is shown on the message; branching from an edited message uses the edited content
+- [x] Live tokens/second counter: live `tok/s` in the streaming status banner alongside elapsed time and token estimate; computed from the turn aggregate so it reflects whole-turn throughput
+- [x] Fix token counter and elapsed timer for complex tasks: the per-turn `TurnAggregate` (content + reasoning + tool-call chars, single `firstTokenAt` origin) survives every iteration of the agentic loop — counts/time accumulate and never reset or stall between tool calls
+- [x] Copy response as markdown: the Copy action on each assistant/perspective response writes the raw markdown source (joined text blocks) to the clipboard, not rendered HTML
+- [x] Edit AI responses: click-to-edit on any assistant or perspective response (`update_message` command + `edited` column, migration 014); the final answer text is editable, saved to DB, shown with an "edited" marker; branching copies stored content so a branch from an edited message inherits the edited text — *built & typechecked; not yet runtime-tested*
 
 ### 0.3.2 — Skills
 

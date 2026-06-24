@@ -357,7 +357,7 @@ pub async fn branch_chat(
     // tool_call_id is the model-supplied id (not a row PK) so copying it verbatim
     // keeps tool calls matched within the branch. Map old→new ids for attachments.
     let msgs = sqlx::query_as::<_, Message>(
-        "SELECT id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, created_at
+        "SELECT id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at
          FROM messages WHERE chat_id = ?1 AND created_at <= ?2 ORDER BY created_at ASC",
     )
     .bind(&chat_id)
@@ -371,8 +371,8 @@ pub async fn branch_chat(
         id_map.insert(m.id.clone(), nid.clone());
         sqlx::query(
             "INSERT INTO messages
-               (id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+               (id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         )
         .bind(&nid)
         .bind(&new_id)
@@ -383,6 +383,7 @@ pub async fn branch_chat(
         .bind(&m.reasoning)
         .bind(&m.zone_id)
         .bind(&m.active_zone_id)
+        .bind(m.edited)
         .bind(m.created_at)
         .execute(&state.db)
         .await?;
@@ -539,7 +540,7 @@ pub async fn get_messages(
     chat_id: String,
 ) -> AppResult<Vec<Message>> {
     let rows = sqlx::query_as::<_, Message>(
-        "SELECT id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, created_at
+        "SELECT id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at
          FROM messages WHERE chat_id = ?1 ORDER BY created_at ASC",
     )
     .bind(&chat_id)
@@ -567,7 +568,7 @@ pub async fn generate_title(
         crate::commands::messages::effective_zone_and_provider(&state.db, &chat_id).await?;
 
     let first_user = sqlx::query_as::<_, Message>(
-        "SELECT id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, created_at
+        "SELECT id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at
          FROM messages WHERE chat_id = ?1 AND role = 'user' ORDER BY created_at ASC LIMIT 1",
     )
     .bind(&chat_id)

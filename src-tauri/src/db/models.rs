@@ -142,6 +142,8 @@ pub struct Message {
     /// Zone that answered this primary assistant message. Null for user/tool
     /// messages and for messages saved before migration 012.
     pub active_zone_id: Option<String>,
+    /// True when the user hand-edited this message's content after it was saved.
+    pub edited: bool,
     pub created_at: i64,
 }
 

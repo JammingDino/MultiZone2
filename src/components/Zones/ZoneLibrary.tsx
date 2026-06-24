@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   X, Download, Check, Loader2, Sparkles, Bookmark, ChevronLeft, ChevronRight,
-  ChevronDown, Plus, Upload, Settings as SettingsIcon, MessageSquare, Trash2, Star,
+  ChevronDown, Plus, Upload, Settings as SettingsIcon, MessageSquare, Trash2, Star, Pencil,
 } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import type { LibraryEntry, Provider, Zone } from "@/lib/types";
 import { ALL_TOOLS } from "@/lib/types";
 import { getZoneIcon } from "@/lib/zoneIcons";
-import { installEntry, saveZoneToLibrary, importEntryFromJson } from "@/lib/zoneLibrary";
+import { installEntry, saveZoneToLibrary, importEntryFromJson, exportZoneJson } from "@/lib/zoneLibrary";
 import { ZoneForm } from "./ZoneForm";
 
 type View = "library" | "detail" | "editor";
@@ -54,6 +54,10 @@ export function ZoneLibrary() {
   const [savePicker, setSavePicker] = useState(false);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
+  // Right-click zone context menu + inline rename.
+  const [zoneMenu, setZoneMenu] = useState<{ zone: Zone; x: number; y: number } | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   const toastTimer = useRef<number | undefined>(undefined);
 
@@ -85,12 +89,14 @@ export function ZoneLibrary() {
   const liveZoneFor = (e: LibraryEntry): Zone | undefined =>
     zones.find((z) => z.name.toLowerCase() === e.name.toLowerCase());
 
-  const curated = entries.filter((e) => e.curated);
-  const saved = entries.filter((e) => !e.curated);
-  const totalPages = Math.max(1, Math.ceil(curated.length / pageSize));
+  // "Curated" = shipped presets you haven't installed yet (available to add).
+  // "Saved by you" = your zones — anything installed, plus your imports.
+  const available = entries.filter((e) => e.curated && !isInstalled(e));
+  const yours = entries.filter((e) => isInstalled(e) || !e.curated);
+  const totalPages = Math.max(1, Math.ceil(available.length / pageSize));
   const pageSafe = Math.min(page, totalPages - 1);
   const start = pageSafe * pageSize;
-  const pageCurated = curated.slice(start, start + pageSize);
+  const pageAvailable = available.slice(start, start + pageSize);
 
   const selected = entries.find((e) => e.id === selectedId) ?? null;
   const editorZone = editorZoneId ? zones.find((z) => z.id === editorZoneId) ?? null : null;
@@ -98,6 +104,44 @@ export function ZoneLibrary() {
   function openEditor(zoneId: string | null) {
     setEditorZoneId(zoneId);
     setView("editor");
+  }
+
+  function openZoneMenu(zone: Zone, x: number, y: number) {
+    setZoneMenu({ zone, x, y });
+  }
+  function startRename(zone: Zone) {
+    setZoneMenu(null);
+    setRenameValue(zone.name);
+    setRenamingId(zone.id);
+  }
+  async function commitRename(zone: Zone) {
+    const next = renameValue.trim();
+    setRenamingId(null);
+    if (!next || next === zone.name) return;
+    try {
+      await api.upsertZone({ ...zone, name: next });
+      await refreshZones();
+      flash(`Renamed to “${next}”`);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+  function onExportZone(zone: Zone) {
+    setZoneMenu(null);
+    exportZoneJson(zone);
+    flash(`Exported “${zone.name}”`);
+  }
+  async function onDeleteZone(zone: Zone) {
+    setZoneMenu(null);
+    setBusy(true);
+    try {
+      await api.deleteZone(zone.id);
+      await refreshZones();
+      if (editorZoneId === zone.id) setView("library");
+      flash(`Deleted “${zone.name}”`);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function onInstall(e: LibraryEntry) {
@@ -243,10 +287,31 @@ export function ZoneLibrary() {
                 const Icon = getZoneIcon(z.icon);
                 const accent = z.accentColor ?? "var(--color-accent)";
                 const active = view === "editor" && editorZoneId === z.id;
+                if (renamingId === z.id) {
+                  return (
+                    <div key={z.id} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5">
+                      <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg" style={{ background: accent }}>
+                        <Icon size={15} color="white" />
+                      </span>
+                      <input
+                        autoFocus
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onBlur={() => commitRename(z)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") commitRename(z);
+                          if (e.key === "Escape") setRenamingId(null);
+                        }}
+                        className="min-w-0 flex-1 rounded border border-[var(--color-accent)] bg-[var(--color-bg)] px-1.5 py-0.5 text-[13px] outline-none"
+                      />
+                    </div>
+                  );
+                }
                 return (
                   <button
                     key={z.id}
                     onClick={() => openEditor(z.id)}
+                    onContextMenu={(e) => { e.preventDefault(); openZoneMenu(z, e.clientX, e.clientY); }}
                     className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-[var(--color-panel-hover)] ${active ? "bg-[var(--color-panel-hover)]" : ""}`}
                   >
                     <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg" style={{ background: accent }}>
@@ -292,17 +357,21 @@ export function ZoneLibrary() {
               />
             ) : (
               <LibraryView
-                pageCurated={pageCurated}
-                saved={saved}
+                pageAvailable={pageAvailable}
+                yours={yours}
                 canInstall={canInstall}
                 busy={busy}
                 isInstalled={isInstalled}
                 onOpen={(e) => { setSelectedId(e.id); setView("detail"); }}
                 onInstall={onInstall}
                 onConfigure={onConfigure}
+                onCardContextMenu={(e, ev) => {
+                  const z = liveZoneFor(e);
+                  if (z) { ev.preventDefault(); openZoneMenu(z, ev.clientX, ev.clientY); }
+                }}
                 page={pageSafe}
                 totalPages={totalPages}
-                rangeLabel={`Showing ${curated.length === 0 ? 0 : start + 1}–${start + pageCurated.length} of ${curated.length} zones`}
+                rangeLabel={`Showing ${available.length === 0 ? 0 : start + 1}–${start + pageAvailable.length} of ${available.length} available`}
                 onPrev={() => setPage((p) => Math.max(0, p - 1))}
                 onNext={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
                 onPage={setPage}
@@ -340,22 +409,66 @@ export function ZoneLibrary() {
             {toast}
           </div>
         )}
+
+        {zoneMenu && (
+          <ZoneContextMenu
+            x={zoneMenu.x}
+            y={zoneMenu.y}
+            onClose={() => setZoneMenu(null)}
+            onEdit={() => { const z = zoneMenu.zone; setZoneMenu(null); openEditor(z.id); }}
+            onRename={() => startRename(zoneMenu.zone)}
+            onExport={() => onExportZone(zoneMenu.zone)}
+            onDelete={() => onDeleteZone(zoneMenu.zone)}
+          />
+        )}
       </div>
     </div>
+  );
+}
+
+function ZoneContextMenu({
+  x, y, onClose, onEdit, onRename, onExport, onDelete,
+}: {
+  x: number; y: number; onClose: () => void;
+  onEdit: () => void; onRename: () => void; onExport: () => void; onDelete: () => void;
+}) {
+  return (
+    <>
+      <div className="fixed inset-0 z-[70]" onClick={onClose} onContextMenu={(e) => { e.preventDefault(); onClose(); }} />
+      <div className="fixed z-[80] min-w-[160px] rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-2xl" style={{ left: x, top: y }}>
+        <MenuItem icon={<SettingsIcon size={13} />} label="Edit" onClick={onEdit} />
+        <MenuItem icon={<Pencil size={13} />} label="Rename" onClick={onRename} />
+        <MenuItem icon={<Download size={13} />} label="Export JSON" onClick={onExport} />
+        <div className="my-1 border-t border-[var(--color-border)]" />
+        <MenuItem icon={<Trash2 size={13} />} label="Delete" onClick={onDelete} danger />
+      </div>
+    </>
+  );
+}
+
+function MenuItem({ icon, label, onClick, danger }: { icon: React.ReactNode; label: string; onClick: () => void; danger?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] hover:bg-[var(--color-panel-hover)] ${danger ? "text-[var(--color-danger)]" : ""}`}
+    >
+      {icon} {label}
+    </button>
   );
 }
 
 // ─── Library (grid) view ────────────────────────────────────────────────────
 
 function LibraryView(props: {
-  pageCurated: LibraryEntry[];
-  saved: LibraryEntry[];
+  pageAvailable: LibraryEntry[];
+  yours: LibraryEntry[];
   canInstall: boolean;
   busy: boolean;
   isInstalled: (e: LibraryEntry) => boolean;
   onOpen: (e: LibraryEntry) => void;
   onInstall: (e: LibraryEntry) => void;
   onConfigure: (e: LibraryEntry) => void;
+  onCardContextMenu: (e: LibraryEntry, ev: React.MouseEvent) => void;
   page: number;
   totalPages: number;
   rangeLabel: string;
@@ -475,23 +588,30 @@ function LibraryView(props: {
       {/* scroll content */}
       <div onDragOver={p.onDragOver} onDragLeave={p.onDragLeave} onDrop={p.onDrop} className="relative flex-1 overflow-y-auto px-6 py-5">
         <SectionLabel>Curated</SectionLabel>
-        <div className="grid grid-cols-3 gap-3.5">
-          {p.pageCurated.map((e) => (
-            <ZoneCard key={e.id} entry={e} installed={p.isInstalled(e)} canInstall={p.canInstall} busy={p.busy}
-              onOpen={() => p.onOpen(e)} onInstall={() => p.onInstall(e)} onConfigure={() => p.onConfigure(e)} />
-          ))}
-        </div>
-
-        <div className="mt-6"><SectionLabel>Saved by you</SectionLabel></div>
-        {p.saved.length === 0 ? (
+        {p.pageAvailable.length === 0 ? (
           <div className="rounded-lg border border-dashed border-[var(--color-border)] bg-[var(--color-bg)]/40 px-4 py-4 text-[12.5px] text-[var(--color-text-muted)]">
-            Nothing saved yet — use “Save a zone…” to snapshot one of your zones, or “Add zones” to import a <span className="font-mono text-[11px]">.json</span>.
+            All curated zones are installed — they're in “Saved by you” below.
           </div>
         ) : (
           <div className="grid grid-cols-3 gap-3.5">
-            {p.saved.map((e) => (
-              <ZoneCard key={e.id} entry={e} installed={p.isInstalled(e)} canInstall={p.canInstall} busy={p.busy} compact
+            {p.pageAvailable.map((e) => (
+              <ZoneCard key={e.id} entry={e} installed={p.isInstalled(e)} canInstall={p.canInstall} busy={p.busy}
                 onOpen={() => p.onOpen(e)} onInstall={() => p.onInstall(e)} onConfigure={() => p.onConfigure(e)} />
+            ))}
+          </div>
+        )}
+
+        <div className="mt-6"><SectionLabel>Saved by you</SectionLabel></div>
+        {p.yours.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-[var(--color-border)] bg-[var(--color-bg)]/40 px-4 py-4 text-[12.5px] text-[var(--color-text-muted)]">
+            Nothing here yet — install a curated zone, snapshot one with “Save a zone…”, or import a <span className="font-mono text-[11px]">.json</span>. Right-click a zone for edit / rename / export / delete.
+          </div>
+        ) : (
+          <div className="grid grid-cols-3 gap-3.5">
+            {p.yours.map((e) => (
+              <ZoneCard key={e.id} entry={e} installed={p.isInstalled(e)} canInstall={p.canInstall} busy={p.busy} compact
+                onOpen={() => p.onOpen(e)} onInstall={() => p.onInstall(e)} onConfigure={() => p.onConfigure(e)}
+                onContextMenu={(ev) => p.onCardContextMenu(e, ev)} />
             ))}
           </div>
         )}
@@ -544,7 +664,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 }
 
 function ZoneCard({
-  entry, installed, canInstall, busy, compact, onOpen, onInstall, onConfigure,
+  entry, installed, canInstall, busy, compact, onOpen, onInstall, onConfigure, onContextMenu,
 }: {
   entry: LibraryEntry;
   installed: boolean;
@@ -554,6 +674,7 @@ function ZoneCard({
   onOpen: () => void;
   onInstall: () => void;
   onConfigure: () => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
 }) {
   const Icon = getZoneIcon(entry.icon);
   const accent = entry.accentColor ?? "var(--color-accent)";
@@ -564,6 +685,7 @@ function ZoneCard({
   return (
     <div
       onClick={onOpen}
+      onContextMenu={onContextMenu}
       className={`relative flex cursor-pointer flex-col rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)]/40 p-4 transition hover:-translate-y-0.5 hover:border-[var(--color-accent)]/50 hover:shadow-lg ${compact ? "min-h-[188px]" : "min-h-[230px]"}`}
     >
       {installed && (

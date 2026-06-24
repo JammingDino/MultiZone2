@@ -110,7 +110,17 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [ ] Base zone for Quick Chat is selected from the library or the user's zones (Settings → Chat) — *deferred to follow-up*
 - [~] Import zone from JSON file (drop / browse / URL) done; **export** zone as JSON file still *deferred*
 - [x] Library zone card shows: icon, accent color, system prompt preview, enabled tools
-- [x] 12 curated zones: MultiZone Assistant, Idea Critic, Deep Researcher, Code Companion, Fact Checker, Brainstormer, Qwythos (pre-installed) + Writing Editor, Data Analyst, Meeting Scribe, Translator, Support Agent (community)
+- [x] 11 curated zones: MultiZone Assistant, Idea Critic, Deep Researcher, Code Companion, Fact Checker, Brainstormer (pre-installed) + Writing Editor, Data Analyst, Meeting Scribe, Translator, Support Agent (community)
+- [x] Configure Zones and the Zone Library are one unified panel (editing is an embedded view, not a separate modal)
+- [x] Settings → Chat: configurable Zone Library page size (6 / 9 / 12 / 15 / 30)
+- [x] Installed zones surface under "Saved by you"; "Curated" lists only the not-yet-installed presets
+
+### 0.2.4 — Zone management & export
+
+- [x] Right-click a zone (installed rail or a "Saved by you" card) opens a context menu
+- [x] Context menu actions: Edit (open editor), Rename (inline), Export JSON, Delete
+- [x] Export a zone as a JSON file, re-importable via "Add zones"
+- [ ] Right-click actions on the chat sidebar's zone references — *follow-up if wanted*
 
 ---
 

@@ -10,7 +10,7 @@ import { DEFAULT_ZONES } from "@/lib/defaultZones";
 
 /** Bump when the shipped curated set changes so existing installs re-seed the
  * library (idempotent — stable ids overwrite, user snapshots are untouched). */
-export const CURATED_LIBRARY_VERSION = 2;
+export const CURATED_LIBRARY_VERSION = 3;
 
 /** Stable, content-independent id for a curated entry so re-seeding overwrites
  * the same file instead of creating duplicates. */
@@ -46,15 +46,56 @@ export function curatedEntries(): LibraryEntry[] {
 }
 
 /** Write the curated presets into the on-disk library (idempotent — stable ids
- * mean repeated calls overwrite rather than duplicate). */
+ * mean repeated calls overwrite rather than duplicate). Also prunes curated
+ * entries that are no longer shipped (e.g. a removed preset), leaving the
+ * user's own snapshots/imports untouched. */
 export async function seedCuratedLibrary(): Promise<void> {
-  for (const entry of curatedEntries()) {
+  const entries = curatedEntries();
+  const liveIds = new Set(entries.map((e) => e.id));
+  for (const entry of entries) {
     try {
       await api.upsertLibraryEntry(entry);
     } catch (e) {
       console.error(`failed to seed library entry "${entry.name}":`, e);
     }
   }
+  // Drop curated entries that were shipped before but no longer exist.
+  try {
+    const existing = await api.listLibraryEntries();
+    for (const e of existing) {
+      if (e.curated && !liveIds.has(e.id)) {
+        await api.deleteLibraryEntry(e.id).catch(() => {});
+      }
+    }
+  } catch { /* ignore */ }
+}
+
+/** Export a live zone as a downloadable JSON file (re-importable via Add zones). */
+export function exportZoneJson(zone: Zone): void {
+  const data = {
+    name: zone.name,
+    icon: zone.icon,
+    accentColor: zone.accentColor,
+    model: zone.model,
+    systemPrompt: zone.systemPrompt,
+    temperature: zone.temperature,
+    maxTokens: zone.maxTokens,
+    topP: zone.topP,
+    toolsEnabled: zone.toolsEnabled,
+    toolConfig: zone.toolConfig,
+    thinkingEnabled: zone.thinkingEnabled,
+    includeThinkingInContext: zone.includeThinkingInContext,
+  };
+  const slug = zone.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "zone";
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${slug}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
 /** Pick a zone name not already taken, suffixing " (2)", " (3)", … if needed. */

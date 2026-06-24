@@ -81,6 +81,8 @@ The flagship mode. A Response Leader zone coordinates multiple sub-agents via su
 
 **Done when:** a user can start a Multizone session, configure the leader and sub-agents, watch the orchestration unfold in the stack tracer, and receive a final synthesized response; the full subchat transcripts are accessible from the sidebar.
 
+> **Research watch — latent-space orchestration.** Multizone Mode is a *text-based* multi-agent system: agents collaborate by exchanging text over the local API, which is token-heavy and slow at depth. [RecursiveMAS](https://recursivemas.github.io/) proposes scaling agent collaboration in *latent* space instead — agents pass hidden states directly and only the final round decodes text (claimed +8.3% accuracy, 1.2–2.4× speedup, 34–75% fewer tokens). It is the natural efficiency/quality ceiling for this mode, but it cannot be implemented at the app/orchestration layer — it requires inference-engine-level latent I/O and a training step. Tracked in the Post-1.0 backlog.
+
 ---
 
 ### 0.7.x — Settings Rework & UI/UX Polish
@@ -109,3 +111,4 @@ Performance audit (startup time, large chat scroll, streaming), installer polish
 | Mobile app | Tauri mobile target (iOS/Android); post-desktop-stable |
 | Multi-user/team | Shared zones, shared projects, access control |
 | Shareable zone marketplace | Community-contributed zones beyond the local library |
+| Latent-space orchestration ([RecursiveMAS](https://recursivemas.github.io/)) | Replace text passing between Multizone agents with latent hidden-state passing — only the final round decodes text. Promises large token/latency savings + accuracy gains for 0.6.x's flagship mode. **Not an app-layer feature:** requires the inference engine to expose hidden states and accept latent inputs (impossible over today's chat-completion APIs — Ollama/OpenAI-compatible/llama.cpp all exchange text/tokens only), plus a training pass to fit the ~13M-param "RecursiveLink" adapters (base weights frozen). The small, frozen-base adapter footprint makes a **local overnight fine-tune** plausible *if* MultiZone gains a training backend — a future bridge between the local-first principle and this technique. Bleeding-edge research as of 2026; gated on engine support landing first. |

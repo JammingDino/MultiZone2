@@ -17,9 +17,18 @@ export interface DefaultZoneDef {
   temperature: number;
   /** Tool ids (must match the backend ToolId set). */
   tools: string[];
-  /** One-line summary used in the template picker. */
+  /** One-line summary used in the template picker / library card tagline. */
   description: string;
   systemPrompt: string;
+  /** Example prompts shown on the library detail view. */
+  examples?: string[];
+  /** Library detail metadata (cosmetic). Defaults: MultiZone Team / Curated / v1.0.0. */
+  author?: string;
+  source?: string;
+  version?: string;
+  /** When false, the zone is offered in the library but NOT auto-installed on
+   * first run. Defaults to true (curated MultiZone zones come pre-installed). */
+  preinstall?: boolean;
 }
 
 export const DEFAULT_ZONES: DefaultZoneDef[] = [
@@ -30,6 +39,8 @@ export const DEFAULT_ZONES: DefaultZoneDef[] = [
     temperature: 0.7,
     tools: ["date_time", "ask_user", "manage_tags", "render_graph", "web_search"],
     description: "A friendly general assistant that also knows MultiZone itself — zones, tools, projects, and how to set them up.",
+    version: "v3.0.0",
+    examples: ["How do I create a new zone?", "Set up a research project for me", "What tools does this zone have?"],
     systemPrompt: `You are the MultiZone Assistant — a helpful, knowledgeable, and approachable AI. You answer everyday questions well, and you also understand the app you live in and can help the user get the most out of it.
 
 ## About MultiZone
@@ -58,6 +69,8 @@ Depending on the zone, you may have tools for: the current date/time, web search
     temperature: 0.8,
     tools: ["ask_user", "web_search", "render_graph"],
     description: "Plays devil's advocate — stress-tests your ideas, surfaces risks, and argues the strongest case against them.",
+    version: "v1.0.4",
+    examples: ["Poke holes in this product plan", "What could go wrong with this launch?", "Argue against my thesis"],
     systemPrompt: `You are the Idea Critic. Your job is to make the user's thinking stronger by arguing against it — not to validate it. You are rigorous, fair, and direct, never contrarian for its own sake.
 
 ## How you operate
@@ -78,6 +91,8 @@ Conversational and pointed. Make one strong argument per turn, then invite a reb
     temperature: 0.5,
     tools: ["web_search", "render_graph", "ask_user", "date_time"],
     description: "Explains topics in depth with sources, separates consensus from debate, and maps structure visually.",
+    version: "v1.2.0",
+    examples: ["Explain CRISPR base editing, with sources", "Consensus vs debate on intermittent fasting?", "Map the history of the transistor"],
     systemPrompt: `You are a rigorous research assistant. You help the user understand topics deeply, not just at surface level.
 
 ## How you work
@@ -94,6 +109,8 @@ Conversational and pointed. Make one strong argument per turn, then invite a reb
     temperature: 0.3,
     tools: ["code_exec", "file_system", "render_graph", "date_time"],
     description: "A pragmatic pair programmer that can run code and read/write files in the project directory.",
+    version: "v2.0.1",
+    examples: ["Refactor utils.js and run the tests", "Find why the build is failing", "Add a CSV export to the report script"],
     systemPrompt: `You are a pragmatic, experienced pair programmer. You write clear, correct code and explain your reasoning.
 
 ## How you work
@@ -110,6 +127,8 @@ Conversational and pointed. Make one strong argument per turn, then invite a reb
     temperature: 0.2,
     tools: ["web_search", "file_system", "render_graph", "ask_user", "date_time"],
     description: "Proofreads, verifies claims, and pressure-tests whether your input holds up — built for document analysis.",
+    version: "v1.1.3",
+    examples: ["Fact-check this press release", "Verify the stats in this report", "Where is this essay's argument weakest?"],
     systemPrompt: `You are a meticulous fact-checker and editor. Your job is to verify that the user's input is accurate, internally consistent, and well-supported — and to catch errors before they go out the door. You are often handed documents, drafts, or arguments to analyse.
 
 ## What you check
@@ -133,6 +152,8 @@ Conversational and pointed. Make one strong argument per turn, then invite a reb
     temperature: 1.0,
     tools: ["render_graph", "ask_user", "web_search"],
     description: "Diverges fast — generates lots of varied ideas, then helps you cluster and choose.",
+    version: "v1.4.0",
+    examples: ["Give me 30 names for a plant-care app", "Brainstorm ways to cut our onboarding time in half", "Cluster these rough ideas into themes"],
     systemPrompt: `You are a high-energy brainstorming partner. Your first job is to diverge: generate a lot of varied, non-obvious ideas quickly, without prematurely judging them.
 
 ## How you work
@@ -142,13 +163,99 @@ Conversational and pointed. Make one strong argument per turn, then invite a reb
 4. **Provoke.** Ask the user pointed questions to unlock new directions rather than waiting for perfect prompts.
 5. Keep the energy up and the judgement light until it's time to choose.`,
   },
+  {
+    name: "Qwythos",
+    icon: "Bot",
+    accentColor: "#8b5cf6",
+    temperature: 0.8,
+    tools: ["web_search", "date_time", "ask_user"],
+    description: "The default everyday persona — warm, curious, and conversational across general chats.",
+    version: "v0.9.0",
+    examples: ["Help me plan my weekend", "Explain this like I'm five", "Let's just chat"],
+    systemPrompt: `You are Qwythos, a warm and curious conversational companion for everyday chats. Be friendly, concise, and genuinely helpful. Ask a clarifying question when it would meaningfully improve your answer, and match the depth of the user's request.`,
+  },
+  {
+    name: "Writing Editor",
+    icon: "Pen",
+    accentColor: "#ec4899",
+    temperature: 0.4,
+    tools: ["file_system", "ask_user", "date_time"],
+    description: "Tightens prose, fixes grammar, and adapts tone — line edits with the reasoning shown.",
+    author: "Community",
+    source: "Community",
+    version: "v0.6.2",
+    preinstall: false,
+    examples: ["Tighten this paragraph", "Make this email warmer", "Fix grammar without changing my voice"],
+    systemPrompt: `You are Writing Editor. Improve clarity, grammar, and tone while preserving the author's voice. Show your edits inline and explain the reasoning behind non-trivial changes. When the user supplies a document as a file, read it first and refer to specific passages.`,
+  },
+  {
+    name: "Data Analyst",
+    icon: "BarChart2",
+    accentColor: "#6366f1",
+    temperature: 0.3,
+    tools: ["code_exec", "file_system", "render_graph", "date_time"],
+    description: "Cleans, analyses, and visualises tabular data, then explains what the numbers actually mean.",
+    author: "Community",
+    source: "Community",
+    version: "v1.0.0",
+    preinstall: false,
+    examples: ["Summarise trends in this CSV", "Plot revenue by month", "Find outliers in this dataset"],
+    systemPrompt: `You are Data Analyst. Clean and analyse tabular data, build clear visualisations, and explain findings in plain language. State your assumptions, call out data-quality issues, and run code to verify your work rather than guessing.`,
+  },
+  {
+    name: "Meeting Scribe",
+    icon: "Mic",
+    accentColor: "#f59e0b",
+    temperature: 0.3,
+    tools: ["file_system", "ask_user", "date_time", "manage_tags"],
+    description: "Turns messy transcripts into clean notes, decisions, and assigned action items.",
+    author: "Community",
+    source: "Community",
+    version: "v0.4.1",
+    preinstall: false,
+    examples: ["Summarise this transcript", "Pull out the action items", "Who agreed to do what?"],
+    systemPrompt: `You are Meeting Scribe. Convert transcripts into structured notes: a short summary, the decisions made, and action items with owners and due dates where stated. Stay faithful to the source and flag anything ambiguous rather than inventing detail.`,
+  },
+  {
+    name: "Translator",
+    icon: "Globe",
+    accentColor: "#06b6d4",
+    temperature: 0.3,
+    tools: ["web_search", "ask_user", "date_time"],
+    description: "Translates between languages while preserving tone, idiom, and formatting.",
+    author: "Community",
+    source: "Community",
+    version: "v1.3.0",
+    preinstall: false,
+    examples: ["Translate this to Japanese, keep it formal", "What does this idiom mean?", "Localise this UI string"],
+    systemPrompt: `You are Translator. Translate accurately while preserving tone, idiom, and formatting. Note where a choice is ambiguous and offer the closest natural alternative. Ask for the target register (formal/informal) when it matters.`,
+  },
+  {
+    name: "Support Agent",
+    icon: "Headphones",
+    accentColor: "#ef4444",
+    temperature: 0.4,
+    tools: ["file_system", "web_search", "ask_user", "manage_tags"],
+    description: "Drafts empathetic support replies grounded in your help-centre docs.",
+    author: "Community",
+    source: "Community",
+    version: "v0.8.0",
+    preinstall: false,
+    examples: ["Draft a reply to this refund request", "Explain this error to a non-technical user", "Find the relevant help article"],
+    systemPrompt: `You are Support Agent. Draft empathetic, accurate support replies grounded in the provided help-centre documents. Never invent policy; if you're unsure, say what you'd need to confirm. Match the customer's tone and keep replies concise.`,
+  },
 ];
 
+/** The curated zones that come pre-installed (everything except the
+ * community/registry extras, which are library-only until installed). */
+export const PREINSTALL_ZONES = DEFAULT_ZONES.filter((z) => z.preinstall !== false);
+
 /**
- * Create the starter zones, each bound to the given provider + model. Errors on
- * individual zones are logged and skipped so one failure doesn't abort the rest.
- * Callers should `refreshZones()` afterward. Does not set a default zone — that
- * stays a user choice in Settings.
+ * Create the pre-installed starter zones, each bound to the given provider +
+ * model. Community/registry zones (preinstall: false) are skipped — they live
+ * in the library until the user installs them. Errors on individual zones are
+ * logged and skipped so one failure doesn't abort the rest. Callers should
+ * `refreshZones()` afterward. Does not set a default zone.
  */
 export async function seedDefaultZones(
   providerId: string,
@@ -156,7 +263,7 @@ export async function seedDefaultZones(
   existingNames: string[] = [],
 ): Promise<void> {
   const taken = new Set(existingNames);
-  for (const z of DEFAULT_ZONES) {
+  for (const z of PREINSTALL_ZONES) {
     if (taken.has(z.name)) continue; // don't create duplicates on re-seed
     try {
       await api.upsertZone({

@@ -101,15 +101,16 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ### 0.2.3 — Zone library
 
-*Storage: the library is a folder of JSON files on disk (`app_data_dir/zone_library/`). Curated presets are seeded there on first run; user snapshots are written alongside. Live zones are no longer auto-seeded — new users install from the library.*
+*Storage: the library is a folder of JSON files on disk (`app_data_dir/zone_library/`), holding 12 curated presets plus user snapshots/imports. The 7 curated MultiZone zones come pre-installed as live zones on first run; the 5 community extras stay library-only until installed. The library UI (Configure Zones / Zone Library) shows an installed-zones rail, a curated card grid with per-entry detail, install/configure/uninstall, save-to-library, JSON import (drop/browse/URL), pagination, and toasts — matching the provided design.*
 
 - [x] Zone library panel: browsable list of curated and user-saved zones
 - [x] "Save to library" button on any zone — saves a snapshot of current config (via "Save a zone…" in the library)
 - [x] "Install from library" — creates a new zone from a library entry; duplicate detection by name
-- [x] Curated default zones presented here rather than seeded invisibly on first run
+- [x] Curated default zones presented here (and pre-installed); installed state shown per card
 - [ ] Base zone for Quick Chat is selected from the library or the user's zones (Settings → Chat) — *deferred to follow-up*
-- [ ] Export zone as JSON file; import zone from JSON file — *deferred to follow-up*
+- [~] Import zone from JSON file (drop / browse / URL) done; **export** zone as JSON file still *deferred*
 - [x] Library zone card shows: icon, accent color, system prompt preview, enabled tools
+- [x] 12 curated zones: MultiZone Assistant, Idea Critic, Deep Researcher, Code Companion, Fact Checker, Brainstormer, Qwythos (pre-installed) + Writing Editor, Data Analyst, Meeting Scribe, Translator, Support Agent (community)
 
 ---
 

@@ -41,6 +41,19 @@ pub struct LibraryEntry {
     /// One-line blurb shown on the library card.
     #[serde(default)]
     pub description: Option<String>,
+    /// Library-detail metadata (cosmetic): who authored it, where it came from,
+    /// a version label, and example prompts.
+    #[serde(default)]
+    pub author: Option<String>,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub version: Option<String>,
+    #[serde(default)]
+    pub examples: Vec<String>,
+    /// True for shipped MultiZone presets; false for user imports/snapshots.
+    #[serde(default)]
+    pub curated_team: bool,
     #[serde(default)]
     pub created_at: i64,
 }

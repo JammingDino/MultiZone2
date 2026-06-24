@@ -8,6 +8,10 @@ import * as api from "@/lib/tauri";
 import type { LibraryEntry, Zone } from "@/lib/types";
 import { DEFAULT_ZONES } from "@/lib/defaultZones";
 
+/** Bump when the shipped curated set changes so existing installs re-seed the
+ * library (idempotent — stable ids overwrite, user snapshots are untouched). */
+export const CURATED_LIBRARY_VERSION = 2;
+
 /** Stable, content-independent id for a curated entry so re-seeding overwrites
  * the same file instead of creating duplicates. */
 function curatedId(name: string): string {
@@ -32,6 +36,11 @@ export function curatedEntries(): LibraryEntry[] {
     thinkingEnabled: false,
     includeThinkingInContext: false,
     description: z.description,
+    author: z.author ?? "MultiZone Team",
+    source: z.source ?? "Curated",
+    version: z.version ?? "v1.0.0",
+    examples: z.examples ?? [],
+    curatedTeam: z.preinstall !== false,
     createdAt: 0,
   }));
 }
@@ -105,6 +114,53 @@ export async function saveZoneToLibrary(zone: Zone): Promise<LibraryEntry> {
     thinkingEnabled: zone.thinkingEnabled,
     includeThinkingInContext: zone.includeThinkingInContext,
     description: null,
+    author: "You",
+    source: "Saved by you",
+    version: "v1.0.0",
+    examples: [],
+    curatedTeam: false,
+    createdAt: 0,
+  });
+}
+
+/** Parse an imported JSON blob (an exported zone or library entry) into a
+ * non-curated library entry and save it. Tolerates partial/foreign shapes. */
+export async function importEntryFromJson(text: string, fallbackName: string): Promise<LibraryEntry> {
+  let raw: Record<string, any> = {};
+  try {
+    raw = JSON.parse(text) as Record<string, any>;
+  } catch {
+    throw new Error("Not valid JSON");
+  }
+  const toolsEnabled =
+    typeof raw.toolsEnabled === "string"
+      ? raw.toolsEnabled
+      : Array.isArray(raw.tools)
+      ? JSON.stringify(raw.tools)
+      : Array.isArray(raw.toolsEnabled)
+      ? JSON.stringify(raw.toolsEnabled)
+      : "[]";
+  return api.upsertLibraryEntry({
+    id: "",
+    name: (raw.name || fallbackName || "Imported Zone").toString().slice(0, 60),
+    curated: false,
+    icon: raw.icon ?? "Box",
+    accentColor: raw.accentColor ?? "#7c5cff",
+    model: raw.model ?? null,
+    systemPrompt: raw.systemPrompt ?? raw.system ?? null,
+    temperature: typeof raw.temperature === "number" ? raw.temperature : 0.7,
+    maxTokens: typeof raw.maxTokens === "number" ? raw.maxTokens : null,
+    topP: typeof raw.topP === "number" ? raw.topP : null,
+    toolsEnabled,
+    toolConfig: typeof raw.toolConfig === "string" ? raw.toolConfig : "{}",
+    thinkingEnabled: !!raw.thinkingEnabled,
+    includeThinkingInContext: !!raw.includeThinkingInContext,
+    description: raw.description ?? null,
+    author: raw.author ?? "Imported",
+    source: raw.source ?? "Imported file",
+    version: raw.version ?? "v1.0.0",
+    examples: Array.isArray(raw.examples) ? raw.examples.map(String) : [],
+    curatedTeam: false,
     createdAt: 0,
   });
 }

@@ -5,7 +5,9 @@ import { BackgroundEffect } from "./components/BackgroundEffect";
 import { TitleBar } from "./components/TitleBar";
 import { Onboarding } from "./components/Onboarding/Onboarding";
 import { useApp } from "./store/app";
-import { seedCuratedLibrary } from "./lib/zoneLibrary";
+import { seedCuratedLibrary, CURATED_LIBRARY_VERSION } from "./lib/zoneLibrary";
+import { seedDefaultZones } from "./lib/defaultZones";
+import * as api from "./lib/tauri";
 
 export default function App() {
   const providersLoaded = useApp((s) => s.providersLoaded);
@@ -13,9 +15,12 @@ export default function App() {
   const defaultProviderId = useApp((s) => s.appSettings.defaultProviderId);
   const setAppSettings = useApp((s) => s.setAppSettings);
   const appSettingsLoaded = useApp((s) => s.appSettingsLoaded);
-  const seededLibrary = useApp((s) => s.appSettings.seededLibrary);
-  // Guard against concurrent invocations of the one-time seeder.
-  const seedingRef = useRef(false);
+  const libraryCuratedVersion = useApp((s) => s.appSettings.libraryCuratedVersion);
+  const seededStarterZones = useApp((s) => s.appSettings.seededStarterZones);
+  const refreshZones = useApp((s) => s.refreshZones);
+  // Guard against concurrent invocations of the one-time seeders.
+  const libRef = useRef(false);
+  const zonesRef = useRef(false);
 
   // Once providers exist, make sure a quick-chat provider is selected. Keeps
   // existing installs (upgrading past this feature) working without a trip
@@ -26,23 +31,47 @@ export default function App() {
     }
   }, [providersLoaded, providers, defaultProviderId, setAppSettings]);
 
-  // One-time seeding of the curated zone library onto disk. The curated presets
-  // are presented in the Zone Library for the user to install — they are no
-  // longer auto-created as live zones. Provider-independent, so it runs as soon
-  // as settings load; the seedingRef guard prevents concurrent runs.
+  // Seed the curated zone library onto disk (all curated presets, including the
+  // community extras). Re-runs when the shipped set version grows so existing
+  // installs pick up newly added presets. Provider-independent.
   useEffect(() => {
-    if (!appSettingsLoaded || seededLibrary || seedingRef.current) return;
-    seedingRef.current = true;
+    if (!appSettingsLoaded || libraryCuratedVersion >= CURATED_LIBRARY_VERSION || libRef.current) return;
+    libRef.current = true;
     (async () => {
       try {
         await seedCuratedLibrary();
-        await setAppSettings({ seededLibrary: true });
+        await setAppSettings({ seededLibrary: true, libraryCuratedVersion: CURATED_LIBRARY_VERSION });
       } finally {
-        seedingRef.current = false;
+        libRef.current = false;
       }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appSettingsLoaded, seededLibrary]);
+  }, [appSettingsLoaded, libraryCuratedVersion]);
+
+  // One-time pre-install of the curated MultiZone zones as live zones, bound to
+  // the quick-chat provider + model, so a new user lands with a useful spread of
+  // assistants. Only the pre-install set is created (community extras stay in
+  // the library). Skipped once done; never sets a default zone.
+  useEffect(() => {
+    if (!providersLoaded || !appSettingsLoaded || seededStarterZones || zonesRef.current) return;
+    const quick = providers.find((p) => p.id === (defaultProviderId ?? providers[0]?.id)) ?? null;
+    const model = quick?.defaultModel?.trim();
+    if (!quick || !model) return;
+    zonesRef.current = true;
+    (async () => {
+      try {
+        const existing = await api.listZones();
+        if (existing.length === 0) {
+          await seedDefaultZones(quick.id, model);
+          await refreshZones();
+        }
+        await setAppSettings({ seededStarterZones: true });
+      } finally {
+        zonesRef.current = false;
+      }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [providersLoaded, appSettingsLoaded, seededStarterZones, providers, defaultProviderId]);
 
   // Lock the app behind onboarding until at least one provider exists.
   const showOnboarding = providersLoaded && providers.length === 0;

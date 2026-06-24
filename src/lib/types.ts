@@ -102,6 +102,13 @@ export interface LibraryEntry {
   thinkingEnabled: boolean;
   includeThinkingInContext: boolean;
   description: string | null;
+  /** Library-detail metadata (cosmetic). */
+  author: string | null;
+  source: string | null;
+  version: string | null;
+  examples: string[];
+  /** True for shipped MultiZone presets; false for user imports/snapshots. */
+  curatedTeam: boolean;
   createdAt: number;
 }
 
@@ -220,6 +227,8 @@ export interface AppSettings {
   seededStarterZones: boolean;
   /** Set once the curated zone library has been written to disk, so it never repeats. */
   seededLibrary: boolean;
+  /** Highest curated-library version seeded to disk; re-seeds when the shipped set grows. */
+  libraryCuratedVersion: number;
   /** When true, the embedded local HTTP API server runs. */
   apiEnabled: boolean;
   /** Port the API server binds to on 127.0.0.1. */
@@ -278,6 +287,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   defaultProviderId: null,
   seededStarterZones: false,
   seededLibrary: false,
+  libraryCuratedVersion: 0,
   apiEnabled: false,
   apiPort: 8765,
   apiToken: "",

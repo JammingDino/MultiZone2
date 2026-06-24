@@ -126,7 +126,22 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ## 0.3.x — Context & Knowledge
 
-### 0.3.0 — Skills
+### 0.3.0 — Conversation branching
+
+- [ ] "Branch from here" button on any user or assistant message
+- [ ] Branching creates a new chat with history up to (and including) that message
+- [ ] New branched chat linked to parent in DB (`parent_chat_id`, `branched_from_message_id`)
+- [ ] Sidebar: branched chats appear as a collapsible sub-list under the parent
+- [ ] Branched chat inherits zone, project, and tag assignments from the parent
+
+### 0.3.1 — Chat interaction polish
+
+- [ ] Live tokens/second counter: displayed in the message footer while the model is generating; shows current throughput as a running figure
+- [ ] Fix token counter and elapsed timer for complex tasks: correctly accumulates counts and time across multi-step reasoning and back-to-back tool calls; does not reset or stall between tool invocations
+- [ ] Copy response as markdown: copy button on each assistant message; copies raw markdown source (not rendered HTML) to clipboard
+- [ ] Edit AI responses: click-to-edit mode on any assistant message; changes saved to DB; an "edited" marker is shown on the message; branching from an edited message uses the edited content
+
+### 0.3.2 — Skills
 
 - [ ] Skills data model: `skills` table (id, name, description, content, created_at)
 - [ ] Skills panel: create, edit, delete skills — content is freeform markdown
@@ -136,7 +151,7 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [ ] Import skill from a text or markdown file
 - [ ] Built-in skill templates: frontend design guide, markdown formatting, JSON output format
 
-### 0.3.1 — Memory
+### 0.3.3 — Memory
 
 - [ ] Memory data model: `memories` table (id, scope: global/project/chat, scope_id, content, created_at, updated_at)
 - [ ] `save_memory` tool: model writes a memory entry, safety level 0 (safe)
@@ -144,21 +159,6 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [ ] Memory injected into system prompt each turn: global first, then project, then chat-level
 - [ ] Memory viewer in settings: browse, edit, and delete entries across all scopes
 - [ ] Soft size limit per scope — oldest entries trimmed when exceeded (limit configurable in settings)
-
-### 0.3.2 — Conversation branching
-
-- [ ] "Branch from here" button on any user or assistant message
-- [ ] Branching creates a new chat with history up to (and including) that message
-- [ ] New branched chat linked to parent in DB (`parent_chat_id`, `branched_from_message_id`)
-- [ ] Sidebar: branched chats appear as a collapsible sub-list under the parent
-- [ ] Branched chat inherits zone, project, and tag assignments from the parent
-
-### 0.3.3 — Chat interaction polish
-
-- [ ] Live tokens/second counter: displayed in the message footer while the model is generating; shows current throughput as a running figure
-- [ ] Fix token counter and elapsed timer for complex tasks: correctly accumulates counts and time across multi-step reasoning and back-to-back tool calls; does not reset or stall between tool invocations
-- [ ] Copy response as markdown: copy button on each assistant message; copies raw markdown source (not rendered HTML) to clipboard
-- [ ] Edit AI responses: click-to-edit mode on any assistant message; changes saved to DB; an "edited" marker is shown on the message; branching from an edited message uses the edited content
 
 ---
 

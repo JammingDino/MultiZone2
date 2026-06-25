@@ -534,9 +534,13 @@ export function BotTurnView({ turn, isLatest = false }: { turn: BotTurn; isLates
   // out together — side-by-side columns or stacked. They share one renderer so
   // the zone avatar/accent is the only thing that differs between them. ──
   if (hasPerspectives) {
+    // NB: no `msg-row` on this wrapper — each ParticipantCard is its own
+    // `.msg-row`, so a wrapping row here would make hovering any one card
+    // reveal every card's action bar (the `.msg-row:hover .msg-actions` rule
+    // matches all descendants).
     return (
-      <div className="msg-row">
-        <div className={layout === "columns" ? "flex flex-wrap items-start gap-4" : "flex flex-col gap-5"}>
+      <div>
+        <div className={layout === "columns" ? "flex flex-wrap items-start justify-center gap-4" : "flex flex-col gap-5"}>
           <ParticipantCard
             zoneId={resolvedZoneId}
             fallbackName="Primary"
@@ -703,7 +707,7 @@ function ParticipantCard({
   const showCollapsed = collapsed && !isStreaming;
 
   return (
-    <div className={`msg-row ${layout === "columns" ? "min-w-[280px] flex-1" : ""}`}>
+    <div className={`msg-row ${layout === "columns" ? "min-w-[280px] max-w-3xl flex-1" : ""}`}>
       <div className="flex gap-3">
         {/* Avatar + the collapse "dropdown" beneath it */}
         <div className="flex flex-col items-center gap-1">

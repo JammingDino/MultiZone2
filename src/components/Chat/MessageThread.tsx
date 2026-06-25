@@ -12,6 +12,7 @@ export function MessageThread({ chatId }: { chatId: string }) {
   const messages = messagesByChat[chatId] ?? [];
   const streaming = streamingByChat[chatId];
   const perspectiveStreams = perspectiveStreamsByChat[chatId] ?? {};
+  const layout = useApp((s) => s.appSettings.perspectiveLayout);
   const containerRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -37,6 +38,20 @@ export function MessageThread({ chatId }: { chatId: string }) {
   units.forEach((u, i) => {
     if (u.type === "bot") lastBotIdx = i;
   });
+
+  // In side-by-side columns mode, the thread widens so each column can grow up
+  // to the normal single-chat width (max-w-3xl) — on a wide/fullscreen display
+  // the columns render as that many full-width chat sections. User messages and
+  // single-zone turns stay centered at the normal width inside the wider frame.
+  // The frame is capped to fit exactly `maxColumns` full-width columns; `w-full`
+  // keeps it bounded by the available window (columns shrink/wrap when narrower).
+  const maxColumns = units.reduce(
+    (n, u) => (u.type === "bot" ? Math.max(n, 1 + u.perspectives.length) : n),
+    0,
+  );
+  const columnsMode = layout === "columns" && maxColumns > 1;
+  // 48rem = max-w-3xl per column; 1rem = gap-4 between columns.
+  const columnsMaxWidth = `calc(${maxColumns} * 48rem + ${maxColumns - 1} * 1rem)`;
 
   useEffect(() => {
     if (!messagesByChat[chatId]) loadMessages(chatId);
@@ -179,18 +194,36 @@ export function MessageThread({ chatId }: { chatId: string }) {
   return (
     <div className="relative flex flex-1 flex-col overflow-hidden">
       <div className="flex-1 overflow-y-auto px-3 py-4 sm:px-6" ref={containerRef}>
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-5" ref={innerRef}>
-          {units.map((unit, i) =>
-            unit.type === "user" ? (
-              <UserMessage key={unit.message.id} message={unit.message} />
+        <div
+          className={`mx-auto flex w-full flex-col gap-5 ${columnsMode ? "" : "max-w-3xl"}`}
+          style={columnsMode ? { maxWidth: columnsMaxWidth } : undefined}
+          ref={innerRef}
+        >
+          {units.map((unit, i) => {
+            // A bot turn with perspectives spans the full (widened) frame so its
+            // columns can spread; everything else stays at the normal width.
+            const spansFull = columnsMode && unit.type === "bot" && unit.perspectives.length > 0;
+            const node =
+              unit.type === "user" ? (
+                <UserMessage message={unit.message} />
+              ) : (
+                <BotTurnView turn={unit} isLatest={i === lastBotIdx} />
+              );
+            const key = unit.type === "user" ? unit.message.id : `bot-${i}`;
+            return spansFull ? (
+              <div key={key}>{node}</div>
             ) : (
-              <BotTurnView key={`bot-${i}`} turn={unit} isLatest={i === lastBotIdx} />
-            ),
-          )}
-          {streaming && <StatusBanner streaming={streaming} chatId={chatId} />}
-          {Object.entries(perspectiveStreams).map(([zoneId, ps]) => (
-            <PerspectiveStatusBanner key={zoneId} streaming={ps} zoneId={zoneId} chatId={chatId} />
-          ))}
+              <div key={key} className={columnsMode ? "mx-auto w-full max-w-3xl" : "contents"}>
+                {node}
+              </div>
+            );
+          })}
+          <div className={columnsMode ? "mx-auto w-full max-w-3xl" : "contents"}>
+            {streaming && <StatusBanner streaming={streaming} chatId={chatId} />}
+            {Object.entries(perspectiveStreams).map(([zoneId, ps]) => (
+              <PerspectiveStatusBanner key={zoneId} streaming={ps} zoneId={zoneId} chatId={chatId} />
+            ))}
+          </div>
           <div ref={endRef} />
         </div>
       </div>

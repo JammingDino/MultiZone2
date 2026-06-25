@@ -220,13 +220,17 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 *MCP is a first-class settings section, distinct from the existing tool config JSON in the zone editor.*
 
-- [ ] Settings → MCP: add, edit, remove MCP server connections (name, transport type: stdio/SSE, URL or command)
-- [ ] On connecting a server: fetch tool list and display name, description, input schema for each tool
-- [ ] User sets a danger level (safe / moderate / dangerous) per MCP tool
-- [ ] MCP tools appear in the zone editor's tools list alongside built-in tools, with their danger badge
-- [ ] Per-zone MCP tool enablement: each zone independently enables/disables specific MCP tools
-- [ ] MCP tool calls route through the same approval/execution pipeline as built-in tools
-- [ ] Server connection status shown in settings (connected / error / disconnected)
+*The MCP client is hand-rolled (no heavy SDK) — JSON-RPC 2.0 over **stdio** (spawned subprocess, the dominant desktop transport) or **SSE/streamable-HTTP** (remote URL via reqwest). Live connections are cached in a process-global manager keyed by server id, so a stdio child stays warm across tool calls instead of paying npx-startup per call (`src-tauri/src/mcp/mod.rs`). Servers + their discovered tools persist in `mcp_servers` / `mcp_tools` (migration 018); each tool carries a user-assigned danger level (default moderate). Per-zone enablement reuses the zone's `tools_enabled` array via the stable qualified id `mcp__<shortServerId>__<tool>`; `build_tools_for_zone` appends MCP defs, `tools::dispatch` routes `mcp__` names to the manager, and the approval gate substitutes each tool's danger level for the built-in `tool_safety_by_name`.*
+
+*Status: built & typechecked (cargo check + `npm run build` green, MCP unit tests pass); not yet runtime-tested against a live MCP server. Connection status is runtime-only (in-memory, not persisted).*
+
+- [x] Settings → MCP: add, edit, remove MCP server connections (name, transport type: stdio/SSE, URL or command) — `McpServerEditor`; stdio takes a command + optional JSON env, SSE takes a URL
+- [x] On connecting a server: fetch tool list and display name, description, input schema for each tool — `connect_mcp_server` runs the initialize handshake + `tools/list`, reconciles `mcp_tools` (new inserted, stale pruned, danger preserved); each tool row expands to show its description + input schema
+- [x] User sets a danger level (safe / moderate / dangerous) per MCP tool — per-tool selector (`set_mcp_tool_danger`)
+- [x] MCP tools appear in the zone editor's tools list alongside built-in tools, with their danger badge — grouped per server under the built-in Tools list
+- [x] Per-zone MCP tool enablement: each zone independently enables/disables specific MCP tools — toggles the qualified id in `tools_enabled`
+- [x] MCP tool calls route through the same approval/execution pipeline as built-in tools — `dispatch` forwards `mcp__` names to `mcp::manager().call`, gated by the tool's danger level
+- [x] Server connection status shown in settings (connected / error / disconnected) — live status pill, error tooltip on failed connect
 
 ### 0.4.3 — RAG / local document knowledge
 

@@ -153,6 +153,41 @@ pub struct Memory {
     pub updated_at: i64,
 }
 
+/// A registered MCP (Model Context Protocol) server. `transport` is "stdio"
+/// (spawn `command` as a local subprocess) or "sse" (connect to the remote
+/// `url`). Connection status is runtime-only and not stored here.
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct McpServer {
+    pub id: String,
+    pub name: String,
+    pub transport: String,
+    pub command: Option<String>,
+    pub url: Option<String>,
+    /// JSON object of environment variables for the stdio child process.
+    pub env: Option<String>,
+    pub enabled: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// A tool advertised by an MCP server, captured at connect time. `danger_level`
+/// (0 safe / 1 moderate / 2 dangerous) is user-assigned and feeds the same
+/// approval pipeline as built-in tools.
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct McpTool {
+    pub id: String,
+    pub server_id: String,
+    pub name: String,
+    pub description: Option<String>,
+    /// JSON schema string describing the tool's input.
+    pub input_schema: Option<String>,
+    pub danger_level: i64,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct Message {

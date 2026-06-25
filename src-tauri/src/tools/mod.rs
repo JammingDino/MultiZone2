@@ -209,6 +209,18 @@ pub async fn dispatch(
     http: &reqwest::Client,
 ) -> AppResult<String> {
     let args: Value = serde_json::from_str(arguments).unwrap_or(Value::Null);
+
+    // MCP tools (`mcp__<server>__<tool>`) route through the global MCP manager,
+    // which connects lazily and forwards `tools/call`.
+    if crate::mcp::is_mcp_tool(name) {
+        let call_args = if args.is_null() {
+            Value::Object(Default::default())
+        } else {
+            args
+        };
+        return crate::mcp::manager().call(name, call_args).await;
+    }
+
     match name {
         "get_current_datetime" => datetime::run(&args).await,
         "web_search" => web_search::run(&args, zone_config, http).await,

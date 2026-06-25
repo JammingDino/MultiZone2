@@ -1,6 +1,7 @@
 mod api;
 mod db;
 mod llm;
+mod mcp;
 mod ocr;
 mod tools;
 mod commands;
@@ -111,6 +112,12 @@ pub fn run() {
             commands::skills::upsert_skill,
             commands::skills::set_skill_enabled,
             commands::skills::delete_skill,
+            commands::mcp::list_mcp_servers,
+            commands::mcp::upsert_mcp_server,
+            commands::mcp::delete_mcp_server,
+            commands::mcp::connect_mcp_server,
+            commands::mcp::disconnect_mcp_server,
+            commands::mcp::set_mcp_tool_danger,
             commands::memory::list_memories,
             commands::memory::upsert_memory,
             commands::memory::delete_memory,

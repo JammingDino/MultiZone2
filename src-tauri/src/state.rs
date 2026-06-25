@@ -45,6 +45,10 @@ impl AppState {
             .user_agent("MultiZone/0.1.0")
             .build()?;
 
+        // Process-global MCP manager: owns live server connections + status, and
+        // looks up server/tool config from the same pool.
+        crate::mcp::init(db.clone(), http.clone());
+
         Ok(Self {
             db,
             http,

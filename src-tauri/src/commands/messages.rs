@@ -1048,7 +1048,13 @@ async fn run_participant_turn(
     } else {
         None
     };
-    let mut tools = build_tools_for_zone(&zone, &tool_ctx);
+    let mut tools = build_tools_for_zone(&ctx.db, &zone, &tool_ctx).await;
+    // Per-zone MCP tool danger levels, refreshed on zone switch, consulted by the
+    // approval gate alongside built-in `tool_safety_by_name`.
+    let mut mcp_danger = {
+        let ids: Vec<String> = serde_json::from_str(&zone.tools_enabled).unwrap_or_default();
+        crate::mcp::danger_for_ids(&ctx.db, &ids).await
+    };
     let mut zone_config: Value =
         serde_json::from_str(&zone.tool_config).unwrap_or(Value::Object(Default::default()));
 
@@ -1303,8 +1309,12 @@ async fn run_participant_turn(
                 return Ok(());
             }
 
-            // Check whether this tool needs explicit user approval.
-            let tool_safety = tools::tool_safety_by_name(&tc.function.name);
+            // Check whether this tool needs explicit user approval. MCP tools
+            // carry a user-assigned danger level; built-ins use their static one.
+            let tool_safety = mcp_danger
+                .get(&tc.function.name)
+                .copied()
+                .unwrap_or_else(|| tools::tool_safety_by_name(&tc.function.name));
             let needs_approval = approval_needed(&auto_approve_level, tool_safety);
 
             let approved = if needs_approval {
@@ -1455,7 +1465,12 @@ async fn run_participant_turn(
                         current_zone_id = Some(new_zone_id.clone());
                         zone = new_zone;
                         provider = new_provider;
-                        tools = build_tools_for_zone(&zone, &tool_ctx);
+                        tools = build_tools_for_zone(&ctx.db, &zone, &tool_ctx).await;
+                        mcp_danger = {
+                            let ids: Vec<String> =
+                                serde_json::from_str(&zone.tools_enabled).unwrap_or_default();
+                            crate::mcp::danger_for_ids(&ctx.db, &ids).await
+                        };
                         zone_config = serde_json::from_str(&zone.tool_config)
                             .unwrap_or(Value::Object(Default::default()));
                         if let Some(ws) = &global_ws_cfg {
@@ -1994,14 +2009,16 @@ fn user_message_content(m: &Message, downgrade_images: bool) -> Option<MessageCo
     Some(MessageContent::Parts(parts))
 }
 
-fn build_tools_for_zone(zone: &Zone, ctx: &ToolContext) -> Vec<Tool> {
+async fn build_tools_for_zone(db: &SqlitePool, zone: &Zone, ctx: &ToolContext) -> Vec<Tool> {
     let ids: Vec<String> = serde_json::from_str(&zone.tools_enabled).unwrap_or_default();
     let mut tools = Vec::new();
-    for id in ids {
-        if let Some(tid) = ToolId::from_str(&id) {
+    for id in &ids {
+        if let Some(tid) = ToolId::from_str(id) {
             tools.extend(tid.definitions(ctx));
         }
     }
+    // MCP tools enabled on this zone (qualified ids `mcp__<server>__<tool>`).
+    tools.extend(crate::mcp::tool_defs_for_ids(db, &ids).await);
     tools
 }
 

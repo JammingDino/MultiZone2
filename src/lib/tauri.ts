@@ -9,6 +9,8 @@ import type {
   LibraryEntry,
   DbStats,
   InputPart,
+  McpServer,
+  McpServerView,
   Memory,
   Message,
   Project,
@@ -93,6 +95,25 @@ export const upsertSkill = (skill: Partial<Skill> & { name: string }) =>
 export const setSkillEnabled = (id: string, enabled: boolean) =>
   invoke<void>("set_skill_enabled", { id, enabled });
 export const deleteSkill = (id: string) => invoke<void>("delete_skill", { id });
+
+// MCP (Model Context Protocol) servers + tools
+export const listMcpServers = () => invoke<McpServerView[]>("list_mcp_servers");
+export const upsertMcpServer = (server: {
+  id?: string;
+  name: string;
+  transport: string;
+  command?: string | null;
+  url?: string | null;
+  env?: string | null;
+  enabled?: boolean;
+}) => invoke<McpServer>("upsert_mcp_server", { server });
+export const deleteMcpServer = (id: string) => invoke<void>("delete_mcp_server", { id });
+export const connectMcpServer = (id: string) =>
+  invoke<McpServerView>("connect_mcp_server", { id });
+export const disconnectMcpServer = (id: string) =>
+  invoke<void>("disconnect_mcp_server", { id });
+export const setMcpToolDanger = (toolId: string, dangerLevel: number) =>
+  invoke<void>("set_mcp_tool_danger", { toolId, dangerLevel });
 
 // Memory
 export const listMemories = () => invoke<Memory[]>("list_memories");

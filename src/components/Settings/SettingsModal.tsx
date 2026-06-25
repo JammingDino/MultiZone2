@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { X, Plus, Trash2, RefreshCw, Server, Palette, MessageSquare, Database, AlertTriangle, Loader2, Folder, FolderOpen, Globe, Copy, Check, Search, Brain, Sparkles, FileUp, FileDown } from "lucide-react";
+import { X, Plus, Trash2, RefreshCw, Server, Palette, MessageSquare, Database, AlertTriangle, Loader2, Folder, FolderOpen, Globe, Copy, Check, Search, Brain, Sparkles, FileUp, FileDown, Plug, Wifi, WifiOff } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useApp } from "@/store/app";
 import type { BackgroundEffect } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
-import type { DbStats, Provider, Skill } from "@/lib/types";
+import type { DbStats, McpServerView, McpTool, Provider, Skill } from "@/lib/types";
 
-type Tab = "providers" | "appearance" | "chat" | "search" | "skills" | "memory" | "api" | "data";
+type Tab = "providers" | "appearance" | "chat" | "search" | "skills" | "mcp" | "memory" | "api" | "data";
 
 export function SettingsModal() {
   const { closeSettings } = useApp();
@@ -29,6 +29,7 @@ export function SettingsModal() {
             <TabButton active={tab === "chat"} icon={<MessageSquare size={14} />} label="Chat" onClick={() => setTab("chat")} />
             <TabButton active={tab === "search"} icon={<Search size={14} />} label="Search" onClick={() => setTab("search")} />
             <TabButton active={tab === "skills"} icon={<Sparkles size={14} />} label="Skills" onClick={() => setTab("skills")} />
+            <TabButton active={tab === "mcp"} icon={<Plug size={14} />} label="MCP" onClick={() => setTab("mcp")} />
             <TabButton active={tab === "memory"} icon={<Brain size={14} />} label="Memory" onClick={() => setTab("memory")} />
             <TabButton active={tab === "api"} icon={<Globe size={14} />} label="API" onClick={() => setTab("api")} />
             <TabButton active={tab === "data"} icon={<Database size={14} />} label="Data" onClick={() => setTab("data")} />
@@ -39,6 +40,7 @@ export function SettingsModal() {
             {tab === "chat" && <ChatTab />}
             {tab === "search" && <SearchTab />}
             {tab === "skills" && <SkillsTab />}
+            {tab === "mcp" && <McpTab />}
             {tab === "memory" && <MemoryTab />}
             {tab === "api" && <ApiTab />}
             {tab === "data" && <DataTab />}
@@ -835,6 +837,326 @@ function SkillEditor({
           {skill ? "Save" : "Create skill"}
         </button>
       </div>
+    </div>
+  );
+}
+
+// ─── MCP (Model Context Protocol) ───────────────────────────────────────────────
+
+const DANGER_META: Record<number, { label: string; cls: string }> = {
+  0: { label: "Safe",      cls: "border-green-600/40  bg-green-600/10  text-green-500" },
+  1: { label: "Moderate",  cls: "border-yellow-600/40 bg-yellow-600/10 text-yellow-500" },
+  2: { label: "Dangerous", cls: "border-red-600/40    bg-red-600/10    text-red-500" },
+};
+
+function StatusPill({ status }: { status: McpServerView["status"] }) {
+  const meta = {
+    connected:   { icon: <Wifi size={11} />,    cls: "border-green-600/40 bg-green-600/10 text-green-500", label: "Connected" },
+    error:       { icon: <WifiOff size={11} />,  cls: "border-red-600/40   bg-red-600/10   text-red-500",   label: "Error" },
+    disconnected:{ icon: <WifiOff size={11} />,  cls: "border-[var(--color-border)] text-[var(--color-text-muted)]", label: "Disconnected" },
+  }[status.state];
+  return (
+    <span
+      title={status.error || undefined}
+      className={`flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium ${meta.cls}`}
+    >
+      {meta.icon} {meta.label}
+    </span>
+  );
+}
+
+function McpTab() {
+  const mcpServers = useApp((s) => s.mcpServers);
+  const refreshMcpServers = useApp((s) => s.refreshMcpServers);
+  const [editing, setEditing] = useState<McpServerView | "new" | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [errorById, setErrorById] = useState<Record<string, string>>({});
+
+  useEffect(() => { refreshMcpServers().catch(console.error); }, [refreshMcpServers]);
+
+  async function connect(s: McpServerView) {
+    setBusyId(s.id);
+    setErrorById((e) => ({ ...e, [s.id]: "" }));
+    try {
+      await api.connectMcpServer(s.id);
+    } catch (e) {
+      setErrorById((prev) => ({ ...prev, [s.id]: String(e) }));
+    } finally {
+      setBusyId(null);
+      await refreshMcpServers();
+    }
+  }
+
+  async function disconnect(s: McpServerView) {
+    await api.disconnectMcpServer(s.id);
+    await refreshMcpServers();
+  }
+
+  async function remove(s: McpServerView) {
+    if (!confirm(`Remove MCP server "${s.name}"? Its tools will be unenrolled from every zone.`)) return;
+    await api.deleteMcpServer(s.id);
+    await refreshMcpServers();
+  }
+
+  async function setDanger(toolId: string, level: number) {
+    await api.setMcpToolDanger(toolId, level);
+    await refreshMcpServers();
+  }
+
+  if (editing) {
+    return (
+      <McpServerEditor
+        server={editing === "new" ? null : editing}
+        onDone={async () => { setEditing(null); await refreshMcpServers(); }}
+        onCancel={() => setEditing(null)}
+      />
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <section>
+        <h3 className="mb-1 text-sm font-medium">MCP servers</h3>
+        <p className="text-xs text-[var(--color-text-muted)]">
+          Connect external <span className="font-mono">Model Context Protocol</span> servers — local
+          commands (stdio) or remote endpoints (SSE/HTTP). On connect, MultiZone fetches the server's
+          tools; set a danger level per tool, then enable specific tools per zone in the zone editor.
+          MCP tool calls go through the same approval pipeline as built-in tools.
+        </p>
+      </section>
+
+      <div>
+        <button
+          onClick={() => setEditing("new")}
+          className="flex items-center gap-1.5 rounded border border-dashed border-[var(--color-border)] px-3 py-1.5 text-xs transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+        >
+          <Plus size={12} /> Add server
+        </button>
+      </div>
+
+      {mcpServers.length === 0 ? (
+        <div className="rounded border border-dashed border-[var(--color-border)] p-4 text-xs text-[var(--color-text-muted)]">
+          No MCP servers yet.
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {mcpServers.map((s) => (
+            <div key={s.id} className="rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate text-sm font-medium">{s.name}</span>
+                    <span className="rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[10px] uppercase text-[var(--color-text-muted)]">
+                      {s.transport}
+                    </span>
+                    <StatusPill status={s.status} />
+                    {!s.enabled && (
+                      <span className="rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]">disabled</span>
+                    )}
+                  </div>
+                  <div className="mt-0.5 truncate font-mono text-[11px] text-[var(--color-text-muted)]">
+                    {s.transport === "stdio" ? s.command : s.url}
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    onClick={() => connect(s)}
+                    disabled={busyId === s.id}
+                    className="flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1 text-[11px] hover:border-[var(--color-accent)] disabled:opacity-50"
+                  >
+                    {busyId === s.id ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+                    {s.status.state === "connected" ? "Refresh" : "Connect"}
+                  </button>
+                  {s.status.state === "connected" && (
+                    <button onClick={() => disconnect(s)} className="rounded px-2 py-1 text-[11px] text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)]">Disconnect</button>
+                  )}
+                  <button onClick={() => setEditing(s)} className="rounded px-2 py-1 text-[11px] text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)]">Edit</button>
+                  <button onClick={() => remove(s)} className="rounded p-1 text-[var(--color-text-muted)] hover:text-[var(--color-danger)]" title="Delete">
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              </div>
+
+              {errorById[s.id] && (
+                <div className="mt-2 rounded border border-red-600/40 bg-red-600/10 p-2 text-[11px] text-red-500">
+                  {errorById[s.id]}
+                </div>
+              )}
+
+              {s.tools.length > 0 && (
+                <div className="mt-3 flex flex-col gap-1.5 border-t border-[var(--color-border)] pt-2">
+                  <div className="text-[11px] font-medium text-[var(--color-text-muted)]">
+                    Tools ({s.tools.length})
+                  </div>
+                  {s.tools.map((t) => (
+                    <McpToolRow key={t.id} tool={t} onSetDanger={(lvl) => setDanger(t.id, lvl)} />
+                  ))}
+                </div>
+              )}
+              {s.tools.length === 0 && s.status.state === "connected" && (
+                <div className="mt-2 text-[11px] text-[var(--color-text-muted)]">This server advertised no tools.</div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function McpToolRow({ tool, onSetDanger }: { tool: McpTool; onSetDanger: (level: number) => void }) {
+  const [open, setOpen] = useState(false);
+  const badge = DANGER_META[tool.dangerLevel] ?? DANGER_META[1];
+  return (
+    <div className="rounded border border-[var(--color-border)] bg-[var(--color-panel)] p-2 text-xs">
+      <div className="flex items-start justify-between gap-2">
+        <button onClick={() => setOpen((v) => !v)} className="min-w-0 flex-1 text-left">
+          <div className="flex items-center gap-1.5">
+            <span className="truncate font-mono text-[11px] font-medium">{tool.name}</span>
+            <span className={`rounded border px-1.5 py-0.5 text-[10px] font-medium ${badge.cls}`}>{badge.label}</span>
+          </div>
+          {tool.description && (
+            <div className="mt-0.5 line-clamp-1 text-[var(--color-text-muted)]">{tool.description}</div>
+          )}
+        </button>
+        <select
+          value={tool.dangerLevel}
+          onChange={(e) => onSetDanger(Number(e.target.value))}
+          className="shrink-0 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-1.5 py-1 text-[11px] outline-none focus:border-[var(--color-accent)]"
+          title="Danger level — drives the approval prompt"
+        >
+          <option value={0}>Safe</option>
+          <option value={1}>Moderate</option>
+          <option value={2}>Dangerous</option>
+        </select>
+      </div>
+      {open && (
+        <div className="mt-2 border-t border-[var(--color-border)] pt-2">
+          {tool.description && <div className="mb-2 text-[var(--color-text-muted)]">{tool.description}</div>}
+          <div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">Input schema</div>
+          <pre className="max-h-40 overflow-auto rounded bg-[var(--color-bg)] p-2 font-mono text-[10px] text-[var(--color-text-muted)]">
+            {tool.inputSchema ? prettyJson(tool.inputSchema) : "(none)"}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function prettyJson(raw: string): string {
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2);
+  } catch {
+    return raw;
+  }
+}
+
+function McpServerEditor({
+  server,
+  onDone,
+  onCancel,
+}: {
+  server: McpServerView | null;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(server?.name ?? "");
+  const [transport, setTransport] = useState<"stdio" | "sse">(server?.transport ?? "stdio");
+  const [command, setCommand] = useState(server?.command ?? "");
+  const [url, setUrl] = useState(server?.url ?? "");
+  const [env, setEnv] = useState(server?.env ?? "");
+  const [enabled, setEnabled] = useState(server?.enabled ?? true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function onSave() {
+    if (!name.trim()) return;
+    if (transport === "stdio" && !command.trim()) { setError("A stdio server needs a command."); return; }
+    if (transport === "sse" && !url.trim()) { setError("An SSE/HTTP server needs a URL."); return; }
+    if (env.trim()) {
+      try { JSON.parse(env); } catch { setError("Env must be valid JSON (e.g. {\"API_KEY\":\"…\"})."); return; }
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await api.upsertMcpServer({
+        id: server?.id,
+        name: name.trim(),
+        transport,
+        command: transport === "stdio" ? command.trim() : null,
+        url: transport === "sse" ? url.trim() : null,
+        env: env.trim() || null,
+        enabled,
+      });
+      onDone();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-medium">{server ? "Edit MCP server" : "Add MCP server"}</h3>
+        <button onClick={onCancel} className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]">← Back</button>
+      </div>
+
+      <label className="block">
+        <div className="mb-1 text-xs text-[var(--color-text-muted)]">Name</div>
+        <input value={name} onChange={(e) => setName(e.target.value)} className="w-full rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]" placeholder="e.g. Filesystem" />
+      </label>
+
+      <label className="block">
+        <div className="mb-1 text-xs text-[var(--color-text-muted)]">Transport</div>
+        <select value={transport} onChange={(e) => setTransport(e.target.value as "stdio" | "sse")} className="w-full rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]">
+          <option value="stdio">stdio (local command)</option>
+          <option value="sse">SSE / HTTP (remote URL)</option>
+        </select>
+      </label>
+
+      {transport === "stdio" ? (
+        <>
+          <label className="block">
+            <div className="mb-1 text-xs text-[var(--color-text-muted)]">Command</div>
+            <input value={command} onChange={(e) => setCommand(e.target.value)} className="w-full rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 font-mono text-xs outline-none focus:border-[var(--color-accent)]" placeholder="npx -y @modelcontextprotocol/server-filesystem ." />
+          </label>
+          <label className="block">
+            <div className="mb-1 text-xs text-[var(--color-text-muted)]">Environment variables <span className="opacity-60">(optional JSON)</span></div>
+            <textarea value={env} onChange={(e) => setEnv(e.target.value)} rows={3} className="w-full rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 font-mono text-xs outline-none focus:border-[var(--color-accent)]" placeholder='{ "API_KEY": "…" }' />
+          </label>
+        </>
+      ) : (
+        <label className="block">
+          <div className="mb-1 text-xs text-[var(--color-text-muted)]">URL</div>
+          <input value={url} onChange={(e) => setUrl(e.target.value)} className="w-full rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 font-mono text-xs outline-none focus:border-[var(--color-accent)]" placeholder="https://example.com/mcp" />
+        </label>
+      )}
+
+      <label className="flex cursor-pointer items-center gap-2 text-sm">
+        <button
+          onClick={() => setEnabled((v) => !v)}
+          className={`relative h-5 w-9 rounded-full transition-colors ${enabled ? "bg-[var(--color-accent)]" : "bg-[var(--color-border)]"}`}
+        >
+          <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all duration-200 ${enabled ? "translate-x-4" : ""}`} />
+        </button>
+        <span>Enabled — its tools are available to zones</span>
+      </label>
+
+      {error && (
+        <div className="rounded border border-red-600/40 bg-red-600/10 p-2 text-[11px] text-red-500">{error}</div>
+      )}
+
+      <div className="flex items-center justify-end gap-2 border-t border-[var(--color-border)] pt-3">
+        <button onClick={onCancel} className="rounded px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)]">Cancel</button>
+        <button onClick={onSave} disabled={saving || !name.trim()} className="rounded bg-[var(--color-accent)] px-3 py-1.5 text-xs text-white disabled:opacity-50">
+          {server ? "Save" : "Add server"}
+        </button>
+      </div>
+      <p className="text-[11px] text-[var(--color-text-muted)]">
+        After saving, click <span className="font-medium">Connect</span> to fetch this server's tools.
+      </p>
     </div>
   );
 }

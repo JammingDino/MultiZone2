@@ -149,6 +149,60 @@ export interface Skill {
   updatedAt: number;
 }
 
+/** A registered MCP (Model Context Protocol) server. */
+export interface McpServer {
+  id: string;
+  name: string;
+  /** "stdio" (spawn a command) or "sse" (connect to a URL). */
+  transport: "stdio" | "sse";
+  /** stdio: command line to run. */
+  command: string | null;
+  /** sse: endpoint URL. */
+  url: string | null;
+  /** stdio: JSON object string of env vars. */
+  env: string | null;
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** A tool advertised by an MCP server, with a user-assigned danger level. */
+export interface McpTool {
+  id: string;
+  serverId: string;
+  name: string;
+  description: string | null;
+  /** JSON-schema string for the tool's input. */
+  inputSchema: string | null;
+  /** 0 safe / 1 moderate / 2 dangerous. */
+  dangerLevel: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** Runtime connection status for an MCP server (not persisted). */
+export interface McpServerStatus {
+  /** "connected" | "error" | "disconnected" */
+  state: "connected" | "error" | "disconnected";
+  error?: string;
+}
+
+/** A server plus its persisted tools and live status — Settings → MCP shape. */
+export interface McpServerView extends McpServer {
+  tools: McpTool[];
+  status: McpServerStatus;
+}
+
+/**
+ * The per-zone enable id for an MCP tool: `mcp__<shortServerId>__<tool>`, where
+ * shortServerId is the first 8 hex chars of the server's UUID (dashes stripped).
+ * Mirrors the Rust `mcp::qualified_name`.
+ */
+export function mcpToolEnableId(serverId: string, toolName: string): string {
+  const short = serverId.replace(/-/g, "").slice(0, 8);
+  return `mcp__${short}__${toolName}`;
+}
+
 /** A model-managed long-term memory entry. */
 export interface Memory {
   id: string;

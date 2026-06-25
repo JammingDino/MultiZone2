@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { DEFAULT_APP_SETTINGS, type AppSettings, type Chat, type ChatTagEntry, type ChatTagLink, type ChatZone, type Memory, type Message, type Project, type Provider, type Skill, type Tag, type Zone } from "@/lib/types";
+import { DEFAULT_APP_SETTINGS, type AppSettings, type Chat, type ChatTagEntry, type ChatTagLink, type ChatZone, type McpServerView, type Memory, type Message, type Project, type Provider, type Skill, type Tag, type Zone } from "@/lib/types";
 import * as api from "@/lib/tauri";
 
 export type StreamPhase =
@@ -73,6 +73,8 @@ interface AppStore {
   tags: Tag[];
   /** Global skill catalog — managed in Settings → Skills. */
   skills: Skill[];
+  /** Registered MCP servers (+ their tools and live status) — Settings → MCP. */
+  mcpServers: McpServerView[];
   /** All memory entries across scopes — backs the settings viewer. */
   memories: Memory[];
   tagsByChat: Record<string, ChatTagEntry[]>;
@@ -162,6 +164,7 @@ interface AppStore {
   refreshProjects: () => Promise<void>;
   refreshTags: () => Promise<void>;
   refreshSkills: () => Promise<void>;
+  refreshMcpServers: () => Promise<void>;
   refreshMemories: () => Promise<void>;
   refreshChatTagLinks: () => Promise<void>;
   loadChatTags: (chatId: string) => Promise<void>;
@@ -278,6 +281,7 @@ export const useApp = create<AppStore>((set, get) => ({
   projects: [],
   tags: [],
   skills: [],
+  mcpServers: [],
   memories: [],
   tagsByChat: {},
   chatTagLinks: [],
@@ -883,6 +887,10 @@ export const useApp = create<AppStore>((set, get) => ({
   async refreshSkills() {
     const skills = await api.listSkills();
     set({ skills });
+  },
+  async refreshMcpServers() {
+    const mcpServers = await api.listMcpServers();
+    set({ mcpServers });
   },
   async refreshMemories() {
     const memories = await api.listMemories();

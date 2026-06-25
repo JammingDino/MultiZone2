@@ -190,7 +190,33 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ## 0.4.x — Research & Sources
 
-### 0.4.0 — MCP (Model Context Protocol)
+### 0.4.0 — OCR & automatic model detection
+
+*OCR uses the **pure-Rust `ocrs` engine** (ocrs + rten), not native Tesseract, to keep the cross-platform build clean — consistent with the codebase's rustls / `pdf-extract` no-native-deps pattern. The two `.rten` model files are loaded at runtime from `<app_data_dir>/ocr_models/` (created on first launch); when absent, image OCR degrades gracefully (a clear placeholder is sent) rather than breaking the turn. The vision-capability check is a model-name heuristic shared between backend (`ocr::is_vision_capable`) and frontend (`lib/vision.ts`) — unrecognised models are treated as text-only so their images are OCR'd rather than dropped.*
+
+*Status: built & typechecked (cargo check + `npm run build` green); image-OCR not yet runtime-tested (requires the `.rten` model files to be present). Detection, PDF text fallback, indicator, and language setting are exercisable without the models.*
+
+- [x] Automatic text-only model detection: model-name heuristic identifying vision-capable families; everything else treated as vision-incapable
+- [x] When a vision-incapable model receives an image attachment: run OCR (pure-Rust `ocrs`, swapped in for Tesseract) and send extracted text — applied in `build_message_history`, results cached per-image to avoid re-OCR each turn
+- [x] PDF fallback: if model is vision-incapable, the input bar extracts PDF text (PDF.js) regardless of PDF mode; the backend OCR also covers any PDF pages that still arrive as images
+- [x] User-visible indicator when OCR fallback is active — amber badge in the input bar whenever the chosen model can't see images and an image/PDF is attached
+- [x] OCR language hint setting in Settings (`ocrLanguage`, default `eng`) — plumbed to the OCR call (note: bundled `ocrs` models are English/Latin-centric, so the hint has limited effect until language-specific models are added)
+- [~] *Limitations:* OCR fallback applies on the single-zone history path; multi-model/perspective chats are not yet OCR'd. Message-header (post-send) OCR indicator deferred — the input-bar indicator covers the pre-send case.
+
+### 0.4.1 — Inline citations (current — release)
+
+*Citations are derived per bot turn: web_search results (numbered with a `ref` + source URL in the tool output) plus the round's file attachments are collected into one ordered, de-duplicated list (`lib/citations.ts`). A remark plugin (`lib/remarkCitations.ts`) rewrites inline `[n]` markers in the answer into clickable superscript links (web) or styled markers (file); a collapsible "Sources" list (`CitationSources`) renders the full list at the foot of the message, numbered to match. The same path serves the primary and every perspective card.*
+
+*Status: built & typechecked (cargo check + `npm run build` green); not yet runtime-tested. Inline-marker accuracy depends on the model emitting `[n]` per the tool's citation instructions; the Sources list is deterministic regardless.*
+
+- [x] Web search tool results tag each used snippet with its source URL — each result carries a `ref` number + `url`, plus a `citation_instructions` note nudging inline `[n]` citation
+- [x] Assistant messages with web search results render inline citation markers linked to source URLs — `[n]` rewritten to superscript links via the remark plugin (code/inline-code left untouched)
+- [x] Citation list at the bottom of the message (collapsible) — `CitationSources`, numbered to match the inline markers, with domain + title per web source
+- [x] File attachment references generate citations by filename and page number — PDF attachments from the round's user message become file citations (filename + page count)
+- [~] *Limitations:* `[n]` mapping is global per turn in encounter order, so it's exact for the common single-search turn but best-effort across multiple searches (the Sources list stays correct either way). Only PDFs yield file citations — images/other types aren't reliably named in stored message parts; precise per-page file citation is not yet supported.
+
+
+### 0.4.2 — MCP (Model Context Protocol)
 
 *MCP is a first-class settings section, distinct from the existing tool config JSON in the zone editor.*
 
@@ -201,21 +227,6 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [ ] Per-zone MCP tool enablement: each zone independently enables/disables specific MCP tools
 - [ ] MCP tool calls route through the same approval/execution pipeline as built-in tools
 - [ ] Server connection status shown in settings (connected / error / disconnected)
-
-### 0.4.1 — OCR & automatic model detection
-
-- [ ] Automatic text-only model detection: identify vision-incapable models by model name or provider capability flags
-- [ ] When a vision-incapable model receives an image attachment: run OCR (Tesseract via Rust binding) and send extracted text
-- [ ] PDF fallback: if model is vision-incapable and PDF mode is "images", switch to text extraction automatically
-- [ ] User-visible indicator when OCR fallback is active in the input bar / message header
-- [ ] OCR language hint setting in Settings
-
-### 0.4.2 — Inline citations
-
-- [ ] Web search tool results tag each used snippet with its source URL
-- [ ] Assistant messages with web search results render inline citation markers linked to source URLs
-- [ ] Citation list at the bottom of the message (collapsible)
-- [ ] File attachment references generate citations by filename and page number
 
 ### 0.4.3 — RAG / local document knowledge
 

@@ -277,6 +277,24 @@ async fn get_auto_approve_level(db: &SqlitePool) -> String {
         .unwrap_or_else(|| "all".to_string())
 }
 
+/// Read the OCR language hint from persisted app_settings (0.4.0). Defaults to
+/// "eng". Passed to the OCR engine when falling back for vision-incapable models.
+async fn ocr_language(db: &SqlitePool) -> String {
+    let raw: Option<Option<String>> = sqlx::query_scalar(
+        "SELECT value FROM settings WHERE key = 'app_settings'",
+    )
+    .fetch_optional(db)
+    .await
+    .ok()
+    .flatten();
+
+    raw.flatten()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.get("ocrLanguage").and_then(|v| v.as_str()).map(String::from))
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "eng".to_string())
+}
+
 /// Returns true when the tool needs explicit user approval given the current level.
 fn approval_needed(auto_level: &str, tool_safety: u8) -> bool {
     match auto_level {
@@ -1661,6 +1679,12 @@ async fn build_message_history(
     // this only affects the API request body built here.
     let last_user_idx = rows.iter().rposition(|m| m.role == "user");
 
+    // OCR fallback (0.4.0): if the resolved model can't accept image input, every
+    // image part (uploaded images and PDF page renders) is OCR'd into text so the
+    // content still reaches the model instead of erroring or being dropped.
+    let vision_capable = crate::ocr::is_vision_capable(&zone.model);
+    let ocr_lang = if vision_capable { String::new() } else { ocr_language(db).await };
+
     for (idx, m) in rows.into_iter().enumerate() {
         let is_historical = last_user_idx.map_or(false, |li| idx < li);
 
@@ -1691,16 +1715,31 @@ async fn build_message_history(
             }
         }
 
-        // Promote hidden parts to their visible equivalents for the API.
-        // The hidden flag is only meaningful to the UI renderer.
-        let content_parts: Vec<ContentPart> = content_parts
-            .into_iter()
-            .map(|p| match p {
-                ContentPart::HiddenText { text } => ContentPart::Text { text },
-                ContentPart::HiddenImage { image_url } => ContentPart::ImageUrl { image_url },
-                other => other,
-            })
-            .collect();
+        // Promote hidden parts to their visible equivalents for the API (the
+        // hidden flag is only meaningful to the UI renderer). When the model is
+        // vision-incapable, image parts are OCR'd into text here instead.
+        let mut promoted: Vec<ContentPart> = Vec::with_capacity(content_parts.len());
+        for p in content_parts {
+            match p {
+                ContentPart::HiddenText { text } => promoted.push(ContentPart::Text { text }),
+                ContentPart::ImageUrl { image_url } | ContentPart::HiddenImage { image_url }
+                    if !vision_capable =>
+                {
+                    let extracted =
+                        crate::ocr::ocr_data_url(image_url.url.clone(), ocr_lang.clone()).await;
+                    let text = match extracted {
+                        Some(t) => format!("[Image — text extracted via OCR]\n{t}"),
+                        None => "[Image attachment — the active model cannot view images, and no text could be extracted from it via OCR.]".to_string(),
+                    };
+                    promoted.push(ContentPart::Text { text });
+                }
+                ContentPart::HiddenImage { image_url } => {
+                    promoted.push(ContentPart::ImageUrl { image_url })
+                }
+                other => promoted.push(other),
+            }
+        }
+        let content_parts: Vec<ContentPart> = promoted;
         let content = if content_parts.is_empty() {
             None
         } else if content_parts.len() == 1 {

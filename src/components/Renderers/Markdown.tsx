@@ -1,9 +1,12 @@
+import { useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import type { Components } from "react-markdown";
 import { CodeBlock } from "./CodeBlock";
+import type { Citation } from "@/lib/citations";
+import { citationPlugin } from "@/lib/remarkCitations";
 
 // Defined at module level so the reference is stable across renders.
 // An inline object literal here would cause ReactMarkdown to unmount/remount
@@ -37,11 +40,21 @@ const MD_COMPONENTS: Components = {
 const REMARK_PLUGINS = [remarkGfm, remarkMath];
 const REHYPE_PLUGINS = [rehypeKatex];
 
-export function Markdown({ source }: { source: string }) {
+export function Markdown({ source, citations }: { source: string; citations?: Citation[] }) {
+  // Append the citation plugin only when there are citations to map, so ordinary
+  // messages keep the stable module-level plugin array (no needless re-parse).
+  const remarkPlugins = useMemo(
+    () =>
+      citations && citations.length > 0
+        ? [...REMARK_PLUGINS, citationPlugin(citations)]
+        : REMARK_PLUGINS,
+    [citations],
+  );
+
   return (
     <div className="markdown" style={{ fontSize: "var(--font-size-message, 14px)" }}>
       <ReactMarkdown
-        remarkPlugins={REMARK_PLUGINS}
+        remarkPlugins={remarkPlugins}
         rehypePlugins={REHYPE_PLUGINS}
         components={MD_COMPONENTS}
       >

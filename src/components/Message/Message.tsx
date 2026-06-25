@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ContentPart, Message, InputPart } from "@/lib/types";
 import { Markdown } from "@/components/Renderers/Markdown";
 import { User, Check, X, FileType, ZoomIn } from "lucide-react";
 import { StepBlock } from "./StepBlock";
 import { MessageActions } from "./MessageActions";
+import { CitationSources } from "./CitationSources";
 import type { BotTurn, PerspectiveTurn, TurnBlock } from "@/lib/grouping";
+import { collectCitations, type Citation, type FileSource } from "@/lib/citations";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { getZoneIcon } from "@/lib/zoneIcons";
@@ -40,11 +42,19 @@ function useThrottledStreaming(source: string, streaming: boolean): string {
 }
 
 /** Renders a single text chunk, with its own streaming throttle. */
-function TextBlockView({ text, streaming }: { text: string; streaming: boolean }) {
+function TextBlockView({
+  text,
+  streaming,
+  citations,
+}: {
+  text: string;
+  streaming: boolean;
+  citations?: Citation[];
+}) {
   const visible = useThrottledStreaming(text, streaming);
   return (
     <div>
-      <Markdown source={visible} />
+      <Markdown source={visible} citations={citations} />
       {streaming && <span className="animate-pulse">▌</span>}
     </div>
   );
@@ -83,6 +93,25 @@ function parsePdfAttachments(parts: ContentPart[]): PdfAttachment[] {
   }
   if (current) result.push({ ...current, mode: "images" });
   return result;
+}
+
+/**
+ * File attachments from the primary user message that opened this turn's round,
+ * surfaced as citation sources (0.4.1). PDFs carry a page count; other file types
+ * aren't reliably named in the stored message parts, so only PDFs are returned.
+ */
+function deriveFileSources(messages: Message[], firstTurnMsgId: string | undefined): FileSource[] {
+  if (!firstTurnMsgId) return [];
+  let user: Message | null = null;
+  for (const m of messages) {
+    if (m.id === firstTurnMsgId) break;
+    if (m.role === "user" && !m.zoneId) user = m;
+  }
+  if (!user) return [];
+  return parsePdfAttachments(parseParts(user.content)).map((p) => ({
+    fileName: p.fileName,
+    pages: p.mode === "images" ? p.pages.length : undefined,
+  }));
 }
 
 type MessagePreview =
@@ -333,15 +362,24 @@ function TurnBody({
   blocks,
   isStreaming,
   chatId,
+  citations,
 }: {
   blocks: TurnBlock[];
   isStreaming: boolean;
   chatId: string;
+  citations?: Citation[];
 }) {
   let stepIdx = 0;
   const blockElements = blocks.map((block, i) => {
     if (block.kind === "text") {
-      return <TextBlockView key={`text-${i}`} text={block.text} streaming={!!block.streaming} />;
+      return (
+        <TextBlockView
+          key={`text-${i}`}
+          text={block.text}
+          streaming={!!block.streaming}
+          citations={citations}
+        />
+      );
     }
     stepIdx += 1;
     return <StepBlock key={block.step.key} step={block.step} index={stepIdx} chatId={chatId} />;
@@ -455,6 +493,18 @@ export function BotTurnView({ turn, isLatest = false }: { turn: BotTurn; isLates
   const zone = useApp((s) => s.zones.find((z) => z.id === resolvedZoneId));
   const layout = useApp((s) => s.appSettings.perspectiveLayout);
 
+  // Citation sources for the turn (web_search results + the round's file
+  // attachments). Shared with every perspective card in this round.
+  const messages = useApp((s) => s.messagesByChat[chatId]);
+  const fileSources = useMemo(
+    () => deriveFileSources(messages ?? [], turn.messageIds[0]),
+    [messages, turn.messageIds],
+  );
+  const citations = useMemo(
+    () => collectCitations(turn.blocks, fileSources),
+    [turn.blocks, fileSources],
+  );
+
   const editMessage = useApp((s) => s.editMessage);
   const [editing, setEditing] = useState(false);
   // The turn's final assistant message — the edit target / "edited" marker source.
@@ -499,6 +549,7 @@ export function BotTurnView({ turn, isLatest = false }: { turn: BotTurn; isLates
             canRegenerate={isLatest}
             layout={layout}
             branchFromMessageId={lastMessageId}
+            fileSources={fileSources}
           />
           {turn.perspectives.map((p) => (
             <ParticipantCard
@@ -513,6 +564,7 @@ export function BotTurnView({ turn, isLatest = false }: { turn: BotTurn; isLates
               regenerateZoneId={p.zoneId}
               canRegenerate={isLatest}
               layout={layout}
+              fileSources={fileSources}
             />
           ))}
         </div>
@@ -568,7 +620,15 @@ export function BotTurnView({ turn, isLatest = false }: { turn: BotTurn; isLates
               );
             })()
           ) : (
-            <TurnBody blocks={turn.blocks} isStreaming={isStreaming} chatId={chatId} />
+            <>
+              <TurnBody
+                blocks={turn.blocks}
+                isStreaming={isStreaming}
+                chatId={chatId}
+                citations={citations}
+              />
+              {!isStreaming && <CitationSources citations={citations} />}
+            </>
           )}
         </div>
       </div>
@@ -609,6 +669,7 @@ function ParticipantCard({
   canRegenerate,
   layout,
   branchFromMessageId,
+  fileSources,
 }: {
   zoneId: string | null;
   fallbackName: string;
@@ -621,7 +682,12 @@ function ParticipantCard({
   canRegenerate: boolean;
   layout: "stacked" | "columns";
   branchFromMessageId?: string;
+  fileSources?: FileSource[];
 }) {
+  const citations = useMemo(
+    () => collectCitations(blocks, fileSources ?? []),
+    [blocks, fileSources],
+  );
   const [collapsed, setCollapsed] = useState(false);
   const [editing, setEditing] = useState(false);
   const editMessage = useApp((s) => s.editMessage);
@@ -714,7 +780,15 @@ function ParticipantCard({
                 );
               })()
             ) : hasContent || isStreaming ? (
-              <TurnBody blocks={blocks} isStreaming={isStreaming} chatId={chatId} />
+              <>
+                <TurnBody
+                  blocks={blocks}
+                  isStreaming={isStreaming}
+                  chatId={chatId}
+                  citations={citations}
+                />
+                {!isStreaming && <CitationSources citations={citations} />}
+              </>
             ) : (
               <span className="text-xs italic text-[var(--color-text-muted)]">No response.</span>
             )}

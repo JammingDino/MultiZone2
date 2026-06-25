@@ -522,6 +522,24 @@ function ChatTab() {
       </section>
 
       <section>
+        <h3 className="mb-1 text-sm font-medium">OCR fallback</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          When the chosen model can't process images, attached images and PDFs are
+          converted to text via OCR before sending. This language hint guides
+          recognition (e.g. <span className="font-mono">eng</span>,{" "}
+          <span className="font-mono">deu</span>, <span className="font-mono">fra</span>).
+        </p>
+        <input
+          type="text"
+          value={appSettings.ocrLanguage}
+          onChange={(e) => setAppSettings({ ocrLanguage: e.target.value.trim() })}
+          placeholder="eng"
+          spellCheck={false}
+          className="w-32 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 text-sm outline-none focus:border-[var(--color-accent)]"
+        />
+      </section>
+
+      <section>
         <h3 className="mb-1 text-sm font-medium">Default file directory</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
           Fallback directory for file system tools when a chat isn't in a project (or the project has no directory set).

@@ -3,6 +3,7 @@ import { Loader2, Wrench, Cog, Brain, ArrowDown } from "lucide-react";
 import { useApp, type StreamingState } from "@/store/app";
 import { UserMessage, BotTurnView } from "@/components/Message/Message";
 import { groupMessages } from "@/lib/grouping";
+import { formatTokens } from "@/lib/format";
 
 const PIN_THRESHOLD_PX = 60;
 
@@ -247,9 +248,13 @@ function StatusBanner({
     icon = <Loader2 size={12} className="animate-spin" />;
     label = "Writing answer…";
   } else if (streaming.phase === "tool_calling") {
-    const t = streaming.pendingTools[streaming.pendingTools.length - 1];
-    icon = <Wrench size={12} />;
-    label = t?.name ? `Preparing tool ${t.name}…` : "Preparing tool…";
+    const tools = streaming.pendingTools;
+    const t = tools[tools.length - 1];
+    // Tool requests stream in (args build up char by char) — pulse the wrench in
+    // the accent color so it's obvious a tool call is actively being assembled.
+    icon = <Wrench size={12} className="animate-pulse text-[var(--color-accent)]" />;
+    const extra = tools.length > 1 ? ` (+${tools.length - 1} more)` : "";
+    label = t?.name ? `Requesting tool ${t.name}…${extra}` : "Requesting tool…";
   } else if (streaming.phase === "tool_running") {
     icon = <Cog size={12} className="animate-spin" />;
     label = streaming.runningTool
@@ -278,7 +283,7 @@ function StatusBanner({
         <>
           <span className="font-mono tabular-nums">{formatElapsed(elapsed)}</span>
           <span className="text-[var(--color-text-muted)]/70">·</span>
-          <span className="font-mono tabular-nums">~{liveTokens} tok</span>
+          <span className="font-mono tabular-nums">~{formatTokens(liveTokens)} tok</span>
           {liveTps !== null && (
             <>
               <span className="text-[var(--color-text-muted)]/70">·</span>

@@ -179,10 +179,18 @@ function ToolStepView({
         className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--color-panel-hover)]"
       >
         {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        <Wrench size={12} className="text-[var(--color-accent)]" />
+        <Wrench
+          size={12}
+          className={`text-[var(--color-accent)]${pending ? " animate-pulse" : ""}`}
+        />
         <span className="text-[var(--color-text-muted)]">
           Step {index} ·{" "}
           <code className="text-[var(--color-text)]">{name}</code>
+          {pending && (
+            <span className="ml-1 text-[10px] uppercase tracking-wide text-[var(--color-accent)]">
+              streaming
+            </span>
+          )}
         </span>
         <span className="ml-auto flex items-center gap-1">{statusIcon}</span>
       </button>

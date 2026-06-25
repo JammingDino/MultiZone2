@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Copy, Check, RotateCcw, BarChart3, Pencil, GitBranch } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
+import { formatTokens } from "@/lib/format";
 
 interface Props {
   /** Used for copy. */
@@ -148,17 +149,17 @@ export function MessageActions({
               />
               <StatRow
                 label="Output tokens (est.)"
-                value={String(estimateTokens(stats.contentChars))}
+                value={formatTokens(estimateTokens(stats.contentChars))}
               />
               {stats.reasoningChars > 0 && (
                 <>
                   <StatRow
                     label="Thinking tokens (est.)"
-                    value={String(estimateTokens(stats.reasoningChars))}
+                    value={formatTokens(estimateTokens(stats.reasoningChars))}
                   />
                   <StatRow
                     label="Total tokens (est.)"
-                    value={String(
+                    value={formatTokens(
                       estimateTokens(stats.contentChars + stats.reasoningChars),
                     )}
                   />
@@ -238,5 +239,5 @@ function formatSpeed(stats: {
 }
 
 function formatTokenTotal(stats: { contentChars: number; reasoningChars: number }) {
-  return String(estimateTokens(stats.contentChars + stats.reasoningChars));
+  return formatTokens(estimateTokens(stats.contentChars + stats.reasoningChars));
 }

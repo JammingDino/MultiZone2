@@ -30,8 +30,9 @@ Semantic versioning. Each release is tagged `vMAJOR.MINOR.PATCH`.
 | **0.5.x** | Subchats & Orchestration Infrastructure | Planned |
 | **0.6.x** | Multizone Mode | Planned |
 | **0.7.x** | Settings rework, UI/UX polish, DB/Markdown toggle | Planned |
+| **0.8.x** | Voice I/O — STT dictation, TTS, hands-free mode | Planned |
 | **1.0.0** | Hardening & Public Release | Planned |
-| **Post-1.0** | Code interface, Diffusion LLM, Voice, Mobile | Backlog |
+| **Post-1.0** | Code interface, Diffusion LLM, Mobile | Backlog |
 
 ---
 
@@ -93,6 +94,14 @@ A full settings audit and consistency pass. Every panel is reviewed for clarity,
 
 ---
 
+### 0.8.x — Voice I/O
+
+Voice dictation in and spoken responses out. Speech-to-text lets the user dictate into the input bar — push-to-talk or toggle-to-dictate — with live partial transcription and an optional auto-send on silence. Text-to-speech reads any response aloud, streaming-aware so playback starts sentence by sentence before the full answer lands, with an auto-speak toggle and per-zone voices. The two combine into a hands-free conversation mode with barge-in. Local models (whisper.cpp for STT, Piper/Kokoro for TTS) are the default and run fully offline, holding the local-first line; API providers (Whisper/Deepgram, OpenAI/ElevenLabs) are available but clearly marked as leaving the machine.
+
+**Done when:** a user can hold a full spoken conversation with a zone — dictate a message, hear the response read back, and interrupt it — entirely offline with local models, and "read aloud" works reliably on any individual response.
+
+---
+
 ### 1.0.0 — Hardening & Public Release
 
 Performance audit (startup time, large chat scroll, streaming), installer polish, auto-updater integration, cross-platform smoke tests (Windows, macOS, Linux), and a REQUIREMENTS.md written for onboarding contributors. No new features — this is a quality and release-infrastructure milestone.
@@ -107,7 +116,6 @@ Performance audit (startup time, large chat scroll, streaming), installer polish
 | --- | --- |
 | Code interface | Claude Code-style chat window for local models working on codebases; uses RAG/embeddings from 0.4.x for repo understanding |
 | Diffusion LLM support | Text generation via diffusion-first models (e.g. Mercury Coder); architecturally distinct from autoregressive — isolated pipeline |
-| Voice I/O | STT input and TTS output in the chat window |
 | Mobile app | Tauri mobile target (iOS/Android); post-desktop-stable |
 | Multi-user/team | Shared zones, shared projects, access control |
 | Shareable zone marketplace | Community-contributed zones beyond the local library |

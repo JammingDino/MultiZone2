@@ -292,6 +292,37 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## 0.8.x — Voice I/O
+
+*Voice dictation in and spoken responses out. Honors the local-first principle: local STT/TTS models run fully offline; any API provider is clearly marked as leaving the machine. All voice config lives in a new **Settings → Voice** section.*
+
+### 0.8.0 — Speech-to-text (dictation input)
+
+- [ ] STT provider config in Settings → Voice: local (whisper.cpp via Rust binding) or API (OpenAI Whisper, Deepgram) — local is the default
+- [ ] Microphone capture in the input bar: a mic button with push-to-talk (hold) and toggle-to-dictate (click) modes
+- [ ] Live partial transcription rendered in the input field as the user speaks; final transcript committed on stop
+- [ ] Input device selection and a visible recording / audio-level indicator while capturing
+- [ ] Language selection + auto-detect; configurable local model size (speed vs accuracy tradeoff)
+- [ ] Transcript insertion mode: insert at cursor vs replace field; optional auto-send on sustained silence (configurable threshold)
+
+### 0.8.1 — Text-to-speech (spoken responses)
+
+- [ ] TTS provider config in Settings → Voice: local (Piper / Kokoro) or API (OpenAI, ElevenLabs) — local is the default
+- [ ] "Read aloud" action on any assistant / perspective response (in MessageActions) with pause / stop controls
+- [ ] Streaming-aware playback: responses are chunked by sentence and queued as they arrive so speech starts before the full answer completes
+- [ ] Auto-speak toggle: assistant responses are spoken automatically as they stream
+- [ ] Voice selection per provider; rate and pitch controls
+- [ ] Per-zone default voice so different zones can sound distinct
+
+### 0.8.2 — Hands-free conversation mode
+
+- [ ] Voice conversation mode: STT input and TTS output chained into a continuous hands-free loop
+- [ ] Barge-in — the user speaking interrupts and stops current playback
+- [ ] Conversation state indicator in the chat header (listening / thinking / speaking)
+- [ ] Fully offline when local STT + TTS are selected; API providers surfaced as a "leaves your machine" warning consistent with the local-first principle
+
+---
+
 ## 1.0.0 — Hardening & Public Release
 
 - [ ] Performance: measure and optimize startup time, first message render, large chat (500+ messages) scroll
@@ -309,7 +340,6 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 - [ ] Code interface: chat window for local models working on codebases; uses RAG from 0.4.3; requires design session
 - [ ] Diffusion LLM support: text generation via diffusion-first models; architecturally isolated from the chat-completion pipeline
-- [ ] Voice I/O: STT input, TTS output
 - [ ] Mobile: Tauri mobile target (iOS/Android)
 - [ ] Deep research mode: multi-step sourced research using subchats; requires design session before scheduling
 - [ ] Zone snapshot/versioning: save zone config at chat creation time so editing a zone does not alter historical context

@@ -10,20 +10,52 @@ use state::AppState;
 use tauri::Manager;
 use tracing_subscriber::EnvFilter;
 
+#[cfg(not(debug_assertions))]
+fn install_panic_hook(path: std::path::PathBuf) {
+    std::panic::set_hook(Box::new(move |info| {
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        let entry = format!(
+            "[{}] {info}\n{backtrace}\n",
+            chrono::Local::now().to_rfc3339()
+        );
+        // Best-effort: the dedicated crash file is easy to point users at, and
+        // the same message goes to the rolling log for context.
+        let _ = std::fs::write(&path, &entry);
+        tracing::error!("panic: {info}");
+    }));
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // In release builds windows_subsystem = "windows" silences all console output,
-    // making panics invisible. Write them to a file so crashes are diagnosable.
-    #[cfg(not(debug_assertions))]
-    std::panic::set_hook(Box::new(|info| {
-        let msg = format!("{info}");
-        let path = std::env::temp_dir().join("multizone_crash.txt");
-        let _ = std::fs::write(&path, &msg);
-    }));
+    let filter =
+        || EnvFilter::from_default_env().add_directive("multizone=debug".parse().unwrap());
 
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env().add_directive("multizone=debug".parse().unwrap()))
-        .init();
+    // Release builds use `windows_subsystem = "windows"` (see main.rs), which
+    // detaches the process from any parent console — so running the installed
+    // app from a terminal prints nothing and panics are invisible. Route logs
+    // and crashes to files in the temp dir instead, so a failed launch on
+    // another machine is diagnosable: look for `multizone.log` and
+    // `multizone_crash.txt` in %TEMP%.
+    #[cfg(not(debug_assertions))]
+    let _log_guard = {
+        let log_dir = std::env::temp_dir();
+        install_panic_hook(log_dir.join("multizone_crash.txt"));
+        let appender = tracing_appender::rolling::never(&log_dir, "multizone.log");
+        let (writer, guard) = tracing_appender::non_blocking(appender);
+        tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_writer(writer)
+            .with_env_filter(filter())
+            .init();
+        // Held for the lifetime of run() so buffered logs flush on exit.
+        guard
+    };
+
+    // Debug builds keep console logging for the dev loop.
+    #[cfg(debug_assertions)]
+    tracing_subscriber::fmt().with_env_filter(filter()).init();
+
+    tracing::info!("MultiZone {} starting", env!("CARGO_PKG_VERSION"));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())

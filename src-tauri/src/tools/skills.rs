@@ -15,7 +15,7 @@ pub fn definition() -> Tool {
                  in the system prompt under \"Skills\". When a user's request matches a skill's \
                  described use case, call this tool with that skill's name BEFORE doing the work, \
                  then follow the returned instructions. Call with no name (or an unknown name) to \
-                 get the catalog of available skills."
+                 get the catalog of available skills. If there are any relevant skills, look at them before responding"
                     .into(),
             parameters: json!({
                 "type": "object",

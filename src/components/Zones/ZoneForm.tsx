@@ -3,7 +3,8 @@ import { RefreshCw, Trash2, X, BookOpen, ChevronDown } from "lucide-react";
 import * as api from "@/lib/tauri";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
 import type { Provider, Zone } from "@/lib/types";
-import { ALL_TOOLS } from "@/lib/types";
+import { ALL_TOOLS, mcpToolEnableId } from "@/lib/types";
+import { useApp } from "@/store/app";
 import { DEFAULT_ZONES } from "@/lib/defaultZones";
 
 const SAFETY_BADGE: Record<number, { label: string; cls: string }> = {
@@ -240,6 +241,8 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
   const [topP, setTopP] = useState("");
   const [tools, setTools] = useState<string[]>([]);
   const [toolConfig, setToolConfig] = useState("{}");
+  const mcpServers = useApp((s) => s.mcpServers);
+  const refreshMcpServers = useApp((s) => s.refreshMcpServers);
   const [ceHeadless, setCeHeadless] = useState(false);
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const [includeThinkingInContext, setIncludeThinkingInContext] = useState(false);
@@ -307,6 +310,10 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
       .catch(() => setModels([]))
       .finally(() => setLoadingModels(false));
   }, [providerId]);
+
+  useEffect(() => {
+    refreshMcpServers().catch(console.error);
+  }, [refreshMcpServers]);
 
   const filteredIcons = useMemo(() => {
     if (!iconSearch.trim()) return null; // null = show groups
@@ -668,6 +675,47 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
                 </label>
               );
             })}
+
+            {/* MCP tools from connected servers, alongside built-in tools. Each
+                carries its user-assigned danger badge; toggling adds/removes the
+                qualified `mcp__server__tool` id from this zone's enabled set. */}
+            {mcpServers
+              .filter((s) => s.enabled && s.tools.length > 0)
+              .map((s) => (
+                <div key={s.id} className="mt-1.5">
+                  <div className="mb-1 flex items-center gap-1.5 px-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
+                    MCP · {s.name}
+                  </div>
+                  {s.tools.map((t) => {
+                    const id = mcpToolEnableId(s.id, t.name);
+                    const badge = SAFETY_BADGE[t.dangerLevel] ?? SAFETY_BADGE[1];
+                    return (
+                      <label
+                        key={t.id}
+                        className="mb-1.5 flex cursor-pointer items-start gap-2 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-2 text-xs hover:border-[var(--color-accent)]"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={tools.includes(id)}
+                          onChange={() => toggleTool(id)}
+                          className="mt-0.5 shrink-0"
+                        />
+                        <div className="flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-mono font-medium">{t.name}</span>
+                            <span className={`rounded border px-1.5 py-0.5 text-[10px] font-medium ${badge.cls}`}>
+                              {badge.label}
+                            </span>
+                          </div>
+                          {t.description && (
+                            <div className="mt-0.5 line-clamp-2 text-[var(--color-text-muted)]">{t.description}</div>
+                          )}
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              ))}
           </div>
         </Field>
 

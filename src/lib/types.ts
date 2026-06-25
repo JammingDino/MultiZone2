@@ -133,6 +133,34 @@ export interface ChatTagLink {
   color: string | null;
 }
 
+/**
+ * A global, on-demand instruction set (Anthropic Agent Skills model). Every
+ * enabled skill's name + description is offered to agents that have the skills
+ * tool; the agent loads `content` on demand via `load_skill`.
+ */
+export interface Skill {
+  id: string;
+  name: string;
+  description: string | null;
+  content: string;
+  /** When true, the skill appears in the catalog offered to agents. */
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** A model-managed long-term memory entry. */
+export interface Memory {
+  id: string;
+  /** "global" | "project" | "chat" */
+  scope: "global" | "project" | "chat";
+  /** Owning project/chat id; null for global. */
+  scopeId: string | null;
+  content: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export type Role = "user" | "assistant" | "tool" | "system";
 
 export interface Message {
@@ -283,6 +311,10 @@ export interface AppSettings {
    * Null = legacy fallback: use defaultProviderId + its defaultModel.
    */
   baseZoneId: string | null;
+  /** Soft cap on memory entries per scope; oldest are trimmed past this. */
+  memoryScopeLimit: number;
+  /** Set once the built-in skill templates have been seeded, so it never repeats. */
+  seededSkills: boolean;
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -308,6 +340,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   webSearchEndpoint: "",
   webSearchApiKey: "",
   baseZoneId: null,
+  memoryScopeLimit: 50,
+  seededSkills: false,
 };
 
 export interface DbStats {
@@ -325,6 +359,8 @@ export const ALL_TOOLS: { id: string; label: string; description: string; safety
   { id: "date_time",    label: "Date / time",      description: "Returns the current date and time.",                                                              safety: 0 },
   { id: "ask_user",     label: "Ask user",          description: "Lets the model pause and ask the user a clarifying question with answer buttons.",               safety: 0 },
   { id: "manage_tags",  label: "Tag chat",          description: "Lets the model create tags and assign them to the current chat to categorize it.",               safety: 0 },
+  { id: "memory",       label: "Memory",            description: "Lets the model save, read, and delete long-term memories scoped to the chat, project, or globally.", safety: 0 },
+  { id: "skills",       label: "Skills",            description: "Lets the model load specialized instruction sets on demand from your global Skills catalog.",       safety: 0 },
   { id: "render_graph", label: "Graph / diagram",   description: "Render Mermaid diagrams or math plots inline.",                                                  safety: 0 },
   { id: "web_search",   label: "Web search",        description: "Search the web via a configured provider.",                                                      safety: 1 },
   { id: "file_system",  label: "File system",       description: "Read, write, and list files within allowed paths.",                                              safety: 1 },

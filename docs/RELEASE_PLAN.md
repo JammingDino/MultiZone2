@@ -143,22 +143,48 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ### 0.3.2 — Skills
 
-- [ ] Skills data model: `skills` table (id, name, description, content, created_at)
-- [ ] Skills panel: create, edit, delete skills — content is freeform markdown
-- [ ] Assign skills to a zone in the zone editor (multi-select list)
-- [ ] Skill content prepended to system prompt (before the zone's own system prompt) when that zone is active
-- [ ] Skills can be toggled per-chat (enable/disable individual skills for a specific conversation)
-- [ ] Import skill from a text or markdown file
-- [ ] Built-in skill templates: frontend design guide, markdown formatting, JSON output format
+*Skills follow the [Anthropic Agent Skills](https://github.com/anthropics/skills) model: global, on-demand instruction sets the agent **discovers and loads itself**, rather than always-on per-zone prepends. Each skill is a name + a description written as the use case that should trigger it + freeform-markdown instructions. The name + description of every enabled skill is injected as a compact catalog into the system prompt of any zone that has the `skills` tool; when a request matches, the agent calls `load_skill` (a safety-0 tool, like any other tool call) to pull the full instructions — progressive disclosure that keeps context small. Skills are managed globally on their own Settings → Skills page; they are not bound to zones or chats.*
+
+*Status: built & typechecked (migrations 015–017; cargo test + `npm run build` green); not yet runtime-tested in the app.*
+
+**Data & catalog**
+- [x] Skills data model: global `skills` table (id, name, description, content, **enabled**, created_at, updated_at). The 015 `zone_skills`/`chat_skills` tables are superseded and unused.
+- [x] Settings → Skills page: create, edit, delete; per-skill global **enable/disable** toggle; freeform-markdown instructions; description framed as the trigger use case
+- [x] Import skill from a `.md` / `.txt` file; export a skill back out as markdown
+
+**Discovery & loading (progressive disclosure)**
+- [x] Catalog block (`# Skills`, name + description per enabled skill) injected into the system prompt for any zone with the `skills` tool (`build_catalog`)
+- [x] `load_skill(name)` tool (safety 0): returns the named skill's full instructions, or the catalog when the name is missing/unknown — the agent requests it like any other tool
+- [x] `skills` tool in the quick-chat safe set and added to all curated zone presets, so the catalog is effectively available everywhere; selectable per zone in the editor
+
+**Templates**
+- [x] Built-in skills seeded on first run (gated by `seededSkills`), fully editable: **frontend-design** (rich, Anthropic-style design guide with a use-case description), markdown-formatting, json-output
+
+**list_dir tool — empty-folder clarity** *(small tool improvement; movable)*
+- [x] In the compact tree output, a directory at the depth limit renders `{}` when genuinely empty or `{"…": true}` when it has un-expanded children — so a depth-limited scan distinguishes the two
+- [x] Marker applies at the deepest scanned level (and at the allowed-roots boundary): probes one entry to decide empty vs non-empty
+- [x] Token-efficient — a single `"…": true` sentinel, not a child count; tool description updated to explain it
 
 ### 0.3.3 — Memory
 
-- [ ] Memory data model: `memories` table (id, scope: global/project/chat, scope_id, content, created_at, updated_at)
-- [ ] `save_memory` tool: model writes a memory entry, safety level 0 (safe)
-- [ ] `read_memory` tool: model reads its own memories filtered by current scope, safety level 0
-- [ ] Memory injected into system prompt each turn: global first, then project, then chat-level
-- [ ] Memory viewer in settings: browse, edit, and delete entries across all scopes
-- [ ] Soft size limit per scope — oldest entries trimmed when exceeded (limit configurable in settings)
+*Model-managed long-term memory: the assistant writes and reads small facts that persist across turns and chats. Entries are scoped — `global` (every chat), `project` (chats in one project), or `chat` (one conversation) — and injected into the system prompt each turn in precedence order (global → project → chat). Writing and reading are exposed as safety-level-0 tools so the model curates its own memory without approval friction, while the user keeps full visibility and edit control through a memory viewer in settings. A soft per-scope size cap keeps the injected block bounded.*
+
+*Status: built & typechecked (migration 016; cargo test + `npm run build` green); not yet runtime-tested in the app.*
+
+**Data model & tools**
+- [x] Memory data model: `memories` table (id, scope: global/project/chat, scope_id nullable, content, created_at, updated_at) + `idx_memories_scope`
+- [x] `save_memory(content, scope?)` tool: model writes an entry; safety level 0 (safe, no approval); scope defaults to `chat`, `project` falls back to `chat` when the chat has no project
+- [x] `read_memory(scope?)` tool: omit scope for all applicable (global + project + chat), or pass one; safety level 0
+- [x] `delete_memory(id)` tool so the model can drop a stale entry; safety level 0. All three live under one `memory` ToolId
+- [~] `memory` tool included in the quick-chat safe toolset (`safe_tool_ids`) and selectable in the zone editor — *not yet added to the curated zone presets' default tool lists*
+
+**Injection & limits**
+- [x] Memory injected into the system prompt each turn under a `# Memory` block: global first, then project, then chat-level (`build_memory_block`)
+- [x] Soft size limit per scope — oldest entries trimmed on save when exceeded; limit configurable in Settings → Memory (`memoryScopeLimit`, default 50)
+- [x] Currently-injected memory entries surfaced via the `memory-updated` event; viewer refreshes live during a turn
+
+**Management**
+- [x] Memory viewer in **Settings → Memory**: browse, edit, and delete entries across all scopes; each row shows its scope + owning project/chat — *full-text search deferred*
 
 ---
 

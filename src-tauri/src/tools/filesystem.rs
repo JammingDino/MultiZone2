@@ -73,7 +73,7 @@ pub fn definitions() -> Vec<Tool> {
                         },
                         "depth": {
                             "type": "integer",
-                            "description": "How many directory levels to recurse. 1 = immediate children only (default), 2 = two levels, etc. Directories at the depth limit appear as empty objects {}.",
+                            "description": "How many directory levels to recurse. 1 = immediate children only (default), 2 = two levels, etc. A directory that is genuinely empty appears as {}; one whose contents weren't expanded because it sits at the depth limit appears as {\"…\": true} so the two are distinguishable.",
                             "default": 1
                         }
                     },
@@ -328,9 +328,20 @@ pub async fn list_directory(
     }
 }
 
+/// Does a directory contain at least one entry? Used at the depth limit to tell
+/// a truly-empty directory apart from one whose contents simply weren't expanded.
+/// Errors (e.g. permission denied) are treated as "unknown" → reported empty.
+async fn has_entries(path: &std::path::Path) -> bool {
+    match tokio::fs::read_dir(path).await {
+        Ok(mut rd) => matches!(rd.next_entry().await, Ok(Some(_))),
+        Err(_) => false,
+    }
+}
+
 /// Recursively build a nested JSON object representing a directory tree.
 /// Files are represented as their extension string; directories as nested objects.
-/// Directories at or beyond `max_depth` are represented as empty objects.
+/// A directory at the depth limit is `{}` when empty, or `{"…": true}` when it
+/// has children that weren't expanded — so the two cases are distinguishable.
 fn dir_tree<'a>(
     path: &'a std::path::Path,
     depth: usize,
@@ -358,7 +369,14 @@ fn dir_tree<'a>(
             let subtree = if depth < max_depth && is_within_roots(&child, roots) {
                 dir_tree(&child, depth + 1, max_depth, roots).await.unwrap_or_else(|_| Value::Object(Default::default()))
             } else {
-                Value::Object(Default::default())
+                // At the depth limit (or outside the allowed roots) we don't
+                // recurse — but still probe so a non-empty folder reads as
+                // {"…": true} rather than looking identical to an empty one.
+                let mut placeholder = serde_json::Map::new();
+                if has_entries(&child).await {
+                    placeholder.insert("…".to_string(), Value::Bool(true));
+                }
+                Value::Object(placeholder)
             };
             map.insert(name, subtree);
         }

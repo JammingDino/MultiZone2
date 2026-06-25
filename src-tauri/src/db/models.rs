@@ -124,6 +124,35 @@ pub struct ChatZone {
     pub zone_id: String,
 }
 
+/// A global, on-demand instruction set (Anthropic Agent Skills model). The
+/// `name` + `description` of every enabled skill is shown to agents that have
+/// the skills tool; the agent loads `content` on demand via `load_skill`.
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct Skill {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub content: String,
+    /// When true, the skill appears in the catalog offered to agents.
+    pub enabled: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// A model-managed memory entry. `scope` is "global" | "project" | "chat";
+/// `scope_id` is the owning project/chat id (NULL for global).
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct Memory {
+    pub id: String,
+    pub scope: String,
+    pub scope_id: Option<String>,
+    pub content: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct Message {

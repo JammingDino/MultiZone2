@@ -7,6 +7,8 @@ pub mod attachments;
 pub mod settings;
 pub mod projects;
 pub mod library;
+pub mod skills;
+pub mod memory;
 
 pub fn now_ts() -> i64 {
     chrono::Utc::now().timestamp_millis()

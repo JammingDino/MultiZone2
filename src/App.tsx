@@ -7,6 +7,7 @@ import { Onboarding } from "./components/Onboarding/Onboarding";
 import { useApp } from "./store/app";
 import { seedCuratedLibrary, CURATED_LIBRARY_VERSION } from "./lib/zoneLibrary";
 import { seedDefaultZones } from "./lib/defaultZones";
+import { seedDefaultSkills } from "./lib/defaultSkills";
 import * as api from "./lib/tauri";
 
 export default function App() {
@@ -17,10 +18,13 @@ export default function App() {
   const appSettingsLoaded = useApp((s) => s.appSettingsLoaded);
   const libraryCuratedVersion = useApp((s) => s.appSettings.libraryCuratedVersion);
   const seededStarterZones = useApp((s) => s.appSettings.seededStarterZones);
+  const seededSkills = useApp((s) => s.appSettings.seededSkills);
   const refreshZones = useApp((s) => s.refreshZones);
+  const refreshSkills = useApp((s) => s.refreshSkills);
   // Guard against concurrent invocations of the one-time seeders.
   const libRef = useRef(false);
   const zonesRef = useRef(false);
+  const skillsRef = useRef(false);
 
   // Once providers exist, make sure a quick-chat provider is selected. Keeps
   // existing installs (upgrading past this feature) working without a trip
@@ -72,6 +76,26 @@ export default function App() {
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [providersLoaded, appSettingsLoaded, seededStarterZones, providers, defaultProviderId]);
+
+  // One-time seed of the built-in skill templates, so the Skills panel starts
+  // populated. Only seeds when the user has no skills yet; provider-independent.
+  useEffect(() => {
+    if (!appSettingsLoaded || seededSkills || skillsRef.current) return;
+    skillsRef.current = true;
+    (async () => {
+      try {
+        const existing = await api.listSkills();
+        if (existing.length === 0) {
+          await seedDefaultSkills();
+          await refreshSkills();
+        }
+        await setAppSettings({ seededSkills: true });
+      } finally {
+        skillsRef.current = false;
+      }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appSettingsLoaded, seededSkills]);
 
   // Lock the app behind onboarding until at least one provider exists.
   const showOnboarding = providersLoaded && providers.length === 0;

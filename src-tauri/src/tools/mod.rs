@@ -7,6 +7,8 @@ pub mod ask_user;
 pub mod tags;
 pub mod zone;
 pub mod shell;
+pub mod memory;
+pub mod skills;
 
 use crate::error::AppResult;
 use crate::llm::types::Tool;
@@ -90,6 +92,8 @@ pub enum ToolId {
     ManageTags,
     SwitchZone,
     Shell,
+    Memory,
+    Skills,
 }
 
 impl ToolId {
@@ -104,6 +108,8 @@ impl ToolId {
             "manage_tags" => Some(Self::ManageTags),
             "switch_zone" => Some(Self::SwitchZone),
             "shell_exec" => Some(Self::Shell),
+            "memory" => Some(Self::Memory),
+            "skills" => Some(Self::Skills),
             _ => None,
         }
     }
@@ -119,6 +125,8 @@ impl ToolId {
             Self::ManageTags => "manage_tags",
             Self::SwitchZone => "switch_zone",
             Self::Shell => "shell_exec",
+            Self::Memory => "memory",
+            Self::Skills => "skills",
         }
     }
 
@@ -136,13 +144,15 @@ impl ToolId {
             Self::ManageTags => vec![tags::definition()],
             Self::SwitchZone => zone::definitions(),
             Self::Shell => vec![shell::definition()],
+            Self::Memory => memory::definitions(),
+            Self::Skills => vec![skills::definition()],
         }
     }
 
     /// Safety classification: 0 = safe, 1 = moderate, 2 = dangerous.
     pub fn safety_level(self) -> u8 {
         match self {
-            Self::DateTime | Self::AskUser | Self::ManageTags | Self::RenderGraph => 0,
+            Self::DateTime | Self::AskUser | Self::ManageTags | Self::RenderGraph | Self::Memory | Self::Skills => 0,
             Self::WebSearch | Self::FileSystem | Self::SwitchZone => 1,
             Self::CodeExec | Self::Shell => 2,
         }
@@ -163,6 +173,8 @@ pub fn safe_tool_ids() -> Vec<&'static str> {
         ToolId::ManageTags,
         ToolId::SwitchZone,
         ToolId::Shell,
+        ToolId::Memory,
+        ToolId::Skills,
     ]
     .into_iter()
     .filter(|t| t.safety_level() == 0)
@@ -175,7 +187,9 @@ pub fn safe_tool_ids() -> Vec<&'static str> {
 pub fn tool_safety_by_name(name: &str) -> u8 {
     match name {
         "get_current_datetime" | "ask_user" | "tag_chat"
-        | "plot_function" | "draw_diagram" => 0,
+        | "plot_function" | "draw_diagram"
+        | "save_memory" | "read_memory" | "delete_memory"
+        | "load_skill" => 0,
         "web_search" | "read_file" | "list_directory"
         | "create_file" | "edit_file" | "list_zones" | "change_zone" => 1,
         "execute_code" | "run_command" => 2,
@@ -210,6 +224,10 @@ pub async fn dispatch(
         "list_zones" => zone::list_zones(db).await,
         "change_zone" => zone::change_zone(&args, db, chat_id).await,
         "run_command" => shell::run(&args, zone_config, project_dir).await,
+        "save_memory" => memory::save(&args, db, chat_id).await,
+        "read_memory" => memory::read(&args, db, chat_id).await,
+        "delete_memory" => memory::delete(&args, db).await,
+        "load_skill" => skills::run(&args, db).await,
         other => Ok(serde_json::json!({
             "error": format!("unknown tool: {other}")
         }).to_string()),

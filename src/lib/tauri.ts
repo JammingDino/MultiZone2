@@ -9,9 +9,11 @@ import type {
   LibraryEntry,
   DbStats,
   InputPart,
+  Memory,
   Message,
   Project,
   Provider,
+  Skill,
   StreamEnvelope,
   Tag,
   Zone,
@@ -83,6 +85,21 @@ export const listTags = () => invoke<Tag[]>("list_tags");
 export const upsertTag = (tag: Partial<Tag> & { name: string }) =>
   invoke<Tag>("upsert_tag", { tag });
 export const deleteTag = (id: string) => invoke<void>("delete_tag", { id });
+
+// Skills (global, on-demand catalog)
+export const listSkills = () => invoke<Skill[]>("list_skills");
+export const upsertSkill = (skill: Partial<Skill> & { name: string }) =>
+  invoke<Skill>("upsert_skill", { skill });
+export const setSkillEnabled = (id: string, enabled: boolean) =>
+  invoke<void>("set_skill_enabled", { id, enabled });
+export const deleteSkill = (id: string) => invoke<void>("delete_skill", { id });
+
+// Memory
+export const listMemories = () => invoke<Memory[]>("list_memories");
+export const upsertMemory = (
+  memory: Partial<Memory> & { scope: Memory["scope"]; content: string },
+) => invoke<Memory>("upsert_memory", { memory });
+export const deleteMemory = (id: string) => invoke<void>("delete_memory", { id });
 
 // Zone library
 export const listLibraryEntries = () => invoke<LibraryEntry[]>("list_library_entries");
@@ -169,6 +186,11 @@ export function onChatTagsUpdated(
   handler: (e: { chatId: string }) => void,
 ): Promise<UnlistenFn> {
   return listen<{ chatId: string }>("chat-tags-updated", (e) => handler(e.payload));
+}
+export function onMemoryUpdated(
+  handler: (e: { chatId: string }) => void,
+): Promise<UnlistenFn> {
+  return listen<{ chatId: string }>("memory-updated", (e) => handler(e.payload));
 }
 export function onChatZoneUpdated(
   handler: (e: { chatId: string; zoneId: string }) => void,

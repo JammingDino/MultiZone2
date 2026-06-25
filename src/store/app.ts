@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { DEFAULT_APP_SETTINGS, type AppSettings, type Chat, type ChatTagEntry, type ChatTagLink, type ChatZone, type Message, type Project, type Provider, type Tag, type Zone } from "@/lib/types";
+import { DEFAULT_APP_SETTINGS, type AppSettings, type Chat, type ChatTagEntry, type ChatTagLink, type ChatZone, type Memory, type Message, type Project, type Provider, type Skill, type Tag, type Zone } from "@/lib/types";
 import * as api from "@/lib/tauri";
 
 export type StreamPhase =
@@ -71,6 +71,10 @@ interface AppStore {
   chats: Chat[];
   projects: Project[];
   tags: Tag[];
+  /** Global skill catalog — managed in Settings → Skills. */
+  skills: Skill[];
+  /** All memory entries across scopes — backs the settings viewer. */
+  memories: Memory[];
   tagsByChat: Record<string, ChatTagEntry[]>;
   /** Every chat's tags in one flat list — drives sidebar chips + tag filtering. */
   chatTagLinks: ChatTagLink[];
@@ -157,6 +161,8 @@ interface AppStore {
   setHomeScreenDraft: (text: string) => void;
   refreshProjects: () => Promise<void>;
   refreshTags: () => Promise<void>;
+  refreshSkills: () => Promise<void>;
+  refreshMemories: () => Promise<void>;
   refreshChatTagLinks: () => Promise<void>;
   loadChatTags: (chatId: string) => Promise<void>;
   setChatProject: (chatId: string, projectId: string | null) => Promise<void>;
@@ -271,6 +277,8 @@ export const useApp = create<AppStore>((set, get) => ({
   chats: [],
   projects: [],
   tags: [],
+  skills: [],
+  memories: [],
   tagsByChat: {},
   chatTagLinks: [],
   chatZonesByChat: {},
@@ -871,6 +879,14 @@ export const useApp = create<AppStore>((set, get) => ({
     const tags = await api.listTags();
     set({ tags });
     get().refreshChatTagLinks().catch(console.error);
+  },
+  async refreshSkills() {
+    const skills = await api.listSkills();
+    set({ skills });
+  },
+  async refreshMemories() {
+    const memories = await api.listMemories();
+    set({ memories });
   },
   async refreshChatTagLinks() {
     const chatTagLinks = await api.getAllChatTags();

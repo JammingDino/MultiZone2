@@ -19,6 +19,7 @@ export function Sidebar() {
     refreshProviders,
     refreshProjects,
     refreshTags,
+    refreshSkills,
     setActiveChat,
     openSettings,
     openZoneLibrary,
@@ -67,11 +68,12 @@ export function Sidebar() {
     refreshChats();
     refreshProjects();
     refreshTags();
+    refreshSkills();
     loadThemeFromBackend();
     loadDefaultZone();
     loadAppSettings();
   }, [refreshProviders, refreshZones, refreshChats, refreshProjects, refreshTags,
-      loadThemeFromBackend, loadDefaultZone, loadAppSettings]);
+      refreshSkills, loadThemeFromBackend, loadDefaultZone, loadAppSettings]);
 
   async function onNewChat(projectId?: string) {
     triggerNewChat(projectId ?? null);

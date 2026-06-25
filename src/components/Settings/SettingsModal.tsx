@@ -1,13 +1,13 @@
-import { useEffect, useState } from "react";
-import { X, Plus, Trash2, RefreshCw, Server, Palette, MessageSquare, Database, AlertTriangle, Loader2, Folder, FolderOpen, Globe, Copy, Check, Search } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { X, Plus, Trash2, RefreshCw, Server, Palette, MessageSquare, Database, AlertTriangle, Loader2, Folder, FolderOpen, Globe, Copy, Check, Search, Brain, Sparkles, FileUp, FileDown } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useApp } from "@/store/app";
 import type { BackgroundEffect } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
-import type { DbStats, Provider } from "@/lib/types";
+import type { DbStats, Provider, Skill } from "@/lib/types";
 
-type Tab = "providers" | "appearance" | "chat" | "search" | "api" | "data";
+type Tab = "providers" | "appearance" | "chat" | "search" | "skills" | "memory" | "api" | "data";
 
 export function SettingsModal() {
   const { closeSettings } = useApp();
@@ -28,6 +28,8 @@ export function SettingsModal() {
             <TabButton active={tab === "appearance"} icon={<Palette size={14} />} label="Appearance" onClick={() => setTab("appearance")} />
             <TabButton active={tab === "chat"} icon={<MessageSquare size={14} />} label="Chat" onClick={() => setTab("chat")} />
             <TabButton active={tab === "search"} icon={<Search size={14} />} label="Search" onClick={() => setTab("search")} />
+            <TabButton active={tab === "skills"} icon={<Sparkles size={14} />} label="Skills" onClick={() => setTab("skills")} />
+            <TabButton active={tab === "memory"} icon={<Brain size={14} />} label="Memory" onClick={() => setTab("memory")} />
             <TabButton active={tab === "api"} icon={<Globe size={14} />} label="API" onClick={() => setTab("api")} />
             <TabButton active={tab === "data"} icon={<Database size={14} />} label="Data" onClick={() => setTab("data")} />
           </nav>
@@ -36,6 +38,8 @@ export function SettingsModal() {
             {tab === "appearance" && <AppearanceTab />}
             {tab === "chat" && <ChatTab />}
             {tab === "search" && <SearchTab />}
+            {tab === "skills" && <SkillsTab />}
+            {tab === "memory" && <MemoryTab />}
             {tab === "api" && <ApiTab />}
             {tab === "data" && <DataTab />}
           </div>
@@ -616,6 +620,322 @@ function ChatTab() {
 }
 
 // ─── Search ───────────────────────────────────────────────────────────────────
+
+// ─── Skills ─────────────────────────────────────────────────────────────────────
+
+function SkillsTab() {
+  const skills = useApp((s) => s.skills);
+  const refreshSkills = useApp((s) => s.refreshSkills);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [editing, setEditing] = useState<Skill | null>(null);
+  const [creating, setCreating] = useState<{ name: string; content: string } | null>(null);
+
+  useEffect(() => { refreshSkills().catch(console.error); }, [refreshSkills]);
+
+  async function importFile(file: File) {
+    const content = await file.text();
+    const name = file.name.replace(/\.(md|markdown|txt)$/i, "");
+    setEditing(null);
+    setCreating({ name, content });
+  }
+
+  async function toggle(s: Skill) {
+    await api.setSkillEnabled(s.id, !s.enabled);
+    await refreshSkills();
+  }
+
+  async function remove(s: Skill) {
+    await api.deleteSkill(s.id);
+    await refreshSkills();
+  }
+
+  if (editing || creating) {
+    return (
+      <SkillEditor
+        skill={editing}
+        seed={creating}
+        onDone={async () => { setEditing(null); setCreating(null); await refreshSkills(); }}
+        onCancel={() => { setEditing(null); setCreating(null); }}
+      />
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <section>
+        <h3 className="mb-1 text-sm font-medium">Skills</h3>
+        <p className="text-xs text-[var(--color-text-muted)]">
+          Global, on-demand instruction sets. Any zone with the <span className="font-mono">Skills</span> tool
+          sees the name + description of every enabled skill and can load its full instructions itself when a
+          request matches — like any other tool call. Write the description as the use case that should trigger it.
+        </p>
+      </section>
+
+      <div className="flex gap-2">
+        <button
+          onClick={() => { setEditing(null); setCreating({ name: "", content: "" }); }}
+          className="flex items-center gap-1.5 rounded border border-dashed border-[var(--color-border)] px-3 py-1.5 text-xs transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+        >
+          <Plus size={12} /> New skill
+        </button>
+        <button
+          onClick={() => fileRef.current?.click()}
+          className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-3 py-1.5 text-xs transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+        >
+          <FileUp size={12} /> Import .md
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".md,.markdown,.txt,text/markdown,text/plain"
+          className="hidden"
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) importFile(f); e.target.value = ""; }}
+        />
+      </div>
+
+      {skills.length === 0 ? (
+        <div className="rounded border border-dashed border-[var(--color-border)] p-4 text-xs text-[var(--color-text-muted)]">
+          No skills yet.
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {skills.map((s) => (
+            <div key={s.id} className="rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate text-sm font-medium">{s.name}</span>
+                    {!s.enabled && (
+                      <span className="rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]">disabled</span>
+                    )}
+                  </div>
+                  {s.description && <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">{s.description}</div>}
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    onClick={() => toggle(s)}
+                    title={s.enabled ? "Enabled — click to remove from the agent catalog" : "Disabled — click to offer to agents"}
+                    className={`relative h-5 w-9 rounded-full transition-colors ${s.enabled ? "bg-[var(--color-accent)]" : "bg-[var(--color-border)]"}`}
+                  >
+                    <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all duration-200 ${s.enabled ? "translate-x-4" : ""}`} />
+                  </button>
+                  <button onClick={() => { setCreating(null); setEditing(s); }} className="rounded px-2 py-0.5 text-[11px] text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)]">Edit</button>
+                  <button onClick={() => remove(s)} className="rounded p-1 text-[var(--color-text-muted)] hover:text-[var(--color-danger)]" title="Delete">
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SkillEditor({
+  skill,
+  seed,
+  onDone,
+  onCancel,
+}: {
+  skill: Skill | null;
+  seed: { name: string; content: string } | null;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(skill?.name ?? seed?.name ?? "");
+  const [description, setDescription] = useState(skill?.description ?? "");
+  const [content, setContent] = useState(skill?.content ?? seed?.content ?? "");
+  const [enabled, setEnabled] = useState(skill?.enabled ?? true);
+  const [saving, setSaving] = useState(false);
+
+  async function onSave() {
+    if (!name.trim()) return;
+    setSaving(true);
+    try {
+      await api.upsertSkill({ id: skill?.id, name: name.trim(), description: description.trim() || null, content, enabled });
+      onDone();
+    } finally { setSaving(false); }
+  }
+
+  function onExport() {
+    const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "skill";
+    const blob = new Blob([content], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${slug}.md`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-medium">{skill ? "Edit skill" : "New skill"}</h3>
+        <button onClick={onCancel} className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]">← Back</button>
+      </div>
+
+      <label className="block">
+        <div className="mb-1 text-xs text-[var(--color-text-muted)]">Name</div>
+        <input value={name} onChange={(e) => setName(e.target.value)} className="w-full rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]" placeholder="e.g. frontend-design" />
+      </label>
+
+      <label className="block">
+        <div className="mb-1 text-xs text-[var(--color-text-muted)]">
+          Description <span className="ml-1 opacity-60">(the use case that should make an agent load this skill)</span>
+        </div>
+        <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className="w-full rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]" placeholder="Use when the user asks to build, design, or review a web UI / frontend component…" />
+      </label>
+
+      <label className="block">
+        <div className="mb-1 text-xs text-[var(--color-text-muted)]">Instructions <span className="ml-1 opacity-60">(freeform markdown, returned when the agent loads the skill)</span></div>
+        <textarea value={content} onChange={(e) => setContent(e.target.value)} rows={14} className="w-full rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 font-mono text-xs outline-none focus:border-[var(--color-accent)]" />
+      </label>
+
+      <label className="flex cursor-pointer items-center gap-2 text-sm">
+        <button
+          onClick={() => setEnabled((v) => !v)}
+          className={`relative h-5 w-9 rounded-full transition-colors ${enabled ? "bg-[var(--color-accent)]" : "bg-[var(--color-border)]"}`}
+        >
+          <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all duration-200 ${enabled ? "translate-x-4" : ""}`} />
+        </button>
+        <span>Enabled — offered to agents in the skills catalog</span>
+      </label>
+
+      <div className="flex items-center justify-end gap-2 border-t border-[var(--color-border)] pt-3">
+        {skill && (
+          <button onClick={onExport} className="mr-auto flex items-center gap-1 rounded border border-[var(--color-border)] px-3 py-1.5 text-xs hover:border-[var(--color-accent)]">
+            <FileDown size={12} /> Export
+          </button>
+        )}
+        <button onClick={onCancel} className="rounded px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)]">Cancel</button>
+        <button onClick={onSave} disabled={saving || !name.trim()} className="rounded bg-[var(--color-accent)] px-3 py-1.5 text-xs text-white disabled:opacity-50">
+          {skill ? "Save" : "Create skill"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Memory ─────────────────────────────────────────────────────────────────────
+
+function MemoryTab() {
+  const appSettings = useApp((s) => s.appSettings);
+  const setAppSettings = useApp((s) => s.setAppSettings);
+  const memories = useApp((s) => s.memories);
+  const refreshMemories = useApp((s) => s.refreshMemories);
+  const projects = useApp((s) => s.projects);
+  const chats = useApp((s) => s.chats);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+
+  useEffect(() => {
+    refreshMemories().catch(console.error);
+    const un = api.onMemoryUpdated(() => refreshMemories().catch(console.error));
+    return () => { un.then((f) => f()).catch(() => {}); };
+  }, [refreshMemories]);
+
+  const scopeLabel = (m: { scope: string; scopeId: string | null }) => {
+    if (m.scope === "global") return "Global";
+    if (m.scope === "project") {
+      const p = projects.find((x) => x.id === m.scopeId);
+      return `Project · ${p?.name ?? "unknown"}`;
+    }
+    const c = chats.find((x) => x.id === m.scopeId);
+    return `Chat · ${c?.title ?? "unknown"}`;
+  };
+
+  async function saveEdit(id: string) {
+    const m = memories.find((x) => x.id === id);
+    if (!m) return;
+    await api.upsertMemory({ id, scope: m.scope, scopeId: m.scopeId, content: draft });
+    setEditingId(null);
+    await refreshMemories();
+  }
+
+  async function remove(id: string) {
+    await api.deleteMemory(id);
+    await refreshMemories();
+  }
+
+  const limit = typeof appSettings.memoryScopeLimit === "number" ? appSettings.memoryScopeLimit : 50;
+
+  return (
+    <div className="flex flex-col gap-6">
+      <section>
+        <h3 className="mb-1 text-sm font-medium">Memory</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          Facts the assistant saves with the memory tool, injected into the system prompt each turn
+          (global → project → chat). Give a zone the <span className="font-mono">Memory</span> tool to let it write here.
+        </p>
+        <label className="flex items-center gap-2 text-sm">
+          <span className="text-[var(--color-text-muted)]">Max entries per scope</span>
+          <input
+            type="number"
+            min={1}
+            value={limit}
+            onChange={(e) => {
+              const n = parseInt(e.target.value, 10);
+              if (Number.isFinite(n) && n > 0) setAppSettings({ memoryScopeLimit: n });
+            }}
+            className="w-24 rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1.5 text-sm outline-none focus:border-[var(--color-accent)]"
+          />
+        </label>
+        <p className="mt-1 text-xs text-[var(--color-text-muted)]">Oldest entries in a scope are trimmed once it exceeds this.</p>
+      </section>
+
+      <section>
+        <h3 className="mb-2 text-sm font-medium">Stored memories ({memories.length})</h3>
+        {memories.length === 0 ? (
+          <div className="rounded border border-dashed border-[var(--color-border)] p-4 text-xs text-[var(--color-text-muted)]">
+            No memories yet.
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {memories.map((m) => (
+              <div key={m.id} className="rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-2.5">
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <span className="rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-text-muted)]">
+                    {scopeLabel(m)}
+                  </span>
+                  <div className="flex items-center gap-1">
+                    {editingId === m.id ? (
+                      <>
+                        <button onClick={() => saveEdit(m.id)} className="rounded px-2 py-0.5 text-[11px] text-[var(--color-accent)] hover:bg-[var(--color-panel-hover)]">Save</button>
+                        <button onClick={() => setEditingId(null)} className="rounded px-2 py-0.5 text-[11px] text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)]">Cancel</button>
+                      </>
+                    ) : (
+                      <button onClick={() => { setEditingId(m.id); setDraft(m.content); }} className="rounded px-2 py-0.5 text-[11px] text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)]">Edit</button>
+                    )}
+                    <button onClick={() => remove(m.id)} className="rounded p-1 text-[var(--color-text-muted)] hover:text-[var(--color-danger)]" title="Delete">
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                </div>
+                {editingId === m.id ? (
+                  <textarea
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    rows={3}
+                    className="w-full rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1.5 text-xs outline-none focus:border-[var(--color-accent)]"
+                  />
+                ) : (
+                  <div className="text-xs text-[var(--color-text)]">{m.content}</div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+// ─── Search ─────────────────────────────────────────────────────────────────────
 
 function SearchTab() {
   const appSettings = useApp((s) => s.appSettings);

@@ -1351,6 +1351,13 @@ async fn run_participant_turn(
                     serde_json::json!({ "chatId": chat_id }),
                 );
             }
+            // The memory tools mutate the memories table — refresh the viewer.
+            if matches!(tc.function.name.as_str(), "save_memory" | "delete_memory") {
+                sink.emit_event(
+                    "memory-updated",
+                    serde_json::json!({ "chatId": chat_id }),
+                );
+            }
 
             sink.emit_for(
                 chat_id,
@@ -1572,8 +1579,24 @@ async fn build_message_history(
         snippets.extend(tag_snippets);
     }
 
+    // Skills catalog (Anthropic Agent Skills model): when this zone has the
+    // skills tool, list every enabled skill's name + description so the model
+    // knows what it can load on demand via `load_skill`. The full content is not
+    // injected — the agent requests it only when a request matches.
+    let zone_tool_ids: Vec<String> = serde_json::from_str(&zone.tools_enabled).unwrap_or_default();
+    if zone_tool_ids.iter().any(|t| t == "skills") {
+        if let Some(catalog) = crate::tools::skills::build_catalog(db).await? {
+            snippets.push(catalog);
+        }
+    }
+
     if let Some(sys) = &zone.system_prompt {
         if !sys.trim().is_empty() { snippets.push(sys.clone()); }
+    }
+
+    // Long-term memory (global → project → chat), injected each turn.
+    if let Some(block) = crate::tools::memory::build_memory_block(db, chat_id).await? {
+        snippets.push(block);
     }
 
     // Does this chat involve perspective zones (now, or historically)? If so we

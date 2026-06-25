@@ -315,6 +315,11 @@ export interface AppSettings {
   memoryScopeLimit: number;
   /** Set once the built-in skill templates have been seeded, so it never repeats. */
   seededSkills: boolean;
+  /**
+   * OCR language hint used when falling back to text extraction for
+   * vision-incapable models (0.4.0). Tesseract-style 3-letter code, e.g. "eng".
+   */
+  ocrLanguage: string;
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -342,6 +347,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   baseZoneId: null,
   memoryScopeLimit: 50,
   seededSkills: false,
+  ocrLanguage: "eng",
 };
 
 export interface DbStats {

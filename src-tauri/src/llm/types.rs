@@ -114,6 +114,9 @@ pub struct StreamChoice {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct StreamDelta {
+    /// Sent on the first delta of a choice; captured to mirror the wire format
+    /// but not consumed (role is fixed to "assistant" on our side).
+    #[allow(dead_code)]
     #[serde(default)]
     pub role: Option<String>,
     #[serde(default)]
@@ -155,6 +158,8 @@ pub struct ChatResponse {
 #[derive(Debug, Clone, Deserialize)]
 pub struct ChatChoice {
     pub message: ChatMessage,
+    /// Captured to mirror the wire format; not consumed for non-streaming reads.
+    #[allow(dead_code)]
     #[serde(default)]
     pub finish_reason: Option<String>,
 }

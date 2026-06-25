@@ -1,6 +1,7 @@
 mod api;
 mod db;
 mod llm;
+mod ocr;
 mod tools;
 mod commands;
 mod state;

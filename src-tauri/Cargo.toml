@@ -1,6 +1,6 @@
 [package]
 name = "multizone"
-version = "0.3.4"
+version = "0.4.1"
 description = "MultiZone — LLM interface"
 authors = ["MultiZone"]
 edition = "2021"
@@ -40,6 +40,12 @@ image = "0.25"
 base64 = "0.22"
 scraper = "0.20"
 pdf-extract = "0.7"
+
+# OCR fallback for vision-incapable models (0.4.0). Pure-Rust engine — no native
+# libtesseract — keeping the cross-platform build clean. Needs `.rten` models at
+# runtime (see ocr.rs); degrades gracefully when absent.
+ocrs = "0.12"
+rten = "0.24"
 
 thiserror = "2.0"
 anyhow = "1.0"

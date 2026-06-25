@@ -33,6 +33,13 @@ impl AppState {
         let attachments_dir = app_data_dir.join("attachments");
         std::fs::create_dir_all(&attachments_dir)?;
 
+        // Where OCR fallback (0.4.0) looks for its pure-Rust model files. Created
+        // eagerly so the location is discoverable; OCR degrades gracefully when
+        // the `.rten` files aren't present.
+        let ocr_models_dir = app_data_dir.join("ocr_models");
+        std::fs::create_dir_all(&ocr_models_dir)?;
+        crate::ocr::set_models_dir(ocr_models_dir);
+
         let db = db::init(&app_data_dir).await?;
         let http = reqwest::Client::builder()
             .user_agent("MultiZone/0.1.0")

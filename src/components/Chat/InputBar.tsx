@@ -1,10 +1,11 @@
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
-import { Paperclip, Send, X, FileText, Image as ImageIcon, FileType, Loader2, Square, ZoomIn, SlidersHorizontal, Zap, Brain } from "lucide-react";
+import { Paperclip, Send, X, FileText, Image as ImageIcon, FileType, Loader2, Square, ZoomIn, SlidersHorizontal, Zap, Brain, ScanText } from "lucide-react";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
 import type { InputPart } from "@/lib/types";
 import { renderPdfToJpegs, extractPdfText } from "@/lib/pdf";
+import { isVisionCapable } from "@/lib/vision";
 
 /** Sentinel zone id meaning "Quick chat (no zone)" for a one-shot override. */
 const SIMPLE_ZONE_ID = "__simple__";
@@ -75,6 +76,24 @@ export function InputBar({ chatId, disabled, ref }: InputBarProps) {
     return zones.find((z) => z.id === zid)?.providerId ?? null;
   })();
 
+  // Effective model for the next send, honouring one-shot overrides. Used to
+  // decide OCR fallback (0.4.0). Null when it can't be predicted (Smart routing
+  // picks a zone per turn) — we then skip the fallback hint and let the backend
+  // OCR if needed.
+  const effectiveModel = (() => {
+    if (ovModel.trim()) return ovModel.trim();
+    if (ovZone === SMART_ZONE_ID) return null;
+    const useQuick = ovZone === null;
+    if (useQuick) return providers.find((p) => p.id === quickProviderId)?.defaultModel ?? null;
+    const zid = ovZone === undefined ? chat?.zoneId ?? null : ovZone;
+    if (zid === null) return providers.find((p) => p.id === quickProviderId)?.defaultModel ?? null;
+    return zones.find((z) => z.id === zid)?.model ?? null;
+  })();
+  // True when the chosen model can't see images, so any image/PDF attachment
+  // will be sent as OCR-extracted text instead.
+  const ocrFallback = effectiveModel != null && !isVisionCapable(effectiveModel);
+  const hasVisualAttachment = pending.some((a) => a.fileType === "image" || a.fileType === "pdf");
+
   useEffect(() => {
     if (!ovOpen || !ovProviderId) return;
     let cancelled = false;
@@ -109,6 +128,9 @@ export function InputBar({ chatId, disabled, ref }: InputBarProps) {
   async function handleFiles(files: FileList | File[] | null) {
     if (!files) return;
     const list = Array.from(files);
+    // When the chosen model can't see images, extract PDF text directly (better
+    // quality than OCR'ing rendered pages) regardless of the global pdfMode.
+    const usePdfText = pdfMode === "text" || ocrFallback;
     for (const file of list) {
       const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
       const id = crypto.randomUUID();
@@ -118,12 +140,12 @@ export function InputBar({ chatId, disabled, ref }: InputBarProps) {
           id,
           fileName: file.name,
           fileType: "pdf",
-          payload: pdfMode === "text" ? "" : [],
+          payload: usePdfText ? "" : [],
           progress: { page: 0, total: 0 },
         };
         setPending((p) => [...p, stub]);
         try {
-          if (pdfMode === "text") {
+          if (usePdfText) {
             const text = await extractPdfText(file, (pr) => {
               setPending((p) => p.map((a) => (a.id === id ? { ...a, progress: pr } : a)));
             });
@@ -271,6 +293,15 @@ export function InputBar({ chatId, disabled, ref }: InputBarProps) {
             attachment={previewAtt}
             onClose={() => setPreviewId(null)}
           />
+        )}
+        {ocrFallback && hasVisualAttachment && (
+          <div
+            className="mb-2 flex w-fit items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-600 dark:text-amber-400"
+            title={`${effectiveModel} can't process images directly. Attached images and PDFs will be sent as OCR-extracted text.`}
+          >
+            <ScanText size={11} />
+            <span>OCR fallback: images sent as extracted text</span>
+          </div>
         )}
         {overrideActive && (
           <div className="mb-2 flex w-fit items-center gap-1.5 rounded-full border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/10 px-2.5 py-1 text-xs text-[var(--color-accent)]">

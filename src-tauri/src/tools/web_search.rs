@@ -112,11 +112,25 @@ pub async fn run(args: &Value, zone_config: &Value, http: &reqwest::Client) -> A
         })
         .to_string()),
         Ok(hits) => {
+            // Number each result and surface its source URL so the model can cite
+            // it inline (0.4.1 inline citations). The frontend maps `[n]` markers
+            // in the answer back to these sources.
             let results: Vec<Value> = hits
                 .iter()
-                .map(|h| json!({ "title": h.title, "url": h.url, "snippet": h.snippet }))
+                .enumerate()
+                .map(|(i, h)| {
+                    json!({ "ref": i + 1, "title": h.title, "url": h.url, "snippet": h.snippet })
+                })
                 .collect();
-            Ok(json!({ "query": query, "results": results }).to_string())
+            Ok(json!({
+                "query": query,
+                "results": results,
+                "citation_instructions": "When you use information from a result, cite it inline \
+                    with its `ref` number in square brackets immediately after the claim, e.g. \
+                    \"The crate is memory-safe [1].\" Combine multiple sources as [1][3]. Only cite \
+                    results you actually used."
+            })
+            .to_string())
         }
         Err(e) => Ok(json!({ "error": format!("Search failed: {e}") }).to_string()),
     }

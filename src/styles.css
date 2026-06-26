@@ -78,6 +78,22 @@ select {
   outline: none;
 }
 
+/* Native <select> dropdown popups are rendered by the OS/engine, not the DOM,
+   so Tailwind bg/text classes only style the closed control — the open list
+   defaulted to a light popup. `color-scheme` tells the engine to paint the
+   native popup dark, and the explicit option colors keep it on-theme. */
+select {
+  color-scheme: dark;
+}
+html.light select {
+  color-scheme: light;
+}
+select option,
+select optgroup {
+  background: var(--color-panel);
+  color: var(--color-text);
+}
+
 /* ===== Global transition for interactive feedback ===== */
 button,
 a,

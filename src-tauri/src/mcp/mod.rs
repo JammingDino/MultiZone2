@@ -644,8 +644,18 @@ async fn fetch_enabled_tools(
     db: &SqlitePool,
     wanted: &std::collections::HashSet<&str>,
 ) -> AppResult<Vec<(String, McpTool)>> {
+    // `id`, `name`, `created_at` and `updated_at` exist on BOTH mcp_tools and
+    // mcp_servers, so the bare `TOOL_COLS` list is ambiguous across this join —
+    // SQLite rejects it with "ambiguous column name", the error is swallowed by
+    // the callers, and the zone silently receives zero MCP tools. Qualify every
+    // selected column with the mcp_tools alias so the join is unambiguous.
+    let cols = TOOL_COLS
+        .split(", ")
+        .map(|c| format!("t.{c}"))
+        .collect::<Vec<_>>()
+        .join(", ");
     let rows = sqlx::query_as::<_, McpTool>(&format!(
-        "SELECT {TOOL_COLS} FROM mcp_tools t
+        "SELECT {cols} FROM mcp_tools t
          JOIN mcp_servers s ON s.id = t.server_id
          WHERE s.enabled = 1"
     ))

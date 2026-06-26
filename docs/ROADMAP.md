@@ -62,9 +62,9 @@ Conversation branching lets users fork from any message to explore an alternate 
 
 ### 0.4.x — Research & Sources
 
-Web search provider and API key configuration moves to a dedicated global settings section. MCP (Model Context Protocol) gets its own settings panel: users add MCP server connections, preview available tools from each server, set danger levels per tool, and enable them per zone — distinct from the existing built-in tool config. OCR and automatic text-only model detection allow PDFs and images to be handled gracefully with models that cannot process them natively. Inline citations attach source links directly to researched claims. RAG over local document collections is introduced here, backed by a local or API embedding model — a prerequisite for the later code interface.
+Web search provider and API key configuration moves to a dedicated global settings section. MCP (Model Context Protocol) gets its own settings panel: users add MCP server connections, preview available tools from each server, set danger levels per tool, and enable them per zone — distinct from the existing built-in tool config. Global tool overrides let a user designate tools (built-in or MCP) that every zone has access to regardless of its individual config — a baseline toolset applied app-wide, with per-zone enablement layered on top. OCR and automatic text-only model detection allow PDFs and images to be handled gracefully with models that cannot process them natively. Inline citations attach source links directly to researched claims. RAG over local document collections is introduced here, backed by a local or API embedding model — a prerequisite for the later code interface.
 
-**Done when:** a user can do a fully cited research session using web search and attached documents, with every claim traceable to a source; MCP servers can be connected and their tools used in zones; images and PDFs degrade gracefully with non-vision models.
+**Done when:** a user can do a fully cited research session using web search and attached documents, with every claim traceable to a source; MCP servers can be connected and their tools used in zones; global tool overrides apply to every zone; images and PDFs degrade gracefully with non-vision models.
 
 ---
 
@@ -88,9 +88,9 @@ The flagship mode. A Response Leader zone coordinates multiple sub-agents via su
 
 ### 0.7.x — Settings Rework & UI/UX Polish
 
-A full settings audit and consistency pass. Every panel is reviewed for clarity, completeness, and visual consistency. The database/markdown toggle is introduced: users can choose to persist chats and zone configs as markdown files alongside the SQLite database, making everything viewable and editable in any text editor. Visual and interaction inconsistencies accumulated during 0.1.x–0.6.x are resolved here before the 1.0 release. Chat export lands here too: one-shot export of any chat as Markdown or a theme-aware PDF, styled to match the active app theme.
+A full settings audit and consistency pass. Every panel is reviewed for clarity, completeness, and visual consistency. The Data section is fleshed out as part of this pass — surfacing more about what the app stores and where: database location and size, per-category storage breakdown (chats, zones, attachments, embeddings/RAG indexes, MCP config), counts and last-modified info, and maintenance actions (vacuum, clear caches, export/import, reset). The exact set of surfaced items is decided at implementation time. The database/markdown toggle is introduced: users can choose to persist chats and zone configs as markdown files alongside the SQLite database, making everything viewable and editable in any text editor. Visual and interaction inconsistencies accumulated during 0.1.x–0.6.x are resolved here before the 1.0 release. Chat export lands here too: one-shot export of any chat as Markdown or a theme-aware PDF, styled to match the active app theme.
 
-**Done when:** settings are internally consistent, the DB/markdown export works reliably, chat export produces correct Markdown and correctly themed PDFs, and the UI passes a fresh-eyes review with no jarring inconsistencies.
+**Done when:** settings are internally consistent, the Data section gives a clear and complete picture of local storage with working maintenance actions, the DB/markdown export works reliably, chat export produces correct Markdown and correctly themed PDFs, and the UI passes a fresh-eyes review with no jarring inconsistencies.
 
 ---
 

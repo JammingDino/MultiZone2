@@ -8,7 +8,7 @@ use crate::state::AppState;
 use tauri::{AppHandle, Emitter, State};
 
 const CHAT_COLS: &str =
-    "id, title, zone_id, project_id, project_context_enabled, perspective_mode, smart_routing, parent_chat_id, branched_from_message_id, created_at, updated_at";
+    "id, title, zone_id, project_id, project_context_enabled, knowledge_enabled, perspective_mode, smart_routing, parent_chat_id, branched_from_message_id, created_at, updated_at";
 
 #[tauri::command]
 pub async fn list_chats(state: State<'_, AppState>) -> AppResult<Vec<Chat>> {

@@ -49,6 +49,9 @@ pub struct Chat {
     pub zone_id: Option<String>,
     pub project_id: Option<String>,
     pub project_context_enabled: bool,
+    /// Per-chat opt-in for project knowledge (RAG). When true and the chat's
+    /// project has a non-empty index, the `search_knowledge` tool is offered.
+    pub knowledge_enabled: bool,
     /// Per-chat override for how perspective zones run: `Some("sequential")`,
     /// `Some("parallel")`, or `None` to inherit the global app setting.
     pub perspective_mode: Option<String>,
@@ -80,6 +83,14 @@ pub struct Project {
     /// When true, new chats created inside this project start with project
     /// context enabled automatically.
     pub default_context_enabled: bool,
+    /// Knowledge (RAG) embedding config, bound to the index. The provider+model
+    /// define the vector space; `kb_dimensions` is the embedding length captured
+    /// at index time. `kb_indexed_at` is the last successful index (None if the
+    /// project has never been indexed).
+    pub kb_provider_id: Option<String>,
+    pub kb_embedding_model: Option<String>,
+    pub kb_dimensions: Option<i64>,
+    pub kb_indexed_at: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
 }

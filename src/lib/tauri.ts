@@ -8,7 +8,10 @@ import type {
   ChatZone,
   LibraryEntry,
   DbStats,
+  IndexSummary,
   InputPart,
+  KbDocument,
+  KnowledgeStatus,
   McpServer,
   McpServerView,
   Memory,
@@ -81,6 +84,26 @@ export const upsertProject = (project: Partial<Project> & { name: string }) =>
 /** Delete a project. `deleteChats` false (default) moves its chats to Ungrouped; true deletes them too. */
 export const deleteProject = (id: string, deleteChats = false) =>
   invoke<void>("delete_project", { id, deleteChats });
+
+// Knowledge (RAG) — project-scoped, sourced from the project directory.
+export const setProjectKbConfig = (
+  projectId: string,
+  providerId: string | null,
+  embeddingModel: string | null,
+) =>
+  invoke<Project>("set_project_kb_config", { projectId, providerId, embeddingModel });
+export const indexProjectKnowledge = (projectId: string) =>
+  invoke<IndexSummary>("index_project_knowledge", { projectId });
+export const getKnowledgeStatus = (projectId: string) =>
+  invoke<KnowledgeStatus>("get_knowledge_status", { projectId });
+export const listKnowledgeDocuments = (projectId: string) =>
+  invoke<KbDocument[]>("list_knowledge_documents", { projectId });
+export const removeKnowledgeDocument = (documentId: string) =>
+  invoke<void>("remove_knowledge_document", { documentId });
+export const clearProjectKnowledge = (projectId: string) =>
+  invoke<void>("clear_project_knowledge", { projectId });
+export const setChatKnowledge = (chatId: string, enabled: boolean) =>
+  invoke<void>("set_chat_knowledge", { chatId, enabled });
 
 // Tags
 export const listTags = () => invoke<Tag[]>("list_tags");

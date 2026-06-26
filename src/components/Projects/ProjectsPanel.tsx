@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { X, Plus, Trash2, Folder, FolderOpen, ToggleLeft } from "lucide-react";
+import { X, Plus, Trash2, Folder, FolderOpen, Database, RefreshCw, FileText, Loader2, AlertTriangle } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
-import type { Project, Tag, Zone } from "@/lib/types";
+import type { IndexSummary, KbDocument, KnowledgeStatus, Project, Tag, Zone } from "@/lib/types";
 import { ZONE_COLOR_PRESETS, getZoneIcon, ZONE_ICON_GROUPS, ZONE_ICONS } from "@/lib/zoneIcons";
 
 export function ProjectsPanel() {
@@ -367,6 +367,17 @@ function ProjectForm({
             <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all duration-200 ${defaultContextEnabled ? "translate-x-4" : ""}`} />
           </button>
         </div>
+
+        {/* Knowledge (RAG) — only for saved projects, since indexing needs a
+            persisted project id + directory. */}
+        {project ? (
+          <KnowledgeSection project={project} />
+        ) : (
+          <div className="mt-4 rounded border border-dashed border-[var(--color-border)] px-3 py-2.5 text-xs text-[var(--color-text-muted)]">
+            <Database size={13} className="mb-1 inline" /> Knowledge (document search) can be set
+            up here after you create the project and give it a directory.
+          </div>
+        )}
       </div>
 
       <div className="flex justify-end gap-2 border-t border-[var(--color-border)] px-4 py-3">
@@ -380,6 +391,274 @@ function ProjectForm({
         </button>
       </div>
     </>
+  );
+}
+
+// ─── Knowledge (RAG) section ───────────────────────────────────────────────────
+
+function KnowledgeSection({ project }: { project: Project }) {
+  const providers = useApp((s) => s.providers);
+  const refreshProjects = useApp((s) => s.refreshProjects);
+
+  const [providerId, setProviderId] = useState<string | null>(project.kbProviderId);
+  const [model, setModel] = useState(project.kbEmbeddingModel ?? "");
+  const [modelOptions, setModelOptions] = useState<string[]>([]);
+  const [status, setStatus] = useState<KnowledgeStatus | null>(null);
+  const [docs, setDocs] = useState<KbDocument[]>([]);
+  const [showDocs, setShowDocs] = useState(false);
+  const [savingCfg, setSavingCfg] = useState(false);
+  const [indexing, setIndexing] = useState(false);
+  const [summary, setSummary] = useState<IndexSummary | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // Saved config on the project; local state is "dirty" until applied.
+  const savedProvider = project.kbProviderId;
+  const savedModel = project.kbEmbeddingModel ?? "";
+  const dirty = (providerId ?? null) !== (savedProvider ?? null) || model.trim() !== savedModel;
+  const configured = !!savedProvider && !!savedModel;
+  const hasDir = !!project.directory?.trim();
+
+  async function reload() {
+    try {
+      const [st, ds] = await Promise.all([
+        api.getKnowledgeStatus(project.id),
+        api.listKnowledgeDocuments(project.id),
+      ]);
+      setStatus(st);
+      setDocs(ds);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  useEffect(() => {
+    setProviderId(project.kbProviderId);
+    setModel(project.kbEmbeddingModel ?? "");
+    setSummary(null);
+    setError(null);
+    reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.id]);
+
+  // Offer model suggestions from the provider's /models list (best-effort;
+  // embedding model ids aren't always listed, so the field stays free-text).
+  useEffect(() => {
+    let cancelled = false;
+    if (!providerId) { setModelOptions([]); return; }
+    api.fetchModels(providerId)
+      .then((m) => { if (!cancelled) setModelOptions(m); })
+      .catch(() => { if (!cancelled) setModelOptions([]); });
+    return () => { cancelled = true; };
+  }, [providerId]);
+
+  async function saveConfig() {
+    setSavingCfg(true);
+    setError(null);
+    try {
+      await api.setProjectKbConfig(project.id, providerId, model.trim() || null);
+      await refreshProjects();
+      await reload();
+      setSummary(null);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSavingCfg(false);
+    }
+  }
+
+  async function runIndex() {
+    setIndexing(true);
+    setError(null);
+    setSummary(null);
+    try {
+      const s = await api.indexProjectKnowledge(project.id);
+      setSummary(s);
+      await refreshProjects();
+      await reload();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setIndexing(false);
+    }
+  }
+
+  async function clearAll() {
+    if (!confirm("Remove the entire knowledge index for this project? The embedding settings are kept.")) return;
+    await api.clearProjectKnowledge(project.id);
+    await refreshProjects();
+    await reload();
+    setSummary(null);
+  }
+
+  async function removeDoc(id: string) {
+    await api.removeKnowledgeDocument(id);
+    await refreshProjects();
+    await reload();
+  }
+
+  const indexed = !!project.kbIndexedAt;
+
+  return (
+    <div className="mt-4 rounded-lg border border-[var(--color-border)] p-3">
+      <div className="mb-2 flex items-center gap-2">
+        <Database size={14} className="text-[var(--color-accent)]" />
+        <span className="text-sm font-medium">Knowledge (document search)</span>
+      </div>
+      <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+        Index this project's directory so zones can search it during a chat (the{" "}
+        <code className="rounded bg-[var(--color-bg)] px-1">search_knowledge</code> tool). Pick an
+        embedding model from one of your providers — for a local model, add Ollama as a provider and
+        choose an embedding model such as <code className="rounded bg-[var(--color-bg)] px-1">nomic-embed-text</code>.
+      </p>
+
+      {/* Embedding provider + model */}
+      <div className="mb-2 grid grid-cols-2 gap-2">
+        <label className="block">
+          <div className="mb-1 text-[11px] text-[var(--color-text-muted)]">Embedding provider</div>
+          <select
+            value={providerId ?? ""}
+            onChange={(e) => setProviderId(e.target.value || null)}
+            className="input"
+          >
+            <option value="">— none —</option>
+            {providers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </label>
+        <label className="block">
+          <div className="mb-1 text-[11px] text-[var(--color-text-muted)]">Embedding model</div>
+          <input
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            list={`kb-models-${project.id}`}
+            placeholder="e.g. text-embedding-3-small"
+            className="input"
+            disabled={!providerId}
+          />
+          <datalist id={`kb-models-${project.id}`}>
+            {modelOptions.map((m) => <option key={m} value={m} />)}
+          </datalist>
+        </label>
+      </div>
+
+      {dirty && (
+        <div className="mb-2 flex items-start gap-1.5 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 text-[11px] text-[var(--color-text-muted)]">
+          <AlertTriangle size={12} className="mt-0.5 shrink-0 text-amber-500" />
+          <span>
+            {indexed
+              ? "Changing the embedding model rebuilds the index from scratch (different vector space). Saving clears the current index — re-index afterwards."
+              : "Save the embedding settings, then index the directory."}
+          </span>
+        </div>
+      )}
+
+      <div className="mb-3 flex items-center gap-2">
+        {dirty && (
+          <button
+            onClick={saveConfig}
+            disabled={savingCfg}
+            className="rounded bg-[var(--color-accent)] px-2.5 py-1 text-xs text-white disabled:opacity-50"
+          >
+            {savingCfg ? "Saving…" : "Save settings"}
+          </button>
+        )}
+        <button
+          onClick={runIndex}
+          disabled={indexing || !configured || dirty || !hasDir}
+          title={
+            !hasDir ? "Set and save a project directory first."
+              : !configured ? "Choose and save an embedding provider + model first."
+              : dirty ? "Save the embedding settings first."
+              : "Walk the directory and (re)build the index."
+          }
+          className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1 text-xs hover:border-[var(--color-accent)] disabled:opacity-50"
+        >
+          {indexing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+          {indexing ? "Indexing…" : indexed ? "Re-index" : "Index directory"}
+        </button>
+        {status && status.documentCount > 0 && (
+          <button
+            onClick={clearAll}
+            className="flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1 text-xs text-[var(--color-text-muted)] hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]"
+          >
+            <Trash2 size={11} /> Clear
+          </button>
+        )}
+      </div>
+
+      {!hasDir && (
+        <div className="mb-2 text-[11px] italic text-[var(--color-text-muted)]">
+          This project has no directory set — choose one above and save the project first.
+        </div>
+      )}
+
+      {/* Status line */}
+      {status && (
+        <div className="mb-1 text-xs text-[var(--color-text-muted)]">
+          {status.documentCount > 0 ? (
+            <>
+              {status.documentCount} document{status.documentCount === 1 ? "" : "s"} ·{" "}
+              {status.chunkCount} chunk{status.chunkCount === 1 ? "" : "s"}
+              {project.kbDimensions ? ` · ${project.kbDimensions}-dim` : ""}
+              {project.kbIndexedAt ? ` · indexed ${new Date(project.kbIndexedAt).toLocaleString()}` : ""}
+            </>
+          ) : (
+            <>Not indexed yet.</>
+          )}
+        </div>
+      )}
+
+      {/* Last run summary */}
+      {summary && (
+        <div className="mb-2 text-[11px] text-[var(--color-text-muted)]">
+          Indexed {summary.indexed}, unchanged {summary.unchanged}, removed {summary.removed}
+          {summary.failed > 0 ? `, failed ${summary.failed}` : ""} · {summary.totalChunks} new chunks.
+          {summary.errors.length > 0 && (
+            <ul className="mt-1 list-disc pl-4 text-[var(--color-danger)]">
+              {summary.errors.slice(0, 5).map((e, i) => <li key={i}>{e}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {error && <div className="mb-2 text-[11px] text-[var(--color-danger)]">{error}</div>}
+
+      {/* Document viewer */}
+      {docs.length > 0 && (
+        <div>
+          <button
+            onClick={() => setShowDocs((v) => !v)}
+            className="text-[11px] text-[var(--color-accent)] hover:underline"
+          >
+            {showDocs ? "Hide" : "Show"} indexed documents ({docs.length})
+          </button>
+          {showDocs && (
+            <div className="mt-1 max-h-44 overflow-y-auto rounded border border-[var(--color-border)]">
+              {docs.map((d) => (
+                <div
+                  key={d.id}
+                  className="group flex items-center gap-2 border-b border-[var(--color-border)] px-2 py-1.5 last:border-b-0"
+                >
+                  <FileText size={12} className="shrink-0 text-[var(--color-text-muted)]" />
+                  <span className="min-w-0 flex-1 truncate font-mono text-[11px]" title={d.path}>{d.path}</span>
+                  {d.status === "error" ? (
+                    <span className="shrink-0 text-[10px] text-[var(--color-danger)]" title={d.error ?? ""}>error</span>
+                  ) : (
+                    <span className="shrink-0 text-[10px] text-[var(--color-text-muted)]">{d.chunkCount} ch.</span>
+                  )}
+                  <button
+                    onClick={() => removeDoc(d.id)}
+                    className="shrink-0 text-[var(--color-text-muted)] opacity-0 transition hover:text-[var(--color-danger)] group-hover:opacity-100"
+                    title="Remove from index"
+                  >
+                    <X size={11} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

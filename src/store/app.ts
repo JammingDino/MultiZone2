@@ -170,6 +170,7 @@ interface AppStore {
   loadChatTags: (chatId: string) => Promise<void>;
   setChatProject: (chatId: string, projectId: string | null) => Promise<void>;
   toggleProjectContext: (chatId: string, enabled: boolean) => Promise<void>;
+  toggleKnowledge: (chatId: string, enabled: boolean) => Promise<void>;
   addChatTag: (chatId: string, tagId: string) => Promise<void>;
   removeChatTag: (chatId: string, tagId: string) => Promise<void>;
   toggleChatTagContext: (chatId: string, tagId: string, enabled: boolean) => Promise<void>;
@@ -915,6 +916,14 @@ export const useApp = create<AppStore>((set, get) => ({
     set((s) => ({
       chats: s.chats.map((c) =>
         c.id === chatId ? { ...c, projectContextEnabled: enabled } : c,
+      ),
+    }));
+  },
+  async toggleKnowledge(chatId, enabled) {
+    await api.setChatKnowledge(chatId, enabled);
+    set((s) => ({
+      chats: s.chats.map((c) =>
+        c.id === chatId ? { ...c, knowledgeEnabled: enabled } : c,
       ),
     }));
   },

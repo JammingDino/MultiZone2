@@ -9,6 +9,7 @@ pub mod zone;
 pub mod shell;
 pub mod memory;
 pub mod skills;
+pub mod knowledge;
 
 use crate::error::AppResult;
 use crate::llm::types::Tool;
@@ -189,7 +190,7 @@ pub fn tool_safety_by_name(name: &str) -> u8 {
         "get_current_datetime" | "ask_user" | "tag_chat"
         | "plot_function" | "draw_diagram"
         | "save_memory" | "read_memory" | "delete_memory"
-        | "load_skill" => 0,
+        | "load_skill" | "search_knowledge" => 0,
         "web_search" | "read_file" | "list_directory"
         | "create_file" | "edit_file" | "list_zones" | "change_zone" => 1,
         "execute_code" | "run_command" => 2,
@@ -240,6 +241,7 @@ pub async fn dispatch(
         "read_memory" => memory::read(&args, db, chat_id).await,
         "delete_memory" => memory::delete(&args, db).await,
         "load_skill" => skills::run(&args, db).await,
+        "search_knowledge" => knowledge::run(&args, db, chat_id, http).await,
         other => Ok(serde_json::json!({
             "error": format!("unknown tool: {other}")
         }).to_string()),

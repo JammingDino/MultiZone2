@@ -38,7 +38,7 @@ use tokio::sync::{oneshot, RwLock};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 const CHAT_COLS: &str =
-    "id, title, zone_id, project_id, project_context_enabled, perspective_mode, smart_routing, parent_chat_id, branched_from_message_id, created_at, updated_at";
+    "id, title, zone_id, project_id, project_context_enabled, knowledge_enabled, perspective_mode, smart_routing, parent_chat_id, branched_from_message_id, created_at, updated_at";
 const MSG_COLS: &str =
     "id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at";
 
@@ -203,7 +203,7 @@ async fn list_zones(State(st): State<ApiState>) -> ApiResult<Json<Vec<Zone>>> {
 
 async fn list_projects(State(st): State<ApiState>) -> ApiResult<Json<Vec<Project>>> {
     let rows = sqlx::query_as::<_, Project>(
-        "SELECT id, name, icon, accent_color, default_zone_id, context_snippet, directory, default_context_enabled, created_at, updated_at
+        "SELECT id, name, icon, accent_color, default_zone_id, context_snippet, directory, default_context_enabled, kb_provider_id, kb_embedding_model, kb_dimensions, kb_indexed_at, created_at, updated_at
          FROM projects ORDER BY name",
     )
     .fetch_all(&st.db)

@@ -236,12 +236,16 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 *Prerequisite for the code interface (post-1.0 backlog).*
 
-- [ ] Embedding provider config in settings: local model (ONNX or Ollama) or API-based (OpenAI embeddings)
-- [ ] Document ingestion: add files or folders to a knowledge base; documents chunked and embedded into local vector store (SQLite-vec or similar)
-- [ ] Knowledge bases scoped to a project or globally available
-- [ ] Zone config: enable a knowledge base for that zone; relevant chunks retrieved and injected before each turn
-- [ ] Knowledge base viewer: list ingested documents, chunk count, last updated; re-index or remove
-- [ ] Injected RAG chunks shown as a collapsible section in the chat header (transparent retrieval)
+*Design decisions (revised from the original outline): knowledge is **project-scoped and sourced from the project's `directory`** — one index per project, not a free-form multi-file knowledge base. Embedding models come **only from providers** (no bespoke local-model runtime): for a local model the user adds Ollama as a provider and picks an embedding model like `nomic-embed-text`, handled by the same OpenAI-compatible `/embeddings` path as OpenAI. The embedding model is **bound to the index** (one vector space), so changing it clears and re-indexes. Retrieval is **agentic** — a read-only `search_knowledge` tool the model calls when it needs grounding — gated by a **per-chat toggle** (`knowledge_enabled`) plus the project having a non-empty index, rather than per-zone enablement or automatic pre-turn injection. Vectors are stored as raw f32 BLOBs in `kb_chunks` and ranked by brute-force cosine in Rust (migration 019); no native vector extension.*
+
+*Status: built & typechecked (cargo check + `npm run build` green, migration/regression test passes); not yet runtime-tested against a live embedding provider.*
+
+- [x] Embedding provider config: per-project embedding provider + model, chosen from the user's configured providers (OpenAI embeddings, or Ollama-as-provider for local) — `set_project_kb_config`, surfaced in the project editor's Knowledge section
+- [x] Document ingestion: walk the project directory, chunk text-bearing files (incl. PDF via `pdf-extract`) with overlap, embed in batches, store vectors in a local SQLite store (`kb_documents` / `kb_chunks`) — `index_project_knowledge`; unchanged files skipped by content hash, deleted files pruned
+- [x] Knowledge bases scoped to a project (sourced from its directory); global knowledge bases intentionally out of scope for this revision
+- [~] Zone/chat config: a per-chat toggle offers the `search_knowledge` tool when the project is indexed; the model retrieves on demand (agentic) rather than chunks being auto-injected each turn — chosen over per-zone enablement
+- [x] Knowledge base viewer: list ingested documents with chunk count and index time; re-index, remove a document, or clear the whole index — Knowledge section in the project editor
+- [~] Retrieval transparency: retrieved chunks surface as ordinary `search_knowledge` tool calls in the message thread (with source file paths for citation), rather than a dedicated collapsible header section
 
 ---
 

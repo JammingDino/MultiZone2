@@ -43,7 +43,7 @@ const ZONE_COLS: &str = "id, name, provider_id, model, system_prompt, temperatur
     tools_enabled, tool_config, thinking_enabled, include_thinking_in_context,
     icon, accent_color, created_at, updated_at";
 const CHAT_COLS: &str =
-    "id, title, zone_id, project_id, project_context_enabled, perspective_mode, smart_routing, parent_chat_id, branched_from_message_id, created_at, updated_at";
+    "id, title, zone_id, project_id, project_context_enabled, knowledge_enabled, perspective_mode, smart_routing, parent_chat_id, branched_from_message_id, created_at, updated_at";
 const MSG_COLS: &str =
     "id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at";
 
@@ -1048,7 +1048,36 @@ async fn run_participant_turn(
     } else {
         None
     };
+    // Project knowledge (RAG) is offered as the read-only `search_knowledge`
+    // tool when this chat opted in AND its project has a non-empty index. It's
+    // independent of the zone's `tools_enabled`, so it's appended after every
+    // (re)build of the toolset below rather than going through `build_tools_for_zone`.
+    let knowledge_available = {
+        let enabled: bool = sqlx::query_scalar("SELECT knowledge_enabled FROM chats WHERE id = ?1")
+            .bind(chat_id)
+            .fetch_optional(&ctx.db)
+            .await?
+            .unwrap_or(false);
+        if enabled {
+            let pid: Option<String> =
+                sqlx::query_scalar("SELECT project_id FROM chats WHERE id = ?1")
+                    .bind(chat_id)
+                    .fetch_optional(&ctx.db)
+                    .await?
+                    .flatten();
+            match pid {
+                Some(p) => crate::knowledge::has_index(&ctx.db, &p).await,
+                None => false,
+            }
+        } else {
+            false
+        }
+    };
+
     let mut tools = build_tools_for_zone(&ctx.db, &zone, &tool_ctx).await;
+    if knowledge_available {
+        tools.push(crate::tools::knowledge::definition());
+    }
     // Per-zone MCP tool danger levels, refreshed on zone switch, consulted by the
     // approval gate alongside built-in `tool_safety_by_name`.
     let mut mcp_danger = {
@@ -1466,6 +1495,9 @@ async fn run_participant_turn(
                         zone = new_zone;
                         provider = new_provider;
                         tools = build_tools_for_zone(&ctx.db, &zone, &tool_ctx).await;
+                        if knowledge_available {
+                            tools.push(crate::tools::knowledge::definition());
+                        }
                         mcp_danger = {
                             let ids: Vec<String> =
                                 serde_json::from_str(&zone.tools_enabled).unwrap_or_default();

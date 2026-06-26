@@ -1,5 +1,6 @@
 mod api;
 mod db;
+mod knowledge;
 mod llm;
 mod mcp;
 mod ocr;
@@ -108,6 +109,13 @@ pub fn run() {
             commands::projects::list_tags,
             commands::projects::upsert_tag,
             commands::projects::delete_tag,
+            commands::knowledge::set_project_kb_config,
+            commands::knowledge::index_project_knowledge,
+            commands::knowledge::get_knowledge_status,
+            commands::knowledge::list_knowledge_documents,
+            commands::knowledge::remove_knowledge_document,
+            commands::knowledge::clear_project_knowledge,
+            commands::knowledge::set_chat_knowledge,
             commands::skills::list_skills,
             commands::skills::upsert_skill,
             commands::skills::set_skill_enabled,

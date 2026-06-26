@@ -41,6 +41,8 @@ export interface Chat {
   zoneId: string | null;
   projectId: string | null;
   projectContextEnabled: boolean;
+  /** Per-chat opt-in for project knowledge (RAG); offers the search_knowledge tool. */
+  knowledgeEnabled: boolean;
   /** Per-chat override for perspective execution; null = inherit global setting. */
   perspectiveMode: "sequential" | "parallel" | null;
   /** When true, the router picks the best zone per turn (Smart chat). */
@@ -64,8 +66,41 @@ export interface Project {
   directory: string | null;
   /** When true, new chats in this project start with project context enabled. */
   defaultContextEnabled: boolean;
+  /** Knowledge (RAG) embedding config, bound to the index. Provider+model define
+   * the vector space; changing either forces a re-index. Null until configured. */
+  kbProviderId: string | null;
+  kbEmbeddingModel: string | null;
+  kbDimensions: number | null;
+  kbIndexedAt: number | null;
   createdAt: number;
   updatedAt: number;
+}
+
+/** A document in a project's knowledge index. */
+export interface KbDocument {
+  id: string;
+  path: string;
+  title: string;
+  chunkCount: number;
+  status: string;
+  error: string | null;
+  indexedAt: number;
+}
+
+export interface KnowledgeStatus {
+  documentCount: number;
+  chunkCount: number;
+}
+
+/** Result of (re)indexing a project's directory. */
+export interface IndexSummary {
+  indexed: number;
+  unchanged: number;
+  removed: number;
+  failed: number;
+  totalChunks: number;
+  dimensions: number | null;
+  errors: string[];
 }
 
 export interface Tag {

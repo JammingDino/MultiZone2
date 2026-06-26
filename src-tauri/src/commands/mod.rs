@@ -10,6 +10,7 @@ pub mod library;
 pub mod skills;
 pub mod memory;
 pub mod mcp;
+pub mod knowledge;
 
 pub fn now_ts() -> i64 {
     chrono::Utc::now().timestamp_millis()

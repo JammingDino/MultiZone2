@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Upload, Tag as TagIcon, X, Zap, Folder, FolderX, ChevronDown, ChevronRight, SplitSquareHorizontal, Plus, ShieldAlert, Eye } from "lucide-react";
+import { Upload, Tag as TagIcon, X, Zap, Folder, FolderX, ChevronDown, ChevronRight, SplitSquareHorizontal, Plus, ShieldAlert, Eye, Database } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { MessageThread } from "./MessageThread";
@@ -34,6 +34,7 @@ export function ChatPanel() {
     loadChatZones,
     setChatProject,
     toggleProjectContext,
+    toggleKnowledge,
     addChatTag,
     removeChatTag,
     toggleChatTagContext,
@@ -220,11 +221,13 @@ export function ChatPanel() {
             chatId={activeChat.id}
             projectId={activeChat.projectId}
             projectContextEnabled={activeChat.projectContextEnabled}
+            knowledgeEnabled={activeChat.knowledgeEnabled}
             projects={projects}
             chatTags={tagsByChat[activeChat.id] ?? []}
             allTags={tags}
             onSetProject={(projectId) => setChatProject(activeChat.id, projectId)}
             onToggleProjectContext={(e) => toggleProjectContext(activeChat.id, e)}
+            onToggleKnowledge={(e) => toggleKnowledge(activeChat.id, e)}
             onAddTag={(tagId) => addChatTag(activeChat.id, tagId)}
             onRemoveTag={(tagId) => removeChatTag(activeChat.id, tagId)}
             onToggleTagContext={(tagId, e) => toggleChatTagContext(activeChat.id, tagId, e)}
@@ -304,11 +307,13 @@ function ProjectTagStrip({
   chatId,
   projectId,
   projectContextEnabled,
+  knowledgeEnabled,
   projects,
   chatTags,
   allTags,
   onSetProject,
   onToggleProjectContext,
+  onToggleKnowledge,
   onAddTag,
   onRemoveTag,
   onToggleTagContext,
@@ -316,11 +321,13 @@ function ProjectTagStrip({
   chatId: string;
   projectId: string | null;
   projectContextEnabled: boolean;
+  knowledgeEnabled: boolean;
   projects: Project[];
   chatTags: ChatTagEntry[];
   allTags: Tag[];
   onSetProject: (projectId: string | null) => void;
   onToggleProjectContext: (enabled: boolean) => void;
+  onToggleKnowledge: (enabled: boolean) => void;
   onAddTag: (tagId: string) => void;
   onRemoveTag: (tagId: string) => void;
   onToggleTagContext: (tagId: string, enabled: boolean) => void;
@@ -333,6 +340,9 @@ function ProjectTagStrip({
   const projectColor = project?.accentColor ?? "var(--color-accent)";
   const unassignedTags = allTags.filter((t) => !chatTags.some((ct) => ct.tagId === t.id));
   const projectHasSnippet = !!project?.contextSnippet?.trim();
+  // The project has a knowledge index built (set after a successful index run).
+  // Only then is the search_knowledge tool useful, so we only show the toggle then.
+  const projectIndexed = !!project?.kbIndexedAt;
 
   // Everything currently being prepended to the system prompt for this chat:
   // the project snippet (when its context is on) and each enabled tag snippet.
@@ -434,6 +444,25 @@ function ProjectTagStrip({
             <span className="text-[10px] italic text-[var(--color-text-muted)]">
               no context snippet set
             </span>
+          )}
+          {projectIndexed && (
+            <button
+              onClick={() => onToggleKnowledge(!knowledgeEnabled)}
+              title={
+                knowledgeEnabled
+                  ? "Knowledge ON — the assistant can search this project's indexed documents. Click to disable."
+                  : "Knowledge OFF — click to let the assistant search this project's documents (the search_knowledge tool)."
+              }
+              className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition ${
+                knowledgeEnabled
+                  ? "border-transparent text-white"
+                  : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-accent)]"
+              }`}
+              style={knowledgeEnabled ? { background: projectColor } : undefined}
+            >
+              <Database size={9} />
+              {knowledgeEnabled ? "Knowledge on" : "Knowledge off"}
+            </button>
           )}
         </>
       )}

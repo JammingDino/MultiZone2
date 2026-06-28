@@ -317,6 +317,55 @@ pub async fn remove_perspective_zone(
     Ok(())
 }
 
+// ─── Multizone sub-agents (0.6.0) ───────────────────────────────────────────
+// The sub-agent roster for a multizone session. The chat's primary `zone_id` is
+// the leader; these are the zones it may delegate to via the subchat tools.
+// Distinct from perspective `chat_zones`, which answer every turn.
+
+#[tauri::command]
+pub async fn get_chat_subagents(
+    state: State<'_, AppState>,
+    chat_id: String,
+) -> AppResult<Vec<ChatZone>> {
+    let rows = sqlx::query_as::<_, ChatZone>(
+        "SELECT chat_id, zone_id FROM chat_subagents WHERE chat_id = ?1",
+    )
+    .bind(&chat_id)
+    .fetch_all(&state.db)
+    .await?;
+    Ok(rows)
+}
+
+/// Replace a chat's entire sub-agent roster with `zone_ids`. Used by the
+/// multizone session-start flow (and the in-chat roster editor) to set which
+/// zones the leader may delegate to.
+#[tauri::command]
+pub async fn set_chat_subagents(
+    state: State<'_, AppState>,
+    chat_id: String,
+    zone_ids: Vec<String>,
+) -> AppResult<()> {
+    let mut tx = state.db.begin().await?;
+    sqlx::query("DELETE FROM chat_subagents WHERE chat_id = ?1")
+        .bind(&chat_id)
+        .execute(&mut *tx)
+        .await?;
+    for zid in &zone_ids {
+        sqlx::query("INSERT OR IGNORE INTO chat_subagents (chat_id, zone_id) VALUES (?1, ?2)")
+            .bind(&chat_id)
+            .bind(zid)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+    sqlx::query("UPDATE chats SET updated_at = ?1 WHERE id = ?2")
+        .bind(now_ts())
+        .bind(&chat_id)
+        .execute(&state.db)
+        .await?;
+    Ok(())
+}
+
 /// Forks a chat at `message_id` into a brand-new chat containing a copy of all
 /// history up to and including that message. The source chat is untouched. The
 /// new chat inherits the source's zone, project, tags and perspective zones, and

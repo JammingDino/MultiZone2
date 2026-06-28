@@ -37,6 +37,10 @@ pub struct Zone {
     pub icon: Option<String>,
     /// Hex accent color (e.g. "#3b82f6"). None = use global accent.
     pub accent_color: Option<String>,
+    /// Response Leader: a zone configured to coordinate sub-agents. When true,
+    /// the engine injects an orchestration preamble (listing the session's
+    /// sub-agent roster) and the library/editor show a leader indicator.
+    pub is_leader: bool,
     pub created_at: i64,
     pub updated_at: i64,
 }

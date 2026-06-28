@@ -7,7 +7,7 @@ use tauri::State;
 
 const ZONE_COLS: &str = "id, name, provider_id, model, system_prompt, temperature, max_tokens, top_p,
     tools_enabled, tool_config, thinking_enabled, include_thinking_in_context,
-    icon, accent_color, created_at, updated_at";
+    icon, accent_color, is_leader, created_at, updated_at";
 
 #[tauri::command]
 pub async fn list_zones(state: State<'_, AppState>) -> AppResult<Vec<Zone>> {
@@ -38,6 +38,8 @@ pub struct ZoneInput {
     pub include_thinking_in_context: Option<bool>,
     pub icon: Option<String>,
     pub accent_color: Option<String>,
+    /// Response Leader flag — marks the zone as a sub-agent coordinator.
+    pub is_leader: Option<bool>,
 }
 
 #[tauri::command]
@@ -49,12 +51,13 @@ pub async fn upsert_zone(state: State<'_, AppState>, zone: ZoneInput) -> AppResu
     let tool_config = zone.tool_config.unwrap_or_else(|| "{}".to_string());
     let thinking_enabled = zone.thinking_enabled.unwrap_or(false);
     let include_thinking_in_context = zone.include_thinking_in_context.unwrap_or(false);
+    let is_leader = zone.is_leader.unwrap_or(false);
 
     sqlx::query(
         "INSERT INTO zones (id, name, provider_id, model, system_prompt, temperature,
                             max_tokens, top_p, tools_enabled, tool_config, thinking_enabled,
-                            include_thinking_in_context, icon, accent_color, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15)
+                            include_thinking_in_context, icon, accent_color, is_leader, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?16)
          ON CONFLICT(id) DO UPDATE SET
            name = excluded.name,
            provider_id = excluded.provider_id,
@@ -69,6 +72,7 @@ pub async fn upsert_zone(state: State<'_, AppState>, zone: ZoneInput) -> AppResu
            include_thinking_in_context = excluded.include_thinking_in_context,
            icon = excluded.icon,
            accent_color = excluded.accent_color,
+           is_leader = excluded.is_leader,
            updated_at = excluded.updated_at",
     )
     .bind(&id)
@@ -85,6 +89,7 @@ pub async fn upsert_zone(state: State<'_, AppState>, zone: ZoneInput) -> AppResu
     .bind(include_thinking_in_context)
     .bind(&zone.icon)
     .bind(&zone.accent_color)
+    .bind(is_leader)
     .bind(now)
     .execute(&state.db)
     .await?;

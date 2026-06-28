@@ -41,7 +41,7 @@ impl TurnOverride {
 
 const ZONE_COLS: &str = "id, name, provider_id, model, system_prompt, temperature, max_tokens, top_p,
     tools_enabled, tool_config, thinking_enabled, include_thinking_in_context,
-    icon, accent_color, created_at, updated_at";
+    icon, accent_color, is_leader, created_at, updated_at";
 const CHAT_COLS: &str =
     "id, title, zone_id, project_id, project_context_enabled, knowledge_enabled, perspective_mode, smart_routing, parent_chat_id, branched_from_message_id, initiated_by_zone_id, created_at, updated_at";
 const MSG_COLS: &str =
@@ -640,6 +640,7 @@ fn simple_zone(provider: &Provider) -> AppResult<Zone> {
         include_thinking_in_context: false,
         icon: None,
         accent_color: None,
+        is_leader: false,
         created_at: 0,
         updated_at: 0,
     })
@@ -1079,9 +1080,24 @@ async fn run_participant_turn(
         }
     };
 
+    // Sub-agent (subchat) turns suppress `ask_user`: only the leader may surface
+    // questions to the user. Detect it once here; the flag also gates the tool
+    // rebuild after a mid-turn zone switch below.
+    let is_subchat: bool = sqlx::query_scalar::<_, Option<String>>(
+        "SELECT initiated_by_zone_id FROM chats WHERE id = ?1",
+    )
+    .bind(chat_id)
+    .fetch_optional(&ctx.db)
+    .await?
+    .flatten()
+    .is_some();
+
     let mut tools = build_tools_for_zone(&ctx.db, &zone, &tool_ctx).await;
     if knowledge_available {
         tools.push(crate::tools::knowledge::definition());
+    }
+    if is_subchat {
+        strip_ask_user(&mut tools);
     }
     // Per-zone MCP tool danger levels, refreshed on zone switch, consulted by the
     // approval gate alongside built-in `tool_safety_by_name`.
@@ -1506,6 +1522,9 @@ async fn run_participant_turn(
                         if knowledge_available {
                             tools.push(crate::tools::knowledge::definition());
                         }
+                        if is_subchat {
+                            strip_ask_user(&mut tools);
+                        }
                         mcp_danger = {
                             let ids: Vec<String> =
                                 serde_json::from_str(&zone.tools_enabled).unwrap_or_default();
@@ -1667,6 +1686,15 @@ async fn build_message_history(
         if !sys.trim().is_empty() { snippets.push(sys.clone()); }
     }
 
+    // Response Leader orchestration preamble (0.6.0): when this zone coordinates
+    // sub-agents, inject the delegation protocol and the session's sub-agent
+    // roster so the leader knows which zones it can spawn.
+    if zone.is_leader {
+        if let Some(block) = build_leader_preamble(db, chat_id, zone).await? {
+            snippets.push(block);
+        }
+    }
+
     // Long-term memory (global → project → chat), injected each turn.
     if let Some(block) = crate::tools::memory::build_memory_block(db, chat_id).await? {
         snippets.push(block);
@@ -1825,6 +1853,68 @@ async fn build_message_history(
     }
 
     Ok(out)
+}
+
+/// Builds the orchestration preamble for a Response Leader zone: the delegation
+/// protocol plus the session's sub-agent roster (from `chat_subagents`). Returns
+/// `None` only if the leader has no sub-agents configured *and* no roster could
+/// be resolved — in that case the leader still gets the protocol text so it can
+/// spawn ad-hoc sub-agents by name.
+async fn build_leader_preamble(
+    db: &SqlitePool,
+    chat_id: &str,
+    zone: &Zone,
+) -> AppResult<Option<String>> {
+    // Resolve the configured sub-agent roster (zone name + first-line blurb).
+    let roster: Vec<(String, Option<String>)> = sqlx::query_as(
+        "SELECT z.name, z.system_prompt
+         FROM chat_subagents s JOIN zones z ON z.id = s.zone_id
+         WHERE s.chat_id = ?1 ORDER BY z.name",
+    )
+    .bind(chat_id)
+    .fetch_all(db)
+    .await?;
+
+    let mut text = format!(
+        "You are \"{}\", the Response Leader for this conversation. Your job is to \
+         coordinate one or more specialist sub-agents and synthesize their work into \
+         a single answer for the user.\n\n\
+         Delegation protocol:\n\
+         • Drive sub-agents exclusively through the `spawn_subagent` and \
+           `send_subchat_message` tools — never answer purely from your own knowledge \
+           when a sub-agent could do the work better.\n\
+         • To stress-test an idea, present each sub-agent with a deliberately *opposing* \
+           or devil's-advocate framing of the task rather than forwarding the user's \
+           message verbatim. Have them argue different sides, then reconcile.\n\
+         • Treat each sub-agent's reply (returned to you as a tool result) as input, not \
+           as the final answer. Synthesize across them before you respond to the user.\n\
+         • You are the only participant who may call `ask_user`; sub-agents cannot pause \
+           to ask the user, so give them everything they need up front.",
+        zone.name
+    );
+
+    if roster.is_empty() {
+        text.push_str(
+            "\n\nNo sub-agents are pre-assigned to this session. Call `list_zones` to \
+             discover available specialists, then spawn the ones you need.",
+        );
+    } else {
+        text.push_str("\n\nSub-agents available for this session:");
+        for (name, blurb) in &roster {
+            let line = blurb
+                .as_deref()
+                .map(first_line)
+                .filter(|s| !s.is_empty())
+                .unwrap_or("specialist assistant");
+            text.push_str(&format!("\n• {name} — {line}"));
+        }
+        text.push_str(
+            "\n\nSpawn these by name with `spawn_subagent`. You may also bring in other \
+             zones via `list_zones` if a task needs a specialist not listed here.",
+        );
+    }
+
+    Ok(Some(text))
 }
 
 /// Builds the per-turn identity preamble for a zone in a multi-zone chat:
@@ -2047,6 +2137,12 @@ fn user_message_content(m: &Message, downgrade_images: bool) -> Option<MessageCo
         }
     }
     Some(MessageContent::Parts(parts))
+}
+
+/// Remove the `ask_user` tool from a toolset. Used for sub-agent (subchat)
+/// turns so only the leader can pause the session to ask the user.
+fn strip_ask_user(tools: &mut Vec<Tool>) {
+    tools.retain(|t| t.function.name != "ask_user");
 }
 
 async fn build_tools_for_zone(db: &SqlitePool, zone: &Zone, ctx: &ToolContext) -> Vec<Tool> {

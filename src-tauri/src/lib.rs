@@ -103,6 +103,8 @@ pub fn run() {
             commands::chats::add_perspective_zone,
             commands::chats::remove_perspective_zone,
             commands::chats::set_chat_perspective_mode,
+            commands::chats::get_chat_subagents,
+            commands::chats::set_chat_subagents,
             commands::chats::delete_chat,
             commands::chats::branch_chat,
             commands::chats::delete_messages_from,

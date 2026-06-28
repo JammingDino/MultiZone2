@@ -10,7 +10,7 @@ import { DEFAULT_ZONES } from "@/lib/defaultZones";
 
 /** Bump when the shipped curated set changes so existing installs re-seed the
  * library (idempotent — stable ids overwrite, user snapshots are untouched). */
-export const CURATED_LIBRARY_VERSION = 6;
+export const CURATED_LIBRARY_VERSION = 7;
 
 /** Stable, content-independent id for a curated entry so re-seeding overwrites
  * the same file instead of creating duplicates. */
@@ -35,6 +35,7 @@ export function curatedEntries(): LibraryEntry[] {
     toolConfig: "{}",
     thinkingEnabled: false,
     includeThinkingInContext: false,
+    isLeader: z.isLeader ?? false,
     description: z.description,
     author: z.author ?? "MultiZone Team",
     source: z.source ?? "Curated",
@@ -85,6 +86,7 @@ export function exportZoneJson(zone: Zone): void {
     toolConfig: zone.toolConfig,
     thinkingEnabled: zone.thinkingEnabled,
     includeThinkingInContext: zone.includeThinkingInContext,
+    isLeader: zone.isLeader,
   };
   const slug = zone.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "zone";
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
@@ -132,6 +134,7 @@ export async function installEntry(
     toolConfig: entry.toolConfig,
     thinkingEnabled: entry.thinkingEnabled,
     includeThinkingInContext: entry.includeThinkingInContext,
+    isLeader: entry.isLeader,
     icon: entry.icon,
     accentColor: entry.accentColor,
   });
@@ -154,6 +157,7 @@ export async function saveZoneToLibrary(zone: Zone): Promise<LibraryEntry> {
     toolConfig: zone.toolConfig,
     thinkingEnabled: zone.thinkingEnabled,
     includeThinkingInContext: zone.includeThinkingInContext,
+    isLeader: zone.isLeader,
     description: null,
     author: "You",
     source: "Saved by you",
@@ -196,6 +200,7 @@ export async function importEntryFromJson(text: string, fallbackName: string): P
     toolConfig: typeof raw.toolConfig === "string" ? raw.toolConfig : "{}",
     thinkingEnabled: !!raw.thinkingEnabled,
     includeThinkingInContext: !!raw.includeThinkingInContext,
+    isLeader: !!raw.isLeader,
     description: raw.description ?? null,
     author: raw.author ?? "Imported",
     source: raw.source ?? "Imported file",

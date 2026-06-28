@@ -164,6 +164,8 @@ export interface LibraryEntry {
   toolConfig: string;
   thinkingEnabled: boolean;
   includeThinkingInContext: boolean;
+  /** Response Leader preset — installs as a sub-agent-coordinating zone. */
+  isLeader: boolean;
   description: string | null;
   /** Library-detail metadata (cosmetic). */
   author: string | null;

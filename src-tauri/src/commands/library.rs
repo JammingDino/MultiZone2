@@ -38,6 +38,9 @@ pub struct LibraryEntry {
     pub thinking_enabled: bool,
     #[serde(default)]
     pub include_thinking_in_context: bool,
+    /// Response Leader preset — installs as a sub-agent-coordinating zone.
+    #[serde(default)]
+    pub is_leader: bool,
     /// One-line blurb shown on the library card.
     #[serde(default)]
     pub description: Option<String>,

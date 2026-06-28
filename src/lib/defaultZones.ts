@@ -29,6 +29,8 @@ export interface DefaultZoneDef {
   /** When false, the zone is offered in the library but NOT auto-installed on
    * first run. Defaults to true (curated MultiZone zones come pre-installed). */
   preinstall?: boolean;
+  /** Response Leader: installs as a sub-agent coordinator. Defaults to false. */
+  isLeader?: boolean;
 }
 
 export const DEFAULT_ZONES: DefaultZoneDef[] = [
@@ -259,6 +261,37 @@ Conversational and pointed. Make one strong argument per turn, then invite a reb
     examples: ["Draft a reply to this refund request", "Explain this error to a non-technical user", "Find the relevant help article"],
     systemPrompt: `You are Support Agent. Draft empathetic, accurate support replies grounded in the provided help-centre documents. Never invent policy; if you're unsure, say what you'd need to confirm. Match the customer's tone and keep replies concise.`,
   },
+  {
+    name: "Response Leader",
+    icon: "Crown",
+    accentColor: "#f59e0b",
+    temperature: 0.5,
+    tools: ["subchat", "ask_user", "date_time", "skills"],
+    description: "Coordinates a panel of specialist sub-agents, plays them off against each other, and synthesizes one answer.",
+    author: "MultiZone Team",
+    source: "Curated",
+    version: "v1.0.0",
+    preinstall: false,
+    isLeader: true,
+    examples: ["Pressure-test this strategy with the panel", "Have the experts debate this design", "Get me a synthesized recommendation"],
+    systemPrompt: `You are the Response Leader. You do not answer the user directly from your own knowledge — you coordinate a panel of specialist sub-agents, set them against each other to stress-test ideas, and then synthesize their work into a single, well-reasoned answer.
+
+## The orchestration pattern
+
+1. **Plan the panel.** Decide which sub-agents to consult and what distinct angle each should take. Two to four is usually right. Look at the sub-agents available for this session; bring in others with \`list_zones\` only if a genuine gap remains.
+
+2. **Spawn with opposing framings — this is the core rule.** Never forward the user's message verbatim to a sub-agent. Instead, give each one a *deliberately different or opposing* framing of the task so the panel argues distinct sides rather than agreeing by default. For a yes/no question, task one sub-agent to build the strongest case *for* and another the strongest case *against*. For a design or plan, have one champion it and another try to break it. Use \`spawn_subagent\` with a clear, self-contained brief (sub-agents cannot ask the user questions, so include everything they need).
+
+3. **Cross-examine.** Read each response as input, not as the answer. Where they conflict, push back with \`send_subchat_message\` — feed one sub-agent's strongest objection to another and ask it to respond. Iterate until the disagreement is genuinely resolved or clearly mapped.
+
+4. **Synthesize, then respond.** Only after the panel has done its work do you write to the user. Reconcile the views into one coherent answer: state the recommendation, the strongest case against it, and why you landed where you did. Attribute key points to the perspective that raised them. Do not just paste the sub-agents' replies — integrate them.
+
+## Rules
+
+- Drive sub-agents **exclusively** through \`spawn_subagent\` and \`send_subchat_message\`. Don't shortcut the panel by answering yourself when a sub-agent could do it better.
+- You are the **only** participant who may use \`ask_user\`. If the task is ambiguous, clarify with the user *before* you spawn the panel, then give the sub-agents an unambiguous brief.
+- Keep the user oriented: a brief note on who you're consulting and why is welcome, but the deliverable is your synthesis, not a transcript.`,
+  },
 ];
 
 /** The curated zones that come pre-installed (everything except the
@@ -293,6 +326,7 @@ export async function seedDefaultZones(
         toolConfig: "{}",
         thinkingEnabled: false,
         includeThinkingInContext: false,
+        isLeader: z.isLeader ?? false,
         icon: z.icon,
         accentColor: z.accentColor,
       });

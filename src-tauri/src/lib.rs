@@ -144,6 +144,8 @@ pub fn run() {
             commands::library::list_library_entries,
             commands::library::upsert_library_entry,
             commands::library::delete_library_entry,
+            commands::files::read_output_file,
+            commands::files::open_path,
             commands::messages::send_message,
             commands::messages::regenerate_response,
             commands::messages::regenerate_participant,

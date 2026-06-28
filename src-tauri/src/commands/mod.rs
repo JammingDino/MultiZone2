@@ -7,6 +7,7 @@ pub mod attachments;
 pub mod settings;
 pub mod projects;
 pub mod library;
+pub mod files;
 pub mod skills;
 pub mod memory;
 pub mod mcp;

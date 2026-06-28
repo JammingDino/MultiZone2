@@ -167,6 +167,14 @@ export const upsertLibraryEntry = (entry: LibraryEntry) =>
   invoke<LibraryEntry>("upsert_library_entry", { entry });
 export const deleteLibraryEntry = (id: string) =>
   invoke<void>("delete_library_entry", { id });
+
+// File presentation (0.5.2)
+/** Read a saved output file as text for the inline HTML report preview. */
+export const readOutputFile = (path: string) =>
+  invoke<string>("read_output_file", { path });
+/** Open a file or URL in the OS default app / browser (Tauri shell open). */
+export const openPath = (path: string) => invoke<void>("open_path", { path });
+
 export const deleteMessagesFrom = (chatId: string, messageId: string) =>
   invoke<void>("delete_messages_from", { chatId, messageId });
 export const getMessages = (chatId: string) =>

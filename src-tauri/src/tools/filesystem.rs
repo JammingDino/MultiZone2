@@ -141,6 +141,42 @@ pub fn definitions() -> Vec<Tool> {
     ]
 }
 
+/// Definition for the standalone `present_file` tool. Kept separate from the
+/// read/write/edit `file_system` group so a presentation-focused zone (e.g. the
+/// HTML report writer) can offer file presentation without full filesystem
+/// access.
+pub fn present_file_definitions() -> Vec<Tool> {
+    vec![Tool {
+        tool_type: "function".into(),
+        function: ToolFunction {
+            name: "present_file".into(),
+            description:
+                "Present a file that already exists on disk to the user, inline in the chat. \
+                 Pair this with create_file / edit_file / read_file: produce or edit the file in one \
+                 call, then present it in another — no need to repeat its contents in the chat. \
+                 HTML files (.html) render as a live preview with an \"open in browser\" button; other \
+                 files show a card that opens them in their default app. Relative paths resolve against \
+                 the working directory."
+                    .into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Path to the existing file. Absolute, or relative to the working directory."
+                    },
+                    "format": {
+                        "type": "string",
+                        "enum": ["html", "md", "csv", "json", "txt"],
+                        "description": "Optional. Overrides how the file is presented; inferred from the file extension when omitted."
+                    }
+                },
+                "required": ["path"]
+            }),
+        },
+    }]
+}
+
 /// Zone config:
 /// {
 ///   "file_system": {
@@ -437,6 +473,49 @@ pub async fn create_file(
         .to_string()),
         Err(e) => Ok(json!({ "error": e.to_string() }).to_string()),
     }
+}
+
+/// `present_file` — surface an already-existing file inline in the chat without
+/// (re)writing it. Read-only: the model produces or edits the file with another
+/// tool, then presents it here. Relative paths resolve against the working
+/// directory; format is taken from the extension unless overridden.
+pub async fn present_file(args: &Value, project_dir: Option<&str>) -> AppResult<String> {
+    let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("").trim();
+    if path.is_empty() {
+        return Ok(json!({ "error": "present_file requires a 'path'" }).to_string());
+    }
+
+    let p = resolve_path(path, project_dir);
+    if !p.is_file() {
+        return Ok(json!({
+            "error": format!("file does not exist: {}", p.to_string_lossy())
+        })
+        .to_string());
+    }
+
+    // Format: explicit override, else inferred from the extension. Normalize the
+    // html alias so the frontend keys on a single value.
+    let format = args
+        .get("format")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| {
+            p.extension()
+                .and_then(|e| e.to_str())
+                .map(|s| s.to_ascii_lowercase())
+                .unwrap_or_default()
+        });
+    let format = if format == "htm" { "html".to_string() } else { format };
+
+    Ok(json!({
+        "rendered": "present_file",
+        "ok": true,
+        "path": p.to_string_lossy(),
+        "filename": p.file_name().map(|f| f.to_string_lossy().to_string()),
+        "format": format,
+    })
+    .to_string())
 }
 
 pub async fn edit_file(

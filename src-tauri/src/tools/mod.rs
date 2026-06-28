@@ -98,6 +98,7 @@ pub enum ToolId {
     Memory,
     Skills,
     Subchat,
+    PresentFile,
 }
 
 impl ToolId {
@@ -115,6 +116,9 @@ impl ToolId {
             "memory" => Some(Self::Memory),
             "skills" => Some(Self::Skills),
             "subchat" => Some(Self::Subchat),
+            // `save_output` is the legacy id for this group (briefly shipped as a
+            // write+present tool); it now maps to the present-only tool.
+            "present_file" | "save_output" => Some(Self::PresentFile),
             _ => None,
         }
     }
@@ -133,6 +137,7 @@ impl ToolId {
             Self::Memory => "memory",
             Self::Skills => "skills",
             Self::Subchat => "subchat",
+            Self::PresentFile => "present_file",
         }
     }
 
@@ -153,13 +158,15 @@ impl ToolId {
             Self::Memory => memory::definitions(),
             Self::Skills => vec![skills::definition()],
             Self::Subchat => subchat::definitions(),
+            Self::PresentFile => filesystem::present_file_definitions(),
         }
     }
 
     /// Safety classification: 0 = safe, 1 = moderate, 2 = dangerous.
     pub fn safety_level(self) -> u8 {
         match self {
-            Self::DateTime | Self::AskUser | Self::ManageTags | Self::RenderGraph | Self::Memory | Self::Skills => 0,
+            // PresentFile only surfaces an existing file inline — read-only, no writes.
+            Self::DateTime | Self::AskUser | Self::ManageTags | Self::RenderGraph | Self::Memory | Self::Skills | Self::PresentFile => 0,
             // Subchat groups read (safe) + spawn/send (moderate); classed moderate
             // here so it isn't in the safe default set. Per-call gating uses the
             // function name (see `tool_safety_by_name`).
@@ -199,7 +206,8 @@ pub fn tool_safety_by_name(name: &str) -> u8 {
         "get_current_datetime" | "ask_user" | "tag_chat"
         | "plot_function" | "draw_diagram"
         | "save_memory" | "read_memory" | "delete_memory"
-        | "load_skill" | "search_knowledge" | "read_subchat" => 0,
+        | "load_skill" | "search_knowledge" | "read_subchat"
+        | "present_file" => 0,
         "web_search" | "read_file" | "list_directory"
         | "create_file" | "edit_file" | "list_zones" | "change_zone"
         | "spawn_subagent" | "send_subchat_message" => 1,
@@ -244,6 +252,7 @@ pub async fn dispatch(
         "list_directory" => filesystem::list_directory(&args, zone_config, project_dir).await,
         "create_file" => filesystem::create_file(&args, zone_config, project_dir).await,
         "edit_file" => filesystem::edit_file(&args, zone_config, project_dir).await,
+        "present_file" => filesystem::present_file(&args, project_dir).await,
         "plot_function" => render_graph::plot(&args).await,
         "draw_diagram" => render_graph::draw(&args).await,
         "ask_user" => ask_user::run(&args).await,

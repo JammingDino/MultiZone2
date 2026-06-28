@@ -15,6 +15,8 @@ import type { Step, ToolStep, ThinkingStep } from "@/lib/grouping";
 import type { ContentPart, InputPart } from "@/lib/types";
 import { MathPlotBlock, type MathPlotData } from "@/components/Renderers/MathPlotBlock";
 import { MermaidBlock } from "@/components/Renderers/MermaidBlock";
+import { HtmlReportBlock } from "@/components/Renderers/HtmlReportBlock";
+import { SavedFileChip } from "@/components/Renderers/SavedFileChip";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 
@@ -346,6 +348,19 @@ function renderToolOutput(
           </div>
         )}
       </>
+    );
+  }
+  if (name === "present_file") {
+    if (typeof parsed.path !== "string") return null;
+    const output = {
+      path: parsed.path as string,
+      filename: typeof parsed.filename === "string" ? parsed.filename : undefined,
+      format: typeof parsed.format === "string" ? parsed.format : undefined,
+    };
+    return output.format === "html" || output.format === "htm" ? (
+      <HtmlReportBlock output={output} />
+    ) : (
+      <SavedFileChip output={output} />
     );
   }
   if (name === "draw_diagram") {

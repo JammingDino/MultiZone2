@@ -497,6 +497,7 @@ export const ALL_TOOLS: { id: string; label: string; description: string; safety
   { id: "memory",       label: "Memory",            description: "Lets the model save, read, and delete long-term memories scoped to the chat, project, or globally.", safety: 0 },
   { id: "skills",       label: "Skills",            description: "Lets the model load specialized instruction sets on demand from your global Skills catalog.",       safety: 0 },
   { id: "render_graph", label: "Graph / diagram",   description: "Render Mermaid diagrams or math plots inline.",                                                  safety: 0 },
+  { id: "present_file", label: "Present file",       description: "Present an existing file inline in the chat — HTML reports get a live preview with an open-in-browser button; other files get an open card.", safety: 0 },
   { id: "web_search",   label: "Web search",        description: "Search the web via a configured provider.",                                                      safety: 1 },
   { id: "file_system",  label: "File system",       description: "Read, write, and list files within allowed paths.",                                              safety: 1 },
   { id: "switch_zone",  label: "Switch zone",       description: "Lets the model list zones and switch the chat to a different zone mid-conversation.",            safety: 1 },

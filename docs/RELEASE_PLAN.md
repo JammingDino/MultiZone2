@@ -273,10 +273,12 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ### 0.5.2 — File presentation
 
-- [ ] HTML output agent zone template: pre-configured to format structured data as clean HTML reports
-- [ ] `save_output_file(filename, content, format)` tool: writes output to the chat's working directory
-- [ ] Rendered HTML shown inline in the chat as a preview with an "open in browser" button
-- [ ] Local file links in HTML output open via Tauri shell open
+*Status: built & typechecked (cargo build + `npm run build` green). Presentation is split from creation: the model writes/edits a file with the existing `file_system` tools (`create_file` / `edit_file`), then surfaces it with the standalone `present_file` tool (id `present_file`, safe/read-only; legacy id `save_output` still resolves). `present_file` resolves relative paths against the chat working directory (project dir, or app default dir) and returns a `rendered` payload — HTML files render inline via a sandboxed scripts-disabled iframe preview (`HtmlReportBlock`), other formats show a `SavedFileChip`. (An earlier combined `save_output_file` write+present tool was removed as redundant.) Two Tauri commands back the UI: `read_output_file` (bounded text read for the preview) and `open_path` (OS opener via the `opener` crate) — used by the "open in browser" button and by intercepted local file links in the report. Curated "Report Builder" zone added (library-only, `preinstall: false`); curated library version bumped to 6.*
+
+- [x] HTML output agent zone template: pre-configured to format structured data as clean HTML reports — "Report Builder" curated zone (`present_file` + file_system + render_graph + web_search)
+- [x] ~~`save_output_file(filename, content, format)` tool~~ → split into `create_file`/`edit_file` (write) + `present_file(path, format?)` (present), so writing and presenting are separate composable calls
+- [x] Rendered HTML shown inline in the chat as a preview with an "open in browser" button — `HtmlReportBlock` sandboxed iframe + `open_path` for the full file
+- [x] Local file links in HTML output open via Tauri shell open — anchor clicks intercepted in the preview, relative hrefs resolved against the report's directory, routed through `open_path`
 
 ---
 

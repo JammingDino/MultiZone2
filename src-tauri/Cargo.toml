@@ -1,6 +1,6 @@
 [package]
 name = "multizone"
-version = "0.4.3"
+version = "0.5.2"
 description = "MultiZone — LLM interface"
 authors = ["MultiZone"]
 edition = "2021"
@@ -38,6 +38,11 @@ chrono = { version = "0.4", features = ["serde"] }
 
 image = "0.25"
 base64 = "0.22"
+
+# Open files / URLs in the user's default app or browser (0.5.2 file
+# presentation): the "open in browser" button and local file links in HTML
+# output. Cross-platform, no native deps.
+opener = "0.7"
 scraper = "0.20"
 pdf-extract = "0.7"
 

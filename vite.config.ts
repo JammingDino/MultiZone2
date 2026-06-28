@@ -34,18 +34,21 @@ export default defineConfig(async () => ({
         // Split heavy vendor libraries into their own chunks so the main
         // bundle stays well under the chunk-size warning threshold and these
         // rarely-changing deps cache independently.
+        //
+        // katex is a shared leaf: both the markdown/content ecosystem (via
+        // rehype-katex) and mermaid depend on it. Isolating it in its own
+        // chunk that everyone imports one-way keeps the dependency graph
+        // acyclic. Crucially it's matched as "/katex/" so the bridge module
+        // rehype-katex (which pulls in the hast/unist web) stays in "content"
+        // instead of dragging that web into the katex chunk and forming a
+        // cycle. markdown + syntax highlighting are coupled enough to share
+        // the "content" chunk; pdfjs and mermaid are self-contained.
         manualChunks(id: string) {
           if (!id.includes("node_modules")) return;
-          if (id.includes("mermaid")) return "mermaid";
-          if (id.includes("katex")) return "katex";
           if (id.includes("pdfjs-dist")) return "pdfjs";
-          if (
-            id.includes("react-syntax-highlighter") ||
-            id.includes("refractor") ||
-            id.includes("highlight.js") ||
-            id.includes("lowlight")
-          )
-            return "syntax-highlighter";
+          if (id.includes("/katex/")) return "katex";
+          if (id.includes("/mermaid/") || id.includes("@mermaid-js"))
+            return "mermaid";
           if (
             id.includes("react-markdown") ||
             id.includes("remark") ||
@@ -54,9 +57,14 @@ export default defineConfig(async () => ({
             id.includes("mdast") ||
             id.includes("hast") ||
             id.includes("unist") ||
-            id.includes("unified")
+            id.includes("unified") ||
+            id.includes("react-syntax-highlighter") ||
+            id.includes("refractor") ||
+            id.includes("highlight.js") ||
+            id.includes("lowlight") ||
+            id.includes("prismjs")
           )
-            return "markdown";
+            return "content";
         },
       },
     },

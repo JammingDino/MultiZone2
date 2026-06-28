@@ -31,6 +31,9 @@ export interface Zone {
   icon: string | null;
   /** Hex accent color, e.g. "#3b82f6". Null = use global accent. */
   accentColor: string | null;
+  /** Response Leader: a zone configured to coordinate sub-agents. Shown with a
+   * dedicated indicator in the library/editor; gets the orchestration preamble. */
+  isLeader: boolean;
   createdAt: number;
   updatedAt: number;
 }

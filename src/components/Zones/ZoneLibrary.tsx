@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   X, Download, Check, Loader2, Sparkles, Bookmark, ChevronLeft, ChevronRight,
-  ChevronDown, Plus, Upload, Settings as SettingsIcon, MessageSquare, Trash2, Star, Pencil,
+  ChevronDown, Plus, Upload, Settings as SettingsIcon, MessageSquare, Trash2, Star, Pencil, Crown,
 } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
@@ -317,8 +317,13 @@ export function ZoneLibrary() {
                     <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg" style={{ background: accent }}>
                       <Icon size={15} color="white" />
                     </span>
-                    <span className="min-w-0">
-                      <span className="block truncate text-[13px] font-medium leading-tight">{z.name}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center gap-1">
+                        <span className="truncate text-[13px] font-medium leading-tight">{z.name}</span>
+                        {z.isLeader && (
+                          <Crown size={11} className="flex-shrink-0 text-amber-500" />
+                        )}
+                      </span>
                       <span className="block truncate text-[11px] text-[var(--color-text-muted)]">{z.model}</span>
                     </span>
                   </button>

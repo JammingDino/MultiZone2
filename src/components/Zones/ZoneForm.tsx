@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { RefreshCw, Trash2, X, BookOpen, ChevronDown } from "lucide-react";
+import { RefreshCw, Trash2, X, BookOpen, ChevronDown, Crown } from "lucide-react";
 import * as api from "@/lib/tauri";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
 import type { Provider, Zone } from "@/lib/types";
@@ -246,6 +246,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
   const [ceHeadless, setCeHeadless] = useState(false);
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const [includeThinkingInContext, setIncludeThinkingInContext] = useState(false);
+  const [isLeader, setIsLeader] = useState(false);
   const [icon, setIcon] = useState<string | null>(null);
   const [accentColor, setAccentColor] = useState<string | null>(null);
   const [iconSearch, setIconSearch] = useState("");
@@ -280,6 +281,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
       } catch { /* ignore */ }
       setThinkingEnabled(zone.thinkingEnabled ?? false);
       setIncludeThinkingInContext(zone.includeThinkingInContext ?? false);
+      setIsLeader(zone.isLeader ?? false);
       setIcon(zone.icon ?? null);
       setAccentColor(zone.accentColor ?? null);
     } else {
@@ -295,6 +297,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
       setCeHeadless(false);
       setThinkingEnabled(false);
       setIncludeThinkingInContext(false);
+      setIsLeader(false);
       setIcon(null);
       setAccentColor(null);
     }
@@ -354,6 +357,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
         toolConfig,
         thinkingEnabled,
         includeThinkingInContext,
+        isLeader,
         icon,
         accentColor,
       });
@@ -776,6 +780,38 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
               </div>
             </label>
           </div>
+        </Field>
+
+        <Field label="Multizone">
+          <label className="flex cursor-pointer items-start gap-2 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-2 text-xs hover:border-[var(--color-accent)]">
+            <input
+              type="checkbox"
+              checked={isLeader}
+              onChange={(e) => {
+                const on = e.target.checked;
+                setIsLeader(on);
+                // A leader drives sub-agents via the subchat tools — enable them
+                // automatically when the role is turned on.
+                if (on) {
+                  setTools((prev) => (prev.includes("subchat") ? prev : [...prev, "subchat"]));
+                }
+              }}
+              className="mt-0.5 shrink-0"
+            />
+            <div>
+              <div className="flex items-center gap-1.5">
+                <Crown size={12} className="text-amber-500" />
+                <span className="font-medium">Response Leader</span>
+              </div>
+              <div className="mt-0.5 text-[var(--color-text-muted)]">
+                Marks this zone as a sub-agent coordinator. In a multizone session it
+                delegates to specialist zones via <code>spawn_subagent</code> /{" "}
+                <code>send_subchat_message</code>, presents opposing views to each, and
+                synthesizes their answers before replying. Enabling this turns on the
+                subchat tools.
+              </div>
+            </div>
+          </label>
         </Field>
 
         <Field label="Tool config (JSON)">

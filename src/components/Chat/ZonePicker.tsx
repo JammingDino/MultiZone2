@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, Check, Plus, Layers, Zap, Brain, Loader2 } from "lucide-react";
+import { ChevronDown, Check, Plus, Layers, Zap, Brain, Loader2, Crown } from "lucide-react";
 import { useApp } from "@/store/app";
 import { getZoneIcon } from "@/lib/zoneIcons";
 
@@ -148,7 +148,10 @@ export function ZonePicker({ chatId, currentZoneId, smartRouting, routingState }
                   <ZoneIcon size={11} color="white" />
                 </div>
                 <div className="flex-1">
-                  <div>{z.name}</div>
+                  <div className="flex items-center gap-1">
+                    {z.name}
+                    {z.isLeader && <Crown size={11} className="text-amber-500" />}
+                  </div>
                   <div className="text-xs text-[var(--color-text-muted)]">{z.model}</div>
                 </div>
                 {active && (

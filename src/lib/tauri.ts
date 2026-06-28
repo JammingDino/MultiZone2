@@ -73,6 +73,11 @@ export const setChatPerspectiveMode = (
   chatId: string,
   mode: "sequential" | "parallel" | null,
 ) => invoke<void>("set_chat_perspective_mode", { chatId, mode });
+/** Multizone sub-agent roster: zones the leader may delegate to. */
+export const getChatSubagents = (chatId: string) =>
+  invoke<ChatZone[]>("get_chat_subagents", { chatId });
+export const setChatSubagents = (chatId: string, zoneIds: string[]) =>
+  invoke<void>("set_chat_subagents", { chatId, zoneIds });
 export const deleteChat = (id: string) => invoke<void>("delete_chat", { id });
 /** Fork a chat at `messageId` into a new chat copying history up to & including it. */
 export const branchChat = (chatId: string, messageId: string) =>

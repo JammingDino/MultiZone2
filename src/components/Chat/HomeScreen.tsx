@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Send, ChevronDown, Zap, Check, Layers, Settings as SettingsIcon, Loader2, Brain, Paperclip, Tag, X, SplitSquareHorizontal } from "lucide-react";
+import { Send, ChevronDown, Zap, Check, Layers, Settings as SettingsIcon, Loader2, Brain, Paperclip, Tag, X, SplitSquareHorizontal, Crown, Users } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { getZoneIcon } from "@/lib/zoneIcons";
@@ -68,6 +68,10 @@ export function HomeScreen() {
   // Extra zones to answer alongside the primary (mode) zone as perspectives.
   const [selectedPerspectiveIds, setSelectedPerspectiveIds] = useState<Set<string>>(new Set());
   const [perspMenuOpen, setPerspMenuOpen] = useState(false);
+  // Multizone: sub-agent roster the leader may delegate to (only used when the
+  // selected primary zone is a Response Leader).
+  const [selectedSubagentIds, setSelectedSubagentIds] = useState<Set<string>>(new Set());
+  const [subagentMenuOpen, setSubagentMenuOpen] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const isFirstNewChatTick = useRef(true);
@@ -82,11 +86,15 @@ export function HomeScreen() {
     setSelectedProjectId(newChatProjectId);
     setSelectedTagIds(new Set());
     setSelectedPerspectiveIds(new Set());
+    setSelectedSubagentIds(new Set());
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [newChatTimestamp]);
 
   const selectedZone =
     mode.type === "zone" ? zones.find((z) => z.id === mode.id) ?? null : null;
+  // When the primary zone is a Response Leader, the new chat starts a multizone
+  // session: the leader drives the chosen sub-agents instead of perspective zones.
+  const leaderSelected = !!selectedZone?.isLeader;
 
   const quickSelectedButUnavailable =
     (mode.type === "quick" || mode.type === "smart") && !quickAvailable;
@@ -219,6 +227,8 @@ export function HomeScreen() {
     const currentProjectId = selectedProjectId;
     const currentTagIds = new Set(selectedTagIds);
     const currentPerspectiveIds = new Set(selectedPerspectiveIds);
+    const currentSubagentIds = new Set(selectedSubagentIds);
+    const currentLeaderSelected = leaderSelected;
 
     // Quick mode uses the base zone if one is configured, otherwise null (legacy provider path).
     const zoneId =
@@ -232,15 +242,25 @@ export function HomeScreen() {
       if (currentMode.type === "smart") {
         await setChatSmart(chat.id, true);
       }
-      // Add perspective zones BEFORE sending so the first turn already runs
-      // them. Skip any that match the primary zone. Run mode inherits the
-      // global default (no per-chat override).
-      for (const zid of currentPerspectiveIds) {
-        if (zid === zoneId) continue;
-        try {
-          await api.addPerspectiveZone(chat.id, zid);
-        } catch (e) {
-          console.error(e);
+      // Multizone session: a leader primary delegates to a sub-agent roster
+      // rather than running perspective zones. Set the roster before sending so
+      // the leader's first turn already knows which zones it can spawn.
+      if (currentLeaderSelected) {
+        const ids = [...currentSubagentIds].filter((id) => id !== zoneId);
+        if (ids.length > 0) {
+          await api.setChatSubagents(chat.id, ids).catch(console.error);
+        }
+      } else {
+        // Add perspective zones BEFORE sending so the first turn already runs
+        // them. Skip any that match the primary zone. Run mode inherits the
+        // global default (no per-chat override).
+        for (const zid of currentPerspectiveIds) {
+          if (zid === zoneId) continue;
+          try {
+            await api.addPerspectiveZone(chat.id, zid);
+          } catch (e) {
+            console.error(e);
+          }
         }
       }
       // Assign selected tags (fire-and-forget; non-critical).
@@ -448,8 +468,26 @@ export function HomeScreen() {
                 )}
               </div>
 
-            {/* Perspectives — extra zones that answer alongside the primary */}
-            {zones.length > 0 && (
+            {/* Multizone sub-agents (leader primary) OR perspectives (any other
+                primary) — the two are mutually exclusive per chat. */}
+            {zones.length > 0 && leaderSelected && (
+              <SubagentPicker
+                zones={zones}
+                leaderZoneId={mode.type === "zone" ? mode.id : null}
+                selected={selectedSubagentIds}
+                open={subagentMenuOpen}
+                setOpen={setSubagentMenuOpen}
+                onToggle={(id) =>
+                  setSelectedSubagentIds((s) => {
+                    const n = new Set(s);
+                    if (n.has(id)) n.delete(id);
+                    else n.add(id);
+                    return n;
+                  })
+                }
+              />
+            )}
+            {zones.length > 0 && !leaderSelected && (
               <PerspectivePicker
                 zones={zones}
                 primaryZoneId={mode.type === "zone" ? mode.id : null}
@@ -587,11 +625,21 @@ export function HomeScreen() {
             </button>
           </div>
         )}
-        {selectedPerspectiveIds.size > 0 && (
+        {!leaderSelected && selectedPerspectiveIds.size > 0 && (
           <p className="mt-2 text-center text-xs text-[var(--color-text-muted)]">
             You'll get {selectedPerspectiveIds.size + 1} answers side by side — the
             primary plus {selectedPerspectiveIds.size} perspective
             {selectedPerspectiveIds.size > 1 ? "s" : ""}. Run mode: {globalPerspectiveMode} (change in Settings → Chat).
+          </p>
+        )}
+        {leaderSelected && (
+          <p className="mt-2 flex items-center justify-center gap-1 text-center text-xs text-[var(--color-text-muted)]">
+            <Crown size={11} className="text-amber-500" />
+            {selectedZone?.name} will coordinate{" "}
+            {selectedSubagentIds.size > 0
+              ? `${selectedSubagentIds.size} sub-agent${selectedSubagentIds.size > 1 ? "s" : ""}`
+              : "sub-agents you choose"}
+            , present opposing views to each, and synthesize one answer.
           </p>
         )}
       </div>
@@ -674,6 +722,91 @@ function PerspectivePicker({
             <div className="my-1 border-t border-[var(--color-border)]" />
             <div className="px-3 py-1.5 text-[11px] text-[var(--color-text-muted)]">
               Runs {globalMode} (set in Settings → Chat). The mode picker is the primary.
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** New-chat composer control for picking the sub-agent roster of a multizone
+ * session. Shown only when the primary zone is a Response Leader; the leader
+ * delegates to the chosen zones via the subchat tools. */
+function SubagentPicker({
+  zones,
+  leaderZoneId,
+  selected,
+  open,
+  setOpen,
+  onToggle,
+}: {
+  zones: Zone[];
+  leaderZoneId: string | null;
+  selected: Set<string>;
+  open: boolean;
+  setOpen: (v: boolean | ((p: boolean) => boolean)) => void;
+  onToggle: (zoneId: string) => void;
+}) {
+  // The leader can't also be its own sub-agent.
+  const addable = zones.filter((z) => z.id !== leaderZoneId);
+  const count = addable.filter((z) => selected.has(z.id)).length;
+
+  return (
+    <div className="relative shrink-0">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title="Sub-agents — specialist zones the leader can delegate to"
+        className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition ${
+          count > 0
+            ? "border-amber-500 text-amber-500"
+            : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
+        }`}
+      >
+        <Users size={12} />
+        {count > 0 ? `${count} sub-agent${count > 1 ? "s" : ""}` : "Sub-agents"}
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div className="absolute bottom-full left-1/2 z-40 mb-1 max-h-72 min-w-[240px] -translate-x-1/2 overflow-y-auto rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg">
+            <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+              Specialists the leader can delegate to
+            </div>
+            {addable.length === 0 && (
+              <div className="px-3 py-2 text-xs text-[var(--color-text-muted)]">
+                No other zones to add.
+              </div>
+            )}
+            {addable.map((z) => {
+              const ZoneIcon = getZoneIcon(z.icon);
+              const active = selected.has(z.id);
+              return (
+                <button
+                  key={z.id}
+                  onClick={() => onToggle(z.id)}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)]"
+                >
+                  <span
+                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded"
+                    style={{ background: z.accentColor ?? "var(--color-accent)" }}
+                  >
+                    <ZoneIcon size={11} color="white" />
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1 truncate">
+                      <span className="truncate">{z.name}</span>
+                      {z.isLeader && <Crown size={10} className="shrink-0 text-amber-500" />}
+                    </div>
+                    <div className="truncate text-xs text-[var(--color-text-muted)]">{z.model}</div>
+                  </div>
+                  {active && <Check size={12} className="shrink-0 text-[var(--color-accent)]" />}
+                </button>
+              );
+            })}
+            <div className="my-1 border-t border-[var(--color-border)]" />
+            <div className="px-3 py-1.5 text-[11px] text-[var(--color-text-muted)]">
+              The leader spawns these as sub-agents and synthesizes their answers.
             </div>
           </div>
         </>

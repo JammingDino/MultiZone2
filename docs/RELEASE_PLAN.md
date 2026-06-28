@@ -256,11 +256,11 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ### 0.5.0 — Subchat data model & API
 
-- [ ] `parent_chat_id` and `initiated_by_zone_id` columns on `Chat`
-- [ ] Sidebar: subchats shown as a collapsible sub-list under their parent chat
-- [ ] Local HTTP API: `POST /chats/:id/messages` accepts a `zone_id` as sender (not user)
-- [ ] Subchat turns render with the initiating zone's avatar instead of the user avatar
-- [ ] Subchats are read-only from the user's perspective (observable but not interactive)
+- [x] `parent_chat_id` and `initiated_by_zone_id` columns on `Chat`
+- [x] Sidebar: subchats shown as a collapsible sub-list under their parent chat
+- [x] Local HTTP API: `POST /chats/:id/messages` accepts a `zone_id` as sender (not user)
+- [x] Subchat turns render with the initiating zone's avatar instead of the user avatar
+- [x] Subchats are read-only from the user's perspective (observable but not interactive)
 
 ### 0.5.1 — Spawn-subagent tool
 

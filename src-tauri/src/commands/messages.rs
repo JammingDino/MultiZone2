@@ -43,7 +43,7 @@ const ZONE_COLS: &str = "id, name, provider_id, model, system_prompt, temperatur
     tools_enabled, tool_config, thinking_enabled, include_thinking_in_context,
     icon, accent_color, created_at, updated_at";
 const CHAT_COLS: &str =
-    "id, title, zone_id, project_id, project_context_enabled, knowledge_enabled, perspective_mode, smart_routing, parent_chat_id, branched_from_message_id, created_at, updated_at";
+    "id, title, zone_id, project_id, project_context_enabled, knowledge_enabled, perspective_mode, smart_routing, parent_chat_id, branched_from_message_id, initiated_by_zone_id, created_at, updated_at";
 const MSG_COLS: &str =
     "id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at";
 

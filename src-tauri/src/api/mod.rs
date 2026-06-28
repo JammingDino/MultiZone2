@@ -38,7 +38,7 @@ use tokio::sync::{oneshot, RwLock};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 const CHAT_COLS: &str =
-    "id, title, zone_id, project_id, project_context_enabled, knowledge_enabled, perspective_mode, smart_routing, parent_chat_id, branched_from_message_id, created_at, updated_at";
+    "id, title, zone_id, project_id, project_context_enabled, knowledge_enabled, perspective_mode, smart_routing, parent_chat_id, branched_from_message_id, initiated_by_zone_id, created_at, updated_at";
 const MSG_COLS: &str =
     "id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at";
 
@@ -383,11 +383,17 @@ struct SendQuery {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct SendBody {
     #[serde(default)]
     text: Option<String>,
     #[serde(default)]
     parts: Option<Vec<InputPart>>,
+    /// When set, the message is sent on behalf of a zone (a subchat turn) rather
+    /// than the user. On first use this marks the chat as a subchat owned by the
+    /// zone (`initiated_by_zone_id`). Used by orchestration over the API.
+    #[serde(default)]
+    sender_zone_id: Option<String>,
 }
 
 fn resolve_parts(body: SendBody) -> Result<Vec<InputPart>, ApiError> {
@@ -412,8 +418,33 @@ async fn send_message(
     Query(q): Query<SendQuery>,
     Json(body): Json<SendBody>,
 ) -> ApiResult<Response> {
+    let sender_zone_id = body.sender_zone_id.clone();
     let parts = resolve_parts(body)?;
     let ctx = st.engine();
+
+    // A message sent on behalf of a zone marks the chat as that zone's subchat
+    // (on first use). The turn itself runs normally — the prompt is persisted as
+    // a user-role message and attribution is read at the chat level.
+    if let Some(zone_id) = sender_zone_id {
+        let exists: Option<(String,)> = sqlx::query_as("SELECT id FROM zones WHERE id = ?1")
+            .bind(&zone_id)
+            .fetch_optional(&st.db)
+            .await
+            .map_err(AppError::from)?;
+        if exists.is_none() {
+            return Err(ApiError(AppError::NotFound(format!("zone {zone_id}"))));
+        }
+        sqlx::query(
+            "UPDATE chats SET initiated_by_zone_id = ?1, updated_at = ?2
+             WHERE id = ?3 AND initiated_by_zone_id IS NULL",
+        )
+        .bind(&zone_id)
+        .bind(now_ts())
+        .bind(&chat_id)
+        .execute(&st.db)
+        .await
+        .map_err(AppError::from)?;
+    }
 
     if q.wait {
         // Blocking: run to completion, then return the turn's new primary messages.

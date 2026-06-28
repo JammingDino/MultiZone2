@@ -8,7 +8,7 @@ use crate::state::AppState;
 use tauri::{AppHandle, Emitter, State};
 
 const CHAT_COLS: &str =
-    "id, title, zone_id, project_id, project_context_enabled, knowledge_enabled, perspective_mode, smart_routing, parent_chat_id, branched_from_message_id, created_at, updated_at";
+    "id, title, zone_id, project_id, project_context_enabled, knowledge_enabled, perspective_mode, smart_routing, parent_chat_id, branched_from_message_id, initiated_by_zone_id, created_at, updated_at";
 
 /// The global default for whether new chats start with knowledge enabled, read
 /// from the `knowledgeDefaultEnabled` field of the `app_settings` JSON blob.

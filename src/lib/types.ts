@@ -51,6 +51,12 @@ export interface Chat {
   parentChatId: string | null;
   /** The parent message this branch was forked at. */
   branchedFromMessageId: string | null;
+  /**
+   * Set on subchats — the zone that spawned and drives this chat. A child chat
+   * with this set is a subchat (vs. a branch, which sets branchedFromMessageId).
+   * Subchats are observable but read-only from the user's perspective.
+   */
+  initiatedByZoneId: string | null;
   createdAt: number;
   updatedAt: number;
 }

@@ -137,6 +137,15 @@ export function UserMessage({ message }: { message: Message }) {
   const [preview, setPreview] = useState<MessagePreview | null>(null);
   const loadMessages = useApp((s) => s.loadMessages);
   const refreshChats = useApp((s) => s.refreshChats);
+  // In a subchat, user-role turns are the owning zone's prompts — render them
+  // with that zone's avatar instead of the generic user avatar.
+  const subchatZone = useApp((s) => {
+    const chat = s.chats.find((c) => c.id === message.chatId);
+    if (!chat?.initiatedByZoneId) return null;
+    return s.zones.find((z) => z.id === chat.initiatedByZoneId) ?? null;
+  });
+  const SenderIcon = subchatZone ? getZoneIcon(subchatZone.icon) : User;
+  const senderBg = subchatZone?.accentColor ?? "var(--color-accent)";
 
   async function commitEdit() {
     const next = draft.trim();
@@ -201,8 +210,12 @@ export function UserMessage({ message }: { message: Message }) {
             <span>Ctrl+Enter to save, Esc to cancel</span>
           </div>
         </div>
-        <div className="mt-1 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded bg-[var(--color-accent)]">
-          <User size={14} />
+        <div
+          className="mt-1 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded"
+          style={{ background: senderBg }}
+          title={subchatZone ? subchatZone.name : undefined}
+        >
+          <SenderIcon size={14} color="white" />
         </div>
       </div>
     );
@@ -261,8 +274,12 @@ export function UserMessage({ message }: { message: Message }) {
             </div>
           )}
         </div>
-        <div className="mt-1 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded bg-[var(--color-accent)]">
-          <User size={14} />
+        <div
+          className="mt-1 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded"
+          style={{ background: senderBg }}
+          title={subchatZone ? subchatZone.name : undefined}
+        >
+          <SenderIcon size={14} color="white" />
         </div>
       </div>
       <div className="msg-actions">

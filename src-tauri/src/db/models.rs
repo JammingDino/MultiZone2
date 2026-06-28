@@ -64,6 +64,11 @@ pub struct Chat {
     /// The message in the parent that this branch was forked at (history was
     /// copied up to and including it). Null for ordinary chats.
     pub branched_from_message_id: Option<String>,
+    /// Set on subchats — the zone that spawned and drives this chat. A child
+    /// chat with this set is a subchat (vs. a branch, which sets
+    /// `branched_from_message_id` instead). Subchats are read-only from the
+    /// user's perspective. Cleared to NULL if the owning zone is deleted.
+    pub initiated_by_zone_id: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }

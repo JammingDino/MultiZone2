@@ -55,6 +55,14 @@ export function ChatPanel() {
   const activeChat = chats.find((c) => c.id === activeChatId) ?? null;
   const activeZone = activeChat ? zones.find((z) => z.id === activeChat.zoneId) : null;
 
+  // A subchat is owned and driven by a zone — observable but read-only for the
+  // user. We swap the composer for a notice and skip approval/ask widgets.
+  const isSubchat = !!activeChat?.initiatedByZoneId;
+  const subchatZone =
+    isSubchat && activeChat
+      ? zones.find((z) => z.id === activeChat.initiatedByZoneId) ?? null
+      : null;
+
   // A chat with no zone (Quick) or smart routing enabled needs the quick-chat
   // provider's default model. Zone chats need their zone to be configured.
   const quickProvider = providers.find((p) => p.id === (defaultProviderId ?? providers[0]?.id)) ?? null;
@@ -234,7 +242,9 @@ export function ChatPanel() {
           />
 
           <MessageThread chatId={activeChat.id} />
-          {pendingApprovals.length > 0 ? (
+          {isSubchat ? (
+            <SubchatNotice zone={subchatZone} />
+          ) : pendingApprovals.length > 0 ? (
             <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3">
               <div className="mx-auto flex max-w-3xl flex-col gap-2">
                 {pendingApprovals.map((pa) => (
@@ -302,6 +312,29 @@ export function ChatPanel() {
 }
 
 import type { ChatTagEntry, ChatZone, Project, Tag, Zone } from "@/lib/types";
+
+/** Read-only footer shown in place of the composer for subchats — these are
+ *  driven by their owning zone, so the user observes but can't send. */
+function SubchatNotice({ zone }: { zone: Zone | null }) {
+  const Icon = zone ? getZoneIcon(zone.icon) : Eye;
+  const color = zone?.accentColor ?? "var(--color-accent)";
+  return (
+    <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3">
+      <div className="mx-auto flex max-w-3xl items-center justify-center gap-2 text-xs text-[var(--color-text-muted)]">
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded" style={{ background: color }}>
+          <Icon size={11} color="white" />
+        </span>
+        {zone ? (
+          <span>
+            Subchat driven by <span className="font-medium text-[var(--color-text)]">{zone.name}</span> — observable, not interactive
+          </span>
+        ) : (
+          <span>Subchat — observable, not interactive</span>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function ProjectTagStrip({
   chatId,

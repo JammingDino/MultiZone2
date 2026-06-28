@@ -3,6 +3,7 @@ import type { Chat, ChatTagLink } from "@/lib/types";
 import { MessageSquare, Pencil, Trash2, Sparkles, Loader2, FolderInput, FolderMinus, GitBranch, ChevronRight, ChevronDown } from "lucide-react";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
+import { getZoneIcon } from "@/lib/zoneIcons";
 
 interface Props {
   chats: Chat[];
@@ -23,6 +24,7 @@ export function ChatList({ chats, activeId, onSelect, projectId }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const { projects, refreshChats, setChatTitle, regenerateTitle, setChatProject } = useApp();
+  const zones = useApp((s) => s.zones);
   const regenerating = useApp((s) => s.regeneratingTitles);
   const chatTagLinks = useApp((s) => s.chatTagLinks);
   const [movingTo, setMovingTo] = useState(false);
@@ -118,7 +120,13 @@ export function ChatList({ chats, activeId, onSelect, projectId }: Props) {
     const kids = childrenByParent[chat.id] ?? [];
     const hasKids = kids.length > 0;
     const branchesOpen = !collapsedBranches.has(chat.id);
-    const isBranch = depth > 0;
+    // A nested child is a subchat when a zone owns it, otherwise a branch.
+    const subchatZone = chat.initiatedByZoneId
+      ? zones.find((z) => z.id === chat.initiatedByZoneId)
+      : null;
+    const isSubchat = !!chat.initiatedByZoneId;
+    const isBranch = depth > 0 && !isSubchat;
+    const SubchatIcon = getZoneIcon(subchatZone?.icon);
     return (
       <div key={chat.id}>
         <div
@@ -143,6 +151,14 @@ export function ChatList({ chats, activeId, onSelect, projectId }: Props) {
             ) : null}
             {isRegenerating ? (
               <Loader2 size={14} className="flex-shrink-0 animate-spin text-[var(--color-accent)]" />
+            ) : isSubchat ? (
+              <span
+                title={subchatZone ? `Subchat driven by ${subchatZone.name}` : "Subchat"}
+                className="flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded"
+                style={{ background: subchatZone?.accentColor ?? "var(--color-panel)" }}
+              >
+                <SubchatIcon size={11} color={subchatZone?.accentColor ? "white" : "var(--color-text-muted)"} />
+              </span>
             ) : isBranch ? (
               <GitBranch size={13} className="flex-shrink-0 text-[var(--color-text-muted)]" />
             ) : (

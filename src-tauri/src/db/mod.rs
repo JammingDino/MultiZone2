@@ -62,7 +62,7 @@ mod tests {
         assert!(old.is_err(), "short column list should fail to decode Chat");
 
         // The current constant must succeed.
-        let new_cols = "id, title, zone_id, project_id, project_context_enabled, knowledge_enabled, perspective_mode, smart_routing, parent_chat_id, branched_from_message_id, created_at, updated_at";
+        let new_cols = "id, title, zone_id, project_id, project_context_enabled, knowledge_enabled, perspective_mode, smart_routing, parent_chat_id, branched_from_message_id, initiated_by_zone_id, created_at, updated_at";
         let new = sqlx::query_as::<_, Chat>(&format!("SELECT {new_cols} FROM chats WHERE id='c1'"))
             .fetch_one(&pool)
             .await;

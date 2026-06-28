@@ -288,12 +288,14 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ### 0.6.0 — Response Leader & orchestration
 
-- [ ] Response Leader zone type: a zone configured to coordinate sub-agents; marked in the zone library with a dedicated indicator
-- [ ] Multizone session start: user selects a leader zone and one or more sub-agent zones
-- [ ] Leader drives sub-agents via `spawn_subagent` / `send_subchat_message` tools exclusively
-- [ ] Leader presents opposing views to each sub-agent (not the user's original message) — enforced by leader system prompt pattern documented in the zone template
-- [ ] Sub-agent responses returned to the leader as tool results; leader synthesizes before responding to the user
-- [ ] Only `ask_user` calls from the leader surface to the user; sub-agent `ask_user` calls are suppressed
+*Status: built & typechecked (cargo check + `npm run build` green). Builds on the 0.5.x subchat infrastructure. The leader is the chat's primary zone (`is_leader` flag, migration 022); the sub-agent roster is stored per-chat in `chat_subagents` (distinct from perspective `chat_zones` — sub-agents only run when the leader spawns them). A multizone session starts from the HomeScreen: choosing a leader zone as the primary swaps the perspectives picker for a sub-agent roster picker, and the roster is persisted via `set_chat_subagents` before the first turn. The engine injects a leader orchestration preamble (delegation protocol + roster + opposing-views guidance) when the answering zone is a leader, and suppresses `ask_user` in any sub-agent (subchat) turn. A library-only "Response Leader" curated zone (`is_leader: true`, subchat tools) documents the prompt pattern; curated library version bumped to 7. Stack-tracer UI for visualising the leader→sub-agent call tree is deferred to 0.6.1.*
+
+- [x] Response Leader zone type: a zone configured to coordinate sub-agents; marked in the zone library with a dedicated indicator — `is_leader` flag, Crown indicator in the library/zone-picker, "Response Leader" toggle in the zone editor (auto-enables the subchat tools)
+- [x] Multizone session start: user selects a leader zone and one or more sub-agent zones — HomeScreen sub-agent roster picker shown when the primary zone is a leader, persisted to `chat_subagents`
+- [x] Leader drives sub-agents via `spawn_subagent` / `send_subchat_message` tools exclusively — reuses the 0.5.1 subchat tools; the leader template enables them and the preamble mandates their use
+- [x] Leader presents opposing views to each sub-agent (not the user's original message) — enforced by leader system prompt pattern documented in the curated "Response Leader" zone template **and** injected as an orchestration preamble each turn
+- [x] Sub-agent responses returned to the leader as tool results; leader synthesizes before responding to the user — inherited from the subchat tool-result flow
+- [x] Only `ask_user` calls from the leader surface to the user; sub-agent `ask_user` calls are suppressed — `ask_user` is stripped from the toolset on any subchat turn
 
 ### 0.6.1 — Stack tracer UI
 

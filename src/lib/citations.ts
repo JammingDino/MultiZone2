@@ -10,10 +10,10 @@ export interface Citation {
   /** 1-based position shown in the Sources list and inline marker after filtering. */
   index: number;
   /**
-   * The number as the model actually wrote it in the answer (`[refIndex]`) — i.e.
-   * the tool's `ref`. Before filtering this equals `index`; after filtering to the
-   * cited subset the list is renumbered but `refIndex` is preserved so the inline
-   * markers in the text can still be matched and relabelled.
+   * The number as the model would have written it (`[refIndex]`) — the tool's
+   * `ref` / collect order. Before filtering this equals `index`; after filtering
+   * to the matched subset the list is renumbered but `refIndex` is preserved so
+   * any inline `[n]` markers a model *does* emit can still be relabelled.
    */
   refIndex: number;
   kind: "web" | "file" | "knowledge";
@@ -25,6 +25,8 @@ export interface Citation {
   path?: string;
   /** Page count for PDF file sources, when known. */
   pages?: number;
+  /** Web result snippet — not displayed; used to detect content reuse in the answer. */
+  snippet?: string;
 }
 
 /** A file attachment referenced by the turn (from the preceding user message). */
@@ -100,6 +102,7 @@ export function collectCitations(blocks: TurnBlock[], fileSources: FileSource[] 
           kind: "web",
           url,
           title: (typeof r?.title === "string" && r.title.trim()) || hostname(url),
+          snippet: typeof r?.snippet === "string" ? r.snippet : undefined,
         });
       }
     } else if (name === "search_knowledge") {
@@ -130,30 +133,95 @@ function basename(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
-/** All distinct `[n]` marker numbers that appear in a turn's answer text. */
-function usedMarkers(blocks: TurnBlock[]): Set<number> {
+/** Joined plain text of a turn's answer (text blocks only). */
+function answerText(blocks: TurnBlock[]): string {
+  return blocks
+    .filter((b): b is Extract<TurnBlock, { kind: "text" }> => b.kind === "text")
+    .map((b) => b.text)
+    .join("\n");
+}
+
+/** All distinct `[n]` marker numbers a model *did* emit in the answer (a bonus
+ *  signal layered on top of content matching — most models emit none). */
+function usedMarkers(answer: string): Set<number> {
   const used = new Set<number>();
   const re = /\[(\d+)\]/g;
-  for (const b of blocks) {
-    if (b.kind !== "text") continue;
-    let m: RegExpExecArray | null;
-    re.lastIndex = 0;
-    while ((m = re.exec(b.text)) !== null) used.add(Number(m[1]));
-  }
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(answer)) !== null) used.add(Number(m[1]));
   return used;
 }
 
+const STOPWORDS = new Set(
+  ("the and for that with this from your you are was were has have had not but they their them then \
+    than out about into over more most some such can will just like also been being which who what when \
+    where why how our its his her she him these those there here only very each other into onto upon".split(
+    /\s+/,
+  ))
+);
+
+/** Distinctive lowercased tokens (≥4 chars, non-stopword) — keeps numbers like
+ *  "17025" so identifiers survive. */
+function distinctiveTokens(text: string): Set<string> {
+  const out = new Set<string>();
+  for (const tok of text.toLowerCase().split(/[^a-z0-9]+/)) {
+    if (tok.length >= 4 && !STOPWORDS.has(tok)) out.add(tok);
+  }
+  return out;
+}
+
+/** Whether the answer shows evidence of having used a given source: a verbatim
+ *  filename/path/host, the site's brand, or enough shared distinctive words. */
+function contentMatches(
+  c: Citation,
+  lowerAnswer: string,
+  normAnswer: string,
+  answerTokens: Set<string>,
+): boolean {
+  if (c.kind === "web") {
+    const host = c.url ? hostname(c.url).toLowerCase() : "";
+    if (host && lowerAnswer.includes(host)) return true;
+    // Brand = first domain label (e.g. "holmessolutions"), matched against the
+    // answer with punctuation/spaces stripped so "Holmes Solutions" hits.
+    const brand = host.split(".")[0];
+    if (brand.length >= 4 && normAnswer.includes(brand)) return true;
+    // Otherwise require a few distinctive words shared with the title + snippet.
+    const src = distinctiveTokens(`${c.title ?? ""} ${c.snippet ?? ""}`);
+    let shared = 0;
+    for (const t of src) {
+      if (answerTokens.has(t) && ++shared >= 3) return true;
+    }
+    return false;
+  }
+  // file / knowledge — the model typically names the file it drew on.
+  const fname = (c.fileName ?? "").toLowerCase();
+  if (fname && lowerAnswer.includes(fname)) return true;
+  if (c.path) {
+    const p = c.path.toLowerCase().replace(/\\/g, "/");
+    if (p && lowerAnswer.replace(/\\/g, "/").includes(p)) return true;
+  }
+  return false;
+}
+
 /**
- * Keep only the citations the model actually cited (a `[refIndex]` marker present
- * in the answer text), then renumber them contiguously for display. The original
- * `refIndex` is preserved so the inline markers can still be matched. When the
- * model cited nothing, returns an empty list — sources aren't shown for tool
- * results the answer didn't draw on.
+ * From the full candidate list, keep only the sources whose content actually
+ * surfaces in the answer (a named file/host, a brand, or shared distinctive
+ * wording) — plus any a model explicitly tagged with `[n]`. This needs nothing
+ * from the model: it compares the answer against the sources rather than asking
+ * the model which it used. Kept sources are renumbered contiguously.
  */
-export function citedCitations(candidates: Citation[], blocks: TurnBlock[]): Citation[] {
-  const used = usedMarkers(blocks);
-  if (used.size === 0) return [];
+export function matchedCitations(candidates: Citation[], blocks: TurnBlock[]): Citation[] {
+  if (candidates.length === 0) return [];
+  const answer = answerText(blocks);
+  const lowerAnswer = answer.toLowerCase();
+  const normAnswer = lowerAnswer.replace(/[^a-z0-9]/g, "");
+  const answerTokens = distinctiveTokens(answer);
+  const markers = usedMarkers(answer);
+
   return candidates
-    .filter((c) => used.has(c.refIndex))
+    .filter(
+      (c) =>
+        markers.has(c.refIndex) ||
+        contentMatches(c, lowerAnswer, normAnswer, answerTokens),
+    )
     .map((c, i) => ({ ...c, index: i + 1 }));
 }

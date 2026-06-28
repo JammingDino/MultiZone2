@@ -6,7 +6,7 @@ import { StepBlock } from "./StepBlock";
 import { MessageActions } from "./MessageActions";
 import { CitationSources } from "./CitationSources";
 import type { BotTurn, PerspectiveTurn, TurnBlock } from "@/lib/grouping";
-import { collectCitations, citedCitations, type Citation, type FileSource } from "@/lib/citations";
+import { collectCitations, matchedCitations, type Citation, type FileSource } from "@/lib/citations";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { getZoneIcon } from "@/lib/zoneIcons";
@@ -501,7 +501,7 @@ export function BotTurnView({ turn, isLatest = false }: { turn: BotTurn; isLates
     [messages, turn.messageIds],
   );
   const citations = useMemo(
-    () => citedCitations(collectCitations(turn.blocks, fileSources), turn.blocks),
+    () => matchedCitations(collectCitations(turn.blocks, fileSources), turn.blocks),
     [turn.blocks, fileSources],
   );
 
@@ -689,7 +689,7 @@ function ParticipantCard({
   fileSources?: FileSource[];
 }) {
   const citations = useMemo(
-    () => citedCitations(collectCitations(blocks, fileSources ?? []), blocks),
+    () => matchedCitations(collectCitations(blocks, fileSources ?? []), blocks),
     [blocks, fileSources],
   );
   const [collapsed, setCollapsed] = useState(false);

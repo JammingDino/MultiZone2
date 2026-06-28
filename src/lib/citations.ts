@@ -27,6 +27,13 @@ export interface Citation {
   pages?: number;
   /** Web result snippet — not displayed; used to detect content reuse in the answer. */
   snippet?: string;
+  /**
+   * Lowercased substring in the answer to anchor this source's inline marker to
+   * (a filename for file/knowledge sources, a distinctive word for web). Absent
+   * when no confident, specific anchor was found — the source still appears in
+   * the Sources list, just without an inline marker. Consumed by remarkCitations.
+   */
+  anchor?: string;
 }
 
 /** A file attachment referenced by the turn (from the preceding user message). */
@@ -217,11 +224,58 @@ export function matchedCitations(candidates: Citation[], blocks: TurnBlock[]): C
   const answerTokens = distinctiveTokens(answer);
   const markers = usedMarkers(answer);
 
-  return candidates
-    .filter(
-      (c) =>
-        markers.has(c.refIndex) ||
-        contentMatches(c, lowerAnswer, normAnswer, answerTokens),
-    )
-    .map((c, i) => ({ ...c, index: i + 1 }));
+  const kept = candidates.filter(
+    (c) =>
+      markers.has(c.refIndex) ||
+      contentMatches(c, lowerAnswer, normAnswer, answerTokens),
+  );
+
+  // Per-web-source distinctive tokens present in the answer + their document
+  // frequency across the kept web sources, so each marker can anchor to its
+  // most *specific* word (a token only one source shares).
+  const webTokens = new Map<Citation, string[]>();
+  const df = new Map<string, number>();
+  for (const c of kept) {
+    if (c.kind !== "web") continue;
+    const toks = [...distinctiveTokens(`${c.title ?? ""} ${c.snippet ?? ""}`)].filter((t) =>
+      answerTokens.has(t),
+    );
+    webTokens.set(c, toks);
+    for (const t of new Set(toks)) df.set(t, (df.get(t) ?? 0) + 1);
+  }
+
+  return kept.map((c, i) => ({
+    ...c,
+    index: i + 1,
+    anchor: pickAnchor(c, lowerAnswer, webTokens.get(c) ?? [], df),
+  }));
+}
+
+/** Choose the inline-marker anchor for a source: the named file for file/
+ *  knowledge sources, or the most specific shared word for web sources. Returns
+ *  undefined when nothing specific enough was found (Sources-list only). */
+function pickAnchor(
+  c: Citation,
+  lowerAnswer: string,
+  webToks: string[],
+  df: Map<string, number>,
+): string | undefined {
+  if (c.kind === "web") {
+    let best: string | undefined;
+    let bestDf = Infinity;
+    let bestLen = 0;
+    for (const t of webToks) {
+      const d = df.get(t) ?? 1;
+      if (d < bestDf || (d === bestDf && t.length > bestLen)) {
+        best = t;
+        bestDf = d;
+        bestLen = t.length;
+      }
+    }
+    // Too generic (shared by 3+ sources) → don't stack markers on one word.
+    return best && bestDf <= 2 ? best : undefined;
+  }
+  const fname = (c.fileName ?? "").toLowerCase();
+  if (fname && lowerAnswer.includes(fname)) return fname;
+  return undefined;
 }

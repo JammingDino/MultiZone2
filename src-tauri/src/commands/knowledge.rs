@@ -192,6 +192,23 @@ pub async fn clear_project_knowledge(
     Ok(())
 }
 
+/// Per-project default for whether new chats start with knowledge enabled.
+/// `None` clears the override (inherit the global setting).
+#[tauri::command]
+pub async fn set_project_kb_default(
+    state: State<'_, AppState>,
+    project_id: String,
+    enabled: Option<bool>,
+) -> AppResult<Project> {
+    sqlx::query("UPDATE projects SET kb_default_enabled = ?1, updated_at = ?2 WHERE id = ?3")
+        .bind(enabled)
+        .bind(now_ts())
+        .bind(&project_id)
+        .execute(&state.db)
+        .await?;
+    fetch_project(&state, &project_id).await
+}
+
 /// Per-chat opt-in for project knowledge.
 #[tauri::command]
 pub async fn set_chat_knowledge(

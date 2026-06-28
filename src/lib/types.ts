@@ -72,6 +72,9 @@ export interface Project {
   kbEmbeddingModel: string | null;
   kbDimensions: number | null;
   kbIndexedAt: number | null;
+  /** Per-project override for the knowledge default in new chats. Null = inherit
+   * the global `knowledgeDefaultEnabled` setting. */
+  kbDefaultEnabled: boolean | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -426,6 +429,11 @@ export interface AppSettings {
    * re-indexed automatically as files change (0.4.3 live auto re-index).
    */
   autoReindex: boolean;
+  /**
+   * When true, new chats start with knowledge enabled (the search_knowledge tool
+   * is offered from the first message). Projects can override this per-project.
+   */
+  knowledgeDefaultEnabled: boolean;
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -455,6 +463,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   seededSkills: false,
   ocrLanguage: "eng",
   autoReindex: true,
+  knowledgeDefaultEnabled: false,
 };
 
 export interface DbStats {

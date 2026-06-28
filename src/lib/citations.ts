@@ -68,10 +68,20 @@ export function collectCitations(blocks: TurnBlock[], fileSources: FileSource[] 
     out.push({ index: n, refIndex: n, ...c });
   };
 
+  // Add a knowledge/file citation for a local file path (search_knowledge hits
+  // and read_file reads), de-duplicated by path.
+  const pushPath = (path: string, title?: string) => {
+    if (!path) return;
+    const key = `kb:${path}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    push({ kind: "knowledge", title: title || basename(path), path, fileName: basename(path) });
+  };
+
   for (const b of blocks) {
     if (b.kind !== "step" || b.step.kind !== "tool" || !b.step.toolResult) continue;
     const name = b.step.toolCall.function.name;
-    if (name !== "web_search" && name !== "search_knowledge") continue;
+    if (name !== "web_search" && name !== "search_knowledge" && name !== "read_file") continue;
 
     let data: any;
     try {
@@ -79,9 +89,9 @@ export function collectCitations(blocks: TurnBlock[], fileSources: FileSource[] 
     } catch {
       continue;
     }
-    const results = Array.isArray(data?.results) ? data.results : [];
 
     if (name === "web_search") {
+      const results = Array.isArray(data?.results) ? data.results : [];
       for (const r of results) {
         const url = typeof r?.url === "string" ? r.url : "";
         if (!url || seen.has(url)) continue;
@@ -92,18 +102,16 @@ export function collectCitations(blocks: TurnBlock[], fileSources: FileSource[] 
           title: (typeof r?.title === "string" && r.title.trim()) || hostname(url),
         });
       }
-    } else {
-      // search_knowledge — one citation per source file (chunks of the same file
-      // collapse into a single source).
+    } else if (name === "search_knowledge") {
+      // One citation per source file (chunks of the same file collapse).
+      const results = Array.isArray(data?.results) ? data.results : [];
       for (const r of results) {
-        const path = typeof r?.source === "string" ? r.source : "";
-        if (!path) continue;
-        const key = `kb:${path}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        const title = (typeof r?.title === "string" && r.title.trim()) || basename(path);
-        push({ kind: "knowledge", title, path, fileName: basename(path) });
+        pushPath(typeof r?.source === "string" ? r.source : "", typeof r?.title === "string" ? r.title.trim() : undefined);
       }
+    } else {
+      // read_file — the file the model read (skipped for image/error results,
+      // which don't carry a source path).
+      pushPath(typeof data?.source === "string" ? data.source : "");
     }
   }
 

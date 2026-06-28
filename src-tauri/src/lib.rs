@@ -122,6 +122,7 @@ pub fn run() {
             commands::knowledge::remove_knowledge_document,
             commands::knowledge::clear_project_knowledge,
             commands::knowledge::set_chat_knowledge,
+            commands::knowledge::set_project_kb_default,
             commands::knowledge::get_global_kb,
             commands::knowledge::set_global_kb_config,
             commands::knowledge::index_global_knowledge,

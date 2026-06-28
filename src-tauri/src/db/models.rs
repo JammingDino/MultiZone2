@@ -91,6 +91,9 @@ pub struct Project {
     pub kb_embedding_model: Option<String>,
     pub kb_dimensions: Option<i64>,
     pub kb_indexed_at: Option<i64>,
+    /// Per-project override for whether new chats start with knowledge enabled.
+    /// None = inherit the global `knowledgeDefaultEnabled` setting.
+    pub kb_default_enabled: Option<bool>,
     pub created_at: i64,
     pub updated_at: i64,
 }

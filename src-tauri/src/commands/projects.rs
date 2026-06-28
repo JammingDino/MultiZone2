@@ -7,14 +7,14 @@ use tauri::State;
 
 // ─── Projects ────────────────────────────────────────────────────────────────
 
-pub const PROJECT_COLS: &str = "id, name, icon, accent_color, default_zone_id, context_snippet, directory, default_context_enabled, kb_provider_id, kb_embedding_model, kb_dimensions, kb_indexed_at, created_at, updated_at";
+pub const PROJECT_COLS: &str = "id, name, icon, accent_color, default_zone_id, context_snippet, directory, default_context_enabled, kb_provider_id, kb_embedding_model, kb_dimensions, kb_indexed_at, kb_default_enabled, created_at, updated_at";
 
 #[tauri::command]
 pub async fn list_projects(state: State<'_, AppState>) -> AppResult<Vec<Project>> {
     // The reserved global-KB project is hidden — it backs the default-directory
     // knowledge base, not a user-facing project.
     let rows = sqlx::query_as::<_, Project>(
-        "SELECT id, name, icon, accent_color, default_zone_id, context_snippet, directory, default_context_enabled, kb_provider_id, kb_embedding_model, kb_dimensions, kb_indexed_at, created_at, updated_at
+        "SELECT id, name, icon, accent_color, default_zone_id, context_snippet, directory, default_context_enabled, kb_provider_id, kb_embedding_model, kb_dimensions, kb_indexed_at, kb_default_enabled, created_at, updated_at
          FROM projects WHERE id != ?1 ORDER BY name",
     )
     .bind(crate::knowledge::GLOBAL_KB_ID)
@@ -84,7 +84,7 @@ pub async fn upsert_project(state: State<'_, AppState>, project: ProjectInput) -
     }
 
     let row = sqlx::query_as::<_, Project>(
-        "SELECT id, name, icon, accent_color, default_zone_id, context_snippet, directory, default_context_enabled, kb_provider_id, kb_embedding_model, kb_dimensions, kb_indexed_at, created_at, updated_at
+        "SELECT id, name, icon, accent_color, default_zone_id, context_snippet, directory, default_context_enabled, kb_provider_id, kb_embedding_model, kb_dimensions, kb_indexed_at, kb_default_enabled, created_at, updated_at
          FROM projects WHERE id = ?1",
     )
     .bind(&id)

@@ -10,6 +10,20 @@ use tauri::{AppHandle, Emitter, State};
 const CHAT_COLS: &str =
     "id, title, zone_id, project_id, project_context_enabled, knowledge_enabled, perspective_mode, smart_routing, parent_chat_id, branched_from_message_id, created_at, updated_at";
 
+/// The global default for whether new chats start with knowledge enabled, read
+/// from the `knowledgeDefaultEnabled` field of the `app_settings` JSON blob.
+async fn knowledge_default_setting(db: &sqlx::SqlitePool) -> bool {
+    let raw: Option<String> =
+        sqlx::query_scalar("SELECT value FROM settings WHERE key = 'app_settings'")
+            .fetch_optional(db)
+            .await
+            .ok()
+            .flatten();
+    raw.and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.get("knowledgeDefaultEnabled").and_then(|b| b.as_bool()))
+        .unwrap_or(false)
+}
+
 #[tauri::command]
 pub async fn list_chats(state: State<'_, AppState>) -> AppResult<Vec<Chat>> {
     let rows = sqlx::query_as::<_, Chat>(&format!(
@@ -29,30 +43,35 @@ pub async fn create_chat(
     let id = new_id();
     let now = now_ts();
 
-    // Inherit default zone and default_context_enabled from project when set.
-    let (effective_zone_id, project_context_enabled) = match &project_id {
+    // Global default for whether new chats start with knowledge enabled.
+    let global_knowledge_default = knowledge_default_setting(&state.db).await;
+
+    // Inherit default zone, default_context_enabled, and the knowledge default
+    // from the project when set (the project's override beats the global setting).
+    let (effective_zone_id, project_context_enabled, knowledge_enabled) = match &project_id {
         Some(pid) => {
-            let row: Option<(Option<String>, bool)> = sqlx::query_as(
-                "SELECT default_zone_id, default_context_enabled FROM projects WHERE id = ?1",
+            let row: Option<(Option<String>, bool, Option<bool>)> = sqlx::query_as(
+                "SELECT default_zone_id, default_context_enabled, kb_default_enabled FROM projects WHERE id = ?1",
             )
             .bind(pid)
             .fetch_optional(&state.db)
             .await?;
-            let (proj_zone, proj_ctx) = row.unwrap_or((None, false));
+            let (proj_zone, proj_ctx, proj_kb) = row.unwrap_or((None, false, None));
             let effective_zone = zone_id.clone().or(proj_zone);
-            (effective_zone, proj_ctx)
+            (effective_zone, proj_ctx, proj_kb.unwrap_or(global_knowledge_default))
         }
-        None => (zone_id.clone(), false),
+        None => (zone_id.clone(), false, global_knowledge_default),
     };
 
     sqlx::query(
-        "INSERT INTO chats (id, title, zone_id, project_id, project_context_enabled, created_at, updated_at)
-         VALUES (?1, 'New Chat', ?2, ?3, ?4, ?5, ?5)",
+        "INSERT INTO chats (id, title, zone_id, project_id, project_context_enabled, knowledge_enabled, created_at, updated_at)
+         VALUES (?1, 'New Chat', ?2, ?3, ?4, ?5, ?6, ?6)",
     )
     .bind(&id)
     .bind(&effective_zone_id)
     .bind(&project_id)
     .bind(project_context_enabled)
+    .bind(knowledge_enabled)
     .bind(now)
     .execute(&state.db)
     .await?;
@@ -336,15 +355,16 @@ pub async fn branch_chat(
     // it back to the parent at the pivot message.
     sqlx::query(
         "INSERT INTO chats
-           (id, title, zone_id, project_id, project_context_enabled, perspective_mode,
+           (id, title, zone_id, project_id, project_context_enabled, knowledge_enabled, perspective_mode,
             smart_routing, parent_chat_id, branched_from_message_id, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)",
     )
     .bind(&new_id)
     .bind(&new_title)
     .bind(&source.zone_id)
     .bind(&source.project_id)
     .bind(source.project_context_enabled)
+    .bind(source.knowledge_enabled)
     .bind(&source.perspective_mode)
     .bind(source.smart_routing)
     .bind(&chat_id)

@@ -105,6 +105,9 @@ export const clearProjectKnowledge = (projectId: string) =>
   invoke<void>("clear_project_knowledge", { projectId });
 export const setChatKnowledge = (chatId: string, enabled: boolean) =>
   invoke<void>("set_chat_knowledge", { chatId, enabled });
+/** Per-project default for knowledge in new chats. null = inherit global. */
+export const setProjectKbDefault = (projectId: string, enabled: boolean | null) =>
+  invoke<Project>("set_project_kb_default", { projectId, enabled });
 
 // Global knowledge base (app default directory) + default embedding config.
 export const getGlobalKb = () => invoke<GlobalKbView>("get_global_kb");

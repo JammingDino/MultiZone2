@@ -1362,6 +1362,16 @@ function KnowledgeTab() {
           <span>Auto re-index — watch indexed directories and re-embed changed files automatically</span>
         </label>
 
+        <label className="mt-2 flex cursor-pointer items-center gap-2 text-xs">
+          <button
+            onClick={() => setAppSettings({ knowledgeDefaultEnabled: !appSettings.knowledgeDefaultEnabled })}
+            className={`relative h-5 w-9 rounded-full transition-colors ${appSettings.knowledgeDefaultEnabled ? "bg-[var(--color-accent)]" : "bg-[var(--color-border)]"}`}
+          >
+            <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all duration-200 ${appSettings.knowledgeDefaultEnabled ? "translate-x-4" : ""}`} />
+          </button>
+          <span>Enable knowledge in new chats by default — the <code className="rounded bg-[var(--color-bg)] px-1">search_knowledge</code> tool is available from the first message (projects can override this)</span>
+        </label>
+
         {summary && (
           <div className="mt-2 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-2 text-[11px] text-[var(--color-text-muted)]">
             Indexed {summary.indexed}, unchanged {summary.unchanged}, removed {summary.removed}, failed {summary.failed}

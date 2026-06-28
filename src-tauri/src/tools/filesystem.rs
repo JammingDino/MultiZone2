@@ -288,8 +288,11 @@ pub async fn read_file(
         .await;
         return match result {
             Ok(Ok(text)) => Ok(json!({
+                "ref": 1,
                 "path": path_str,
+                "source": path_str,
                 "content": text,
+                "citation_instructions": READ_FILE_CITATION,
             })
             .to_string()),
             Ok(Err(e)) => Ok(json!({ "error": format!("PDF text extraction failed: {e}") }).to_string()),
@@ -298,14 +301,26 @@ pub async fn read_file(
     }
 
     match tokio::fs::read(&p).await {
-        Ok(bytes) => Ok(json!({
-            "path": p.to_string_lossy(),
-            "content": bytes_to_string(bytes),
-        })
-        .to_string()),
+        Ok(bytes) => {
+            let path_str = p.to_string_lossy().to_string();
+            Ok(json!({
+                "ref": 1,
+                "path": path_str,
+                "source": path_str,
+                "content": bytes_to_string(bytes),
+                "citation_instructions": READ_FILE_CITATION,
+            })
+            .to_string())
+        }
         Err(e) => Ok(json!({ "error": e.to_string() }).to_string()),
     }
 }
+
+/// Nudge the model to cite a file it draws on, mirroring web_search /
+/// search_knowledge so reads surface in the Sources list.
+const READ_FILE_CITATION: &str =
+    "If you use information from this file in your answer, cite it inline with [1] \
+     immediately after the claim.";
 
 pub async fn list_directory(
     args: &Value,

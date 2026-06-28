@@ -661,6 +661,29 @@ function KnowledgeSection({ project }: { project: Project }) {
           )}
         </div>
       )}
+
+      {/* Per-project default for knowledge in new chats. */}
+      <div className="mt-3 border-t border-[var(--color-border)] pt-3">
+        <label className="flex items-center justify-between gap-2 text-xs">
+          <span className="text-[var(--color-text-muted)]">Knowledge in new chats</span>
+          <select
+            value={project.kbDefaultEnabled === null ? "inherit" : project.kbDefaultEnabled ? "on" : "off"}
+            onChange={async (e) => {
+              const v = e.target.value;
+              await api.setProjectKbDefault(project.id, v === "inherit" ? null : v === "on");
+              await refreshProjects();
+            }}
+            className="input w-32"
+          >
+            <option value="inherit">Use global default</option>
+            <option value="on">On</option>
+            <option value="off">Off</option>
+          </select>
+        </label>
+        <div className="mt-1 text-[10px] text-[var(--color-text-muted)]">
+          Whether chats in this project start with the <code className="rounded bg-[var(--color-bg)] px-1">search_knowledge</code> tool available from the first message.
+        </div>
+      </div>
     </div>
   );
 }

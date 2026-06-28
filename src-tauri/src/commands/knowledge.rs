@@ -70,6 +70,7 @@ pub async fn set_project_kb_config(
     embedding_model: Option<String>,
 ) -> AppResult<Project> {
     apply_kb_config(&state, &project_id, provider_id, embedding_model).await?;
+    knowledge::watcher::resync().await;
     fetch_project(&state, &project_id).await
 }
 
@@ -119,7 +120,10 @@ pub async fn index_project_knowledge(
     state: State<'_, AppState>,
     project_id: String,
 ) -> AppResult<IndexSummary> {
-    knowledge::index_project(&state.db, &state.http, &project_id).await
+    let summary = knowledge::index_project(&state.db, &state.http, &project_id).await?;
+    // Now indexed → ensure it's being watched for live re-index.
+    knowledge::watcher::resync().await;
+    Ok(summary)
 }
 
 /// Counts for the viewer header.
@@ -184,6 +188,7 @@ pub async fn clear_project_knowledge(
         .bind(&project_id)
         .execute(&state.db)
         .await?;
+    knowledge::watcher::resync().await;
     Ok(())
 }
 
@@ -272,7 +277,9 @@ pub async fn index_global_knowledge(state: State<'_, AppState>) -> AppResult<Ind
         .bind(GLOBAL_KB_ID)
         .execute(&state.db)
         .await?;
-    knowledge::index_project(&state.db, &state.http, GLOBAL_KB_ID).await
+    let summary = knowledge::index_project(&state.db, &state.http, GLOBAL_KB_ID).await?;
+    knowledge::watcher::resync().await;
+    Ok(summary)
 }
 
 #[tauri::command]
@@ -297,5 +304,6 @@ pub async fn clear_global_knowledge(state: State<'_, AppState>) -> AppResult<()>
         .bind(GLOBAL_KB_ID)
         .execute(&state.db)
         .await?;
+    knowledge::watcher::resync().await;
     Ok(())
 }

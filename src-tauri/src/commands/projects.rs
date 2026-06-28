@@ -90,6 +90,8 @@ pub async fn upsert_project(state: State<'_, AppState>, project: ProjectInput) -
     .bind(&id)
     .fetch_one(&state.db)
     .await?;
+    // Directory may have changed — re-sync the knowledge watcher.
+    crate::knowledge::watcher::resync().await;
     Ok(row)
 }
 
@@ -113,6 +115,7 @@ pub async fn delete_project(
         .bind(&id)
         .execute(&state.db)
         .await?;
+    crate::knowledge::watcher::resync().await;
     Ok(())
 }
 

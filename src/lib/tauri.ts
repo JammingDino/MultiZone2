@@ -256,3 +256,12 @@ export function onChatZoneUpdated(
     handler(e.payload),
   );
 }
+/** Emitted after the watcher auto re-indexes a knowledge scope. */
+export function onKnowledgeUpdated(
+  handler: (e: { scope: string; global: boolean; indexed: number; removed: number }) => void,
+): Promise<UnlistenFn> {
+  return listen<{ scope: string; global: boolean; indexed: number; removed: number }>(
+    "knowledge-updated",
+    (e) => handler(e.payload),
+  );
+}

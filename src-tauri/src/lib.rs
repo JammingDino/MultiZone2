@@ -70,6 +70,12 @@ pub fn run() {
                 handle.manage(state);
                 // Launch the HTTP API server if the user has enabled it.
                 commands::api::start_if_enabled(&handle).await;
+                // Start the knowledge directory watcher (live auto re-index).
+                {
+                    let st = handle.state::<AppState>();
+                    knowledge::watcher::init(st.db.clone(), st.http.clone(), handle.clone());
+                }
+                knowledge::watcher::resync().await;
             });
             Ok(())
         })

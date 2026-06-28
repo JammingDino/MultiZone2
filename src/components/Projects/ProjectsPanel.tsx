@@ -437,6 +437,9 @@ function KnowledgeSection({ project }: { project: Project }) {
     setSummary(null);
     setError(null);
     reload();
+    // Live auto re-index of this project's directory refreshes the panel.
+    const un = api.onKnowledgeUpdated((e) => { if (e.scope === project.id) reload(); });
+    return () => { un.then((f) => f()).catch(() => {}); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.id]);
 

@@ -1199,7 +1199,12 @@ function KnowledgeTab() {
     }
   }
 
-  useEffect(() => { reload().catch(console.error); }, []);
+  useEffect(() => {
+    reload().catch(console.error);
+    const un = api.onKnowledgeUpdated(() => reload().catch(console.error));
+    return () => { un.then((f) => f()).catch(() => {}); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -1346,6 +1351,16 @@ function KnowledgeTab() {
               : "Not indexed yet."}
           </div>
         )}
+
+        <label className="mt-3 flex cursor-pointer items-center gap-2 text-xs">
+          <button
+            onClick={() => setAppSettings({ autoReindex: !appSettings.autoReindex })}
+            className={`relative h-5 w-9 rounded-full transition-colors ${appSettings.autoReindex ? "bg-[var(--color-accent)]" : "bg-[var(--color-border)]"}`}
+          >
+            <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all duration-200 ${appSettings.autoReindex ? "translate-x-4" : ""}`} />
+          </button>
+          <span>Auto re-index — watch indexed directories and re-embed changed files automatically</span>
+        </label>
 
         {summary && (
           <div className="mt-2 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-2 text-[11px] text-[var(--color-text-muted)]">

@@ -41,6 +41,11 @@ base64 = "0.22"
 scraper = "0.20"
 pdf-extract = "0.7"
 
+# Live auto re-index (0.4.3): watch knowledge directories and re-embed changed
+# files. The debouncer coalesces editor save-bursts into a single re-index.
+notify = "6.1"
+notify-debouncer-mini = "0.4"
+
 # OCR fallback for vision-incapable models (0.4.0). Pure-Rust engine — no native
 # libtesseract — keeping the cross-platform build clean. Needs `.rten` models at
 # runtime (see ocr.rs); degrades gracefully when absent.

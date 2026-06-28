@@ -421,6 +421,11 @@ export interface AppSettings {
    * vision-incapable models (0.4.0). Tesseract-style 3-letter code, e.g. "eng".
    */
   ocrLanguage: string;
+  /**
+   * When true (default), indexed knowledge directories are watched on disk and
+   * re-indexed automatically as files change (0.4.3 live auto re-index).
+   */
+  autoReindex: boolean;
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -449,6 +454,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   memoryScopeLimit: 50,
   seededSkills: false,
   ocrLanguage: "eng",
+  autoReindex: true,
 };
 
 export interface DbStats {

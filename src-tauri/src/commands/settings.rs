@@ -30,6 +30,11 @@ pub async fn set_setting(
     .bind(&value)
     .execute(&state.db)
     .await?;
+    // The default directory + auto-reindex toggle live in app_settings; re-sync
+    // the knowledge watcher so a change takes effect immediately.
+    if key == "app_settings" {
+        crate::knowledge::watcher::resync().await;
+    }
     Ok(())
 }
 
@@ -51,7 +56,8 @@ pub async fn get_db_stats(state: State<'_, AppState>) -> AppResult<DbStats> {
         .fetch_one(&state.db).await?;
     let (zones,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM zones")
         .fetch_one(&state.db).await?;
-    let (projects,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM projects")
+    let (projects,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM projects WHERE id != ?1")
+        .bind(crate::knowledge::GLOBAL_KB_ID)
         .fetch_one(&state.db).await?;
     let (tags,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM tags")
         .fetch_one(&state.db).await?;

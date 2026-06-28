@@ -12,6 +12,8 @@
 //! share one vector space, so changing the project's `kb_embedding_model`
 //! requires a re-index (the UI surfaces this).
 
+pub mod watcher;
+
 use crate::commands::{new_id, now_ts};
 use crate::db::models::{Project, Provider};
 use crate::error::{AppError, AppResult};

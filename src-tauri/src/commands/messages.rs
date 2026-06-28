@@ -154,6 +154,12 @@ impl StreamSink {
     fn emit_event(&self, event: &str, payload: Value) {
         let _ = self.app.emit(event, payload);
     }
+
+    /// Tell an open GUI the chat list changed (e.g. a subchat was created) so
+    /// the sidebar refreshes. GUI-only; no SSE.
+    pub fn notify_chats_changed(&self) {
+        self.emit_event("chats-changed", serde_json::json!({}));
+    }
 }
 
 #[tauri::command]
@@ -1387,6 +1393,9 @@ async fn run_participant_turn(
                     chat_id,
                     project_dir.as_deref(),
                     &ctx.http,
+                    ctx,
+                    sink,
+                    Some(zone.id.as_str()),
                 )
                 .await
                 .unwrap_or_else(|e| {

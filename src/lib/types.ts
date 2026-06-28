@@ -440,6 +440,12 @@ export interface AppSettings {
    * is offered from the first message). Projects can override this per-project.
    */
   knowledgeDefaultEnabled: boolean;
+  /**
+   * Maximum subchat nesting depth (0.5.1). A zone can spawn subagents up to this
+   * many levels deep; deeper spawn_subagent calls are refused. Prevents runaway
+   * recursion. Default 3.
+   */
+  subchatDepthLimit: number;
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -470,6 +476,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   ocrLanguage: "eng",
   autoReindex: true,
   knowledgeDefaultEnabled: false,
+  subchatDepthLimit: 3,
 };
 
 export interface DbStats {
@@ -493,6 +500,7 @@ export const ALL_TOOLS: { id: string; label: string; description: string; safety
   { id: "web_search",   label: "Web search",        description: "Search the web via a configured provider.",                                                      safety: 1 },
   { id: "file_system",  label: "File system",       description: "Read, write, and list files within allowed paths.",                                              safety: 1 },
   { id: "switch_zone",  label: "Switch zone",       description: "Lets the model list zones and switch the chat to a different zone mid-conversation.",            safety: 1 },
+  { id: "subchat",      label: "Subagents",         description: "Lets the model spawn subchats driven by other zones, send them messages, and read their transcripts (delegation).", safety: 1 },
   { id: "code_exec",    label: "Code execution",    description: "Run code snippets in a sandboxed subprocess (Python, Node, Bash, PowerShell).",                  safety: 2 },
   { id: "shell_exec",   label: "Shell / terminal",  description: "Run arbitrary shell commands in the chat's working directory (cmd, PowerShell, bash).",          safety: 2 },
 ];

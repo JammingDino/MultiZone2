@@ -264,12 +264,12 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ### 0.5.1 — Spawn-subagent tool
 
-- [ ] `spawn_subagent(zone_id, initial_message, context_mode)` tool: creates a subchat, assigns the zone, sends the first message, returns subchat ID
-- [ ] `context_mode` options: `full` (whole conversation), `task_only` (just the initial message), `summary` (caller provides a brief)
-- [ ] `send_subchat_message(subchat_id, message)` tool: sends a message to an existing subchat and returns the response
-- [ ] `read_subchat(subchat_id)` tool: returns the full transcript of a subchat
-- [ ] Safety levels: spawn/send = moderate; read = safe
-- [ ] Subchat depth limit (default 3, configurable in settings) prevents infinite loops
+- [x] `spawn_subagent(zone_id, initial_message, context_mode)` tool: creates a subchat, assigns the zone, sends the first message, returns subchat ID
+- [x] `context_mode` options: `full` (whole conversation), `task_only` (just the initial message), `summary` (caller provides a brief)
+- [x] `send_subchat_message(subchat_id, message)` tool: sends a message to an existing subchat and returns the response
+- [x] `read_subchat(subchat_id)` tool: returns the full transcript of a subchat
+- [x] Safety levels: spawn/send = moderate; read = safe
+- [x] Subchat depth limit (default 3, configurable in settings) prevents infinite loops
 
 ### 0.5.2 — File presentation
 

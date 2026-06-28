@@ -10,7 +10,9 @@ pub mod shell;
 pub mod memory;
 pub mod skills;
 pub mod knowledge;
+pub mod subchat;
 
+use crate::commands::messages::{EngineCtx, StreamSink};
 use crate::error::AppResult;
 use crate::llm::types::Tool;
 use serde_json::Value;
@@ -95,6 +97,7 @@ pub enum ToolId {
     Shell,
     Memory,
     Skills,
+    Subchat,
 }
 
 impl ToolId {
@@ -111,6 +114,7 @@ impl ToolId {
             "shell_exec" => Some(Self::Shell),
             "memory" => Some(Self::Memory),
             "skills" => Some(Self::Skills),
+            "subchat" => Some(Self::Subchat),
             _ => None,
         }
     }
@@ -128,6 +132,7 @@ impl ToolId {
             Self::Shell => "shell_exec",
             Self::Memory => "memory",
             Self::Skills => "skills",
+            Self::Subchat => "subchat",
         }
     }
 
@@ -147,6 +152,7 @@ impl ToolId {
             Self::Shell => vec![shell::definition()],
             Self::Memory => memory::definitions(),
             Self::Skills => vec![skills::definition()],
+            Self::Subchat => subchat::definitions(),
         }
     }
 
@@ -154,7 +160,10 @@ impl ToolId {
     pub fn safety_level(self) -> u8 {
         match self {
             Self::DateTime | Self::AskUser | Self::ManageTags | Self::RenderGraph | Self::Memory | Self::Skills => 0,
-            Self::WebSearch | Self::FileSystem | Self::SwitchZone => 1,
+            // Subchat groups read (safe) + spawn/send (moderate); classed moderate
+            // here so it isn't in the safe default set. Per-call gating uses the
+            // function name (see `tool_safety_by_name`).
+            Self::WebSearch | Self::FileSystem | Self::SwitchZone | Self::Subchat => 1,
             Self::CodeExec | Self::Shell => 2,
         }
     }
@@ -190,16 +199,18 @@ pub fn tool_safety_by_name(name: &str) -> u8 {
         "get_current_datetime" | "ask_user" | "tag_chat"
         | "plot_function" | "draw_diagram"
         | "save_memory" | "read_memory" | "delete_memory"
-        | "load_skill" | "search_knowledge" => 0,
+        | "load_skill" | "search_knowledge" | "read_subchat" => 0,
         "web_search" | "read_file" | "list_directory"
-        | "create_file" | "edit_file" | "list_zones" | "change_zone" => 1,
+        | "create_file" | "edit_file" | "list_zones" | "change_zone"
+        | "spawn_subagent" | "send_subchat_message" => 1,
         "execute_code" | "run_command" => 2,
         _ => 1,
     }
 }
 
 /// Dispatch a tool call by name to the appropriate handler. `db` and `chat_id`
-/// are only used by tools that touch app state (currently `tag_chat`).
+/// are only used by tools that touch app state (e.g. `tag_chat`). `ctx`, `sink`
+/// and `caller_zone_id` are used by the subchat tools, which run nested turns.
 pub async fn dispatch(
     name: &str,
     arguments: &str,
@@ -208,6 +219,9 @@ pub async fn dispatch(
     chat_id: &str,
     project_dir: Option<&str>,
     http: &reqwest::Client,
+    ctx: &EngineCtx,
+    sink: &StreamSink,
+    caller_zone_id: Option<&str>,
 ) -> AppResult<String> {
     let args: Value = serde_json::from_str(arguments).unwrap_or(Value::Null);
 
@@ -242,6 +256,9 @@ pub async fn dispatch(
         "delete_memory" => memory::delete(&args, db).await,
         "load_skill" => skills::run(&args, db).await,
         "search_knowledge" => knowledge::run(&args, db, chat_id, http).await,
+        "spawn_subagent" => subchat::spawn(&args, ctx, sink, caller_zone_id, chat_id).await,
+        "send_subchat_message" => subchat::send(&args, ctx, sink).await,
+        "read_subchat" => subchat::read(&args, db).await,
         other => Ok(serde_json::json!({
             "error": format!("unknown tool: {other}")
         }).to_string()),

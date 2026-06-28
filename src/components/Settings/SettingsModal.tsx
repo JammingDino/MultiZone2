@@ -617,6 +617,29 @@ function ChatTab() {
       </section>
 
       <section>
+        <h3 className="mb-1 text-sm font-medium">Subagent depth limit</h3>
+        <p className="mb-2 text-xs text-[var(--color-text-muted)]">
+          How many levels deep zones may spawn subagents (subchats). Deeper
+          <span className="font-mono"> spawn_subagent</span> calls are refused to prevent runaway recursion.
+        </p>
+        <div className="flex gap-2">
+          {[1, 2, 3, 4, 5].map((n) => (
+            <button
+              key={n}
+              onClick={() => setAppSettings({ subchatDepthLimit: n })}
+              className={`flex-1 rounded border px-3 py-2.5 text-center text-sm ${
+                (appSettings.subchatDepthLimit || 3) === n
+                  ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]"
+                  : "border-[var(--color-border)] hover:border-[var(--color-accent)]"
+              }`}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section>
         <h3 className="mb-1 text-sm font-medium">Zone library page size</h3>
         <p className="mb-2 text-xs text-[var(--color-text-muted)]">
           How many zone cards the Zone Library shows per page.

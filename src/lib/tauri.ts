@@ -259,6 +259,10 @@ export function onChatZoneUpdated(
     handler(e.payload),
   );
 }
+/** Emitted when the chat list changes server-side (e.g. a subchat was spawned). */
+export function onChatsChanged(handler: () => void): Promise<UnlistenFn> {
+  return listen("chats-changed", () => handler());
+}
 /** Emitted after the watcher auto re-indexes a knowledge scope. */
 export function onKnowledgeUpdated(
   handler: (e: { scope: string; global: boolean; indexed: number; removed: number }) => void,

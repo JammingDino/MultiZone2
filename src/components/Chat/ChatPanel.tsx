@@ -140,6 +140,7 @@ export function ChatPanel() {
     let unlistenTitle: (() => void) | undefined;
     let unlistenTags: (() => void) | undefined;
     let unlistenZone: (() => void) | undefined;
+    let unlistenChats: (() => void) | undefined;
     api.onStream((env) => {
       applyStreamEvent(env.chatId, env.event, env.perspectiveZoneId);
     }).then((u) => {
@@ -170,12 +171,21 @@ export function ChatPanel() {
       if (cancelled) u();
       else unlistenZone = u;
     });
+    api.onChatsChanged(() => {
+      // A subchat was spawned (or the chat list otherwise changed) — refresh so
+      // the sidebar shows it nested under its parent live.
+      refreshChats();
+    }).then((u) => {
+      if (cancelled) u();
+      else unlistenChats = u;
+    });
     return () => {
       cancelled = true;
       unlistenStream?.();
       unlistenTitle?.();
       unlistenTags?.();
       unlistenZone?.();
+      unlistenChats?.();
     };
   }, [applyStreamEvent, setChatTitle, refreshChats, refreshTags, loadChatTags]);
 

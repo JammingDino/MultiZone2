@@ -11,10 +11,13 @@ pub const PROJECT_COLS: &str = "id, name, icon, accent_color, default_zone_id, c
 
 #[tauri::command]
 pub async fn list_projects(state: State<'_, AppState>) -> AppResult<Vec<Project>> {
+    // The reserved global-KB project is hidden — it backs the default-directory
+    // knowledge base, not a user-facing project.
     let rows = sqlx::query_as::<_, Project>(
         "SELECT id, name, icon, accent_color, default_zone_id, context_snippet, directory, default_context_enabled, kb_provider_id, kb_embedding_model, kb_dimensions, kb_indexed_at, created_at, updated_at
-         FROM projects ORDER BY name",
+         FROM projects WHERE id != ?1 ORDER BY name",
     )
+    .bind(crate::knowledge::GLOBAL_KB_ID)
     .fetch_all(&state.db)
     .await?;
     Ok(rows)
@@ -35,6 +38,7 @@ pub struct ProjectInput {
 
 #[tauri::command]
 pub async fn upsert_project(state: State<'_, AppState>, project: ProjectInput) -> AppResult<Project> {
+    let is_new = project.id.is_none();
     let id = project.id.unwrap_or_else(new_id);
     let now = now_ts();
     let default_context = project.default_context_enabled.unwrap_or(false);
@@ -62,6 +66,22 @@ pub async fn upsert_project(state: State<'_, AppState>, project: ProjectInput) -
     .bind(now)
     .execute(&state.db)
     .await?;
+
+    // New projects inherit the global default embedding provider+model so the
+    // user doesn't reconfigure it per project (they can still override it).
+    if is_new {
+        let (provider, model) = crate::knowledge::default_embedding_config(&state.db).await;
+        if provider.is_some() || model.is_some() {
+            sqlx::query(
+                "UPDATE projects SET kb_provider_id = ?1, kb_embedding_model = ?2 WHERE id = ?3",
+            )
+            .bind(&provider)
+            .bind(&model)
+            .bind(&id)
+            .execute(&state.db)
+            .await?;
+        }
+    }
 
     let row = sqlx::query_as::<_, Project>(
         "SELECT id, name, icon, accent_color, default_zone_id, context_snippet, directory, default_context_enabled, kb_provider_id, kb_embedding_model, kb_dimensions, kb_indexed_at, created_at, updated_at

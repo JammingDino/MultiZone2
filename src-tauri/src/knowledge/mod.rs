@@ -252,6 +252,42 @@ fn collect_files(root: &Path) -> Vec<PathBuf> {
     out
 }
 
+// ── global knowledge base ─────────────────────────────────────────────────────
+
+/// Reserved project id backing the *global* knowledge base — the index over the
+/// app's default directory, usable by chats that aren't in a project. It's a
+/// hidden `projects` row (filtered out of `list_projects`) so the global KB
+/// reuses every per-project mechanism (config, indexing, search) unchanged.
+pub const GLOBAL_KB_ID: &str = "__global_kb__";
+
+/// Create the hidden global-KB project row if it doesn't exist yet. Idempotent.
+pub async fn ensure_global_project(db: &SqlitePool) -> AppResult<()> {
+    let now = now_ts();
+    sqlx::query(
+        "INSERT OR IGNORE INTO projects (id, name, default_context_enabled, created_at, updated_at)
+         VALUES (?1, 'Global Knowledge', 0, ?2, ?2)",
+    )
+    .bind(GLOBAL_KB_ID)
+    .bind(now)
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// The default embedding provider+model new projects inherit, taken from the
+/// global-KB row. Returns `(None, None)` when the global KB isn't configured.
+pub async fn default_embedding_config(db: &SqlitePool) -> (Option<String>, Option<String>) {
+    let row: Option<(Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT kb_provider_id, kb_embedding_model FROM projects WHERE id = ?1",
+    )
+    .bind(GLOBAL_KB_ID)
+    .fetch_optional(db)
+    .await
+    .ok()
+    .flatten();
+    row.unwrap_or((None, None))
+}
+
 // ── provider/client helpers ──────────────────────────────────────────────────
 
 async fn load_project(db: &SqlitePool, project_id: &str) -> AppResult<Project> {

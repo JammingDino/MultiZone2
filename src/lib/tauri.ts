@@ -10,6 +10,7 @@ import type {
   DbStats,
   IndexSummary,
   InputPart,
+  GlobalKbView,
   KbDocument,
   KnowledgeStatus,
   McpServer,
@@ -104,6 +105,18 @@ export const clearProjectKnowledge = (projectId: string) =>
   invoke<void>("clear_project_knowledge", { projectId });
 export const setChatKnowledge = (chatId: string, enabled: boolean) =>
   invoke<void>("set_chat_knowledge", { chatId, enabled });
+
+// Global knowledge base (app default directory) + default embedding config.
+export const getGlobalKb = () => invoke<GlobalKbView>("get_global_kb");
+export const setGlobalKbConfig = (
+  providerId: string | null,
+  embeddingModel: string | null,
+) => invoke<GlobalKbView>("set_global_kb_config", { providerId, embeddingModel });
+export const indexGlobalKnowledge = () =>
+  invoke<IndexSummary>("index_global_knowledge");
+export const listGlobalKbDocuments = () =>
+  invoke<KbDocument[]>("list_global_kb_documents");
+export const clearGlobalKnowledge = () => invoke<void>("clear_global_knowledge");
 
 // Tags
 export const listTags = () => invoke<Tag[]>("list_tags");

@@ -1065,10 +1065,9 @@ async fn run_participant_turn(
                     .fetch_optional(&ctx.db)
                     .await?
                     .flatten();
-            match pid {
-                Some(p) => crate::knowledge::has_index(&ctx.db, &p).await,
-                None => false,
-            }
+            // No project → the global KB (default-directory index), if any.
+            let scope = pid.unwrap_or_else(|| crate::knowledge::GLOBAL_KB_ID.to_string());
+            crate::knowledge::has_index(&ctx.db, &scope).await
         } else {
             false
         }

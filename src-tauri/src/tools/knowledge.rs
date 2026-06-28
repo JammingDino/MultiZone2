@@ -63,22 +63,15 @@ pub async fn run(
         .map(|n| (n as usize).clamp(1, MAX_K))
         .unwrap_or(DEFAULT_K);
 
-    // The knowledge base is project-scoped; find this chat's project.
+    // The knowledge base is scoped to the chat's project; chats without a project
+    // fall back to the global KB (the app's default-directory index).
     let project_id: Option<String> =
         sqlx::query_scalar("SELECT project_id FROM chats WHERE id = ?1")
             .bind(chat_id)
             .fetch_optional(db)
             .await?
             .flatten();
-    let project_id = match project_id {
-        Some(p) => p,
-        None => {
-            return Ok(json!({
-                "error": "this chat is not in a project, so it has no knowledge base"
-            })
-            .to_string())
-        }
-    };
+    let project_id = project_id.unwrap_or_else(|| crate::knowledge::GLOBAL_KB_ID.to_string());
 
     match crate::knowledge::search(db, http, &project_id, query, k).await {
         Ok(hits) if hits.is_empty() => Ok(json!({

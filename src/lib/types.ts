@@ -92,6 +92,18 @@ export interface KnowledgeStatus {
   chunkCount: number;
 }
 
+/** The default embedding config + global-KB index status (Settings → Knowledge). */
+export interface GlobalKbView {
+  providerId: string | null;
+  embeddingModel: string | null;
+  /** The app's default directory — the global KB's source. */
+  directory: string | null;
+  indexedAt: number | null;
+  dimensions: number | null;
+  documentCount: number;
+  chunkCount: number;
+}
+
 /** Result of (re)indexing a project's directory. */
 export interface IndexSummary {
   indexed: number;

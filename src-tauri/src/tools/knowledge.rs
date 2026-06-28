@@ -87,10 +87,15 @@ pub async fn run(
         })
         .to_string()),
         Ok(hits) => {
+            // Number each result with a `ref` and ask the model to cite it inline
+            // with `[n]`, mirroring web_search — the frontend turns the markers it
+            // actually uses into a Sources list (0.4.1 inline citations).
             let results: Vec<Value> = hits
                 .iter()
-                .map(|h| {
+                .enumerate()
+                .map(|(i, h)| {
                     json!({
+                        "ref": i + 1,
                         "source": h.path,
                         "title": h.title,
                         "chunk": h.ordinal,
@@ -99,7 +104,13 @@ pub async fn run(
                     })
                 })
                 .collect();
-            Ok(json!({ "results": results }).to_string())
+            Ok(json!({
+                "results": results,
+                "citation_instructions": "When you use information from a passage, cite it inline \
+                    with its `ref` number in square brackets immediately after the claim, e.g. [1]. \
+                    Only cite the passages you actually used."
+            })
+            .to_string())
         }
         Err(e) => Ok(json!({ "error": e.to_string() }).to_string()),
     }

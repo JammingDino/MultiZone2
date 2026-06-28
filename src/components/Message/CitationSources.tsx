@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronDown, ChevronRight, Link2, FileType } from "lucide-react";
+import { ChevronDown, ChevronRight, Link2, FileType, Database } from "lucide-react";
 import type { Citation } from "@/lib/citations";
 
 function hostname(url: string): string {
@@ -45,6 +45,14 @@ export function CitationSources({ citations }: { citations: Citation[] }) {
                   <span className="truncate">{c.title}</span>
                   <span className="shrink-0 text-[var(--color-text-muted)]">— {hostname(c.url)}</span>
                 </a>
+              ) : c.kind === "knowledge" ? (
+                <span className="flex min-w-0 items-baseline gap-1 text-[var(--color-text)]" title={c.path}>
+                  <Database size={11} className="shrink-0 translate-y-0.5 text-[var(--color-text-muted)]" />
+                  <span className="truncate">{c.fileName ?? c.title}</span>
+                  {c.path && c.path !== c.fileName ? (
+                    <span className="min-w-0 shrink truncate text-[var(--color-text-muted)]">— {c.path}</span>
+                  ) : null}
+                </span>
               ) : (
                 <span className="flex min-w-0 items-baseline gap-1 text-[var(--color-text)]">
                   <FileType size={11} className="shrink-0 translate-y-0.5 text-[var(--color-text-muted)]" />

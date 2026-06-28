@@ -14,11 +14,14 @@ const MARKER = /\[(\d+)\]/g;
  * no-op, so callers can include it unconditionally.
  */
 export function citationPlugin(citations: Citation[]) {
-  const byIndex = new Map(citations.map((c) => [c.index, c]));
+  // Keyed by `refIndex` (the number as written in the answer); the rendered label
+  // uses the citation's display `index`, which may differ after filtering to the
+  // cited subset.
+  const byRef = new Map(citations.map((c) => [c.refIndex, c]));
 
   return function () {
     return function transform(tree: any) {
-      if (byIndex.size === 0) return;
+      if (byRef.size === 0) return;
 
       visit(tree, "text", (node: any, index: number | undefined, parent: any) => {
         if (!parent || index === undefined) return;
@@ -31,12 +34,12 @@ export function citationPlugin(citations: Citation[]) {
         let m: RegExpExecArray | null;
         while ((m = MARKER.exec(value)) !== null) {
           const n = Number(m[1]);
-          const cite = byIndex.get(n);
+          const cite = byRef.get(n);
           if (!cite) continue; // leave unrecognised [k] as plain text
           matched = true;
           if (m.index > last) children.push({ type: "text", value: value.slice(last, m.index) });
 
-          const label = { type: "text", value: `[${n}]` };
+          const label = { type: "text", value: `[${cite.index}]` };
           if (cite.url) {
             children.push({
               type: "link",

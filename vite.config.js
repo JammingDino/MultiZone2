@@ -61,6 +61,42 @@ export default defineConfig(function () { return __awaiter(void 0, void 0, void 
                     },
                 },
                 clearScreen: false,
+                build: {
+                    // mermaid alone is ~2.9 MB minified and can't be split further; this
+                    // threshold sits just above it so genuinely new oversized chunks still warn.
+                    chunkSizeWarningLimit: 3500,
+                    rollupOptions: {
+                        output: {
+                            // Split heavy vendor libraries into their own chunks so the main
+                            // bundle stays well under the chunk-size warning threshold and these
+                            // rarely-changing deps cache independently.
+                            manualChunks: function (id) {
+                                if (!id.includes("node_modules"))
+                                    return;
+                                if (id.includes("mermaid"))
+                                    return "mermaid";
+                                if (id.includes("katex"))
+                                    return "katex";
+                                if (id.includes("pdfjs-dist"))
+                                    return "pdfjs";
+                                if (id.includes("react-syntax-highlighter") ||
+                                    id.includes("refractor") ||
+                                    id.includes("highlight.js") ||
+                                    id.includes("lowlight"))
+                                    return "syntax-highlighter";
+                                if (id.includes("react-markdown") ||
+                                    id.includes("remark") ||
+                                    id.includes("rehype") ||
+                                    id.includes("micromark") ||
+                                    id.includes("mdast") ||
+                                    id.includes("hast") ||
+                                    id.includes("unist") ||
+                                    id.includes("unified"))
+                                    return "markdown";
+                            },
+                        },
+                    },
+                },
                 server: {
                     port: 1420,
                     strictPort: true,

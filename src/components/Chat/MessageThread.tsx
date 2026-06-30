@@ -257,6 +257,8 @@ function StatusBanner({
   const contentChars = turn?.contentChars ?? streaming.content.length;
   const reasoningChars = turn?.reasoningChars ?? streaming.reasoning.length;
   const toolCallChars = turn?.toolCallChars ?? 0;
+  const toolMs = turn?.toolMs ?? 0;
+  const toolStartedAt = turn?.toolStartedAt ?? null;
   const elapsed = useLiveElapsed(firstTokenAt);
 
   // In a multi-zone chat, prefix the primary's status with its zone dot + name
@@ -295,10 +297,20 @@ function StatusBanner({
       : "Running tool…";
   }
   const liveTokens = estimateTokens(contentChars + reasoningChars + toolCallChars);
+  // Generation time excludes tool execution: completed tool runs (toolMs) plus
+  // the tool currently running (reconstructed from the same live clock, since
+  // now = firstTokenAt + elapsed). While a tool runs this grows in lock-step
+  // with elapsed, so genElapsed — and thus tok/s — holds steady, while the
+  // overall timer keeps ticking.
+  const activeToolMs =
+    toolStartedAt !== null && firstTokenAt !== null
+      ? Math.max(0, firstTokenAt + elapsed - toolStartedAt)
+      : 0;
+  const genElapsed = Math.max(0, elapsed - toolMs - activeToolMs);
   // Live throughput: tokens produced so far over generation time. Needs a little
   // elapsed time before it's meaningful, so we hold off under ~300 ms.
   const liveTps =
-    elapsed > 300 && liveTokens > 0 ? liveTokens / (elapsed / 1000) : null;
+    genElapsed > 300 && liveTokens > 0 ? liveTokens / (genElapsed / 1000) : null;
   return (
     <div className="ml-10 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
       {hasPerspectives && zone && (

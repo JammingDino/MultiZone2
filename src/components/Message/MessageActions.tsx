@@ -230,11 +230,16 @@ function formatSpeed(stats: {
   durationMs: number;
   contentChars: number;
   reasoningChars: number;
+  toolMs?: number;
 }) {
-  if (stats.durationMs <= 0) return "—";
+  // tok/s reflects generation throughput, so discount time spent executing
+  // tools (the model isn't producing tokens then). Overall duration is shown
+  // separately, in full.
+  const genMs = stats.durationMs - (stats.toolMs ?? 0);
+  if (genMs <= 0) return "—";
   // Speed includes thinking tokens — that's still tokens the model produced.
   const tokens = estimateTokens(stats.contentChars + stats.reasoningChars);
-  const tps = (tokens / (stats.durationMs / 1000)).toFixed(1);
+  const tps = (tokens / (genMs / 1000)).toFixed(1);
   return `${tps} tok/s`;
 }
 

@@ -34,6 +34,9 @@ export interface MessageStats {
   timeToFirstTokenMs: number | null;
   contentChars: number;
   reasoningChars: number;
+  /** Cumulative time tools spent *executing* this turn. Excluded from tok/s so
+   *  throughput reflects generation, not tool wall-clock. */
+  toolMs: number;
 }
 
 /**
@@ -52,6 +55,11 @@ export interface TurnAggregate {
   reasoningChars: number;
   /** Cumulative chars in tool call arguments across all tool calls this turn. */
   toolCallChars: number;
+  /** Cumulative wall-clock of *completed* tool executions this turn. */
+  toolMs: number;
+  /** Start time of the tool currently executing (null when none is running).
+   *  Lets the live banner discount the in-progress tool's time from tok/s. */
+  toolStartedAt: number | null;
 }
 
 export interface PendingApproval {
@@ -493,6 +501,8 @@ export const useApp = create<AppStore>((set, get) => ({
                     : null,
                 contentChars: current.content.length,
                 reasoningChars: current.reasoning.length,
+                // Perspective streams don't track tool execution time separately.
+                toolMs: 0,
               };
             }
             delete chatPersp[perspectiveZoneId];
@@ -542,6 +552,8 @@ export const useApp = create<AppStore>((set, get) => ({
             contentChars: 0,
             reasoningChars: 0,
             toolCallChars: 0,
+            toolMs: 0,
+            toolStartedAt: null,
           };
           break;
 
@@ -557,6 +569,8 @@ export const useApp = create<AppStore>((set, get) => ({
               contentChars: 0,
               reasoningChars: 0,
               toolCallChars: 0,
+              toolMs: 0,
+              toolStartedAt: null,
             };
           }
           break;
@@ -653,6 +667,12 @@ export const useApp = create<AppStore>((set, get) => ({
               runningTool: event.name,
             };
           }
+          // Mark when this tool's execution began so its wall-clock can be
+          // excluded from tok/s (the model isn't generating while it runs).
+          {
+            const te = turnByChat[chatId];
+            if (te) turnByChat[chatId] = { ...te, toolStartedAt: Date.now() };
+          }
           // Clear the primary's approval banner — the tool is now executing.
           pendingApprovalByChat[chatId] = dropApproval(pendingApprovalByChat[chatId], undefined);
           break;
@@ -660,6 +680,17 @@ export const useApp = create<AppStore>((set, get) => ({
         case "tool_call_result":
           if (current) {
             streaming[chatId] = { ...current, runningTool: null };
+          }
+          // Fold the just-finished tool's execution time into the turn total.
+          {
+            const tr = turnByChat[chatId];
+            if (tr && tr.toolStartedAt !== null) {
+              turnByChat[chatId] = {
+                ...tr,
+                toolMs: tr.toolMs + (Date.now() - tr.toolStartedAt),
+                toolStartedAt: null,
+              };
+            }
           }
           // Also clear any lingering approval state (e.g. denied tool).
           pendingApprovalByChat[chatId] = dropApproval(pendingApprovalByChat[chatId], undefined);
@@ -685,12 +716,18 @@ export const useApp = create<AppStore>((set, get) => ({
             // somehow saved without a first-token event (no streaming
             // tokens at all), fall back to total time so we don't show 0.
             const start = firstTokenAt ?? turnStart;
+            // Total tool-execution time this turn, plus any tool still marked
+            // running (shouldn't normally happen at save time, but be safe).
+            const toolMs =
+              (turn?.toolMs ?? 0) +
+              (turn?.toolStartedAt != null ? now - turn.toolStartedAt : 0);
             statsByMessage[event.message.id] = {
               durationMs: now - start,
               timeToFirstTokenMs:
                 firstTokenAt !== null ? firstTokenAt - turnStart : null,
               contentChars: turn ? turn.contentChars : current.content.length,
               reasoningChars: turn ? turn.reasoningChars : current.reasoning.length,
+              toolMs,
             };
           }
           delete streaming[chatId];

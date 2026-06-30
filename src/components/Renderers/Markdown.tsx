@@ -7,6 +7,13 @@ import type { Components } from "react-markdown";
 import { CodeBlock } from "./CodeBlock";
 import type { Citation } from "@/lib/citations";
 import { citationPlugin } from "@/lib/remarkCitations";
+import { openPath } from "@/lib/tauri";
+
+/** http(s) links can't navigate inside the Tauri webview — route them through
+ *  the OS default browser. Other hrefs (in-page anchors) fall through to default. */
+function isExternal(href: unknown): href is string {
+  return typeof href === "string" && /^https?:\/\//i.test(href);
+}
 
 // Defined at module level so the reference is stable across renders.
 // An inline object literal here would cause ReactMarkdown to unmount/remount
@@ -26,7 +33,20 @@ const MD_COMPONENTS: Components = {
     );
   },
   a(props) {
-    return <a {...props} target="_blank" rel="noopener noreferrer" />;
+    const { href } = props as { href?: string };
+    return (
+      <a
+        {...props}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={(e) => {
+          if (isExternal(href)) {
+            e.preventDefault();
+            openPath(href).catch((err) => console.error("openPath failed", err));
+          }
+        }}
+      />
+    );
   },
   table(props) {
     return (

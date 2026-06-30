@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight, Link2, FileType, Database } from "lucide-react";
 import type { Citation } from "@/lib/citations";
+import { openPath } from "@/lib/tauri";
 
 function hostname(url: string): string {
   try {
@@ -38,6 +39,10 @@ export function CitationSources({ citations }: { citations: Citation[] }) {
                   href={c.url}
                   target="_blank"
                   rel="noopener noreferrer"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    openPath(c.url!).catch((err) => console.error("openPath failed", err));
+                  }}
                   className="flex min-w-0 items-baseline gap-1 text-[var(--color-accent)] hover:underline"
                   title={c.url}
                 >

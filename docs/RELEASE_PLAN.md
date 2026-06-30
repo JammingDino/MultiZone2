@@ -307,6 +307,29 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [x] Expanding a node shows the full subchat transcript inline — `SubchatTranscript` lazy-loads `get_messages` and renders the user/assistant turns
 - [x] Stack trace persists on chat reload (reads from subchat records in DB) — derived entirely from persisted tool results + the `get_subchat_tree` query, no live streaming state
 
+### 0.6.2 — UX & accuracy pass
+
+*Status: built & typechecked (`npm run build` green). A batch of small, well-scoped bug fixes shipped as one release; one commit per change. No schema or backend changes — entirely frontend/store except the version bump. The headline fix is the citation rework: inline `[n]` markers were auto-inserted for every search result sharing as few as 3 words with the answer, so a single `web_search` sprayed a marker every few words. Replaced with a hybrid — trust the model's explicit `[n]` markers when present (no auto-insertion), otherwise a tight heuristic that only marks a source with a verbatim host/filename or a distinctive word (≥5 chars) unique to one candidate across the whole set. The Sources list ([CitationSources.tsx](../src/components/Message/CitationSources.tsx)) now splits into "cited" (the used subset, numbered to match the inline markers) and a secondary "more retrieved" toggle holding the full candidate list. Token/timer accuracy also improved: per-message stats now read from the turn aggregate so multi-step turns count every step, and tok/s discounts tool-execution wall-clock (tracked on the turn aggregate via `tool_call_executing`/`tool_call_result`) while the overall timer keeps full wall-clock.*
+
+- [x] Web + citation links open in the OS default browser — anchor clicks routed through the existing `open_path` command instead of `target="_blank"` (a no-op inside the Tauri webview); covers markdown body, auto-inserted inline citations, and the Sources list
+- [x] Long model names truncate in the chat top bar — zone/model label in [ZonePicker.tsx](../src/components/Chat/ZonePicker.tsx) clamped to a max width with ellipsis (full value on hover), so a long model id no longer pushes the rest of the bar around
+- [x] Tool-call args/output cap their height with a scrollbar — Arguments and Output panes in [StepBlock.tsx](../src/components/Message/StepBlock.tsx) clamped to `max-h-280px` with `overflow-auto`, matching the thinking-block behavior
+- [x] Token totals span every step of a multi-step turn — saved per-message stats read from the turn aggregate (which accumulates across the whole agentic loop) rather than just the final assistant iteration
+- [x] tok/s excludes tool-execution time — cumulative tool wall-clock tracked on the turn aggregate and subtracted from the tok/s denominator (live + saved); the overall duration still counts full wall-clock, so live tok/s holds steady while a tool runs instead of decaying
+- [x] Inline citations no longer spray; Sources split into "cited" vs "more retrieved" — hybrid model-marker/tight-heuristic strategy (see status note), full provenance preserved behind a secondary toggle
+- [x] Embedding model picker shows the full list on open — swapped the native `<datalist>` (filter-only) for the shared `ModelCombobox`, which lists every model on focus and narrows only after the user types
+
+### Backlog — known issues (unscheduled)
+
+*Surfaced during the 0.6.2 review; not yet slated to a release. Movable. #10 and #11 are the highest-impact.*
+
+- [ ] **State not saving — search provider** — the search provider selection (and possibly related fields) doesn't persist; investigate the settings write path for that field
+- [ ] **Dropdowns not styled consistently** — Default provider, Quick chat base zone, and Search provider still use native `<select>`/`<datalist>` styling rather than the app's combobox treatment; unify them (the embedding picker was migrated to `ModelCombobox` in 0.6.2 as the pattern)
+- [ ] **Branch only works from the primary response in perspective mode** — "Branch from here" is offered on the primary turn but not on perspective cards; allow branching from a perspective participant
+- [ ] **Chat history mix-ups** — viewing subchats (and sometimes ordinary chats) occasionally shows mismatched prompt/content pairs, or an entire history rendered as if every chat is identical; clears on app restart but recurs. Likely a keying/identity bug in the message store or list virtualization — needs a reliable repro
+- [ ] **Tool approvals inside subchats never reach the user** — subchats are read-only in the UI, so the approval banner isn't shown; a sub-agent tool call needing approval waits ~5 min and is auto-denied, silently stalling the sub-agent. Safe today only if sub-agent zones stick to auto-approved/safe tools. Fix: surface subchat approval prompts somewhere actionable (parent chat, or an observable approval UI in the subchat view). Introduced in 0.5.1 (spawn-subagent tools)
+- [ ] **Most settings not persisted across app updates** — app settings are lost when updating to a new version; investigate where settings are stored vs. what the installer/updater replaces, and migrate/preserve across updates
+
 ---
 
 ## 0.7.x — Settings Rework & UI/UX Polish

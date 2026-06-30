@@ -12,7 +12,11 @@ import {
   readFileAsDataUrl,
 } from "@/components/Chat/InputBar";
 
-type Mode = { type: "quick" } | { type: "smart" } | { type: "zone"; id: string };
+type Mode =
+  | { type: "quick" }
+  | { type: "smart" }
+  | { type: "multizone" }
+  | { type: "zone"; id: string };
 
 /**
  * The landing view shown when no chat is open. A greeting + a single composer
@@ -68,10 +72,14 @@ export function HomeScreen() {
   // Extra zones to answer alongside the primary (mode) zone as perspectives.
   const [selectedPerspectiveIds, setSelectedPerspectiveIds] = useState<Set<string>>(new Set());
   const [perspMenuOpen, setPerspMenuOpen] = useState(false);
-  // Multizone: sub-agent roster the leader may delegate to (only used when the
-  // selected primary zone is a Response Leader).
+  // Multizone: sub-agent roster the leader may delegate to (used when the
+  // primary is a Response Leader — either picked directly or via Multizone mode).
   const [selectedSubagentIds, setSelectedSubagentIds] = useState<Set<string>>(new Set());
   const [subagentMenuOpen, setSubagentMenuOpen] = useState(false);
+  // Multizone mode: which leader zone orchestrates (null = use the default,
+  // i.e. the first available Response Leader zone).
+  const [multizoneLeaderId, setMultizoneLeaderId] = useState<string | null>(null);
+  const [leaderMenuOpen, setLeaderMenuOpen] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const isFirstNewChatTick = useRef(true);
@@ -87,19 +95,36 @@ export function HomeScreen() {
     setSelectedTagIds(new Set());
     setSelectedPerspectiveIds(new Set());
     setSelectedSubagentIds(new Set());
+    setMultizoneLeaderId(null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [newChatTimestamp]);
 
   const selectedZone =
     mode.type === "zone" ? zones.find((z) => z.id === mode.id) ?? null : null;
-  // When the primary zone is a Response Leader, the new chat starts a multizone
-  // session: the leader drives the chosen sub-agents instead of perspective zones.
-  const leaderSelected = !!selectedZone?.isLeader;
+  // Zones that can orchestrate a multizone session.
+  const leaderZones = useMemo(() => zones.filter((z) => z.isLeader), [zones]);
+  const multizoneAvailable = leaderZones.length > 0;
+  // The leader driving the session. In Multizone mode it's the chosen (or
+  // default) leader zone; otherwise it's the primary zone when that zone is
+  // itself a Response Leader. Either way the leader drives the chosen sub-agents
+  // instead of perspective zones.
+  const effectiveLeaderZone =
+    mode.type === "multizone"
+      ? leaderZones.find((z) => z.id === multizoneLeaderId) ?? leaderZones[0] ?? null
+      : selectedZone?.isLeader
+      ? selectedZone
+      : null;
+  const leaderSelected = !!effectiveLeaderZone;
 
   const quickSelectedButUnavailable =
     (mode.type === "quick" || mode.type === "smart") && !quickAvailable;
+  const multizoneSelectedButUnavailable = mode.type === "multizone" && !multizoneAvailable;
   const smartWithNoZones = mode.type === "smart" && zones.length === 0 && quickAvailable;
-  const canSend = (text.trim().length > 0 || pending.length > 0) && !sending && !quickSelectedButUnavailable;
+  const canSend =
+    (text.trim().length > 0 || pending.length > 0) &&
+    !sending &&
+    !quickSelectedButUnavailable &&
+    !multizoneSelectedButUnavailable;
 
   const greeting = useMemo(() => {
     const h = new Date().getHours();
@@ -231,11 +256,14 @@ export function HomeScreen() {
     const currentLeaderSelected = leaderSelected;
 
     // Quick mode uses the base zone if one is configured, otherwise null (legacy provider path).
+    // Multizone mode uses the chosen leader zone as the chat's primary zone.
     const zoneId =
       currentMode.type === "zone"
         ? currentMode.id
         : currentMode.type === "quick"
         ? (baseZoneId ?? null)
+        : currentMode.type === "multizone"
+        ? (effectiveLeaderZone?.id ?? null)
         : null;
     try {
       const chat = await api.createChat(zoneId, currentProjectId);
@@ -372,6 +400,11 @@ export function HomeScreen() {
                       <Brain size={12} className="text-[var(--color-accent)]" />
                       Smart
                     </>
+                  ) : mode.type === "multizone" ? (
+                    <>
+                      <Users size={12} className="text-[var(--color-accent)]" />
+                      {effectiveLeaderZone ? `Multizone · ${effectiveLeaderZone.name}` : "Multizone"}
+                    </>
                   ) : selectedZone ? (
                     <>
                       <span
@@ -429,6 +462,27 @@ export function HomeScreen() {
                         </div>
                         {mode.type === "smart" && <Check size={12} className="text-[var(--color-accent)]" />}
                       </button>
+                      <button
+                        onClick={() => { setMode({ type: "multizone" }); setMenuOpen(false); }}
+                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+                        disabled={!multizoneAvailable}
+                        title={
+                          multizoneAvailable
+                            ? "A Response Leader coordinates a panel of sub-agents and synthesizes one answer"
+                            : "Create a Response Leader zone to enable Multizone"
+                        }
+                      >
+                        <Users size={13} className="text-[var(--color-accent)]" />
+                        <div className="flex-1">
+                          <div>Multizone</div>
+                          <div className="text-xs text-[var(--color-text-muted)]">
+                            {multizoneAvailable
+                              ? "A leader coordinates a panel of sub-agents"
+                              : "No Response Leader zone yet"}
+                          </div>
+                        </div>
+                        {mode.type === "multizone" && <Check size={12} className="text-[var(--color-accent)]" />}
+                      </button>
 
                       {zones.length > 0 && <div className="my-1 border-t border-[var(--color-border)]" />}
                       {zones.map((z) => {
@@ -468,12 +522,24 @@ export function HomeScreen() {
                 )}
               </div>
 
+            {/* Multizone leader picker — choose which Response Leader orchestrates
+                (only when picking the dedicated Multizone mode with >1 leader). */}
+            {mode.type === "multizone" && leaderZones.length > 1 && (
+              <LeaderPicker
+                leaderZones={leaderZones}
+                selectedId={effectiveLeaderZone?.id ?? null}
+                open={leaderMenuOpen}
+                setOpen={setLeaderMenuOpen}
+                onSelect={(id) => { setMultizoneLeaderId(id); setLeaderMenuOpen(false); }}
+              />
+            )}
+
             {/* Multizone sub-agents (leader primary) OR perspectives (any other
                 primary) — the two are mutually exclusive per chat. */}
             {zones.length > 0 && leaderSelected && (
               <SubagentPicker
                 zones={zones}
-                leaderZoneId={mode.type === "zone" ? mode.id : null}
+                leaderZoneId={effectiveLeaderZone?.id ?? null}
                 selected={selectedSubagentIds}
                 open={subagentMenuOpen}
                 setOpen={setSubagentMenuOpen}
@@ -487,7 +553,7 @@ export function HomeScreen() {
                 }
               />
             )}
-            {zones.length > 0 && !leaderSelected && (
+            {zones.length > 0 && !leaderSelected && mode.type !== "multizone" && (
               <PerspectivePicker
                 zones={zones}
                 primaryZoneId={mode.type === "zone" ? mode.id : null}
@@ -625,6 +691,14 @@ export function HomeScreen() {
             </button>
           </div>
         )}
+        {multizoneSelectedButUnavailable && (
+          <div className="mt-2 flex items-center justify-center gap-1 text-xs text-[var(--color-text-muted)]">
+            Multizone needs a Response Leader zone.
+            <button onClick={() => openZoneEditor(null)} className="inline-flex items-center gap-1 text-[var(--color-accent)] hover:underline">
+              Create one
+            </button>
+          </div>
+        )}
         {!leaderSelected && selectedPerspectiveIds.size > 0 && (
           <p className="mt-2 text-center text-xs text-[var(--color-text-muted)]">
             You'll get {selectedPerspectiveIds.size + 1} answers side by side — the
@@ -635,7 +709,7 @@ export function HomeScreen() {
         {leaderSelected && (
           <p className="mt-2 flex items-center justify-center gap-1 text-center text-xs text-[var(--color-text-muted)]">
             <Crown size={11} className="text-amber-500" />
-            {selectedZone?.name} will coordinate{" "}
+            {effectiveLeaderZone?.name} will coordinate{" "}
             {selectedSubagentIds.size > 0
               ? `${selectedSubagentIds.size} sub-agent${selectedSubagentIds.size > 1 ? "s" : ""}`
               : "sub-agents you choose"}
@@ -723,6 +797,73 @@ function PerspectivePicker({
             <div className="px-3 py-1.5 text-[11px] text-[var(--color-text-muted)]">
               Runs {globalMode} (set in Settings → Chat). The mode picker is the primary.
             </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** New-chat composer control for choosing which Response Leader orchestrates a
+ * Multizone session. Shown only in the dedicated Multizone mode when more than
+ * one leader zone exists; otherwise the single leader is used implicitly. */
+function LeaderPicker({
+  leaderZones,
+  selectedId,
+  open,
+  setOpen,
+  onSelect,
+}: {
+  leaderZones: Zone[];
+  selectedId: string | null;
+  open: boolean;
+  setOpen: (v: boolean | ((p: boolean) => boolean)) => void;
+  onSelect: (zoneId: string) => void;
+}) {
+  return (
+    <div className="relative shrink-0">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title="Leader — the Response Leader zone that coordinates the panel"
+        className="flex items-center gap-1.5 rounded-full border border-amber-500 px-2.5 py-1 text-xs text-amber-500 transition hover:opacity-90"
+      >
+        <Crown size={12} />
+        Leader
+        <ChevronDown size={12} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div className="absolute bottom-full left-1/2 z-40 mb-1 max-h-72 min-w-[240px] -translate-x-1/2 overflow-y-auto rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg">
+            <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+              Response Leader for this session
+            </div>
+            {leaderZones.map((z) => {
+              const ZoneIcon = getZoneIcon(z.icon);
+              const active = z.id === selectedId;
+              return (
+                <button
+                  key={z.id}
+                  onClick={() => onSelect(z.id)}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)]"
+                >
+                  <span
+                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded"
+                    style={{ background: z.accentColor ?? "var(--color-accent)" }}
+                  >
+                    <ZoneIcon size={11} color="white" />
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1 truncate">
+                      <span className="truncate">{z.name}</span>
+                      <Crown size={10} className="shrink-0 text-amber-500" />
+                    </div>
+                    <div className="truncate text-xs text-[var(--color-text-muted)]">{z.model}</div>
+                  </div>
+                  {active && <Check size={12} className="shrink-0 text-[var(--color-accent)]" />}
+                </button>
+              );
+            })}
           </div>
         </>
       )}

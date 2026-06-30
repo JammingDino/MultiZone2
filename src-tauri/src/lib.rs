@@ -74,8 +74,12 @@ pub fn run() {
                 {
                     let st = handle.state::<AppState>();
                     knowledge::watcher::init(st.db.clone(), st.http.clone(), handle.clone());
+                    // Markdown two-way sync watcher (0.7.2): pulls external `.md`
+                    // edits in the mirror folder back into the DB.
+                    commands::mirror::init(st.db.clone(), handle.clone());
                 }
                 knowledge::watcher::resync().await;
+                commands::mirror::resync().await;
             });
             Ok(())
         })

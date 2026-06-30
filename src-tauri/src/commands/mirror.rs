@@ -14,11 +14,16 @@ use crate::commands::{new_id, now_ts};
 use crate::db::models::{Chat, Message, Zone};
 use crate::error::AppResult;
 use crate::llm::types::ContentPart;
+use notify::{RecommendedWatcher, RecursiveMode};
+use notify_debouncer_mini::{new_debouncer, DebounceEventResult, Debouncer};
 use serde_json::Value;
 use sqlx::SqlitePool;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use tauri::State;
+use std::sync::OnceLock;
+use std::time::Duration;
+use tauri::{AppHandle, Emitter, State};
+use tokio::sync::Mutex;
 
 use crate::state::AppState;
 
@@ -290,7 +295,11 @@ fn write_chat_file(dir: &Path, chat_id: &str, slug: &str, md: &str) -> AppResult
             }
         }
     }
-    std::fs::write(dir.join(target), md)?;
+    let path = dir.join(target);
+    // Record the content we're about to write so the watcher can tell our own
+    // write apart from an external edit and skip the round-trip (0.7.2 two-way).
+    note_written(&path, md);
+    std::fs::write(path, md)?;
     Ok(())
 }
 
@@ -504,4 +513,237 @@ pub async fn import_chat_from_markdown(
     // Reflect the freshly-imported chat into the mirror dir too (best-effort).
     mirror_chat_best_effort(&state.db, &chat_id).await;
     Ok(chat)
+}
+
+// ─── Two-way sync: watch the mirror folder, pull external edits into the DB ───
+//
+// The DB stays canonical; the markdown files are an editable synced copy. When
+// the user edits a mirrored `.md` in their editor, the watcher parses it and
+// syncs the change back into the DB. To avoid a feedback loop, every file we
+// write records its content hash (`note_written`); the watcher ignores a change
+// whose content matches what we last wrote. Sync is deliberately conservative —
+// the title and same-shape message-text edits flow back losslessly; structural
+// rewrites (adding/removing turns, which markdown can't represent unambiguously
+// against interleaved tool/perspective turns) are left for the DB to own.
+
+/// Content hashes of files we wrote, so the watcher can skip its own echoes.
+fn last_written() -> &'static std::sync::Mutex<HashMap<PathBuf, u64>> {
+    static LAST_WRITTEN: OnceLock<std::sync::Mutex<HashMap<PathBuf, u64>>> = OnceLock::new();
+    LAST_WRITTEN.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+fn content_hash(s: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    s.hash(&mut h);
+    h.finish()
+}
+
+fn note_written(path: &Path, content: &str) {
+    if let Ok(mut m) = last_written().lock() {
+        m.insert(path.to_path_buf(), content_hash(content));
+    }
+}
+
+/// True when `content` at `path` matches what we last wrote there (our own echo).
+fn was_our_write(path: &Path, content: &str) -> bool {
+    last_written()
+        .lock()
+        .ok()
+        .and_then(|m| m.get(path).copied())
+        == Some(content_hash(content))
+}
+
+const DEBOUNCE: Duration = Duration::from_secs(1);
+
+/// Process-global watcher over the mirror directory. Initialised once at
+/// startup; `resync` (re)builds the watch from current config.
+pub struct MirrorWatcher {
+    db: SqlitePool,
+    app: AppHandle,
+    debouncer: Mutex<Option<Debouncer<RecommendedWatcher>>>,
+}
+
+static WATCHER: OnceLock<MirrorWatcher> = OnceLock::new();
+
+pub fn init(db: SqlitePool, app: AppHandle) {
+    let _ = WATCHER.set(MirrorWatcher { db, app, debouncer: Mutex::new(None) });
+}
+
+/// (Re)build the watch from current config: watch the mirror directory when the
+/// feature is on, otherwise drop the watch. Called at startup and whenever
+/// `app_settings` changes. No-op if the watcher isn't initialised.
+pub async fn resync() {
+    if let Some(w) = WATCHER.get() {
+        w.resync().await;
+    }
+}
+
+impl MirrorWatcher {
+    async fn resync(&self) {
+        let cfg = read_config(&self.db).await;
+        let Some(cfg) = cfg else {
+            *self.debouncer.lock().await = None; // feature off — stop watching
+            return;
+        };
+        if std::fs::create_dir_all(&cfg.dir).is_err() {
+            return;
+        }
+
+        let db = self.db.clone();
+        let app = self.app.clone();
+        let debouncer = new_debouncer(DEBOUNCE, move |res: DebounceEventResult| {
+            let paths: Vec<PathBuf> = match res {
+                Ok(events) => events.into_iter().map(|e| e.path).collect(),
+                Err(_) => return,
+            };
+            let db = db.clone();
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                for path in paths {
+                    sync_file_into_db(&db, &app, &path).await;
+                }
+            });
+        });
+
+        match debouncer {
+            Ok(mut d) => {
+                // Non-recursive: only top-level chat `.md` files matter; the
+                // `zones/` JSON exports are write-only and shouldn't trigger syncs.
+                if let Err(e) = d.watcher().watch(&cfg.dir, RecursiveMode::NonRecursive) {
+                    tracing::warn!("mirror watch failed for {}: {e}", cfg.dir.display());
+                }
+                *self.debouncer.lock().await = Some(d);
+            }
+            Err(e) => tracing::warn!("mirror debouncer init failed: {e}"),
+        }
+    }
+}
+
+/// Handle one changed path: if it's a managed chat `.md` that was edited
+/// externally, pull the change into the DB.
+async fn sync_file_into_db(db: &SqlitePool, app: &AppHandle, path: &Path) {
+    if path.extension().and_then(|e| e.to_str()) != Some("md") {
+        return;
+    }
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return; // deleted/locked — leave the DB as the source of truth
+    };
+    if was_our_write(path, &content) {
+        return; // our own mirror write echoing back
+    }
+
+    let parsed = parse_markdown(&content);
+    // Only files we manage (with a chat_id in frontmatter) are synced; loose
+    // markdown is brought in via the explicit "Import from markdown" action.
+    let Some(chat_id) = frontmatter_chat_id(&content) else { return };
+
+    match sync_chat_from_parsed(db, &chat_id, &parsed).await {
+        Ok(true) => {
+            // Record the now-current content so a duplicate event is a no-op.
+            note_written(path, &content);
+            let _ = app.emit("chat-file-synced", serde_json::json!({ "chatId": chat_id }));
+        }
+        Ok(false) => {}
+        Err(e) => tracing::warn!("mirror sync of {} failed: {e}", path.display()),
+    }
+}
+
+/// Pull `chat_id` from a document's frontmatter, if present.
+fn frontmatter_chat_id(src: &str) -> Option<String> {
+    let mut lines = src.lines();
+    if lines.next().map(str::trim) != Some("---") {
+        return None;
+    }
+    for line in lines {
+        if line.trim() == "---" {
+            break;
+        }
+        if let Some((k, v)) = line.split_once(':') {
+            if k.trim() == "chat_id" {
+                let id = unquote(v);
+                return Some(id).filter(|s| !s.is_empty());
+            }
+        }
+    }
+    None
+}
+
+/// Apply an external edit to an existing chat. Returns whether anything changed.
+/// Conservative: updates the title, and updates message text in place only when
+/// the file's visible blocks line up one-to-one (same count + roles) with the
+/// chat's visible turns — so typo fixes flow back without disturbing tool or
+/// perspective turns that markdown can't represent.
+async fn sync_chat_from_parsed(
+    db: &SqlitePool,
+    chat_id: &str,
+    parsed: &ParsedChat,
+) -> AppResult<bool> {
+    let Some(current_title): Option<String> =
+        sqlx::query_scalar("SELECT title FROM chats WHERE id = ?1")
+            .bind(chat_id)
+            .fetch_optional(db)
+            .await?
+    else {
+        return Ok(false); // chat no longer exists
+    };
+
+    let mut changed = false;
+    let now = now_ts();
+
+    if !parsed.title.is_empty() && parsed.title != current_title {
+        sqlx::query("UPDATE chats SET title = ?1, updated_at = ?2 WHERE id = ?3")
+            .bind(&parsed.title)
+            .bind(now)
+            .bind(chat_id)
+            .execute(db)
+            .await?;
+        changed = true;
+    }
+
+    // The chat's visible primary turns, in order — the same set the mirror
+    // renders to markdown blocks.
+    let primary = sqlx::query_as::<_, Message>(&format!(
+        "SELECT {MSG_COLS} FROM messages WHERE chat_id = ?1 AND zone_id IS NULL ORDER BY created_at ASC"
+    ))
+    .bind(chat_id)
+    .fetch_all(db)
+    .await?;
+    let visible: Vec<&Message> = primary
+        .iter()
+        .filter(|m| {
+            (m.role == "user" || m.role == "assistant")
+                && (!visible_text(&m.content).is_empty() || image_count(&m.content) > 0)
+        })
+        .collect();
+
+    // Only sync message text when the shapes match exactly; otherwise the edit
+    // is structural and the DB keeps ownership.
+    if visible.len() == parsed.messages.len()
+        && visible
+            .iter()
+            .zip(&parsed.messages)
+            .all(|(m, (role, _))| &m.role == role)
+    {
+        for (m, (_, text)) in visible.iter().zip(&parsed.messages) {
+            if visible_text(&m.content).trim() != text.trim() {
+                let content = serde_json::to_string(&vec![ContentPart::Text { text: text.clone() }])?;
+                sqlx::query("UPDATE messages SET content = ?1, edited = 1 WHERE id = ?2")
+                    .bind(&content)
+                    .bind(&m.id)
+                    .execute(db)
+                    .await?;
+                changed = true;
+            }
+        }
+    }
+
+    if changed {
+        sqlx::query("UPDATE chats SET updated_at = ?1 WHERE id = ?2")
+            .bind(now)
+            .bind(chat_id)
+            .execute(db)
+            .await?;
+    }
+    Ok(changed)
 }

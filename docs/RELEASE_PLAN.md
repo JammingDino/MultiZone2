@@ -356,13 +356,20 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ### 0.7.2 — DB/Markdown toggle
 
-*Status: built & typechecked (`cargo check` + `npm run build` green). A new backend module — [mirror.rs](../src-tauri/src/commands/mirror.rs) — owns the live mirror. It reads its config (`markdownMirrorEnabled` + `markdownMirrorDir`) from the same `app_settings` JSON the rest of the app uses, so it cheaply no-ops when off. `mirror_chat` rewrites a chat's whole `.md` from current DB state on each call (always correct regardless of which save fired it), in the **same format as the 0.7.1 manual export** (YAML frontmatter + `## Who · timestamp` blocks) so the two are interchangeable and importable. Files are keyed by chat id (filename suffix `--<chat_id>.md`) so a title change renames cleanly instead of orphaning, and subchats (sub-agent transcripts) are skipped. The mirror is hooked into the message engine at the turn chokepoint (`run_turn`, covering send + regenerate + all perspectives), plus per-participant regenerate, message edits, auto-title, and chat deletion (which removes the file) — every one best-effort so a write failure only logs and never blocks the engine. Zone configs are exported as `zones/<id>.json` alongside on each mirror pass. Two commands back the UI: `mirror_all_chats` (re-write everything; run when the toggle is enabled or the folder changes) and `import_chat_from_markdown` (lenient frontmatter + block parser → a new chat, zone/project matched by name). Settings → Data gained the toggle, a folder picker, "Mirror all chats now", and "Import from markdown…".*
+*Status: built & typechecked (`cargo check` + `npm run build` green). **Plaintext markdown storage with two-way sync** — the DB stays the source of truth, but when the toggle is on every chat also lives as a real `.md` file the user can read, edit, version, and move outside the app, and edits flow back in. A new backend module — [mirror.rs](../src-tauri/src/commands/mirror.rs) — owns both directions. Config (`markdownMirrorEnabled` + `markdownMirrorDir`) lives in the same `app_settings` JSON the rest of the app uses, so it cheaply no-ops when off.*
 
-- [x] Settings → Data: "Export as markdown" toggle; configurable output directory
-- [x] Each chat mirrored as a `.md` file: frontmatter (chat ID, zone, project, tags, dates), messages as timestamped blocks
+***DB → files.** `mirror_chat` rewrites a chat's whole `.md` from current DB state on each call (always correct regardless of which save fired it), in the **same format as the 0.7.1 manual export** (YAML frontmatter + `## Who · timestamp` blocks). Files are keyed by chat id (filename suffix `--<chat_id>.md`) so a title change renames cleanly instead of orphaning; subchats are skipped. Hooked into the message engine at the turn chokepoint (`run_turn`, covering send + regenerate + all perspectives), plus per-participant regenerate, message edits, auto-title, and chat deletion (removes the file) — all best-effort so a write failure only logs and never blocks the engine. Zone configs are written as `zones/<id>.json` alongside on each pass.*
+
+***Files → DB.** A `notify`-debounced watcher over the mirror folder (mirroring the knowledge-watcher pattern, init at startup + re-synced on settings change) pulls external `.md` edits back in. A content-hash record of every file we write lets the watcher ignore its own echoes, avoiding a feedback loop. Sync is deliberately conservative and lossless: the title and same-shape message-text edits flow back (matched one-to-one against the chat's visible turns, leaving tool/perspective turns markdown can't represent untouched); structural rewrites are left for the DB to own. A `chat-file-synced` event refreshes the open chat live.*
+
+*Two commands back the UI: `mirror_all_chats` (re-write everything; run when enabled / folder changes) and `import_chat_from_markdown` (bring a loose file in as a new chat). Settings → Data gained the toggle, folder picker, "Mirror all chats now", and "Import from markdown…".*
+
+- [x] Settings → Data: storage toggle ("Store chats as markdown files"); configurable output directory
+- [x] Each chat stored as a `.md` file: frontmatter (chat ID, zone, project, tags, dates), messages as timestamped blocks
 - [x] Zone configs exported as individual JSON files in a `zones/` subdirectory alongside the markdown chats
-- [x] Markdown files updated on every message save (mirror runs at the turn chokepoint + edit/regenerate/auto-title; delete removes the file)
-- [x] Import from markdown: read a `.md` chat file back into the DB (new chat, zone/project matched by name)
+- [x] Markdown files updated on every message save (turn chokepoint + edit/regenerate/auto-title; delete removes the file)
+- [x] **Two-way sync** — external edits to a `.md` (title, message text) are watched and pulled back into the DB; self-write echoes suppressed by content hash; structural rewrites left to the DB
+- [x] Import from markdown: read a loose `.md` chat file in as a new chat (zone/project matched by name)
 
 ### 0.7.3 — UI/UX consistency pass
 

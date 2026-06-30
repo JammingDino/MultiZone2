@@ -100,6 +100,9 @@ pub async fn set_setting(
     // the knowledge watcher so a change takes effect immediately.
     if key == "app_settings" {
         crate::knowledge::watcher::resync().await;
+        // Re-evaluate the markdown two-way-sync watch (mirror dir / enabled may
+        // have changed).
+        crate::commands::mirror::resync().await;
     }
     // Mirror user-facing preferences to the installer-safe backup so they survive
     // a version update that clears the per-app data dir. Best-effort — a failed

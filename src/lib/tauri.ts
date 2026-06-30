@@ -285,6 +285,12 @@ export function onChatZoneUpdated(
 export function onChatsChanged(handler: () => void): Promise<UnlistenFn> {
   return listen("chats-changed", () => handler());
 }
+/** Emitted after an external edit to a mirrored `.md` was synced into the DB (0.7.2). */
+export function onChatFileSynced(
+  handler: (e: { chatId: string }) => void,
+): Promise<UnlistenFn> {
+  return listen<{ chatId: string }>("chat-file-synced", (e) => handler(e.payload));
+}
 /** Emitted after the watcher auto re-indexes a knowledge scope. */
 export function onKnowledgeUpdated(
   handler: (e: { scope: string; global: boolean; indexed: number; removed: number }) => void,

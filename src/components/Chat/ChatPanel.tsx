@@ -30,6 +30,7 @@ export function ChatPanel() {
     applyStreamEvent,
     setChatTitle,
     refreshChats,
+    loadMessages,
     refreshTags,
     loadChatTags,
     loadChatZones,
@@ -142,6 +143,7 @@ export function ChatPanel() {
     let unlistenTags: (() => void) | undefined;
     let unlistenZone: (() => void) | undefined;
     let unlistenChats: (() => void) | undefined;
+    let unlistenFileSync: (() => void) | undefined;
     api.onStream((env) => {
       applyStreamEvent(env.chatId, env.event, env.perspectiveZoneId);
     }).then((u) => {
@@ -180,6 +182,15 @@ export function ChatPanel() {
       if (cancelled) u();
       else unlistenChats = u;
     });
+    api.onChatFileSynced(({ chatId }) => {
+      // An external edit to a mirrored `.md` was synced into the DB (0.7.2) —
+      // refresh the sidebar (title) and reload this chat's messages.
+      refreshChats();
+      loadMessages(chatId);
+    }).then((u) => {
+      if (cancelled) u();
+      else unlistenFileSync = u;
+    });
     return () => {
       cancelled = true;
       unlistenStream?.();
@@ -187,8 +198,9 @@ export function ChatPanel() {
       unlistenTags?.();
       unlistenZone?.();
       unlistenChats?.();
+      unlistenFileSync?.();
     };
-  }, [applyStreamEvent, setChatTitle, refreshChats, refreshTags, loadChatTags]);
+  }, [applyStreamEvent, setChatTitle, refreshChats, refreshTags, loadChatTags, loadMessages]);
 
   return (
     <main

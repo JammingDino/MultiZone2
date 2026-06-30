@@ -1856,18 +1856,19 @@ function DataTab() {
         ) : null}
       </section>
 
-      {/* Markdown mirror (0.7.2) */}
+      {/* Markdown two-way sync (0.7.2) */}
       <section>
-        <h3 className="mb-1 text-sm font-medium">Export as markdown</h3>
+        <h3 className="mb-1 text-sm font-medium">Plaintext markdown storage</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Mirror every chat to a <span className="font-mono">.md</span> file and keep it in sync as you chat.
-          Zone configs are written as JSON in a <span className="font-mono">zones/</span> subfolder alongside.
-          The same files can be read back in below.
+          Keep every chat as a real <span className="font-mono">.md</span> file you can read, edit, and version
+          outside the app. The database stays the source of truth, but the files sync both ways: chats are written
+          out as you go, and edits you make to a file on disk (message text, title) are pulled back in. Zone configs
+          are written as JSON in a <span className="font-mono">zones/</span> subfolder alongside.
         </p>
 
         <ToggleRow
-          label="Mirror chats to markdown"
-          description={mirrorDir ? undefined : "Choose an output folder below to start mirroring."}
+          label="Store chats as markdown files"
+          description={mirrorDir ? "Files sync two-way with the database." : "Choose an output folder below to start."}
           checked={mirrorOn}
           onChange={toggleMirror}
         />

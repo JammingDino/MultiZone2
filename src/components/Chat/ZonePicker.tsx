@@ -63,7 +63,7 @@ export function ZonePicker({ chatId, currentZoneId, smartRouting, routingState }
     <div ref={wrapRef} className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1.5 rounded border border-transparent px-1.5 py-0.5 text-xs text-[var(--color-text-muted)] hover:border-[var(--color-border)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]"
+        className="flex min-w-0 max-w-full items-center gap-1.5 rounded border border-transparent px-1.5 py-0.5 text-xs text-[var(--color-text-muted)] hover:border-[var(--color-border)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]"
         title="Change zone"
       >
         {smartRouting && routingState?.status === "routing" ? (
@@ -88,18 +88,27 @@ export function ZonePicker({ chatId, currentZoneId, smartRouting, routingState }
         ) : (
           <Zap size={12} className="text-[var(--color-accent)]" />
         )}
-        <span>
-          {smartRouting && routingState?.status === "routing"
-            ? "Routing…"
-            : routedZone
-              ? `Smart → ${routedZone.name}`
-              : smartRouting
-                ? "Smart chat"
-                : current
-                  ? `${current.name} · ${current.model}`
-                  : "Quick chat"}
-        </span>
-        <ChevronDown size={12} />
+        {(() => {
+          const label =
+            smartRouting && routingState?.status === "routing"
+              ? "Routing…"
+              : routedZone
+                ? `Smart → ${routedZone.name}`
+                : smartRouting
+                  ? "Smart chat"
+                  : current
+                    ? `${current.name} · ${current.model}`
+                    : "Quick chat";
+          // Long model ids (e.g. provider/long-model-name) would otherwise push
+          // the rest of the top bar around — clamp the width and ellipsize,
+          // keeping the full text reachable via the tooltip.
+          return (
+            <span className="max-w-[200px] truncate" title={label}>
+              {label}
+            </span>
+          );
+        })()}
+        <ChevronDown size={12} className="shrink-0" />
       </button>
 
       {open && (

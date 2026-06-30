@@ -1305,17 +1305,14 @@ function KnowledgeTab() {
           </label>
           <label className="block">
             <div className="mb-1 text-[11px] text-[var(--color-text-muted)]">Model</div>
-            <input
+            <ModelCombobox
               value={model}
-              onChange={(e) => setModel(e.target.value)}
-              list="global-kb-models"
+              onChange={setModel}
+              options={modelOptions}
               placeholder="e.g. text-embedding-3-small"
               className="input"
               disabled={!providerId}
             />
-            <datalist id="global-kb-models">
-              {modelOptions.map((m) => <option key={m} value={m} />)}
-            </datalist>
           </label>
         </div>
         {dirty && (

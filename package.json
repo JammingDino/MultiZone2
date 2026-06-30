@@ -1,7 +1,7 @@
 {
   "name": "multizone",
   "private": true,
-  "version": "0.6.0",
+  "version": "0.6.2",
   "releaseBuild": false,
   "type": "module",
   "scripts": {

@@ -323,12 +323,12 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 *Surfaced during the 0.6.2 review; not yet slated to a release. Movable. #10 and #11 are the highest-impact.*
 
-- [ ] **State not saving — search provider** — the search provider selection (and possibly related fields) doesn't persist; investigate the settings write path for that field
-- [ ] **Dropdowns not styled consistently** — Default provider, Quick chat base zone, and Search provider still use native `<select>`/`<datalist>` styling rather than the app's combobox treatment; unify them (the embedding picker was migrated to `ModelCombobox` in 0.6.2 as the pattern)
+- [ ] **State not saving — search provider** — the search provider selection (and most other settings field) doesn't persist; investigate the settings write path for that field
+- [x] **Dropdowns not styled consistently** — *fixed in 0.7.0*: a shared `SettingSelect` (styled control + chevron) now backs Default provider, Quick chat base zone, Search provider, and MCP transport
 - [ ] **Branch only works from the primary response in perspective mode** — "Branch from here" is offered on the primary turn but not on perspective cards; allow branching from a perspective participant
 - [ ] **Chat history mix-ups** — viewing subchats (and sometimes ordinary chats) occasionally shows mismatched prompt/content pairs, or an entire history rendered as if every chat is identical; clears on app restart but recurs. Likely a keying/identity bug in the message store or list virtualization — needs a reliable repro
 - [ ] **Tool approvals inside subchats never reach the user** — subchats are read-only in the UI, so the approval banner isn't shown; a sub-agent tool call needing approval waits ~5 min and is auto-denied, silently stalling the sub-agent. Safe today only if sub-agent zones stick to auto-approved/safe tools. Fix: surface subchat approval prompts somewhere actionable (parent chat, or an observable approval UI in the subchat view). Introduced in 0.5.1 (spawn-subagent tools)
-- [ ] **Most settings not persisted across app updates** — app settings are lost when updating to a new version; investigate where settings are stored vs. what the installer/updater replaces, and migrate/preserve across updates
+- [x] **Most settings not persisted across app updates** — *fixed in 0.7.0*: root cause was the SQLite settings DB living under the bundle-identifier app data dir (`%APPDATA%\com.multizone.desktop`), which the Windows installer clears on update. User-facing preferences (`app_settings`, `theme`, `default_zone_id`) are now mirrored to an installer-safe sibling file (`%APPDATA%\MultiZone\settings-backup.json`) on every write and restored automatically when the DB comes up fresh/wiped. `reset_database` also clears the backup so a deliberate reset stays reset
 
 ---
 
@@ -336,12 +336,25 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ### 0.7.0 — Settings rework
 
-- [ ] Settings modal reorganized: General, Appearance, Chat, Search, API, MCP, Data
-- [ ] Appearance section: light/dark mode toggle, global accent color, typography (font family + size), visual effects (shadows, bloom/glow), background effects (type, speed, density, opacity)
-- [ ] All settings labels reviewed for clarity; help text added where behavior is non-obvious
-- [ ] Settings validated on input; invalid values highlighted inline rather than on save
+*Status: built & typechecked (`npm run build` green). The settings modal keeps every existing section but regroups the nav into labelled groups — **Models** (Providers), **Interface** (Appearance, Chat), **Tools & context** (Search, Skills, Knowledge, Memory, MCP), **System** (API, Data) — via a new `NavGroup` header component. Styling was unified: a shared `SettingSelect` (styled, chevron) replaces the bare native `<select>`s on the Providers default-provider, Quick-chat base zone, Search provider, and MCP transport fields; a `ToggleRow` component standardises the labelled on/off rows (Chat auto-title / reasoning, Appearance shadows / bloom); the `.input` class that the Knowledge tab relied on was promoted from inside `ProviderForm` to a modal-level `<style>` so it's always present. Two misfiled controls moved from Chat → Appearance because they're visual, not behavioural: **Perspective layout** (stacked/columns) and **Zone library page size** (the sequential/parallel *run mode* stays in Chat as a performance setting). Inline validation arrived via a reusable `NumberField` (Memory max-entries) and a red-border + message on the API port — both validate per-keystroke and highlight invalid input rather than silently reverting on save. Separately, ephemeral view state is now durable: a new [uiState.ts](../src/lib/uiState.ts) (`usePersistentSet` / `usePersistentBool`, localStorage under `ui.*`) persists collapsed project folders, the sidebar open/closed state, folded branch groups, and expanded stack-trace blocks / subchat transcripts across sessions.*
 
-### 0.7.1 — DB/Markdown toggle
+- [x] Settings modal reorganized into labelled nav groups — all sections kept (Models / Interface / Tools & context / System), not dropped to the planned subset
+- [x] Appearance section: light/dark mode, global accent color, typography (font family + size), visual effects (shadows, bloom/glow), background effects (type, speed, density, opacity) — plus the relocated Perspective layout + Zone library page size
+- [x] Consistent styling pass: shared `SettingSelect` for dropdowns, `ToggleRow` for toggle rows, global `.input` class, `Section` helper
+- [x] Settings validated on input; invalid values highlighted inline rather than on save (`NumberField`, API port)
+- [x] Open/closed view state persists across sessions — project folders, sidebar, branch groups, stack-trace + subchat expansion ([uiState.ts](../src/lib/uiState.ts))
+- [x] Settings survive app updates — preferences mirrored to an installer-safe backup outside the bundle-identifier data dir and restored on a fresh/wiped DB ([settings.rs](../src-tauri/src/commands/settings.rs), [state.rs](../src-tauri/src/state.rs)); closes the "settings lost on update" backlog item
+
+### 0.7.1 — Chat export
+
+*Status: built & typechecked (`npm run build` green). One pure module — [export.ts](../src/lib/export.ts) — builds both formats off a single resolved `ExportChatData` snapshot (chat metadata + the fetched message list + a zoneId→info map), driven by an `ExportMenu` button in the chat header ([ExportMenu.tsx](../src/components/Chat/ExportMenu.tsx), hidden on read-only subchats). Markdown: YAML frontmatter (title, chat_id, zone, model, project, tags, created/updated/exported ISO dates) + `## Role · timestamp` blocks, body text from the visible `text` content parts only (hidden context-injection parts excluded), image parts noted as `_N images attached_`; downloaded via a Blob (same pattern as the Skills export, no extra fs permissions). PDF: a theme-aware standalone HTML document rendered into a hidden iframe and sent to the OS print dialog ("Save as PDF"). Message markdown is rendered to HTML via the app's own stack (`react-markdown` + GFM through `renderToStaticMarkup`), so formatting survives — headings, bold/italic, lists, fenced code, blockquotes, tables, links — styled to the inlined light/dark palette + user accent + configured font, laid out as user-right / assistant-left bubbles. The page is sized to the full rendered content height so the export is **one continuous page with no breaks**; the title/zone/export-date header sits inline at the top (an earlier `position:fixed` header overlapped the first message and was cut off). Only user/assistant turns with visible text or images are exported — tool/system/empty turns are dropped.*
+
+- [x] Export chat as Markdown: single `.md` with frontmatter (title, zone, model, project, tags, dates) + timestamped message blocks (distinct from the planned live-mirror in 0.7.2)
+- [x] Export chat as PDF: theme-aware print document matching the active theme — accent, light/dark background, font family, message-bubble layout — with rendered markdown formatting preserved
+- [x] Continuous single-page PDF (sized to content height, no pagination); inline header with chat title, zone/project, and export date
+- [x] Export entry point in the chat header (`ExportMenu`), with a Markdown / PDF dropdown
+
+### 0.7.2 — DB/Markdown toggle
 
 - [ ] Settings → Data: "Export as markdown" toggle; configurable output directory
 - [ ] Each chat mirrored as a `.md` file: frontmatter (chat ID, zone, project, tags, dates), messages as timestamped blocks
@@ -349,7 +362,7 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [ ] Markdown files updated on every message save
 - [ ] Import from markdown: read a `.md` chat file back into the DB
 
-### 0.7.2 — UI/UX consistency pass
+### 0.7.3 — UI/UX consistency pass
 
 - [ ] Audit all modals: consistent header height, close button placement, padding
 - [ ] Audit all form fields: consistent label size, input height, focus ring
@@ -357,13 +370,6 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [ ] Sidebar: collapse/expand animation; active chat highlight
 - [ ] Message thread: spacing between messages, avatar sizes, alignment
 - [ ] Confirm all save buttons close panels as expected (from 0.1.8 and 0.2.x checklists)
-
-### 0.7.3 — Chat export
-
-- [ ] Export chat as Markdown: full chat exported as a single `.md` file (distinct from the live-mirror in 0.7.1) — frontmatter with chat title, zone, project, tags, dates; messages as timestamped blocks
-- [ ] Export chat as PDF: theme-aware PDF styled to match the currently active app theme (accent color, background, font family, message bubble layout)
-- [ ] PDF page header: chat title, zone name, and export date; page numbers in footer
-- [ ] Export entry point in the chat header or chat context menu
 
 ---
 

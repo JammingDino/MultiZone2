@@ -13,6 +13,11 @@ pub struct AppState {
     pub http: reqwest::Client,
     pub app_data_dir: PathBuf,
     pub attachments_dir: PathBuf,
+    /// Installer-safe location for the settings backup JSON. Lives *outside* the
+    /// bundle-identifier app data dir (which a Windows reinstall/update can
+    /// clear) so user preferences survive a version update. See
+    /// [`crate::commands::settings::write_backup`].
+    pub settings_backup_path: PathBuf,
     /// Per-chat cancellation flags for in-flight streams.
     pub active_streams: Arc<RwLock<HashMap<String, Arc<AtomicBool>>>>,
     /// Running HTTP API server, if enabled. Replaced on settings change.
@@ -41,6 +46,25 @@ impl AppState {
         crate::ocr::set_models_dir(ocr_models_dir);
 
         let db = db::init(&app_data_dir).await?;
+
+        // The settings backup lives a level up from the bundle-identifier app
+        // data dir, in a stable `MultiZone/` folder the Windows installer doesn't
+        // own, so it persists across updates that wipe the per-app dir. Falls
+        // back to the app data dir itself if the OS data root is unavailable.
+        let settings_backup_path = app
+            .path()
+            .data_dir()
+            .unwrap_or_else(|_| app_data_dir.clone())
+            .join("MultiZone")
+            .join("settings-backup.json");
+        // Restore preferences from the backup when the DB is fresh/wiped (e.g.
+        // just after a version update). No-op on a genuine first install.
+        if let Err(e) =
+            crate::commands::settings::restore_from_backup_if_empty(&db, &settings_backup_path).await
+        {
+            tracing::warn!("settings restore from backup failed: {e}");
+        }
+
         let http = reqwest::Client::builder()
             .user_agent("MultiZone/0.1.0")
             .build()?;
@@ -54,6 +78,7 @@ impl AppState {
             http,
             app_data_dir,
             attachments_dir,
+            settings_backup_path,
             active_streams: Arc::new(RwLock::new(HashMap::new())),
             api_server: Mutex::new(None),
             tool_approvals: Arc::new(Mutex::new(HashMap::new())),

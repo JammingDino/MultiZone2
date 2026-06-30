@@ -1,7 +1,73 @@
 use crate::error::AppResult;
 use crate::state::AppState;
 use serde::Serialize;
+use sqlx::SqlitePool;
+use std::collections::HashMap;
+use std::path::Path;
 use tauri::{AppHandle, State};
+
+/// Settings keys mirrored to the installer-safe backup file. These are the
+/// user-facing preferences (not seeding flags or transient state) that must
+/// survive a version update even if the installer wipes the per-app data dir.
+pub const BACKUP_KEYS: [&str; 3] = ["app_settings", "theme", "default_zone_id"];
+
+/// Write the current values of [`BACKUP_KEYS`] to the installer-safe backup
+/// file (a JSON map). The file lives *outside* the bundle-identifier app data
+/// dir (see [`crate::state`]) so a reinstall/update that clears that dir doesn't
+/// take the user's preferences with it. Best-effort: a failure here never blocks
+/// the actual settings write.
+pub async fn write_backup(db: &SqlitePool, backup_path: &Path) -> AppResult<()> {
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT key, value FROM settings WHERE key IN ('app_settings', 'theme', 'default_zone_id')",
+    )
+    .fetch_all(db)
+    .await?;
+    let map: HashMap<String, String> = rows.into_iter().collect();
+    if let Some(parent) = backup_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(backup_path, serde_json::to_string_pretty(&map)?)?;
+    Ok(())
+}
+
+/// On startup, if the settings table has no `app_settings` row — i.e. a fresh or
+/// installer-wiped database — restore the backed-up keys from the installer-safe
+/// backup file. A genuine first-ever install has no backup, so this is a no-op
+/// there. Best-effort: any error degrades to "start with defaults".
+pub async fn restore_from_backup_if_empty(db: &SqlitePool, backup_path: &Path) -> AppResult<()> {
+    let existing: Option<(String,)> =
+        sqlx::query_as("SELECT value FROM settings WHERE key = 'app_settings'")
+            .fetch_optional(db)
+            .await?;
+    if existing.is_some() {
+        return Ok(()); // DB already carries the user's settings — nothing to restore.
+    }
+    let Ok(raw) = std::fs::read_to_string(backup_path) else {
+        return Ok(()); // No backup (first install) — start fresh.
+    };
+    let Ok(map) = serde_json::from_str::<HashMap<String, String>>(&raw) else {
+        return Ok(()); // Corrupt backup — don't block startup.
+    };
+    let mut restored = 0;
+    for (k, v) in map {
+        if !BACKUP_KEYS.contains(&k.as_str()) {
+            continue;
+        }
+        sqlx::query(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        )
+        .bind(&k)
+        .bind(&v)
+        .execute(db)
+        .await?;
+        restored += 1;
+    }
+    if restored > 0 {
+        tracing::info!("restored {restored} setting(s) from installer-safe backup");
+    }
+    Ok(())
+}
 
 #[tauri::command]
 pub async fn get_setting(
@@ -34,6 +100,14 @@ pub async fn set_setting(
     // the knowledge watcher so a change takes effect immediately.
     if key == "app_settings" {
         crate::knowledge::watcher::resync().await;
+    }
+    // Mirror user-facing preferences to the installer-safe backup so they survive
+    // a version update that clears the per-app data dir. Best-effort — a failed
+    // backup must not fail the settings write the user just made.
+    if BACKUP_KEYS.contains(&key.as_str()) {
+        if let Err(e) = write_backup(&state.db, &state.settings_backup_path).await {
+            tracing::warn!("settings backup failed: {e}");
+        }
     }
     Ok(())
 }
@@ -87,6 +161,11 @@ pub async fn reset_database(
     }
     if state.attachments_dir.exists() {
         let _ = std::fs::remove_dir_all(&state.attachments_dir);
+    }
+    // Drop the installer-safe settings backup too, so the reset is a true fresh
+    // start and isn't silently undone by restore-on-launch.
+    if state.settings_backup_path.exists() {
+        let _ = std::fs::remove_file(&state.settings_backup_path);
     }
 
     app.exit(0);

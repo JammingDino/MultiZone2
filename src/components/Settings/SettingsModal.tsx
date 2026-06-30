@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { X, Plus, Trash2, RefreshCw, Server, Palette, MessageSquare, Database, AlertTriangle, Loader2, Folder, FolderOpen, Globe, Copy, Check, Search, Brain, Sparkles, FileUp, FileDown, Plug, Wifi, WifiOff, Library } from "lucide-react";
+import { X, Plus, Trash2, RefreshCw, Server, Palette, MessageSquare, Database, AlertTriangle, Loader2, Folder, FolderOpen, Globe, Copy, Check, Search, Brain, Sparkles, FileUp, FileDown, Plug, Wifi, WifiOff, Library, ChevronDown } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useApp } from "@/store/app";
 import type { BackgroundEffect } from "@/store/app";
@@ -15,6 +15,7 @@ export function SettingsModal() {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={closeSettings}>
+      <style>{`.input { width: 100%; border: 1px solid var(--color-border); border-radius: 4px; padding: 8px 12px; background: var(--color-panel); font-size: 13px; outline: none; } .input:focus { border-color: var(--color-accent); }`}</style>
       <div className="flex h-[620px] w-[820px] flex-col rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex h-12 items-center justify-between border-b border-[var(--color-border)] px-4">
           <div className="font-medium">Settings</div>
@@ -23,15 +24,22 @@ export function SettingsModal() {
           </button>
         </div>
         <div className="flex flex-1 overflow-hidden">
-          <nav className="flex w-44 flex-col gap-1 border-r border-[var(--color-border)] p-2 text-sm">
+          <nav className="flex w-44 flex-col gap-0.5 overflow-y-auto border-r border-[var(--color-border)] p-2 text-sm">
+            <NavGroup label="Models" />
             <TabButton active={tab === "providers"} icon={<Server size={14} />} label="Providers" onClick={() => setTab("providers")} />
+
+            <NavGroup label="Interface" />
             <TabButton active={tab === "appearance"} icon={<Palette size={14} />} label="Appearance" onClick={() => setTab("appearance")} />
             <TabButton active={tab === "chat"} icon={<MessageSquare size={14} />} label="Chat" onClick={() => setTab("chat")} />
+
+            <NavGroup label="Tools & context" />
             <TabButton active={tab === "search"} icon={<Search size={14} />} label="Search" onClick={() => setTab("search")} />
             <TabButton active={tab === "skills"} icon={<Sparkles size={14} />} label="Skills" onClick={() => setTab("skills")} />
-            <TabButton active={tab === "mcp"} icon={<Plug size={14} />} label="MCP" onClick={() => setTab("mcp")} />
             <TabButton active={tab === "knowledge"} icon={<Library size={14} />} label="Knowledge" onClick={() => setTab("knowledge")} />
             <TabButton active={tab === "memory"} icon={<Brain size={14} />} label="Memory" onClick={() => setTab("memory")} />
+            <TabButton active={tab === "mcp"} icon={<Plug size={14} />} label="MCP" onClick={() => setTab("mcp")} />
+
+            <NavGroup label="System" />
             <TabButton active={tab === "api"} icon={<Globe size={14} />} label="API" onClick={() => setTab("api")} />
             <TabButton active={tab === "data"} icon={<Database size={14} />} label="Data" onClick={() => setTab("data")} />
           </nav>
@@ -49,6 +57,14 @@ export function SettingsModal() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function NavGroup({ label }: { label: string }) {
+  return (
+    <div className="mt-3 px-2 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)] first:mt-0">
+      {label}
     </div>
   );
 }
@@ -116,17 +132,16 @@ function ProvidersTab() {
           <p className="mb-2 text-xs text-[var(--color-text-muted)]">
             Fallback provider used when no base zone is configured. Its default model is used.
           </p>
-          <select
+          <SettingSelect
             value={quickProviderId}
-            onChange={(e) => setAppSettings({ defaultProviderId: e.target.value || null })}
-            className="w-full rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]"
+            onChange={(v) => setAppSettings({ defaultProviderId: v || null })}
           >
             {providers.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}{p.defaultModel ? ` · ${p.defaultModel}` : " · (no model set)"}
               </option>
             ))}
-          </select>
+          </SettingSelect>
         </section>
       )}
 
@@ -257,26 +272,18 @@ function AppearanceTab() {
       <section>
         <h3 className="mb-2 text-sm font-medium">Visual effects</h3>
         <div className="flex flex-col gap-2">
-          <div
-            onClick={() => setTheme({ shadowsEnabled: !theme.shadowsEnabled })}
-            className="flex cursor-pointer items-center justify-between rounded border border-[var(--color-border)] px-3 py-2 hover:border-[var(--color-accent)]"
-          >
-            <div>
-              <div className="text-sm">Drop shadows</div>
-              <div className="text-[10px] text-[var(--color-text-muted)]">Adds depth shadows to panels and cards</div>
-            </div>
-            <Toggle checked={!!theme.shadowsEnabled} onChange={(v) => setTheme({ shadowsEnabled: v })} />
-          </div>
-          <div
-            onClick={() => setTheme({ bloomEnabled: !theme.bloomEnabled })}
-            className="flex cursor-pointer items-center justify-between rounded border border-[var(--color-border)] px-3 py-2 hover:border-[var(--color-accent)]"
-          >
-            <div>
-              <div className="text-sm">Bloom / glow</div>
-              <div className="text-[10px] text-[var(--color-text-muted)]">Adds glow to interactive elements and accent colors</div>
-            </div>
-            <Toggle checked={!!theme.bloomEnabled} onChange={(v) => setTheme({ bloomEnabled: v })} />
-          </div>
+          <ToggleRow
+            label="Drop shadows"
+            description="Adds depth shadows to panels and cards"
+            checked={!!theme.shadowsEnabled}
+            onChange={(v) => setTheme({ shadowsEnabled: v })}
+          />
+          <ToggleRow
+            label="Bloom / glow"
+            description="Adds glow to interactive elements and accent colors"
+            checked={!!theme.bloomEnabled}
+            onChange={(v) => setTheme({ bloomEnabled: v })}
+          />
           {theme.bloomEnabled && (
             <div className="ml-3 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
               <SliderRow
@@ -377,6 +384,50 @@ function AppearanceTab() {
         )}
       </section>
 
+      <section>
+        <h3 className="mb-1 text-sm font-medium">Perspective layout</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          How additional model responses are arranged beneath the primary answer when a chat runs multiple zones.
+        </p>
+        <div className="flex gap-2">
+          {([
+            ["stacked", "Stacked", "Full-width response blocks stacked vertically."],
+            ["columns", "Columns", "Side-by-side columns for direct comparison."],
+          ] as const).map(([val, label, desc]) => (
+            <button
+              key={val}
+              onClick={() => setAppSettings({ perspectiveLayout: val })}
+              className={`flex-1 rounded border px-3 py-2.5 text-left text-sm ${appSettings.perspectiveLayout === val ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]" : "border-[var(--color-border)] hover:border-[var(--color-accent)]"}`}
+            >
+              <div className="font-medium">{label}</div>
+              <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">{desc}</div>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section>
+        <h3 className="mb-1 text-sm font-medium">Zone library page size</h3>
+        <p className="mb-2 text-xs text-[var(--color-text-muted)]">
+          How many zone cards the Zone Library shows per page.
+        </p>
+        <div className="flex gap-2">
+          {[6, 9, 12, 15, 30].map((n) => (
+            <button
+              key={n}
+              onClick={() => setAppSettings({ zoneLibraryPageSize: n })}
+              className={`flex-1 rounded border px-3 py-2.5 text-center text-sm ${
+                (appSettings.zoneLibraryPageSize || 6) === n
+                  ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]"
+                  : "border-[var(--color-border)] hover:border-[var(--color-accent)]"
+              }`}
+            >
+              <div className="font-medium">{n}</div>
+            </button>
+          ))}
+        </div>
+      </section>
+
     </div>
   );
 }
@@ -399,10 +450,9 @@ function ChatTab() {
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
           The zone Quick Chat uses when no specific zone is selected. Defines the model, system prompt, and tools for Quick chats.
         </p>
-        <select
+        <SettingSelect
           value={appSettings.baseZoneId ?? ""}
-          onChange={(e) => setAppSettings({ baseZoneId: e.target.value || null })}
-          className="w-full rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]"
+          onChange={(v) => setAppSettings({ baseZoneId: v || null })}
         >
           <option value="">— none (use provider default model) —</option>
           {zones.map((z) => (
@@ -410,7 +460,7 @@ function ChatTab() {
               {z.name} · {z.model}
             </option>
           ))}
-        </select>
+        </SettingSelect>
         {zones.length === 0 && (
           <p className="mt-2 text-xs text-[var(--color-text-muted)]">
             No zones yet — create one from "Configure Zones".
@@ -445,16 +495,11 @@ function ChatTab() {
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
           Automatically ask the model to generate a short title after the first response.
         </p>
-        <div
-          onClick={() => setAppSettings({ autoTitle: !appSettings.autoTitle })}
-          className="flex cursor-pointer items-center justify-between rounded border border-[var(--color-border)] px-3 py-2.5 hover:border-[var(--color-accent)]"
-        >
-          <span className="text-sm">Auto-generate titles</span>
-          <Toggle
-            checked={appSettings.autoTitle}
-            onChange={(v) => setAppSettings({ autoTitle: v })}
-          />
-        </div>
+        <ToggleRow
+          label="Auto-generate titles"
+          checked={appSettings.autoTitle}
+          onChange={(v) => setAppSettings({ autoTitle: v })}
+        />
       </section>
 
       <section>
@@ -462,16 +507,11 @@ function ChatTab() {
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
           Show thinking/reasoning expanded by default. When off, blocks are collapsed once streaming finishes.
         </p>
-        <div
-          onClick={() => setAppSettings({ expandThinkingByDefault: !appSettings.expandThinkingByDefault })}
-          className="flex cursor-pointer items-center justify-between rounded border border-[var(--color-border)] px-3 py-2.5 hover:border-[var(--color-accent)]"
-        >
-          <span className="text-sm">Expand reasoning by default</span>
-          <Toggle
-            checked={appSettings.expandThinkingByDefault}
-            onChange={(v) => setAppSettings({ expandThinkingByDefault: v })}
-          />
-        </div>
+        <ToggleRow
+          label="Expand reasoning by default"
+          checked={appSettings.expandThinkingByDefault}
+          onChange={(v) => setAppSettings({ expandThinkingByDefault: v })}
+        />
       </section>
 
       <section>
@@ -595,28 +635,6 @@ function ChatTab() {
       </section>
 
       <section>
-        <h3 className="mb-1 text-sm font-medium">Perspective layout</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          How additional model responses are arranged beneath the primary answer.
-        </p>
-        <div className="flex gap-2">
-          {([
-            ["stacked", "Stacked", "Full-width response blocks stacked vertically."],
-            ["columns", "Columns", "Side-by-side columns for direct comparison."],
-          ] as const).map(([val, label, desc]) => (
-            <button
-              key={val}
-              onClick={() => setAppSettings({ perspectiveLayout: val })}
-              className={`flex-1 rounded border px-3 py-2.5 text-left text-sm ${appSettings.perspectiveLayout === val ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]" : "border-[var(--color-border)] hover:border-[var(--color-accent)]"}`}
-            >
-              <div className="font-medium">{label}</div>
-              <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">{desc}</div>
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <section>
         <h3 className="mb-1 text-sm font-medium">Subagent depth limit</h3>
         <p className="mb-2 text-xs text-[var(--color-text-muted)]">
           How many levels deep zones may spawn subagents (subchats). Deeper
@@ -639,32 +657,9 @@ function ChatTab() {
         </div>
       </section>
 
-      <section>
-        <h3 className="mb-1 text-sm font-medium">Zone library page size</h3>
-        <p className="mb-2 text-xs text-[var(--color-text-muted)]">
-          How many zone cards the Zone Library shows per page.
-        </p>
-        <div className="flex gap-2">
-          {[6, 9, 12, 15, 30].map((n) => (
-            <button
-              key={n}
-              onClick={() => setAppSettings({ zoneLibraryPageSize: n })}
-              className={`flex-1 rounded border px-3 py-2.5 text-center text-sm ${
-                (appSettings.zoneLibraryPageSize || 6) === n
-                  ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]"
-                  : "border-[var(--color-border)] hover:border-[var(--color-accent)]"
-              }`}
-            >
-              <div className="font-medium">{n}</div>
-            </button>
-          ))}
-        </div>
-      </section>
     </div>
   );
 }
-
-// ─── Search ───────────────────────────────────────────────────────────────────
 
 // ─── Skills ─────────────────────────────────────────────────────────────────────
 
@@ -1135,10 +1130,10 @@ function McpServerEditor({
 
       <label className="block">
         <div className="mb-1 text-xs text-[var(--color-text-muted)]">Transport</div>
-        <select value={transport} onChange={(e) => setTransport(e.target.value as "stdio" | "sse")} className="w-full rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]">
+        <SettingSelect value={transport} onChange={(v) => setTransport(v as "stdio" | "sse")}>
           <option value="stdio">stdio (local command)</option>
           <option value="sse">SSE / HTTP (remote URL)</option>
-        </select>
+        </SettingSelect>
       </label>
 
       {transport === "stdio" ? (
@@ -1481,19 +1476,10 @@ function MemoryTab() {
           Facts the assistant saves with the memory tool, injected into the system prompt each turn
           (global → project → chat). Give a zone the <span className="font-mono">Memory</span> tool to let it write here.
         </p>
-        <label className="flex items-center gap-2 text-sm">
+        <div className="flex items-center gap-2 text-sm">
           <span className="text-[var(--color-text-muted)]">Max entries per scope</span>
-          <input
-            type="number"
-            min={1}
-            value={limit}
-            onChange={(e) => {
-              const n = parseInt(e.target.value, 10);
-              if (Number.isFinite(n) && n > 0) setAppSettings({ memoryScopeLimit: n });
-            }}
-            className="w-24 rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1.5 text-sm outline-none focus:border-[var(--color-accent)]"
-          />
-        </label>
+          <NumberField value={limit} min={1} onCommit={(v) => setAppSettings({ memoryScopeLimit: v })} />
+        </div>
         <p className="mt-1 text-xs text-[var(--color-text-muted)]">Oldest entries in a scope are trimmed once it exceeds this.</p>
       </section>
 
@@ -1561,10 +1547,9 @@ function SearchTab() {
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
           Applied to all zones that have the web search tool enabled.
         </p>
-        <select
+        <SettingSelect
           value={provider}
-          onChange={(e) => setAppSettings({ webSearchProvider: e.target.value, webSearchEndpoint: "", webSearchApiKey: "" })}
-          className="w-full rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]"
+          onChange={(v) => setAppSettings({ webSearchProvider: v, webSearchEndpoint: "", webSearchApiKey: "" })}
         >
           <option value="multi">multi — DDG + Marginalia, no key (recommended)</option>
           <option value="duckduckgo">duckduckgo — DDG Lite only, no key</option>
@@ -1573,7 +1558,7 @@ function SearchTab() {
           <option value="brave">brave — Brave Search API (needs key)</option>
           <option value="tavily">tavily — Tavily API (needs key)</option>
           <option value="serper">serper — Google via Serper API (needs key)</option>
-        </select>
+        </SettingSelect>
       </section>
 
       {provider === "searxng" && (
@@ -1622,6 +1607,8 @@ function ApiTab() {
   const [copied, setCopied] = useState(false);
 
   const baseUrl = `http://127.0.0.1:${appSettings.apiPort ?? 8765}`;
+  const parsedPort = parseInt(portInput, 10);
+  const portInvalid = !Number.isFinite(parsedPort) || parsedPort < 1 || parsedPort > 65535;
 
   // Push the current config to the backend, persist it, and reflect any error.
   async function apply(next: { apiEnabled?: boolean; apiPort?: number; apiToken?: string }) {
@@ -1707,9 +1694,14 @@ function ApiTab() {
           onBlur={commitPort}
           onKeyDown={(e) => { if (e.key === "Enter") commitPort(); }}
           inputMode="numeric"
-          className="w-40 rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-2.5 py-1.5 text-sm outline-none focus:border-[var(--color-accent)]"
+          className={`w-40 rounded border bg-[var(--color-panel)] px-2.5 py-1.5 text-sm outline-none ${
+            portInvalid ? "border-[var(--color-danger)]" : "border-[var(--color-border)] focus:border-[var(--color-accent)]"
+          }`}
           placeholder="8765"
         />
+        {portInvalid && (
+          <p className="mt-1 text-[11px] text-[var(--color-danger)]">Enter a port between 1 and 65535.</p>
+        )}
       </section>
 
       <section>
@@ -1859,6 +1851,106 @@ function DataTab() {
 
 // ─── Shared components ────────────────────────────────────────────────────────
 
+/** Standard section block: title, optional help text, and consistent spacing. */
+function Section({ title, help, children }: { title: string; help?: React.ReactNode; children?: React.ReactNode }) {
+  return (
+    <section>
+      <h3 className="mb-1 text-sm font-medium">{title}</h3>
+      {help && <p className="mb-3 text-xs text-[var(--color-text-muted)]">{help}</p>}
+      {children}
+    </section>
+  );
+}
+
+/** Styled <select> matching the app's input chrome — replaces bare native selects. */
+function SettingSelect({
+  value, onChange, children, className = "", disabled,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  children: React.ReactNode;
+  className?: string;
+  disabled?: boolean;
+}) {
+  return (
+    <div className={`relative ${className}`}>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        className="w-full appearance-none rounded border border-[var(--color-border)] bg-[var(--color-panel)] py-2 pl-3 pr-8 text-sm outline-none focus:border-[var(--color-accent)] disabled:opacity-50"
+      >
+        {children}
+      </select>
+      <ChevronDown size={14} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />
+    </div>
+  );
+}
+
+/** Labeled toggle row — the shared pattern for an on/off setting with a description. */
+function ToggleRow({
+  label, description, checked, onChange,
+}: {
+  label: React.ReactNode;
+  description?: React.ReactNode;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <div
+      onClick={() => onChange(!checked)}
+      className="flex cursor-pointer items-center justify-between gap-3 rounded border border-[var(--color-border)] px-3 py-2.5 hover:border-[var(--color-accent)]"
+    >
+      <div className="min-w-0">
+        <div className="text-sm">{label}</div>
+        {description && <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">{description}</div>}
+      </div>
+      <Toggle checked={checked} onChange={onChange} />
+    </div>
+  );
+}
+
+/** Integer input that validates on every keystroke: commits valid values
+ *  immediately and highlights invalid ones inline rather than on save. */
+function NumberField({
+  value, min, max, onCommit, width = "w-24",
+}: {
+  value: number;
+  min: number;
+  max?: number;
+  onCommit: (v: number) => void;
+  width?: string;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => { setDraft(String(value)); }, [value]);
+
+  const n = parseInt(draft, 10);
+  const invalid = !Number.isFinite(n) || n < min || (max !== undefined && n > max);
+
+  return (
+    <div>
+      <input
+        value={draft}
+        inputMode="numeric"
+        onChange={(e) => {
+          const next = e.target.value;
+          setDraft(next);
+          const v = parseInt(next, 10);
+          if (Number.isFinite(v) && v >= min && (max === undefined || v <= max)) onCommit(v);
+        }}
+        className={`${width} rounded border bg-[var(--color-panel)] px-2 py-1.5 text-sm outline-none ${
+          invalid ? "border-[var(--color-danger)]" : "border-[var(--color-border)] focus:border-[var(--color-accent)]"
+        }`}
+      />
+      {invalid && (
+        <p className="mt-1 text-[11px] text-[var(--color-danger)]">
+          Enter a whole number {max !== undefined ? `between ${min} and ${max}` : `${min} or greater`}.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
     <button
@@ -1996,7 +2088,6 @@ function ProviderForm({ value, onClose, onSaved }: { value: Partial<Provider>; o
           </button>
         )}
       </div>
-      <style>{`.input { width: 100%; border: 1px solid var(--color-border); border-radius: 4px; padding: 6px 8px; background: var(--color-panel); font-size: 13px; } .input:focus { border-color: var(--color-accent); }`}</style>
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { MessageSquare, Pencil, Trash2, Sparkles, Loader2, FolderInput, FolderMi
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { getZoneIcon } from "@/lib/zoneIcons";
+import { usePersistentSet } from "@/lib/uiState";
 
 interface Props {
   chats: Chat[];
@@ -28,7 +29,8 @@ export function ChatList({ chats, activeId, onSelect, projectId }: Props) {
   const regenerating = useApp((s) => s.regeneratingTitles);
   const chatTagLinks = useApp((s) => s.chatTagLinks);
   const [movingTo, setMovingTo] = useState(false);
-  const [collapsedBranches, setCollapsedBranches] = useState<Set<string>>(new Set());
+  // Folded branch groups persist across sessions (keyed by parent chat id).
+  const collapsedBranches = usePersistentSet("collapsedBranches");
   const moveRef = useRef<HTMLDivElement>(null);
 
   // Group every chat↔tag link by chat so each item can show its tag chips.
@@ -56,12 +58,7 @@ export function ChatList({ chats, activeId, onSelect, projectId }: Props) {
   );
 
   function toggleBranches(chatId: string) {
-    setCollapsedBranches((prev) => {
-      const next = new Set(prev);
-      if (next.has(chatId)) next.delete(chatId);
-      else next.add(chatId);
-      return next;
-    });
+    collapsedBranches.toggle(chatId);
   }
 
   function openMenu(e: React.MouseEvent, chatId: string) {

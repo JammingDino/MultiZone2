@@ -11,6 +11,7 @@ import type { ContentPart, Message, SubchatNode } from "@/lib/types";
 import type { TurnBlock } from "@/lib/grouping";
 import { useApp } from "@/store/app";
 import { getZoneIcon } from "@/lib/zoneIcons";
+import { usePersistentBool } from "@/lib/uiState";
 import { Markdown } from "@/components/Renderers/Markdown";
 import * as api from "@/lib/tauri";
 
@@ -73,7 +74,9 @@ export function StackTrace({
   spawnedIds: string[];
   leaderZoneId: string | null;
 }) {
-  const [open, setOpen] = useState(false);
+  // Whether this turn's stack trace is expanded persists across sessions, keyed
+  // by the turn's first spawned subchat id (stable + unique per leader turn).
+  const [open, setOpen] = usePersistentBool(`stacktrace:${chatId}:${spawnedIds[0] ?? ""}`, false);
   const [nodes, setNodes] = useState<SubchatNode[] | null>(null);
   const [loading, setLoading] = useState(false);
   const leaderZone = useApp((s) => s.zones.find((z) => z.id === leaderZoneId));
@@ -112,7 +115,7 @@ export function StackTrace({
   return (
     <div className="mt-2 rounded-md border border-[var(--color-border)] bg-[var(--color-panel)]">
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setOpen(!open)}
         className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--color-panel-hover)]"
       >
         {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
@@ -174,7 +177,9 @@ function SubchatNodeRow({
   node: SubchatNode;
   childMap: Map<string, SubchatNode[]>;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  // Each subchat row remembers whether its transcript is open, keyed by the
+  // globally-unique subchat id, so the view is restored next session.
+  const [expanded, setExpanded] = usePersistentBool(`subchat:${node.id}`, false);
   const zone = useApp((s) => s.zones.find((z) => z.id === node.zoneId));
   const ZoneIcon = getZoneIcon(zone?.icon);
   const color = zone?.accentColor ?? null;
@@ -183,7 +188,7 @@ function SubchatNodeRow({
   return (
     <div className="py-0.5">
       <button
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() => setExpanded(!expanded)}
         title={expanded ? "Hide transcript" : "Show transcript"}
         className="flex w-full items-center gap-2 rounded px-1 py-1 text-left text-xs hover:bg-[var(--color-panel-hover)]"
       >

@@ -242,7 +242,7 @@ function ToolStepView({
       {open && (
         <div className="space-y-2 border-t border-[var(--color-border)] p-2 text-xs">
           <Section label="Arguments">
-            <pre className="overflow-x-auto whitespace-pre-wrap text-[var(--color-text-muted)]">
+            <pre className="max-h-[280px] overflow-auto whitespace-pre-wrap text-[var(--color-text-muted)]">
               {toolCall.function.arguments
                 ? prettyJson(toolCall.function.arguments)
                 : "(none)"}
@@ -253,7 +253,7 @@ function ToolStepView({
               label={isError ? (isSetupIssue ? "Details" : "Error") : "Output"}
             >
               <pre
-                className={`overflow-x-auto whitespace-pre-wrap ${
+                className={`max-h-[280px] overflow-auto whitespace-pre-wrap ${
                   isError && !isSetupIssue
                     ? "text-[var(--color-danger)]"
                     : "text-[var(--color-text-muted)]"

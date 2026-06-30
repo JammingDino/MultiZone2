@@ -143,6 +143,22 @@ export interface ChatZone {
 }
 
 /**
+ * A node in a chat's sub-agent call tree (0.6.1 stack tracer). One per subchat
+ * descended from the root chat. `zoneId` is the answering sub-agent;
+ * `initiatedByZoneId` is the zone that spawned it; nesting is reconstructed via
+ * `parentChatId`. `messageCount` is the subchat's user/assistant turn count.
+ */
+export interface SubchatNode {
+  id: string;
+  title: string;
+  zoneId: string | null;
+  initiatedByZoneId: string | null;
+  parentChatId: string | null;
+  messageCount: number;
+  createdAt: number;
+}
+
+/**
  * A portable zone preset in the on-disk zone library. Provider/model are not
  * bound — installing resolves them from the user's settings. `curated` entries
  * ship with the app; the rest are user "Save to library" snapshots.

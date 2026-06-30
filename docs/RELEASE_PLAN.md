@@ -299,13 +299,13 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ### 0.6.1 — Stack tracer UI
 
-*Requires design sign-off before implementation.*
+*Status: built & typechecked (cargo check + `npm run build` green). The trace is reconstructed from persisted records, not live state: a new `get_subchat_tree(chat_id)` command (recursive CTE over `chats.parent_chat_id`, subchats only) returns every descendant subchat with its conversational message count (`SubchatNode` model). The `StackTrace` block ([StackTrace.tsx](../src/components/Message/StackTrace.tsx)) renders in a leader's `BotTurnView`, scoped to that turn by the `subchat_id`s parsed out of the turn's `spawn_subagent` tool results (`spawnedSubchatIdsFromBlocks`) — so it survives reload and ties each trace to the turn that produced it. The block is collapsible (thinking-block styling); the tree is leader → sub-agent → nested, each node showing the zone avatar, name, and message count; expanding a node lazily loads and renders that subchat's transcript inline. Renders nothing for ordinary (non-leader) turns.*
 
-- [ ] Inline stack trace block in the assistant message: collapsible, styled like a thinking block
-- [ ] Tree of agent calls: leader → sub-agent → (nested sub-agents if any)
-- [ ] Each node: zone avatar, zone name, message count, expand/collapse
-- [ ] Expanding a node shows the full subchat transcript inline
-- [ ] Stack trace persists on chat reload (reads from subchat records in DB)
+- [x] Inline stack trace block in the assistant message: collapsible, styled like a thinking block — `StackTrace` (Network icon, chevron header) mirrors the thinking-block container
+- [x] Tree of agent calls: leader → sub-agent → (nested sub-agents if any) — leader root + recursive `SubchatNodeRow` via the `parent_chat_id` child map
+- [x] Each node: zone avatar, zone name, message count, expand/collapse — zone avatar/name resolved from the store, message count from `SubchatNode.messageCount`
+- [x] Expanding a node shows the full subchat transcript inline — `SubchatTranscript` lazy-loads `get_messages` and renders the user/assistant turns
+- [x] Stack trace persists on chat reload (reads from subchat records in DB) — derived entirely from persisted tool results + the `get_subchat_tree` query, no live streaming state
 
 ---
 

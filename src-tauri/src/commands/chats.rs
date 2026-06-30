@@ -366,6 +366,43 @@ pub async fn set_chat_subagents(
     Ok(())
 }
 
+// ─── Stack tracer (0.6.1) ───────────────────────────────────────────────────
+
+/// The full sub-agent call tree rooted at `chat_id`: every descendant subchat
+/// (recursively), each with its conversational message count. Only true subchats
+/// (`initiated_by_zone_id` set) are walked — branches, which share the
+/// `parent_chat_id` link but have no owning zone, are excluded. The frontend
+/// assembles the tree via `parent_chat_id` and scopes each assistant turn's
+/// trace to the subchats it spawned (matched from the turn's tool results).
+#[tauri::command]
+pub async fn get_subchat_tree(
+    state: State<'_, AppState>,
+    chat_id: String,
+) -> AppResult<Vec<crate::db::models::SubchatNode>> {
+    let rows = sqlx::query_as::<_, crate::db::models::SubchatNode>(
+        "WITH RECURSIVE descendants(id) AS (
+            SELECT id FROM chats
+              WHERE parent_chat_id = ?1 AND initiated_by_zone_id IS NOT NULL
+            UNION ALL
+            SELECT c.id FROM chats c
+              JOIN descendants d ON c.parent_chat_id = d.id
+              WHERE c.initiated_by_zone_id IS NOT NULL
+         )
+         SELECT c.id, c.title, c.zone_id, c.initiated_by_zone_id, c.parent_chat_id,
+                (SELECT COUNT(*) FROM messages m
+                   WHERE m.chat_id = c.id AND m.zone_id IS NULL
+                     AND m.role IN ('user', 'assistant')) AS message_count,
+                c.created_at
+         FROM chats c
+         JOIN descendants d ON c.id = d.id
+         ORDER BY c.created_at ASC",
+    )
+    .bind(&chat_id)
+    .fetch_all(&state.db)
+    .await?;
+    Ok(rows)
+}
+
 /// Forks a chat at `message_id` into a brand-new chat containing a copy of all
 /// history up to and including that message. The source chat is untouched. The
 /// new chat inherits the source's zone, project, tags and perspective zones, and

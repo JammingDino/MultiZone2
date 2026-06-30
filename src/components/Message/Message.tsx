@@ -5,6 +5,7 @@ import { User, Check, X, FileType, ZoomIn } from "lucide-react";
 import { StepBlock } from "./StepBlock";
 import { MessageActions } from "./MessageActions";
 import { CitationSources } from "./CitationSources";
+import { StackTrace, spawnedSubchatIdsFromBlocks } from "./StackTrace";
 import type { BotTurn, PerspectiveTurn, TurnBlock } from "@/lib/grouping";
 import { collectCitations, matchedCitations, type Citation, type FileSource } from "@/lib/citations";
 import * as api from "@/lib/tauri";
@@ -521,6 +522,12 @@ export function BotTurnView({ turn, isLatest = false }: { turn: BotTurn; isLates
     () => matchedCitations(collectCitations(turn.blocks, fileSources), turn.blocks),
     [turn.blocks, fileSources],
   );
+  // Sub-agents this leader turn spawned (0.6.1 stack tracer). Empty for ordinary
+  // turns, so the trace block renders nothing.
+  const spawnedSubchatIds = useMemo(
+    () => spawnedSubchatIdsFromBlocks(turn.blocks),
+    [turn.blocks],
+  );
 
   const editMessage = useApp((s) => s.editMessage);
   const [editing, setEditing] = useState(false);
@@ -649,6 +656,13 @@ export function BotTurnView({ turn, isLatest = false }: { turn: BotTurn; isLates
                 citations={citations}
               />
               {!isStreaming && <CitationSources citations={citations} />}
+              {!isStreaming && (
+                <StackTrace
+                  chatId={chatId}
+                  spawnedIds={spawnedSubchatIds}
+                  leaderZoneId={resolvedZoneId}
+                />
+              )}
             </>
           )}
         </div>

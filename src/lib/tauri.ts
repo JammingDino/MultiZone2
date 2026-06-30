@@ -21,6 +21,7 @@ import type {
   Provider,
   Skill,
   StreamEnvelope,
+  SubchatNode,
   Tag,
   Zone,
 } from "./types";
@@ -78,6 +79,9 @@ export const getChatSubagents = (chatId: string) =>
   invoke<ChatZone[]>("get_chat_subagents", { chatId });
 export const setChatSubagents = (chatId: string, zoneIds: string[]) =>
   invoke<void>("set_chat_subagents", { chatId, zoneIds });
+/** The leader→sub-agent(→nested) call tree for a chat (0.6.1 stack tracer). */
+export const getSubchatTree = (chatId: string) =>
+  invoke<SubchatNode[]>("get_subchat_tree", { chatId });
 export const deleteChat = (id: string) => invoke<void>("delete_chat", { id });
 /** Fork a chat at `messageId` into a new chat copying history up to & including it. */
 export const branchChat = (chatId: string, messageId: string) =>

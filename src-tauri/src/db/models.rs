@@ -147,6 +147,26 @@ pub struct ChatZone {
     pub zone_id: String,
 }
 
+/// A node in a chat's sub-agent call tree (0.6.1 stack tracer). One row per
+/// subchat descended (recursively) from a root chat, carrying the answering
+/// zone, the owning/spawning zone, the parent link, and the conversational
+/// message count — enough for the UI to assemble the leader→sub-agent(→nested)
+/// tree and show each node's transcript on demand.
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct SubchatNode {
+    pub id: String,
+    pub title: String,
+    /// The zone that answers in this subchat (the sub-agent).
+    pub zone_id: Option<String>,
+    /// The zone that spawned and drives this subchat (the caller/leader).
+    pub initiated_by_zone_id: Option<String>,
+    pub parent_chat_id: Option<String>,
+    /// Count of primary (zone_id IS NULL) user/assistant turns in the subchat.
+    pub message_count: i64,
+    pub created_at: i64,
+}
+
 /// A global, on-demand instruction set (Anthropic Agent Skills model). The
 /// `name` + `description` of every enabled skill is shown to agents that have
 /// the skills tool; the agent loads `content` on demand via `load_skill`.

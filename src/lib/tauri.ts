@@ -234,6 +234,11 @@ export const setSetting = (key: string, value: string) =>
   invoke<void>("set_setting", { key, value });
 export const getDbStats = () => invoke<DbStats>("get_db_stats");
 export const resetDatabase = () => invoke<void>("reset_database");
+/** Re-write every chat's markdown mirror (used after enabling it / changing the dir). Returns the count. */
+export const mirrorAllChats = () => invoke<number>("mirror_all_chats");
+/** Read a mirrored `.md` file back into the DB as a new chat. */
+export const importChatFromMarkdown = (path: string) =>
+  invoke<Chat>("import_chat_from_markdown", { path });
 
 // API server
 export const applyApiSettings = (enabled: boolean, port: number, token: string) =>

@@ -159,6 +159,8 @@ pub fn run() {
             commands::settings::set_setting,
             commands::settings::get_db_stats,
             commands::settings::reset_database,
+            commands::mirror::mirror_all_chats,
+            commands::mirror::import_chat_from_markdown,
             commands::attachments::upload_attachment,
             commands::attachments::save_pdf_attachment,
             commands::attachments::get_attachment_images,

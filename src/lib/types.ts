@@ -467,6 +467,14 @@ export interface AppSettings {
    * recursion. Default 3.
    */
   subchatDepthLimit: number;
+  /**
+   * When true (0.7.2), every chat is mirrored to a `.md` file under
+   * `markdownMirrorDir` and kept in sync on each message save, with zone
+   * configs written as JSON in a `zones/` subdirectory alongside.
+   */
+  markdownMirrorEnabled: boolean;
+  /** Output directory for the markdown mirror. Empty = unset (mirror is a no-op). */
+  markdownMirrorDir: string;
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -498,6 +506,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   autoReindex: true,
   knowledgeDefaultEnabled: false,
   subchatDepthLimit: 3,
+  markdownMirrorEnabled: false,
+  markdownMirrorDir: "",
 };
 
 export interface DbStats {

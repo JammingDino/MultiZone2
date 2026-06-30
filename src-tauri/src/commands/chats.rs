@@ -637,6 +637,8 @@ pub async fn delete_chat(state: State<'_, AppState>, id: String) -> AppResult<()
         .bind(&id)
         .execute(&state.db)
         .await?;
+    // Remove the chat's mirrored markdown file too (0.7.2).
+    crate::commands::mirror::unmirror_chat_best_effort(&state.db, &id).await;
     Ok(())
 }
 
@@ -749,6 +751,9 @@ pub async fn generate_title(
         "chat-title-updated",
         serde_json::json!({ "chatId": chat_id, "title": title }),
     );
+
+    // The title lives in the mirror's frontmatter + filename (0.7.2).
+    crate::commands::mirror::mirror_chat_best_effort(&state.db, &chat_id).await;
 
     Ok(title)
 }

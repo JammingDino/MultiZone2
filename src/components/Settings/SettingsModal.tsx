@@ -1752,10 +1752,72 @@ function DataTab() {
   const [loadingStats, setLoadingStats] = useState(false);
   const [resetStage, setResetStage] = useState<"idle" | "confirm" | "resetting">("idle");
 
+  const appSettings = useApp((s) => s.appSettings);
+  const setAppSettings = useApp((s) => s.setAppSettings);
+  const refreshChats = useApp((s) => s.refreshChats);
+  const setActiveChat = useApp((s) => s.setActiveChat);
+  const closeSettings = useApp((s) => s.closeSettings);
+
+  const mirrorOn = appSettings.markdownMirrorEnabled;
+  const mirrorDir = appSettings.markdownMirrorDir?.trim() ?? "";
+  const [mirrorBusy, setMirrorBusy] = useState(false);
+  const [mirrorMsg, setMirrorMsg] = useState<string | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
+
   useEffect(() => {
     setLoadingStats(true);
     api.getDbStats().then(setStats).catch(console.error).finally(() => setLoadingStats(false));
   }, []);
+
+  /** Run a full re-mirror, surfacing a short status line. */
+  async function runFullMirror() {
+    setMirrorBusy(true);
+    setMirrorMsg(null);
+    try {
+      const n = await api.mirrorAllChats();
+      setMirrorMsg(`Mirrored ${n} chat${n === 1 ? "" : "s"}.`);
+    } catch (e) {
+      console.error(e);
+      setMirrorMsg("Mirror failed — see console.");
+    } finally {
+      setMirrorBusy(false);
+    }
+  }
+
+  async function toggleMirror(on: boolean) {
+    await setAppSettings({ markdownMirrorEnabled: on });
+    if (on && mirrorDir) await runFullMirror();
+  }
+
+  async function pickMirrorDir() {
+    const selected = await open({ directory: true, multiple: false });
+    if (typeof selected !== "string") return;
+    await setAppSettings({ markdownMirrorDir: selected });
+    if (mirrorOn) await runFullMirror();
+  }
+
+  async function importMarkdown() {
+    const selected = await open({
+      multiple: false,
+      filters: [{ name: "Markdown", extensions: ["md", "markdown"] }],
+    });
+    if (typeof selected !== "string") return;
+    setImportBusy(true);
+    setImportMsg(null);
+    try {
+      const chat = await api.importChatFromMarkdown(selected);
+      await refreshChats();
+      setImportMsg(`Imported “${chat.title}”.`);
+      await setActiveChat(chat.id);
+      closeSettings();
+    } catch (e) {
+      console.error(e);
+      setImportMsg("Import failed — see console.");
+    } finally {
+      setImportBusy(false);
+    }
+  }
 
   async function doReset() {
     setResetStage("resetting");
@@ -1792,6 +1854,69 @@ function DataTab() {
             ))}
           </div>
         ) : null}
+      </section>
+
+      {/* Markdown mirror (0.7.2) */}
+      <section>
+        <h3 className="mb-1 text-sm font-medium">Export as markdown</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          Mirror every chat to a <span className="font-mono">.md</span> file and keep it in sync as you chat.
+          Zone configs are written as JSON in a <span className="font-mono">zones/</span> subfolder alongside.
+          The same files can be read back in below.
+        </p>
+
+        <ToggleRow
+          label="Mirror chats to markdown"
+          description={mirrorDir ? undefined : "Choose an output folder below to start mirroring."}
+          checked={mirrorOn}
+          onChange={toggleMirror}
+        />
+
+        <div className="mt-2 flex items-center gap-2">
+          <button
+            onClick={pickMirrorDir}
+            className="flex shrink-0 items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:border-[var(--color-accent)]"
+          >
+            <FolderOpen size={13} /> Choose folder…
+          </button>
+          {mirrorDir ? (
+            <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5">
+              <Folder size={12} className="shrink-0 text-[var(--color-text-muted)]" />
+              <span className="truncate font-mono text-xs" title={mirrorDir}>{mirrorDir}</span>
+              <button
+                onClick={() => setAppSettings({ markdownMirrorDir: "" })}
+                className="ml-auto shrink-0 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ) : (
+            <span className="text-xs text-[var(--color-text-muted)]">No output folder set</span>
+          )}
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            onClick={runFullMirror}
+            disabled={!mirrorOn || !mirrorDir || mirrorBusy}
+            className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:border-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+            title={!mirrorDir ? "Choose a folder first." : "Re-write every chat to the folder now."}
+          >
+            {mirrorBusy ? <Loader2 size={13} className="animate-spin" /> : <FileDown size={13} />}
+            Mirror all chats now
+          </button>
+          <button
+            onClick={importMarkdown}
+            disabled={importBusy}
+            className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:border-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {importBusy ? <Loader2 size={13} className="animate-spin" /> : <FileUp size={13} />}
+            Import from markdown…
+          </button>
+          {(mirrorMsg || importMsg) && (
+            <span className="text-xs text-[var(--color-text-muted)]">{mirrorMsg ?? importMsg}</span>
+          )}
+        </div>
       </section>
 
       {/* Reset */}

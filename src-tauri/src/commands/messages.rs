@@ -253,13 +253,15 @@ pub async fn update_message(
         .execute(&state.db)
         .await?;
 
-    sqlx::query_as::<_, Message>(&format!(
+    let updated = sqlx::query_as::<_, Message>(&format!(
         "SELECT {MSG_COLS} FROM messages WHERE id = ?1"
     ))
     .bind(&message_id)
     .fetch_one(&state.db)
-    .await
-    .map_err(Into::into)
+    .await?;
+    // Edited content changes the mirrored file (0.7.2).
+    crate::commands::mirror::mirror_chat_best_effort(&state.db, &chat_id).await;
+    Ok(updated)
 }
 
 /// Read the auto-approve level from persisted app_settings.
@@ -398,6 +400,8 @@ pub async fn run_regenerate_participant_entry(
     if let Err(e) = &result {
         sink.emit_for(chat_id, zone_id.as_deref(), StreamPayload::Error { message: e.to_string() });
     }
+    // This path bypasses run_turn, so mirror here too (0.7.2).
+    crate::commands::mirror::mirror_chat_best_effort(&ctx.db, chat_id).await;
     result
 }
 
@@ -902,6 +906,19 @@ fn extract_text_parts(content_json: &str) -> String {
 /// `sequential` mode the primary runs first, then each perspective in turn.
 /// Every participant shares the one cancel flag, so cancelling stops them all.
 async fn run_turn(
+    ctx: &EngineCtx,
+    sink: &StreamSink,
+    chat_id: &str,
+    ov: &TurnOverride,
+    cancel: Arc<AtomicBool>,
+) {
+    run_turn_inner(ctx, sink, chat_id, ov, cancel).await;
+    // After the turn (primary + any perspectives have all completed), refresh
+    // the on-disk markdown mirror if the user has it enabled (0.7.2).
+    crate::commands::mirror::mirror_chat_best_effort(&ctx.db, chat_id).await;
+}
+
+async fn run_turn_inner(
     ctx: &EngineCtx,
     sink: &StreamSink,
     chat_id: &str,

@@ -356,11 +356,13 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ### 0.7.2 — DB/Markdown toggle
 
-- [ ] Settings → Data: "Export as markdown" toggle; configurable output directory
-- [ ] Each chat mirrored as a `.md` file: frontmatter (chat ID, zone, project, tags, dates), messages as timestamped blocks
-- [ ] Zone configs exported as individual JSON files in a `zones/` subdirectory alongside the markdown chats
-- [ ] Markdown files updated on every message save
-- [ ] Import from markdown: read a `.md` chat file back into the DB
+*Status: built & typechecked (`cargo check` + `npm run build` green). A new backend module — [mirror.rs](../src-tauri/src/commands/mirror.rs) — owns the live mirror. It reads its config (`markdownMirrorEnabled` + `markdownMirrorDir`) from the same `app_settings` JSON the rest of the app uses, so it cheaply no-ops when off. `mirror_chat` rewrites a chat's whole `.md` from current DB state on each call (always correct regardless of which save fired it), in the **same format as the 0.7.1 manual export** (YAML frontmatter + `## Who · timestamp` blocks) so the two are interchangeable and importable. Files are keyed by chat id (filename suffix `--<chat_id>.md`) so a title change renames cleanly instead of orphaning, and subchats (sub-agent transcripts) are skipped. The mirror is hooked into the message engine at the turn chokepoint (`run_turn`, covering send + regenerate + all perspectives), plus per-participant regenerate, message edits, auto-title, and chat deletion (which removes the file) — every one best-effort so a write failure only logs and never blocks the engine. Zone configs are exported as `zones/<id>.json` alongside on each mirror pass. Two commands back the UI: `mirror_all_chats` (re-write everything; run when the toggle is enabled or the folder changes) and `import_chat_from_markdown` (lenient frontmatter + block parser → a new chat, zone/project matched by name). Settings → Data gained the toggle, a folder picker, "Mirror all chats now", and "Import from markdown…".*
+
+- [x] Settings → Data: "Export as markdown" toggle; configurable output directory
+- [x] Each chat mirrored as a `.md` file: frontmatter (chat ID, zone, project, tags, dates), messages as timestamped blocks
+- [x] Zone configs exported as individual JSON files in a `zones/` subdirectory alongside the markdown chats
+- [x] Markdown files updated on every message save (mirror runs at the turn chokepoint + edit/regenerate/auto-title; delete removes the file)
+- [x] Import from markdown: read a `.md` chat file back into the DB (new chat, zone/project matched by name)
 
 ### 0.7.3 — UI/UX consistency pass
 

@@ -130,9 +130,9 @@ export function ChatList({ chats, activeId, onSelect, projectId }: Props) {
           onClick={() => onSelect(chat.id)}
           onContextMenu={(e) => openMenu(e, chat.id)}
           style={{ marginLeft: depth * 12 }}
-          className={`group mx-1 my-0.5 cursor-pointer rounded px-2 py-1.5 text-sm ${
+          className={`group mx-1 my-0.5 cursor-pointer rounded px-2 py-1.5 text-sm transition-colors ${
             active
-              ? "bg-[var(--color-panel-hover)] text-[var(--color-text)]"
+              ? "bg-[color-mix(in_srgb,var(--color-accent)_14%,transparent)] font-medium text-[var(--color-text)] shadow-[inset_2px_0_0_var(--color-accent)]"
               : "text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
           }`}
         >

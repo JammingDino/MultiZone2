@@ -108,7 +108,7 @@ export function Sidebar() {
 
   if (!sidebarOpen) {
     return (
-      <aside className="flex h-full w-12 flex-shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-panel)]">
+      <aside className="flex h-full w-12 flex-shrink-0 flex-col overflow-hidden border-r border-[var(--color-border)] bg-[var(--color-panel)] transition-[width] duration-200 ease-in-out">
         {/* Expand button */}
         <div className="flex h-12 items-center justify-center border-b border-[var(--color-border)]">
           <button
@@ -161,7 +161,7 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="flex h-full w-72 flex-shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-panel)]">
+    <aside className="flex h-full w-72 flex-shrink-0 flex-col overflow-hidden border-r border-[var(--color-border)] bg-[var(--color-panel)] transition-[width] duration-200 ease-in-out">
       {/* Header */}
       <div className="flex h-12 items-center justify-between border-b border-[var(--color-border)] px-3">
         <div className="flex items-center gap-2 font-semibold">

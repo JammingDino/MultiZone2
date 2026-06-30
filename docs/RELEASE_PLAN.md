@@ -373,12 +373,14 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ### 0.7.3 — UI/UX consistency pass
 
-- [ ] Audit all modals: consistent header height, close button placement, padding
-- [ ] Audit all form fields: consistent label size, input height, focus ring
-- [ ] Audit all buttons: consistent size, disabled state, hover state
-- [ ] Sidebar: collapse/expand animation; active chat highlight
-- [ ] Message thread: spacing between messages, avatar sizes, alignment
-- [ ] Confirm all save buttons close panels as expected (from 0.1.8 and 0.2.x checklists)
+*Status: built & typechecked (`npm run build` green). The headline change is a shared modal shell — [Modal.tsx](../src/components/common/Modal.tsx) (`Modal` + `ModalTitle`) — adopted by all four panel modals (Settings, Zone editor, Zone library, Projects). Previously each hand-rolled its own overlay/panel/header with drifting values (header `h-12` vs `py-3` vs `h-14`, `rounded-lg`/`shadow-xl` vs `rounded-xl`/`shadow-2xl`, and three different close-button treatments); they now share one `h-14` header, `px-5` padding, `rounded-xl`/`shadow-2xl` panel, and a single muted→text close button in a consistent spot, with `max-h-[94vh]`/`max-w-[96vw]` so large modals never overflow the viewport. The sidebar's active-chat highlight was indistinguishable from hover (both used `panel-hover`); the active chat now gets an accent-tinted background + inset accent bar + medium weight, and collapse/expand animates the width (`transition-[width] 200ms`) instead of snapping. Message-thread spacing/alignment were already consistent (turn `gap-5`, `h-7 w-7` avatars, `gap-3` gutter, `ml-10` status banners); the one drift — user avatars lacked the `shadow-sm` bot avatars carried — was aligned. Save-button behaviour was audited: the zone form closes the editor on save, the project form refreshes and closes the panel — both as expected.*
+
+- [x] Audit all modals: consistent header height, close button placement, padding — shared `Modal`/`ModalTitle` shell adopted by Settings, Zone editor, Zone library, Projects
+- [x] Audit all form fields: consistent label size, input height, focus ring — shared `.input`, `SettingSelect`, `ToggleRow`, `NumberField` from 0.7.0 carry the field chrome; modal bodies reuse them
+- [x] Audit all buttons: consistent size, disabled state, hover state — modal close buttons unified; panel action buttons share the bordered hover-accent / disabled-opacity pattern
+- [x] Sidebar: collapse/expand animation (`transition-[width]`); active chat highlight (accent tint + inset accent bar, distinct from hover)
+- [x] Message thread: spacing between messages, avatar sizes, alignment — verified consistent (`gap-5` / `h-7 w-7` / `gap-3` / `ml-10`); user-avatar `shadow-sm` aligned to bot avatars
+- [x] Confirm all save buttons close panels as expected — zone form closes the editor; project form refreshes + closes the panel
 
 ---
 

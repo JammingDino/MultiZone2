@@ -5,47 +5,44 @@ import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import type { IndexSummary, KbDocument, KnowledgeStatus, Project, Tag, Zone } from "@/lib/types";
 import { ZONE_COLOR_PRESETS, getZoneIcon, ZONE_ICON_GROUPS, ZONE_ICONS } from "@/lib/zoneIcons";
+import { Modal } from "@/components/common/Modal";
 
 export function ProjectsPanel() {
   const { zones, projects, tags, closeProjectsPanel, refreshProjects, refreshTags } = useApp();
   const [tab, setTab] = useState<"projects" | "tags">("projects");
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={closeProjectsPanel}>
-      <div className="flex h-[700px] w-[960px] flex-col rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] shadow-xl" onClick={(e) => e.stopPropagation()}>
-        {/* Header */}
-        <div className="flex h-12 items-center justify-between border-b border-[var(--color-border)] px-4">
-          <div className="flex items-center gap-1">
-            {(["projects", "tags"] as const).map((t) => (
-              <button
-                key={t}
-                onClick={() => setTab(t)}
-                className={`rounded px-3 py-1.5 text-sm capitalize transition ${
-                  tab === t
-                    ? "bg-[var(--color-panel-hover)] font-medium text-[var(--color-text)]"
-                    : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-                }`}
-              >
-                {t}
-              </button>
-            ))}
-          </div>
-          <button onClick={closeProjectsPanel} className="rounded p-1 hover:bg-[var(--color-panel-hover)]">
-            <X size={16} />
-          </button>
+    <Modal
+      onClose={closeProjectsPanel}
+      className="h-[700px] w-[960px]"
+      header={
+        <div className="flex items-center gap-1">
+          {(["projects", "tags"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`rounded px-3 py-1.5 text-sm capitalize transition ${
+                tab === t
+                  ? "bg-[var(--color-panel-hover)] font-medium text-[var(--color-text)]"
+                  : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+              }`}
+            >
+              {t}
+            </button>
+          ))}
         </div>
-
-        {/* Body */}
-        <div className="flex min-h-0 flex-1">
-          {tab === "projects" ? (
-            <ProjectsTab projects={projects} zones={zones} onSaved={refreshProjects} onDeleted={refreshProjects} />
-          ) : (
-            <TagsTab tags={tags} onSaved={refreshTags} onDeleted={refreshTags} />
-          )}
-        </div>
+      }
+    >
+      {/* Body */}
+      <div className="flex min-h-0 flex-1">
+        {tab === "projects" ? (
+          <ProjectsTab projects={projects} zones={zones} onSaved={refreshProjects} onDeleted={refreshProjects} />
+        ) : (
+          <TagsTab tags={tags} onSaved={refreshTags} onDeleted={refreshTags} />
+        )}
       </div>
       <style>{`.input { width: 100%; border: 1px solid var(--color-border); border-radius: 4px; padding: 6px 8px; background: var(--color-panel); font-size: 13px; } .input:focus { border-color: var(--color-accent); outline: none; }`}</style>
-    </div>
+    </Modal>
   );
 }
 

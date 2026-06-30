@@ -5,6 +5,7 @@ import { useApp } from "@/store/app";
 import type { BackgroundEffect } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
+import { Modal, ModalTitle } from "@/components/common/Modal";
 import type { DbStats, GlobalKbView, IndexSummary, KbDocument, McpServerView, McpTool, Provider, Skill } from "@/lib/types";
 
 type Tab = "providers" | "appearance" | "chat" | "search" | "skills" | "mcp" | "knowledge" | "memory" | "api" | "data";
@@ -14,15 +15,8 @@ export function SettingsModal() {
   const [tab, setTab] = useState<Tab>("providers");
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={closeSettings}>
+    <Modal onClose={closeSettings} className="h-[620px] w-[820px]" header={<ModalTitle>Settings</ModalTitle>}>
       <style>{`.input { width: 100%; border: 1px solid var(--color-border); border-radius: 4px; padding: 8px 12px; background: var(--color-panel); font-size: 13px; outline: none; } .input:focus { border-color: var(--color-accent); }`}</style>
-      <div className="flex h-[620px] w-[820px] flex-col rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex h-12 items-center justify-between border-b border-[var(--color-border)] px-4">
-          <div className="font-medium">Settings</div>
-          <button onClick={closeSettings} className="rounded p-1 hover:bg-[var(--color-panel-hover)]">
-            <X size={16} />
-          </button>
-        </div>
         <div className="flex flex-1 overflow-hidden">
           <nav className="flex w-44 flex-col gap-0.5 overflow-y-auto border-r border-[var(--color-border)] p-2 text-sm">
             <NavGroup label="Models" />
@@ -56,8 +50,7 @@ export function SettingsModal() {
             {tab === "data" && <DataTab />}
           </div>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 

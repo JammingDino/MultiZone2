@@ -10,6 +10,7 @@ import { ALL_TOOLS } from "@/lib/types";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import { installEntry, saveZoneToLibrary, importEntryFromJson, exportZoneJson } from "@/lib/zoneLibrary";
 import { ZoneForm } from "./ZoneForm";
+import { Modal, ModalTitle } from "@/components/common/Modal";
 
 type View = "library" | "detail" | "editor";
 
@@ -239,19 +240,11 @@ export function ZoneLibrary() {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={closeZoneLibrary}>
-      <div
-        className="flex h-[700px] w-[980px] max-w-[96vw] flex-col overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Title bar */}
-        <div className="flex h-14 flex-shrink-0 items-center justify-between border-b border-[var(--color-border)] px-5">
-          <div className="text-[15px] font-semibold">Configure Zones</div>
-          <button onClick={closeZoneLibrary} className="rounded-md p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]">
-            <X size={16} />
-          </button>
-        </div>
-
+    <Modal
+      onClose={closeZoneLibrary}
+      className="h-[700px] w-[980px] overflow-hidden"
+      header={<ModalTitle>Configure Zones</ModalTitle>}
+    >
         <div className="flex min-h-0 flex-1">
           {/* LEFT RAIL */}
           <div className="flex w-56 flex-shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-bg)]/40">
@@ -426,8 +419,7 @@ export function ZoneLibrary() {
             onDelete={() => onDeleteZone(zoneMenu.zone)}
           />
         )}
-      </div>
-    </div>
+    </Modal>
   );
 }
 

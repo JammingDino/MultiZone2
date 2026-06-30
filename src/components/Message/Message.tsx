@@ -212,7 +212,7 @@ export function UserMessage({ message }: { message: Message }) {
           </div>
         </div>
         <div
-          className="mt-1 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded"
+          className="mt-1 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded shadow-sm"
           style={{ background: senderBg }}
           title={subchatZone ? subchatZone.name : undefined}
         >
@@ -276,7 +276,7 @@ export function UserMessage({ message }: { message: Message }) {
           )}
         </div>
         <div
-          className="mt-1 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded"
+          className="mt-1 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded shadow-sm"
           style={{ background: senderBg }}
           title={subchatZone ? subchatZone.name : undefined}
         >

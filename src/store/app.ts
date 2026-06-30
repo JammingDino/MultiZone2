@@ -673,18 +673,24 @@ export const useApp = create<AppStore>((set, get) => ({
           messagesByChat[chatId] = [...msgs, event.message];
           if (current) {
             const now = Date.now();
+            // Stats are read from the turn aggregate (which spans every
+            // iteration of the agentic loop), not just this last assistant
+            // message — otherwise a multi-step turn only counts the final
+            // step's content/thinking tokens. Fall back to the per-iteration
+            // streaming state if the aggregate is somehow missing.
+            const turn = turnByChat[chatId];
+            const turnStart = turn?.startedAt ?? current.startedAt;
+            const firstTokenAt = turn?.firstTokenAt ?? current.firstTokenAt;
             // Duration measures generation time, not network wait. If we
             // somehow saved without a first-token event (no streaming
             // tokens at all), fall back to total time so we don't show 0.
-            const start = current.firstTokenAt ?? current.startedAt;
+            const start = firstTokenAt ?? turnStart;
             statsByMessage[event.message.id] = {
               durationMs: now - start,
               timeToFirstTokenMs:
-                current.firstTokenAt !== null
-                  ? current.firstTokenAt - current.startedAt
-                  : null,
-              contentChars: current.content.length,
-              reasoningChars: current.reasoning.length,
+                firstTokenAt !== null ? firstTokenAt - turnStart : null,
+              contentChars: turn ? turn.contentChars : current.content.length,
+              reasoningChars: turn ? turn.reasoningChars : current.reasoning.length,
             };
           }
           delete streaming[chatId];

@@ -518,9 +518,13 @@ export function BotTurnView({ turn, isLatest = false }: { turn: BotTurn; isLates
     () => deriveFileSources(messages ?? [], turn.messageIds[0]),
     [messages, turn.messageIds],
   );
-  const citations = useMemo(
-    () => matchedCitations(collectCitations(turn.blocks, fileSources), turn.blocks),
+  const allCitations = useMemo(
+    () => collectCitations(turn.blocks, fileSources),
     [turn.blocks, fileSources],
+  );
+  const citations = useMemo(
+    () => matchedCitations(allCitations, turn.blocks),
+    [allCitations, turn.blocks],
   );
   // Sub-agents this leader turn spawned (0.6.1 stack tracer). Empty for ordinary
   // turns, so the trace block renders nothing.
@@ -655,7 +659,7 @@ export function BotTurnView({ turn, isLatest = false }: { turn: BotTurn; isLates
                 chatId={chatId}
                 citations={citations}
               />
-              {!isStreaming && <CitationSources citations={citations} />}
+              {!isStreaming && <CitationSources used={citations} all={allCitations} />}
               {!isStreaming && (
                 <StackTrace
                   chatId={chatId}
@@ -719,9 +723,13 @@ function ParticipantCard({
   branchFromMessageId?: string;
   fileSources?: FileSource[];
 }) {
-  const citations = useMemo(
-    () => matchedCitations(collectCitations(blocks, fileSources ?? []), blocks),
+  const allCitations = useMemo(
+    () => collectCitations(blocks, fileSources ?? []),
     [blocks, fileSources],
+  );
+  const citations = useMemo(
+    () => matchedCitations(allCitations, blocks),
+    [allCitations, blocks],
   );
   const [collapsed, setCollapsed] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -822,7 +830,7 @@ function ParticipantCard({
                   chatId={chatId}
                   citations={citations}
                 />
-                {!isStreaming && <CitationSources citations={citations} />}
+                {!isStreaming && <CitationSources used={citations} all={allCitations} />}
               </>
             ) : (
               <span className="text-xs italic text-[var(--color-text-muted)]">No response.</span>

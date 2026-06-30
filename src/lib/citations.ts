@@ -140,6 +140,12 @@ function basename(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
+/** Stable identity for a source, to reconcile the "Used" subset against the
+ *  full "All retrieved" candidate list (which use different `index` numbering). */
+export function citationKey(c: Citation): string {
+  return c.url ?? (c.path ? `kb:${c.path}` : `file:${c.fileName ?? c.title}`);
+}
+
 /** Joined plain text of a turn's answer (text blocks only). */
 function answerText(blocks: TurnBlock[]): string {
   return blocks
@@ -176,106 +182,90 @@ function distinctiveTokens(text: string): Set<string> {
   return out;
 }
 
-/** Whether the answer shows evidence of having used a given source: a verbatim
- *  filename/path/host, the site's brand, or enough shared distinctive words. */
-function contentMatches(
-  c: Citation,
-  lowerAnswer: string,
-  normAnswer: string,
-  answerTokens: Set<string>,
-): boolean {
-  if (c.kind === "web") {
-    const host = c.url ? hostname(c.url).toLowerCase() : "";
-    if (host && lowerAnswer.includes(host)) return true;
-    // Brand = first domain label (e.g. "holmessolutions"), matched against the
-    // answer with punctuation/spaces stripped so "Holmes Solutions" hits.
-    const brand = host.split(".")[0];
-    if (brand.length >= 4 && normAnswer.includes(brand)) return true;
-    // Otherwise require a few distinctive words shared with the title + snippet.
-    const src = distinctiveTokens(`${c.title ?? ""} ${c.snippet ?? ""}`);
-    let shared = 0;
-    for (const t of src) {
-      if (answerTokens.has(t) && ++shared >= 3) return true;
-    }
-    return false;
-  }
-  // file / knowledge — the model typically names the file it drew on.
-  const fname = (c.fileName ?? "").toLowerCase();
-  if (fname && lowerAnswer.includes(fname)) return true;
-  if (c.path) {
-    const p = c.path.toLowerCase().replace(/\\/g, "/");
-    if (p && lowerAnswer.replace(/\\/g, "/").includes(p)) return true;
-  }
-  return false;
-}
-
 /**
- * From the full candidate list, keep only the sources whose content actually
- * surfaces in the answer (a named file/host, a brand, or shared distinctive
- * wording) — plus any a model explicitly tagged with `[n]`. This needs nothing
- * from the model: it compares the answer against the sources rather than asking
- * the model which it used. Kept sources are renumbered contiguously.
+ * The "Used" / cited subset of the candidate list, with inline-marker anchors.
+ * Drives both the inline `[n]` markers and the "Used" section of the Sources
+ * list; the full candidate list is shown separately as "All retrieved".
+ *
+ * Hybrid strategy (0.6.2), tuned to stop the previous marker-spray:
+ *  1. If the model emitted any explicit `[n]` markers, trust them exclusively:
+ *     keep only the sources it referenced (by collect order) and do NOT auto-
+ *     insert anything — remarkCitations just relabels the model's markers.
+ *  2. Otherwise fall back to a *tight* heuristic — a source earns an inline
+ *     marker only with a verbatim, specific, UNIQUE anchor in the answer:
+ *       - web: the site host appears literally, OR a distinctive word (≥5 chars)
+ *         that belongs to exactly one candidate across the whole set, or
+ *       - file/knowledge: the filename or path appears verbatim.
+ *     The old "≥3 shared words" path is gone, so generic overlap no longer
+ *     sprinkles a marker for every search result.
+ * Kept sources are renumbered contiguously.
  */
 export function matchedCitations(candidates: Citation[], blocks: TurnBlock[]): Citation[] {
   if (candidates.length === 0) return [];
   const answer = answerText(blocks);
   const lowerAnswer = answer.toLowerCase();
-  const normAnswer = lowerAnswer.replace(/[^a-z0-9]/g, "");
-  const answerTokens = distinctiveTokens(answer);
   const markers = usedMarkers(answer);
 
-  const kept = candidates.filter(
-    (c) =>
-      markers.has(c.refIndex) ||
-      contentMatches(c, lowerAnswer, normAnswer, answerTokens),
-  );
-
-  // Per-web-source distinctive tokens present in the answer + their document
-  // frequency across the kept web sources, so each marker can anchor to its
-  // most *specific* word (a token only one source shares).
-  const webTokens = new Map<Citation, string[]>();
-  const df = new Map<string, number>();
-  for (const c of kept) {
-    if (c.kind !== "web") continue;
-    const toks = [...distinctiveTokens(`${c.title ?? ""} ${c.snippet ?? ""}`)].filter((t) =>
-      answerTokens.has(t),
-    );
-    webTokens.set(c, toks);
-    for (const t of new Set(toks)) df.set(t, (df.get(t) ?? 0) + 1);
+  // 1. Model-driven: trust explicit markers, no heuristic insertion.
+  if (markers.size > 0) {
+    return candidates
+      .filter((c) => markers.has(c.refIndex))
+      .map((c, i) => ({ ...c, index: i + 1, anchor: undefined }));
   }
 
-  return kept.map((c, i) => ({
-    ...c,
-    index: i + 1,
-    anchor: pickAnchor(c, lowerAnswer, webTokens.get(c) ?? [], df),
-  }));
+  // 2. Tight heuristic. Document frequency of each distinctive token across ALL
+  // candidates lets us find words unique to a single source.
+  const answerTokens = distinctiveTokens(answer);
+  const ownTokens = new Map<Citation, Set<string>>();
+  const df = new Map<string, number>();
+  for (const c of candidates) {
+    const toks = distinctiveTokens(`${c.title ?? ""} ${c.snippet ?? ""}`);
+    ownTokens.set(c, toks);
+    for (const t of toks) df.set(t, (df.get(t) ?? 0) + 1);
+  }
+
+  const kept: { c: Citation; anchor: string }[] = [];
+  for (const c of candidates) {
+    const anchor = tightAnchor(c, lowerAnswer, answerTokens, ownTokens.get(c)!, df);
+    if (anchor) kept.push({ c, anchor });
+  }
+
+  return kept.map(({ c, anchor }, i) => ({ ...c, index: i + 1, anchor }));
 }
 
-/** Choose the inline-marker anchor for a source: the named file for file/
- *  knowledge sources, or the most specific shared word for web sources. Returns
- *  undefined when nothing specific enough was found (Sources-list only). */
-function pickAnchor(
+/** A verbatim, specific, unique anchor for a source, or undefined if none.
+ *  Web sources anchor on a literal host mention or a distinctive word owned by
+ *  exactly one candidate; file/knowledge sources on a literal filename/path. */
+function tightAnchor(
   c: Citation,
   lowerAnswer: string,
-  webToks: string[],
+  answerTokens: Set<string>,
+  ownTokens: Set<string>,
   df: Map<string, number>,
 ): string | undefined {
   if (c.kind === "web") {
+    const host = c.url ? hostname(c.url).toLowerCase() : "";
+    // Literal host mention (contains a dot → matched as a substring downstream).
+    if (host && lowerAnswer.includes(host)) return host;
+    // Otherwise the longest distinctive word that (a) appears in the answer and
+    // (b) is unique to this single source across every candidate.
     let best: string | undefined;
-    let bestDf = Infinity;
     let bestLen = 0;
-    for (const t of webToks) {
-      const d = df.get(t) ?? 1;
-      if (d < bestDf || (d === bestDf && t.length > bestLen)) {
+    for (const t of ownTokens) {
+      if (t.length < 5 || !answerTokens.has(t) || (df.get(t) ?? 0) !== 1) continue;
+      if (t.length > bestLen) {
         best = t;
-        bestDf = d;
         bestLen = t.length;
       }
     }
-    // Too generic (shared by 3+ sources) → don't stack markers on one word.
-    return best && bestDf <= 2 ? best : undefined;
+    return best;
   }
+  // file / knowledge — the model typically names the file it drew on.
   const fname = (c.fileName ?? "").toLowerCase();
   if (fname && lowerAnswer.includes(fname)) return fname;
+  if (c.path) {
+    const p = c.path.toLowerCase().replace(/\\/g, "/");
+    if (p && lowerAnswer.replace(/\\/g, "/").includes(p)) return p;
+  }
   return undefined;
 }

@@ -303,6 +303,29 @@ async fn ocr_language(db: &SqlitePool) -> String {
         .unwrap_or_else(|| "eng".to_string())
 }
 
+/// Look up the user's manual vision override for a model, from the
+/// `visionOverrides` map in app settings: `Some("on")` = always send images,
+/// `Some("off")` = always OCR to text, `None` = auto (use the name heuristic).
+async fn vision_override(db: &SqlitePool, model: &str) -> Option<String> {
+    let raw: Option<Option<String>> = sqlx::query_scalar(
+        "SELECT value FROM settings WHERE key = 'app_settings'",
+    )
+    .fetch_optional(db)
+    .await
+    .ok()
+    .flatten();
+
+    raw.flatten()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| {
+            v.get("visionOverrides")?
+                .get(model)?
+                .as_str()
+                .map(String::from)
+        })
+        .filter(|s| s == "on" || s == "off")
+}
+
 /// Returns true when the tool needs explicit user approval given the current level.
 fn approval_needed(auto_level: &str, tool_safety: u8) -> bool {
     match auto_level {
@@ -1782,7 +1805,14 @@ async fn build_message_history(
     // OCR fallback (0.4.0): if the resolved model can't accept image input, every
     // image part (uploaded images and PDF page renders) is OCR'd into text so the
     // content still reaches the model instead of erroring or being dropped.
-    let vision_capable = crate::ocr::is_vision_capable(&zone.model);
+    // The per-model `visionOverrides` app setting (0.7.4) beats the name
+    // heuristic in both directions, for models the heuristic can't classify
+    // (e.g. fine-tunes whose names hide the base family).
+    let vision_capable = match vision_override(db, &zone.model).await.as_deref() {
+        Some("on") => true,
+        Some("off") => false,
+        _ => crate::ocr::is_vision_capable(&zone.model),
+    };
     let ocr_lang = if vision_capable { String::new() } else { ocr_language(db).await };
 
     for (idx, m) in rows.into_iter().enumerate() {

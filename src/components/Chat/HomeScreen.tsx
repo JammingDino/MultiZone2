@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Send, ChevronDown, Zap, Check, Layers, Settings as SettingsIcon, Loader2, Brain, Paperclip, Tag, X, SplitSquareHorizontal, Crown, Users } from "lucide-react";
+import { Send, ChevronDown, Zap, Check, Layers, Settings as SettingsIcon, Loader2, Brain, Paperclip, Tag, X, SplitSquareHorizontal, Crown, Users, Upload, ScanText } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { getZoneIcon } from "@/lib/zoneIcons";
@@ -11,6 +11,8 @@ import {
   AttachmentPreview,
   readFileAsDataUrl,
 } from "@/components/Chat/InputBar";
+import { useDictation, MicButton } from "@/components/Chat/useDictation";
+import { resolveVisionCapable } from "@/lib/vision";
 
 type Mode =
   | { type: "quick" }
@@ -82,7 +84,13 @@ export function HomeScreen() {
   const [leaderMenuOpen, setLeaderMenuOpen] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  // Dictation (0.8.0) for the new-chat composer — same mic behavior as the
+  // in-chat InputBar. Splices the transcript into the draft text.
+  const dictation = useDictation({ taRef, setText });
   const isFirstNewChatTick = useRef(true);
+  const visionOverrides = useApp((s) => s.appSettings.visionOverrides);
+  const dragDepth = useRef(0);
+  const [isDragOver, setIsDragOver] = useState(false);
 
   // Persist draft text across navigations.
   useEffect(() => { setHomeScreenDraft(text); }, [text, setHomeScreenDraft]);
@@ -125,6 +133,22 @@ export function HomeScreen() {
     !sending &&
     !quickSelectedButUnavailable &&
     !multizoneSelectedButUnavailable;
+
+  // Model that will answer the first message, mirroring the send-time zone
+  // resolution above. Null when it can't be predicted (Smart routing). Drives
+  // the OCR-fallback hint so the user learns pre-send that this model can't
+  // see images — the exact confusion 0.7.4 fixes for quick chats.
+  const effectiveModel =
+    mode.type === "smart"
+      ? null
+      : mode.type === "quick"
+      ? baseZone?.model ?? quickModel
+      : mode.type === "multizone"
+      ? effectiveLeaderZone?.model ?? null
+      : selectedZone?.model ?? null;
+  const ocrFallback =
+    effectiveModel != null && !resolveVisionCapable(effectiveModel, visionOverrides);
+  const hasVisualAttachment = pending.some((a) => a.fileType === "image" || a.fileType === "pdf");
 
   const greeting = useMemo(() => {
     const h = new Date().getHours();
@@ -188,6 +212,39 @@ export function HomeScreen() {
           { id, fileName: file.name, fileType: "other", payload: "" },
         ]);
       }
+    }
+  }
+
+  // Drag-and-drop onto the new-chat composer, mirroring ChatPanel's in-chat
+  // handling. ChatPanel's own handlers bail when no chat is open, so these are
+  // the only live handlers on this screen (events are consumed here first).
+  function hasFiles(e: React.DragEvent) {
+    return Array.from(e.dataTransfer?.types ?? []).includes("Files");
+  }
+  function onDragEnter(e: React.DragEvent) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth.current += 1;
+    setIsDragOver(true);
+  }
+  function onDragOver(e: React.DragEvent) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  }
+  function onDragLeave(e: React.DragEvent) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setIsDragOver(false);
+  }
+  function onDrop(e: React.DragEvent) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth.current = 0;
+    setIsDragOver(false);
+    if (e.dataTransfer.files.length > 0) {
+      handleFiles(e.dataTransfer.files);
     }
   }
 
@@ -324,7 +381,24 @@ export function HomeScreen() {
   }
 
   return (
-    <div className="flex flex-1 flex-col items-center justify-center px-4">
+    <div
+      className="relative flex flex-1 flex-col items-center justify-center px-4"
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
+      {isDragOver && (
+        <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-[var(--color-bg)]/70 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-3 rounded-xl border-2 border-dashed border-[var(--color-accent)] bg-[var(--color-panel)]/80 px-10 py-8 text-sm text-[var(--color-text)]">
+            <Upload size={28} className="text-[var(--color-accent)]" />
+            <div>Drop files to attach</div>
+            <div className="text-xs text-[var(--color-text-muted)]">
+              Images, PDFs, and text files supported
+            </div>
+          </div>
+        </div>
+      )}
       <div className="w-full max-w-2xl">
         <div className="mb-6 text-center">
           <h1 className="text-2xl font-semibold text-[var(--color-text)]">{greeting}</h1>
@@ -353,6 +427,23 @@ export function HomeScreen() {
               onClose={() => setPreviewId(null)}
             />
           )}
+          {ocrFallback && hasVisualAttachment && (
+            <div
+              className="mb-2 flex w-fit items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-600 dark:text-amber-400"
+              title={`${effectiveModel} can't process images directly. Attached images and PDFs will be sent as OCR-extracted text. Override this per model in the zone editor or provider settings.`}
+            >
+              <ScanText size={11} />
+              <span>OCR fallback: images sent as extracted text</span>
+            </div>
+          )}
+          {dictation.voiceError && (
+            <div className="mb-2 flex w-fit items-center gap-1.5 rounded-full border border-red-500/40 bg-red-500/10 px-2.5 py-1 text-xs text-red-600 dark:text-red-400">
+              <span>{dictation.voiceError}</span>
+              <button onClick={dictation.dismissVoiceError} className="hover:text-[var(--color-text)]" title="Dismiss">
+                <X size={11} />
+              </button>
+            </div>
+          )}
           <textarea
             ref={taRef}
             value={text}
@@ -380,6 +471,9 @@ export function HomeScreen() {
               className="hidden"
               onChange={(e) => { handleFiles(e.target.files); e.target.value = ""; }}
             />
+
+            {/* Dictation */}
+            <MicButton dictation={dictation} />
 
             {/* Center group — items at natural width, spread left/center/right */}
             <div className="flex flex-1 items-center justify-between">

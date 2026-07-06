@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Settings, Layers, ChevronRight, ChevronDown, FolderPlus, ChevronLeft, Pencil, Trash2, Tag as TagIcon, X, Sparkles } from "lucide-react";
+import { Plus, Settings, Layers, ChevronRight, ChevronDown, FolderPlus, ChevronLeft, Pencil, Trash2, Tag as TagIcon, X, Sparkles, Keyboard } from "lucide-react";
 import { useApp } from "@/store/app";
+import { useShallow } from "zustand/react/shallow";
 import * as api from "@/lib/tauri";
 import { ChatList } from "./ChatList";
 import { getZoneIcon } from "@/lib/zoneIcons";
@@ -25,10 +26,34 @@ export function Sidebar() {
     openSettings,
     openZoneLibrary,
     openProjectsPanel,
+    openShortcutsHelp,
     loadThemeFromBackend,
     loadDefaultZone,
     loadAppSettings,
-  } = useApp();
+  } = useApp(
+    useShallow((s) => ({
+      chats: s.chats,
+      zones: s.zones,
+      providers: s.providers,
+      projects: s.projects,
+      activeChatId: s.activeChatId,
+      defaultZoneId: s.defaultZoneId,
+      refreshChats: s.refreshChats,
+      refreshZones: s.refreshZones,
+      refreshProviders: s.refreshProviders,
+      refreshProjects: s.refreshProjects,
+      refreshTags: s.refreshTags,
+      refreshSkills: s.refreshSkills,
+      setActiveChat: s.setActiveChat,
+      openSettings: s.openSettings,
+      openZoneLibrary: s.openZoneLibrary,
+      openProjectsPanel: s.openProjectsPanel,
+      openShortcutsHelp: s.openShortcutsHelp,
+      loadThemeFromBackend: s.loadThemeFromBackend,
+      loadDefaultZone: s.loadDefaultZone,
+      loadAppSettings: s.loadAppSettings,
+    })),
+  );
   const triggerNewChat = useApp((s) => s.triggerNewChat);
 
   const defaultProviderId = useApp((s) => s.appSettings.defaultProviderId);
@@ -155,6 +180,13 @@ export function Sidebar() {
           >
             <Settings size={15} />
           </button>
+          <button
+            onClick={openShortcutsHelp}
+            title="Keyboard Shortcuts (?)"
+            className="rounded p-2 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-accent)]"
+          >
+            <Keyboard size={15} />
+          </button>
         </div>
       </aside>
     );
@@ -169,6 +201,13 @@ export function Sidebar() {
           MultiZone
         </div>
         <div className="flex items-center gap-0.5">
+          <button
+            onClick={openShortcutsHelp}
+            className="rounded p-1.5 hover:bg-[var(--color-panel-hover)]"
+            title="Keyboard Shortcuts (?)"
+          >
+            <Keyboard size={16} />
+          </button>
           <button
             onClick={openSettings}
             className="rounded p-1.5 hover:bg-[var(--color-panel-hover)]"

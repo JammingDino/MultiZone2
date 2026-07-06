@@ -2,13 +2,23 @@ import { useEffect, useState } from "react";
 import { X, Plus, Trash2, Folder, FolderOpen, Database, RefreshCw, FileText, Loader2, AlertTriangle } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useApp } from "@/store/app";
+import { useShallow } from "zustand/react/shallow";
 import * as api from "@/lib/tauri";
 import type { IndexSummary, KbDocument, KnowledgeStatus, Project, Tag, Zone } from "@/lib/types";
 import { ZONE_COLOR_PRESETS, getZoneIcon, ZONE_ICON_GROUPS, ZONE_ICONS } from "@/lib/zoneIcons";
 import { Modal } from "@/components/common/Modal";
 
 export function ProjectsPanel() {
-  const { zones, projects, tags, closeProjectsPanel, refreshProjects, refreshTags } = useApp();
+  const { zones, projects, tags, closeProjectsPanel, refreshProjects, refreshTags } = useApp(
+    useShallow((s) => ({
+      zones: s.zones,
+      projects: s.projects,
+      tags: s.tags,
+      closeProjectsPanel: s.closeProjectsPanel,
+      refreshProjects: s.refreshProjects,
+      refreshTags: s.refreshTags,
+    })),
+  );
   const [tab, setTab] = useState<"projects" | "tags">("projects");
 
   return (

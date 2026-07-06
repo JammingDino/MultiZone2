@@ -3,9 +3,10 @@ import { Paperclip, Send, X, FileText, Image as ImageIcon, FileType, Loader2, Sq
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
+import { useDictation, MicButton } from "@/components/Chat/useDictation";
 import type { InputPart } from "@/lib/types";
 import { renderPdfToJpegs, extractPdfText } from "@/lib/pdf";
-import { isVisionCapable } from "@/lib/vision";
+import { resolveVisionCapable } from "@/lib/vision";
 
 /** Sentinel zone id meaning "Quick chat (no zone)" for a one-shot override. */
 const SIMPLE_ZONE_ID = "__simple__";
@@ -46,8 +47,12 @@ export function InputBar({ chatId, disabled, ref }: InputBarProps) {
   const zones = useApp((s) => s.zones);
   const providers = useApp((s) => s.providers);
   const defaultProviderId = useApp((s) => s.appSettings.defaultProviderId);
+  const visionOverrides = useApp((s) => s.appSettings.visionOverrides);
   const fileRef = useRef<HTMLInputElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  // Dictation (0.8.0): mic capture + transcribe-on-stop, shared with the
+  // new-chat composer. Cancels a running recording when the chat switches.
+  const dictation = useDictation({ taRef, setText, cancelKey: chatId });
   // Busy while any participant is generating — the primary OR a perspective
   // zone — so the stop button stays available until the whole turn settles.
   // cancel_stream cancels every participant at once (shared cancel flag).
@@ -90,8 +95,10 @@ export function InputBar({ chatId, disabled, ref }: InputBarProps) {
     return zones.find((z) => z.id === zid)?.model ?? null;
   })();
   // True when the chosen model can't see images, so any image/PDF attachment
-  // will be sent as OCR-extracted text instead.
-  const ocrFallback = effectiveModel != null && !isVisionCapable(effectiveModel);
+  // will be sent as OCR-extracted text instead. Honors the per-model manual
+  // override (Settings / zone editor) over the name heuristic.
+  const ocrFallback =
+    effectiveModel != null && !resolveVisionCapable(effectiveModel, visionOverrides);
   const hasVisualAttachment = pending.some((a) => a.fileType === "image" || a.fileType === "pdf");
 
   useEffect(() => {
@@ -312,6 +319,14 @@ export function InputBar({ chatId, disabled, ref }: InputBarProps) {
             </button>
           </div>
         )}
+        {dictation.voiceError && (
+          <div className="mb-2 flex w-fit items-center gap-1.5 rounded-full border border-red-500/40 bg-red-500/10 px-2.5 py-1 text-xs text-red-600 dark:text-red-400">
+            <span>{dictation.voiceError}</span>
+            <button onClick={dictation.dismissVoiceError} className="hover:text-[var(--color-text)]" title="Dismiss">
+              <X size={11} />
+            </button>
+          </div>
+        )}
         <div className="flex items-end gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 focus-within:border-[var(--color-accent)]">
           <button
             onClick={() => fileRef.current?.click()}
@@ -330,6 +345,7 @@ export function InputBar({ chatId, disabled, ref }: InputBarProps) {
               e.target.value = "";
             }}
           />
+          <MicButton dictation={dictation} disabled={disabled} />
           <div className="relative">
             <button
               onClick={() => setOvOpen((v) => !v)}

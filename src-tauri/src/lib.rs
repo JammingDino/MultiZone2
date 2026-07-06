@@ -1,4 +1,5 @@
 mod api;
+mod audio;
 mod db;
 mod knowledge;
 mod llm;
@@ -8,6 +9,7 @@ mod tools;
 mod commands;
 mod state;
 mod error;
+mod stt_api;
 
 use state::AppState;
 use tauri::Manager;
@@ -170,6 +172,10 @@ pub fn run() {
             commands::attachments::get_attachment_images,
             commands::api::apply_api_settings,
             commands::api::generate_api_token,
+            commands::voice::list_voice_input_devices,
+            commands::voice::start_dictation,
+            commands::voice::stop_dictation,
+            commands::voice::cancel_dictation,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

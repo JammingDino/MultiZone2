@@ -4,6 +4,7 @@ import { ChatPanel } from "./components/Chat/ChatPanel";
 import { BackgroundEffect } from "./components/BackgroundEffect";
 import { TitleBar } from "./components/TitleBar";
 import { Onboarding } from "./components/Onboarding/Onboarding";
+import { ShortcutsHelpModal } from "./components/common/ShortcutsHelpModal";
 import { useApp } from "./store/app";
 import { seedCuratedLibrary, CURATED_LIBRARY_VERSION } from "./lib/zoneLibrary";
 import { seedDefaultZones } from "./lib/defaultZones";
@@ -21,6 +22,9 @@ export default function App() {
   const seededSkills = useApp((s) => s.appSettings.seededSkills);
   const refreshZones = useApp((s) => s.refreshZones);
   const refreshSkills = useApp((s) => s.refreshSkills);
+  const shortcutsHelpOpen = useApp((s) => s.shortcutsHelpOpen);
+  const openShortcutsHelp = useApp((s) => s.openShortcutsHelp);
+  const closeShortcutsHelp = useApp((s) => s.closeShortcutsHelp);
   // Guard against concurrent invocations of the one-time seeders.
   const libRef = useRef(false);
   const zonesRef = useRef(false);
@@ -100,6 +104,21 @@ export default function App() {
   // Lock the app behind onboarding until at least one provider exists.
   const showOnboarding = providersLoaded && providers.length === 0;
 
+  // Global "?" opens the shortcuts reference, unless the user is typing
+  // somewhere (input/textarea/contenteditable) — there "?" is just a character.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== "?" || e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable) return;
+      e.preventDefault();
+      openShortcutsHelp();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [openShortcutsHelp]);
+
   return (
     <div className="h-screen w-screen overflow-hidden text-[var(--color-text)]">
       <BackgroundEffect />
@@ -111,6 +130,7 @@ export default function App() {
           <Sidebar />
           <ChatPanel />
           {showOnboarding && <Onboarding />}
+          {shortcutsHelpOpen && <ShortcutsHelpModal onClose={closeShortcutsHelp} />}
         </div>
       </div>
     </div>

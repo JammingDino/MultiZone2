@@ -386,16 +386,16 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ## 0.8.x — Voice I/O
 
-*Voice dictation in and spoken responses out. Honors the local-first principle: local STT/TTS models run fully offline; any API provider is clearly marked as leaving the machine. All voice config lives in a new **Settings → Voice** section.*
+*Voice dictation in and spoken responses out. Honors the local-first principle: transcription runs through the same Provider rows the rest of the app uses (no embedded model host), and on-device is available by pointing a provider at a local server — the same way local LLMs work here. API providers are clearly marked as leaving the machine. All voice config lives in a new **Settings → Voice** section.*
 
 ### 0.8.0 — Speech-to-text (dictation input)
 
-- [ ] STT provider config in Settings → Voice: local (whisper.cpp via Rust binding) or API (OpenAI Whisper, Deepgram) — local is the default
-- [ ] Microphone capture in the input bar: a mic button with push-to-talk (hold) and toggle-to-dictate (click) modes
-- [ ] Live partial transcription rendered in the input field as the user speaks; final transcript committed on stop
-- [ ] Input device selection and a visible recording / audio-level indicator while capturing
-- [ ] Language selection + auto-detect; configurable local model size (speed vs accuracy tradeoff)
-- [ ] Transcript insertion mode: insert at cursor vs replace field; optional auto-send on sustained silence (configurable threshold)
+- [x] STT provider config in Settings → Voice: any configured Provider exposing an OpenAI-compatible `/audio/transcriptions` endpoint (OpenAI, or a local server like LM Studio serving a whisper model) — same Provider rows zones already use, no fixed vendor list. No embedded speech engine: an earlier `whisper-rs`/`whisper.cpp` build was dropped because it forced a `libclang`/CMake toolchain on every build, against this project's native-dependency-avoidance stance; "local" is now "point the provider at a local server"
+- [x] Microphone capture (pure-Rust `cpal`, WAV-encoded via `hound`) with a mic button in both the in-chat input bar and the new-chat composer — push-to-talk (hold) and toggle-to-dictate (click) modes, sharing one `useDictation` hook
+- [x] Final transcript committed on stop (the recording is uploaded and transcribed once capture ends; no live partials, which needed the dropped in-process engine)
+- [x] Input device selection and a visible recording indicator (the mic button pulses red) while capturing
+- [x] Language selection + auto-detect
+- [x] Transcript insertion mode: insert at cursor vs replace field; optional auto-send on sustained silence (configurable threshold)
 
 ### 0.8.1 — Text-to-speech (spoken responses)
 
@@ -417,13 +417,13 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ## 1.0.0 — Hardening & Public Release
 
-- [ ] Performance: measure and optimize startup time, first message render, large chat (500+ messages) scroll
-- [ ] Streaming: verify no dropped tokens or UI lag under sustained use
+- [ ] Performance: measure and optimize startup time, first message render, large chat (500+ messages) scroll — fixed the main structural cause of wasted re-renders: `Sidebar`/`ChatPanel`/`MessageThread`/`ChatList`/`ZoneEditor`/`ProjectsPanel`/`SettingsModal` subscribed to the whole zustand store unfiltered, so *any* state change anywhere re-rendered all of them; converted to shallow/per-field selectors, and `UserMessage`/`BotTurnView` are now memoized (with a custom comparator for `BotTurnView` since `groupMessages` rebuilds turn objects each call) so a streaming token only re-renders the turn actually generating, not the whole history. Still open: no virtualization for very long (500+) message lists, and no measured before/after startup or first-paint numbers.
+- [ ] Streaming: verify no dropped tokens or UI lag under sustained use — hardened `ChatPanel`'s Tauri event-listener effect to run once (refs instead of a dependency array) so the "stream" listener can never be torn down and re-attached mid-session, closing the only realistic drop window found. Sustained-use soak testing not yet done.
 - [ ] Installer: Windows (NSIS or WiX), macOS (DMG), Linux (AppImage)
 - [ ] Auto-updater: Tauri updater plugin wired to GitHub releases
 - [ ] Cross-platform smoke tests on Windows 11, macOS, and Linux
 - [ ] Write REQUIREMENTS.md for contributor onboarding
-- [ ] In-app keyboard shortcut reference
+- [x] In-app keyboard shortcut reference — `?` (outside text fields) or the new keyboard icon in the sidebar opens a shortcuts modal cataloguing every shortcut currently wired up in the app
 - [ ] Clean uninstall: no orphaned files or registry entries
 
 ---

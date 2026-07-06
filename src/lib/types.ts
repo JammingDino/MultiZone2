@@ -475,6 +475,33 @@ export interface AppSettings {
   markdownMirrorEnabled: boolean;
   /** Output directory for the markdown mirror. Empty = unset (mirror is a no-op). */
   markdownMirrorDir: string;
+  /**
+   * Per-model manual override for image input (0.7.4), keyed by exact model
+   * name. "on" = always send images, "off" = always OCR to text. Models absent
+   * from the map use the automatic name heuristic (lib/vision.ts).
+   */
+  visionOverrides: Record<string, "on" | "off">;
+  /**
+   * Dictation input (0.8.0). The id of one of this app's own `Provider` rows —
+   * the same providers zones already point at — so any provider exposing an
+   * OpenAI-compatible transcription endpoint (OpenAI itself, or a local server
+   * like LM Studio serving a whisper model) works the same way. There's no
+   * fixed vendor list. Null = no dictation provider configured yet; the mic
+   * prompts the user to pick one in Settings → Voice.
+   */
+  sttProviderId: string | null;
+  /** Model name requested from sttProviderId (e.g. "whisper-1"). */
+  sttModel: string;
+  /** BCP-47-ish language code (e.g. "en"), or "" for auto-detect. */
+  sttLanguage: string;
+  /** Remembered input device by name; null = system default. */
+  sttInputDevice: string | null;
+  /** "hold" = push-to-talk (mic button must be held); "toggle" = click to start/stop. */
+  sttActivationMode: "hold" | "toggle";
+  /** Where the committed transcript goes relative to the textarea's content. */
+  sttInsertionMode: "cursor" | "replace";
+  /** Auto-send the message after this many ms of sustained silence while dictating; 0 = off. */
+  sttAutoSendSilenceMs: number;
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -508,6 +535,14 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   subchatDepthLimit: 3,
   markdownMirrorEnabled: false,
   markdownMirrorDir: "",
+  visionOverrides: {},
+  sttProviderId: null,
+  sttModel: "",
+  sttLanguage: "",
+  sttInputDevice: null,
+  sttActivationMode: "toggle",
+  sttInsertionMode: "cursor",
+  sttAutoSendSilenceMs: 0,
 };
 
 export interface DbStats {
@@ -516,6 +551,12 @@ export interface DbStats {
   zones: number;
   projects: number;
   tags: number;
+}
+
+/** A microphone input device, from `cpal::Host::input_devices()` (0.8.0). */
+export interface VoiceInputDevice {
+  name: string;
+  isDefault: boolean;
 }
 
 /** 0 = safe, 1 = moderate, 2 = dangerous — mirrors the Rust backend. */

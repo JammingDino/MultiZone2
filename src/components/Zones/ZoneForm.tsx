@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw, Trash2, X, BookOpen, ChevronDown, Crown } from "lucide-react";
 import * as api from "@/lib/tauri";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
+import { VisionOverrideSelect } from "@/components/common/VisionOverrideSelect";
 import type { Provider, Zone } from "@/lib/types";
 import { ALL_TOOLS, mcpToolEnableId } from "@/lib/types";
 import { useApp } from "@/store/app";
@@ -558,6 +559,10 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
             />
           </Field>
         </div>
+
+        <Field label="Image input">
+          <VisionOverrideSelect model={model} />
+        </Field>
 
         {/* System prompt — kept as a plain div (not label) so the template-picker
             backdrop overlay doesn't trigger label focus side-effects. */}

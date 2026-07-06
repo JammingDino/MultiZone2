@@ -1,17 +1,29 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Wrench, Cog, Brain, ArrowDown } from "lucide-react";
 import { useApp, type StreamingState } from "@/store/app";
+import type { Message } from "@/lib/types";
 import { UserMessage, BotTurnView } from "@/components/Message/Message";
 import { groupMessages } from "@/lib/grouping";
 import { formatTokens } from "@/lib/format";
 
 const PIN_THRESHOLD_PX = 60;
 
+// Stable fallbacks — reusing the same reference across renders keeps the
+// per-chat selectors below from reporting a "change" (and re-rendering the
+// whole thread) on every unrelated store update when a chat has no
+// messages/perspectives yet.
+const EMPTY_MESSAGES: Message[] = [];
+const EMPTY_PERSPECTIVE_STREAMS: Record<string, StreamingState> = {};
+
 export function MessageThread({ chatId }: { chatId: string }) {
-  const { messagesByChat, streamingByChat, perspectiveStreamsByChat, loadMessages } = useApp();
-  const messages = messagesByChat[chatId] ?? [];
-  const streaming = streamingByChat[chatId];
-  const perspectiveStreams = perspectiveStreamsByChat[chatId] ?? {};
+  // Selected per-chat (rather than destructuring the whole store) so a token
+  // streaming into a different chat, or any unrelated store update, doesn't
+  // force this thread — and its whole message list — to re-render.
+  const messages = useApp((s) => s.messagesByChat[chatId] ?? EMPTY_MESSAGES);
+  const messagesLoaded = useApp((s) => s.messagesByChat[chatId] !== undefined);
+  const streaming = useApp((s) => s.streamingByChat[chatId]);
+  const perspectiveStreams = useApp((s) => s.perspectiveStreamsByChat[chatId] ?? EMPTY_PERSPECTIVE_STREAMS);
+  const loadMessages = useApp((s) => s.loadMessages);
   const layout = useApp((s) => s.appSettings.perspectiveLayout);
   const containerRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
@@ -54,8 +66,8 @@ export function MessageThread({ chatId }: { chatId: string }) {
   const columnsMaxWidth = `calc(${maxColumns} * 48rem + ${maxColumns - 1} * 1rem)`;
 
   useEffect(() => {
-    if (!messagesByChat[chatId]) loadMessages(chatId);
-  }, [chatId, messagesByChat, loadMessages]);
+    if (!messagesLoaded) loadMessages(chatId);
+  }, [chatId, messagesLoaded, loadMessages]);
 
   // When switching chats, default to pinned and jump to the bottom.
   useEffect(() => {

@@ -3,6 +3,7 @@ import type { Chat, ChatTagLink } from "@/lib/types";
 import { MessageSquare, Pencil, Trash2, Sparkles, Loader2, FolderInput, FolderMinus, GitBranch, ChevronRight, ChevronDown } from "lucide-react";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
+import { useShallow } from "zustand/react/shallow";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import { usePersistentSet } from "@/lib/uiState";
 
@@ -24,7 +25,15 @@ export function ChatList({ chats, activeId, onSelect, projectId }: Props) {
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
-  const { projects, refreshChats, setChatTitle, regenerateTitle, setChatProject } = useApp();
+  const { projects, refreshChats, setChatTitle, regenerateTitle, setChatProject } = useApp(
+    useShallow((s) => ({
+      projects: s.projects,
+      refreshChats: s.refreshChats,
+      setChatTitle: s.setChatTitle,
+      regenerateTitle: s.regenerateTitle,
+      setChatProject: s.setChatProject,
+    })),
+  );
   const zones = useApp((s) => s.zones);
   const regenerating = useApp((s) => s.regeneratingTitles);
   const chatTagLinks = useApp((s) => s.chatTagLinks);

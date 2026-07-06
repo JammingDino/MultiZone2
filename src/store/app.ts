@@ -119,6 +119,16 @@ interface AppStore {
   loadAppSettings: () => Promise<void>;
   setAppSettings: (partial: Partial<AppSettings>) => Promise<void>;
 
+  // Voice / dictation (0.8.0) — transient recording state, not persisted.
+  voiceSessionId: string | null;
+  voiceRecording: boolean;
+  voiceError: string | null;
+  voiceInputDevices: import("@/lib/types").VoiceInputDevice[];
+  startDictation: () => Promise<void>;
+  stopDictation: () => Promise<string>;
+  cancelDictation: () => Promise<void>;
+  refreshVoiceInputDevices: () => Promise<void>;
+
   // ui
   settingsOpen: boolean;
   zoneEditorOpen: boolean;
@@ -126,6 +136,7 @@ interface AppStore {
   zonesPanelOpen: boolean;
   zoneLibraryOpen: boolean;
   defaultZoneId: string | null;
+  shortcutsHelpOpen: boolean;
 
   // actions
   refreshProviders: () => Promise<void>;
@@ -154,6 +165,8 @@ interface AppStore {
   closeZoneLibrary: () => void;
   setDefaultZone: (id: string | null) => Promise<void>;
   loadDefaultZone: () => Promise<void>;
+  openShortcutsHelp: () => void;
+  closeShortcutsHelp: () => void;
 
   projectsPanelOpen: boolean;
   projectsPanelInitId: string | null;
@@ -309,12 +322,18 @@ export const useApp = create<AppStore>((set, get) => ({
   appSettings: DEFAULT_APP_SETTINGS,
   appSettingsLoaded: false,
 
+  voiceSessionId: null,
+  voiceRecording: false,
+  voiceError: null,
+  voiceInputDevices: [],
+
   settingsOpen: false,
   zoneEditorOpen: false,
   editingZoneId: null,
   zonesPanelOpen: false,
   zoneLibraryOpen: false,
   defaultZoneId: null,
+  shortcutsHelpOpen: false,
   projectsPanelOpen: false,
   projectsPanelInitId: null,
   newChatProjectId: null,
@@ -886,6 +905,47 @@ export const useApp = create<AppStore>((set, get) => ({
       console.warn("failed to persist app settings", e);
     }
   },
+
+  async startDictation() {
+    set({ voiceError: null });
+    try {
+      const deviceName = get().appSettings.sttInputDevice;
+      const sessionId = await api.startDictation(deviceName);
+      set({ voiceSessionId: sessionId, voiceRecording: true });
+    } catch (e) {
+      set({ voiceError: String(e) });
+      throw e;
+    }
+  },
+  async stopDictation() {
+    const sessionId = get().voiceSessionId;
+    set({ voiceSessionId: null, voiceRecording: false });
+    if (!sessionId) return "";
+    try {
+      return await api.stopDictation(sessionId);
+    } catch (e) {
+      set({ voiceError: String(e) });
+      throw e;
+    }
+  },
+  async cancelDictation() {
+    const sessionId = get().voiceSessionId;
+    set({ voiceSessionId: null, voiceRecording: false });
+    if (!sessionId) return;
+    try {
+      await api.cancelDictation(sessionId);
+    } catch (e) {
+      console.warn("failed to cancel dictation", e);
+    }
+  },
+  async refreshVoiceInputDevices() {
+    try {
+      const voiceInputDevices = await api.listVoiceInputDevices();
+      set({ voiceInputDevices });
+    } catch (e) {
+      console.warn("failed to list voice input devices", e);
+    }
+  },
   openSettings: () => set({ settingsOpen: true }),
   closeSettings: () => set({ settingsOpen: false }),
   openZoneEditor: (id) => set({ zoneEditorOpen: true, editingZoneId: id }),
@@ -894,6 +954,8 @@ export const useApp = create<AppStore>((set, get) => ({
   closeZonesPanel: () => set({ zonesPanelOpen: false }),
   openZoneLibrary: () => set({ zoneLibraryOpen: true }),
   closeZoneLibrary: () => set({ zoneLibraryOpen: false }),
+  openShortcutsHelp: () => set({ shortcutsHelpOpen: true }),
+  closeShortcutsHelp: () => set({ shortcutsHelpOpen: false }),
   async setDefaultZone(id) {
     set({ defaultZoneId: id });
     try {

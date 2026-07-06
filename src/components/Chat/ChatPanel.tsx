@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Upload, Tag as TagIcon, X, Zap, Folder, FolderX, ChevronDown, ChevronRight, SplitSquareHorizontal, Plus, ShieldAlert, Eye, Database } from "lucide-react";
 import { useApp } from "@/store/app";
+import { useShallow } from "zustand/react/shallow";
 import * as api from "@/lib/tauri";
 import { MessageThread } from "./MessageThread";
 import { InputBar, type InputBarHandle } from "./InputBar";
@@ -45,7 +46,39 @@ export function ChatPanel() {
     setChatPerspectiveMode,
     respondApproval,
     openZoneEditor,
-  } = useApp();
+  } = useApp(
+    useShallow((s) => ({
+      activeChatId: s.activeChatId,
+      chats: s.chats,
+      zones: s.zones,
+      projects: s.projects,
+      tags: s.tags,
+      tagsByChat: s.tagsByChat,
+      chatZonesByChat: s.chatZonesByChat,
+      settingsOpen: s.settingsOpen,
+      zoneEditorOpen: s.zoneEditorOpen,
+      zoneLibraryOpen: s.zoneLibraryOpen,
+      projectsPanelOpen: s.projectsPanelOpen,
+      applyStreamEvent: s.applyStreamEvent,
+      setChatTitle: s.setChatTitle,
+      refreshChats: s.refreshChats,
+      loadMessages: s.loadMessages,
+      refreshTags: s.refreshTags,
+      loadChatTags: s.loadChatTags,
+      loadChatZones: s.loadChatZones,
+      setChatProject: s.setChatProject,
+      toggleProjectContext: s.toggleProjectContext,
+      toggleKnowledge: s.toggleKnowledge,
+      addChatTag: s.addChatTag,
+      removeChatTag: s.removeChatTag,
+      toggleChatTagContext: s.toggleChatTagContext,
+      addPerspectiveZone: s.addPerspectiveZone,
+      removePerspectiveZone: s.removePerspectiveZone,
+      setChatPerspectiveMode: s.setChatPerspectiveMode,
+      respondApproval: s.respondApproval,
+      openZoneEditor: s.openZoneEditor,
+    })),
+  );
   const globalPerspectiveMode = useApp((s) => s.appSettings.perspectiveMode);
   const providers = useApp((s) => s.providers);
   const defaultProviderId = useApp((s) => s.appSettings.defaultProviderId);
@@ -136,6 +169,18 @@ export function ChatPanel() {
     }
   }
 
+  // Mirror the latest store actions in refs so the listener-setup effect below
+  // can run exactly once (empty deps) without ever tearing down and
+  // re-attaching the "stream" listener mid-session — a re-attach would open a
+  // window between the old unlisten() and the new listen() resolving where any
+  // in-flight token would be silently dropped.
+  const actionsRef = useRef({
+    applyStreamEvent, setChatTitle, refreshChats, refreshTags, loadChatTags, loadMessages,
+  });
+  actionsRef.current = {
+    applyStreamEvent, setChatTitle, refreshChats, refreshTags, loadChatTags, loadMessages,
+  };
+
   useEffect(() => {
     let cancelled = false;
     let unlistenStream: (() => void) | undefined;
@@ -145,14 +190,14 @@ export function ChatPanel() {
     let unlistenChats: (() => void) | undefined;
     let unlistenFileSync: (() => void) | undefined;
     api.onStream((env) => {
-      applyStreamEvent(env.chatId, env.event, env.perspectiveZoneId);
+      actionsRef.current.applyStreamEvent(env.chatId, env.event, env.perspectiveZoneId);
     }).then((u) => {
       if (cancelled) u();
       else unlistenStream = u;
     });
     api.onChatTitleUpdated(({ chatId, title }) => {
-      setChatTitle(chatId, title);
-      refreshChats();
+      actionsRef.current.setChatTitle(chatId, title);
+      actionsRef.current.refreshChats();
     }).then((u) => {
       if (cancelled) u();
       else unlistenTitle = u;
@@ -160,8 +205,8 @@ export function ChatPanel() {
     api.onChatTagsUpdated(({ chatId }) => {
       // The model created/assigned a tag — refresh the global tag list and
       // this chat's tag chips so the strip updates live.
-      refreshTags();
-      loadChatTags(chatId);
+      actionsRef.current.refreshTags();
+      actionsRef.current.loadChatTags(chatId);
     }).then((u) => {
       if (cancelled) u();
       else unlistenTags = u;
@@ -169,7 +214,7 @@ export function ChatPanel() {
     api.onChatZoneUpdated(() => {
       // The model switched the chat's primary zone mid-turn — re-pull chats so
       // the zone picker reflects the new zone live.
-      refreshChats();
+      actionsRef.current.refreshChats();
     }).then((u) => {
       if (cancelled) u();
       else unlistenZone = u;
@@ -177,7 +222,7 @@ export function ChatPanel() {
     api.onChatsChanged(() => {
       // A subchat was spawned (or the chat list otherwise changed) — refresh so
       // the sidebar shows it nested under its parent live.
-      refreshChats();
+      actionsRef.current.refreshChats();
     }).then((u) => {
       if (cancelled) u();
       else unlistenChats = u;
@@ -185,8 +230,8 @@ export function ChatPanel() {
     api.onChatFileSynced(({ chatId }) => {
       // An external edit to a mirrored `.md` was synced into the DB (0.7.2) —
       // refresh the sidebar (title) and reload this chat's messages.
-      refreshChats();
-      loadMessages(chatId);
+      actionsRef.current.refreshChats();
+      actionsRef.current.loadMessages(chatId);
     }).then((u) => {
       if (cancelled) u();
       else unlistenFileSync = u;
@@ -200,7 +245,9 @@ export function ChatPanel() {
       unlistenChats?.();
       unlistenFileSync?.();
     };
-  }, [applyStreamEvent, setChatTitle, refreshChats, refreshTags, loadChatTags, loadMessages]);
+    // Deliberately empty — see actionsRef comment above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <main

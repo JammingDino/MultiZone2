@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { ContentPart, Message, InputPart } from "@/lib/types";
 import { Markdown } from "@/components/Renderers/Markdown";
 import { User, Check, X, FileType, ZoomIn } from "lucide-react";
@@ -120,7 +120,7 @@ type MessagePreview =
   | { kind: "pdf-images"; fileName: string; pages: string[] }
   | { kind: "pdf-text"; fileName: string; text: string };
 
-export function UserMessage({ message }: { message: Message }) {
+function UserMessageImpl({ message }: { message: Message }) {
   const parts = parseParts(message.content);
   const text = parts
     .filter((p): p is Extract<ContentPart, { type: "text" }> => p.type === "text")
@@ -298,6 +298,9 @@ export function UserMessage({ message }: { message: Message }) {
     </div>
   );
 }
+
+/** Memoized — a large chat history shouldn't re-render every past user turn on each streamed token. */
+export const UserMessage = memo(UserMessageImpl);
 
 function MessagePreviewModal({
   preview,
@@ -493,7 +496,7 @@ function lastTextBlockIndex(blocks: TurnBlock[]): number {
   return idx;
 }
 
-export function BotTurnView({ turn, isLatest = false }: { turn: BotTurn; isLatest?: boolean }) {
+function BotTurnViewImpl({ turn, isLatest = false }: { turn: BotTurn; isLatest?: boolean }) {
   const isStreaming = Boolean(turn.streaming);
   const hasAnything = turn.blocks.length > 0 || isStreaming;
 
@@ -689,6 +692,38 @@ export function BotTurnView({ turn, isLatest = false }: { turn: BotTurn; isLates
     </div>
   );
 }
+
+// `groupMessages` rebuilds a fresh `BotTurn` object on every call (including
+// for turns whose underlying messages haven't changed), so a default
+// reference-equality memo would never bail out. Compare the pieces that
+// actually change instead: message ids (grows only via new persisted
+// messages) and the `streaming` reference (a new object every token, but only
+// present on the turn currently generating).
+function botTurnPropsEqual(
+  prev: { turn: BotTurn; isLatest?: boolean },
+  next: { turn: BotTurn; isLatest?: boolean },
+): boolean {
+  if (prev.isLatest !== next.isLatest) return false;
+  const a = prev.turn;
+  const b = next.turn;
+  if (a.streaming !== b.streaming || a.zoneId !== b.zoneId) return false;
+  if (a.messageIds.length !== b.messageIds.length) return false;
+  for (let i = 0; i < a.messageIds.length; i++) {
+    if (a.messageIds[i] !== b.messageIds[i]) return false;
+  }
+  if (a.perspectives.length !== b.perspectives.length) return false;
+  for (let i = 0; i < a.perspectives.length; i++) {
+    const pa = a.perspectives[i];
+    const pb = b.perspectives[i];
+    if (pa.zoneId !== pb.zoneId || pa.messageId !== pb.messageId || pa.streaming !== pb.streaming) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** Memoized — an in-progress turn re-renders on every streamed token; earlier turns in the same chat shouldn't. */
+export const BotTurnView = memo(BotTurnViewImpl, botTurnPropsEqual);
 
 /**
  * One participant's response in a multi-zone turn — the primary or a

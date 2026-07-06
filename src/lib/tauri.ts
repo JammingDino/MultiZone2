@@ -23,6 +23,7 @@ import type {
   StreamEnvelope,
   SubchatNode,
   Tag,
+  VoiceInputDevice,
   Zone,
 } from "./types";
 
@@ -300,3 +301,13 @@ export function onKnowledgeUpdated(
     (e) => handler(e.payload),
   );
 }
+
+// Voice / dictation (0.8.0)
+export const listVoiceInputDevices = () =>
+  invoke<VoiceInputDevice[]>("list_voice_input_devices");
+export const startDictation = (deviceName: string | null) =>
+  invoke<string>("start_dictation", { deviceName });
+export const stopDictation = (sessionId: string) =>
+  invoke<string>("stop_dictation", { sessionId });
+export const cancelDictation = (sessionId: string) =>
+  invoke<void>("cancel_dictation", { sessionId });

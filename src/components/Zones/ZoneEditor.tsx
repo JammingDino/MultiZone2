@@ -1,11 +1,20 @@
 import { useMemo } from "react";
 import { useApp } from "@/store/app";
+import { useShallow } from "zustand/react/shallow";
 import type { Zone } from "@/lib/types";
 import { ZoneForm } from "./ZoneForm";
 import { Modal, ModalTitle } from "@/components/common/Modal";
 
 export function ZoneEditor() {
-  const { providers, zones, editingZoneId, closeZoneEditor, refreshZones } = useApp();
+  const { providers, zones, editingZoneId, closeZoneEditor, refreshZones } = useApp(
+    useShallow((s) => ({
+      providers: s.providers,
+      zones: s.zones,
+      editingZoneId: s.editingZoneId,
+      closeZoneEditor: s.closeZoneEditor,
+      refreshZones: s.refreshZones,
+    })),
+  );
   const existing = useMemo(
     () => zones.find((z) => z.id === editingZoneId) ?? null,
     [zones, editingZoneId],

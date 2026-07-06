@@ -13,6 +13,7 @@ pub mod memory;
 pub mod mcp;
 pub mod knowledge;
 pub mod mirror;
+pub mod voice;
 
 pub fn now_ts() -> i64 {
     chrono::Utc::now().timestamp_millis()

@@ -24,6 +24,9 @@ pub struct AppState {
     pub api_server: Mutex<Option<crate::api::ApiHandle>>,
     /// Pending tool-approval gates: chatId → oneshot sender for the approval answer.
     pub tool_approvals: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>>,
+    /// Live dictation sessions (0.8.0): sessionId → capture handle, from
+    /// `start_dictation` until `stop_dictation`/`cancel_dictation` removes it.
+    pub voice_sessions: Arc<Mutex<HashMap<String, crate::audio::CaptureHandle>>>,
 }
 
 impl AppState {
@@ -82,6 +85,7 @@ impl AppState {
             active_streams: Arc::new(RwLock::new(HashMap::new())),
             api_server: Mutex::new(None),
             tool_approvals: Arc::new(Mutex::new(HashMap::new())),
+            voice_sessions: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 }

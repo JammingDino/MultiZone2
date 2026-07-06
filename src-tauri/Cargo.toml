@@ -28,7 +28,7 @@ futures-util = "0.3"
 axum = "0.7"
 tower-http = { version = "0.6", features = ["cors"] }
 
-reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], default-features = false }
+reqwest = { version = "0.12", features = ["json", "stream", "multipart", "rustls-tls"], default-features = false }
 eventsource-stream = "0.2"
 
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid", "migrate"] }
@@ -56,6 +56,17 @@ notify-debouncer-mini = "0.4"
 # runtime (see ocr.rs); degrades gracefully when absent.
 ocrs = "0.12"
 rten = "0.24"
+
+# Speech-to-text (0.8.0). Dictation is transcribed by a user-configured
+# provider's OpenAI-compatible `/audio/transcriptions` endpoint (see
+# `stt_api.rs`) — the same "provider = base URL + API key" model the rest of the
+# app uses, with no embedded model host. On-device transcription is still
+# available by pointing that provider at a local server (e.g. LM Studio serving
+# a whisper model). `cpal` captures the microphone and `hound` encodes the
+# recording as WAV for upload; both are pure-Rust with no native build deps
+# (unlike the previously-embedded whisper.cpp, which required libclang + cmake).
+cpal = "0.15"
+hound = "3.5"
 
 thiserror = "2.0"
 anyhow = "1.0"

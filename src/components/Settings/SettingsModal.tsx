@@ -1,17 +1,19 @@
 import { useEffect, useRef, useState } from "react";
-import { X, Plus, Trash2, RefreshCw, Server, Palette, MessageSquare, Database, AlertTriangle, Loader2, Folder, FolderOpen, Globe, Copy, Check, Search, Brain, Sparkles, FileUp, FileDown, Plug, Wifi, WifiOff, Library, ChevronDown } from "lucide-react";
+import { X, Plus, Trash2, RefreshCw, Server, Palette, MessageSquare, Database, AlertTriangle, Loader2, Folder, FolderOpen, Globe, Copy, Check, Search, Brain, Sparkles, FileUp, FileDown, Plug, Wifi, WifiOff, Library, ChevronDown, Mic } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useApp } from "@/store/app";
 import type { BackgroundEffect } from "@/store/app";
+import { useShallow } from "zustand/react/shallow";
 import * as api from "@/lib/tauri";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
+import { VisionOverrideSelect } from "@/components/common/VisionOverrideSelect";
 import { Modal, ModalTitle } from "@/components/common/Modal";
 import type { DbStats, GlobalKbView, IndexSummary, KbDocument, McpServerView, McpTool, Provider, Skill } from "@/lib/types";
 
-type Tab = "providers" | "appearance" | "chat" | "search" | "skills" | "mcp" | "knowledge" | "memory" | "api" | "data";
+type Tab = "providers" | "appearance" | "chat" | "voice" | "search" | "skills" | "mcp" | "knowledge" | "memory" | "api" | "data";
 
 export function SettingsModal() {
-  const { closeSettings } = useApp();
+  const closeSettings = useApp((s) => s.closeSettings);
   const [tab, setTab] = useState<Tab>("providers");
 
   return (
@@ -25,6 +27,7 @@ export function SettingsModal() {
             <NavGroup label="Interface" />
             <TabButton active={tab === "appearance"} icon={<Palette size={14} />} label="Appearance" onClick={() => setTab("appearance")} />
             <TabButton active={tab === "chat"} icon={<MessageSquare size={14} />} label="Chat" onClick={() => setTab("chat")} />
+            <TabButton active={tab === "voice"} icon={<Mic size={14} />} label="Voice" onClick={() => setTab("voice")} />
 
             <NavGroup label="Tools & context" />
             <TabButton active={tab === "search"} icon={<Search size={14} />} label="Search" onClick={() => setTab("search")} />
@@ -41,6 +44,7 @@ export function SettingsModal() {
             {tab === "providers" && <ProvidersTab />}
             {tab === "appearance" && <AppearanceTab />}
             {tab === "chat" && <ChatTab />}
+            {tab === "voice" && <VoiceTab />}
             {tab === "search" && <SearchTab />}
             {tab === "skills" && <SkillsTab />}
             {tab === "mcp" && <McpTab />}
@@ -79,7 +83,9 @@ function TabButton({ active, icon, label, onClick }: { active: boolean; icon: Re
 // ─── Providers ────────────────────────────────────────────────────────────────
 
 function ProvidersTab() {
-  const { providers, refreshProviders } = useApp();
+  const { providers, refreshProviders } = useApp(
+    useShallow((s) => ({ providers: s.providers, refreshProviders: s.refreshProviders })),
+  );
   const appSettings = useApp((s) => s.appSettings);
   const setAppSettings = useApp((s) => s.setAppSettings);
   const [editing, setEditing] = useState<Partial<Provider> | null>(null);
@@ -650,6 +656,173 @@ function ChatTab() {
         </div>
       </section>
 
+    </div>
+  );
+}
+
+// ─── Voice ──────────────────────────────────────────────────────────────────────
+
+function VoiceTab() {
+  const appSettings = useApp((s) => s.appSettings);
+  const setAppSettings = useApp((s) => s.setAppSettings);
+  const providers = useApp((s) => s.providers);
+  const voiceInputDevices = useApp((s) => s.voiceInputDevices);
+  const refreshVoiceInputDevices = useApp((s) => s.refreshVoiceInputDevices);
+  const [providerModels, setProviderModels] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!appSettings.sttProviderId) { setProviderModels([]); return; }
+    let cancelled = false;
+    api.fetchModels(appSettings.sttProviderId)
+      .then((m) => { if (!cancelled) setProviderModels(m); })
+      .catch(() => { if (!cancelled) setProviderModels([]); });
+    return () => { cancelled = true; };
+  }, [appSettings.sttProviderId]);
+
+  useEffect(() => {
+    refreshVoiceInputDevices().catch(console.error);
+  }, [refreshVoiceInputDevices]);
+
+  return (
+    <div className="flex flex-col gap-6">
+      <section>
+        <h3 className="mb-1 text-sm font-medium">Dictation provider</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          The mic button's recordings are transcribed by one of your configured providers. Any provider
+          exposing an OpenAI-compatible <span className="font-mono">/audio/transcriptions</span> endpoint
+          works — OpenAI itself, or a local server like LM Studio serving a whisper model (fully on-device).
+        </p>
+        {providers.length === 0 ? (
+          <p className="text-xs text-amber-600 dark:text-amber-400">
+            No providers configured yet — add one in the Providers tab, then choose it here.
+          </p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <p className="text-xs text-[var(--color-text-muted)]">Provider</p>
+            <SettingSelect
+              value={appSettings.sttProviderId ?? ""}
+              onChange={(v) => setAppSettings({ sttProviderId: v || null, sttModel: "" })}
+            >
+              <option value="">— choose a provider —</option>
+              {providers.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </SettingSelect>
+            <p className="mt-1 text-xs text-[var(--color-text-muted)]">Model</p>
+            <ModelCombobox
+              value={appSettings.sttModel}
+              onChange={(v) => setAppSettings({ sttModel: v })}
+              options={providerModels}
+              placeholder="e.g. whisper-1"
+              className="input"
+            />
+            <p className="text-[11px] text-[var(--color-text-muted)]">
+              The recording is sent to the provider when you stop dictating, and the transcript is
+              inserted once it returns. Audio leaves your machine unless the provider runs locally.
+            </p>
+          </div>
+        )}
+      </section>
+
+      <section>
+        <h3 className="mb-1 text-sm font-medium">Language</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          BCP-47-ish language code (e.g. <span className="font-mono">en</span>). Leave empty to auto-detect.
+        </p>
+        <input
+          type="text"
+          value={appSettings.sttLanguage}
+          onChange={(e) => setAppSettings({ sttLanguage: e.target.value.trim() })}
+          placeholder="auto-detect"
+          spellCheck={false}
+          className="w-32 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 text-sm outline-none focus:border-[var(--color-accent)]"
+        />
+      </section>
+
+      <section>
+        <h3 className="mb-1 text-sm font-medium">Input device</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          Microphone used for dictation.
+        </p>
+        <SettingSelect
+          value={appSettings.sttInputDevice ?? ""}
+          onChange={(v) => setAppSettings({ sttInputDevice: v || null })}
+        >
+          <option value="">System default</option>
+          {voiceInputDevices.map((d) => (
+            <option key={d.name} value={d.name}>{d.name}</option>
+          ))}
+        </SettingSelect>
+      </section>
+
+      <section>
+        <h3 className="mb-1 text-sm font-medium">Activation mode</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          How the mic button starts and stops a recording.
+        </p>
+        <div className="flex gap-2">
+          {([
+            ["toggle", "Toggle", "Click to start, click again to stop"],
+            ["hold", "Hold", "Press and hold to record (push-to-talk)"],
+          ] as const).map(([val, label, desc]) => (
+            <button
+              key={val}
+              onClick={() => setAppSettings({ sttActivationMode: val })}
+              className={`flex-1 rounded border px-3 py-2.5 text-left text-sm ${appSettings.sttActivationMode === val ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]" : "border-[var(--color-border)] hover:border-[var(--color-accent)]"}`}
+            >
+              <div className="font-medium">{label}</div>
+              <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">{desc}</div>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section>
+        <h3 className="mb-1 text-sm font-medium">Insertion mode</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          Where the transcript goes relative to text already in the input field.
+        </p>
+        <div className="flex gap-2">
+          {([
+            ["cursor", "At cursor", "Insert the transcript at the cursor position"],
+            ["replace", "Replace field", "Replace the entire input field with the transcript"],
+          ] as const).map(([val, label, desc]) => (
+            <button
+              key={val}
+              onClick={() => setAppSettings({ sttInsertionMode: val })}
+              className={`flex-1 rounded border px-3 py-2.5 text-left text-sm ${appSettings.sttInsertionMode === val ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]" : "border-[var(--color-border)] hover:border-[var(--color-accent)]"}`}
+            >
+              <div className="font-medium">{label}</div>
+              <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">{desc}</div>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section>
+        <h3 className="mb-1 text-sm font-medium">Auto-send on silence</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          Automatically send the message after you stop speaking.
+        </p>
+        <ToggleRow
+          label="Auto-send after silence"
+          checked={appSettings.sttAutoSendSilenceMs > 0}
+          onChange={(v) => setAppSettings({ sttAutoSendSilenceMs: v ? 1200 : 0 })}
+        />
+        {appSettings.sttAutoSendSilenceMs > 0 && (
+          <div className="mt-2">
+            <SliderRow
+              label="Silence threshold"
+              value={appSettings.sttAutoSendSilenceMs}
+              min={500}
+              max={3000}
+              step={100}
+              display={`${appSettings.sttAutoSendSilenceMs}ms`}
+              onChange={(v) => setAppSettings({ sttAutoSendSilenceMs: v })}
+            />
+          </div>
+        )}
+      </section>
     </div>
   );
 }
@@ -2186,6 +2359,11 @@ function ProviderForm({ value, onClose, onSaved }: { value: Partial<Provider>; o
           placeholder={testing ? "Loading models…" : value.id ? "Pick or type a model" : "Add provider first, or type a model name"}
         />
       </Field>
+      {defaultModel.trim() && (
+        <Field label="Image input (default model)">
+          <VisionOverrideSelect model={defaultModel} />
+        </Field>
+      )}
       {testResult && (
         <div className="my-2 rounded bg-[var(--color-panel)] p-2 text-xs text-[var(--color-text-muted)]">{testResult}</div>
       )}

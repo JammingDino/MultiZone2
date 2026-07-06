@@ -12,6 +12,8 @@ A desktop LLM chat application built with Tauri + React + Rust. Supports multipl
 
 On Windows, Tauri also requires the [WebView2 runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) (pre-installed on Windows 10/11) and the MSVC build tools (via Visual Studio Build Tools or Visual Studio).
 
+Voice dictation (0.8.0+) adds **no extra build dependencies**: microphone capture (`cpal`) and WAV encoding (`hound`) are pure Rust, and transcription is done by a user-configured provider's OpenAI-compatible `/audio/transcriptions` endpoint at runtime (Settings → Voice). On-device transcription is available by pointing that provider at a local server (e.g. LM Studio serving a whisper model), so there is no embedded speech engine and no C/C++/`libclang`/CMake toolchain to install.
+
 ## Dev
 
 ```bash

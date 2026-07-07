@@ -1,5 +1,6 @@
 pub mod datetime;
 pub mod web_search;
+pub mod extract;
 pub mod code_exec;
 pub mod filesystem;
 pub mod render_graph;
@@ -88,6 +89,7 @@ impl Default for ToolContext {
 pub enum ToolId {
     DateTime,
     WebSearch,
+    Extract,
     CodeExec,
     FileSystem,
     RenderGraph,
@@ -106,6 +108,7 @@ impl ToolId {
         match s {
             "date_time" => Some(Self::DateTime),
             "web_search" => Some(Self::WebSearch),
+            "extract" => Some(Self::Extract),
             "code_exec" => Some(Self::CodeExec),
             "file_system" => Some(Self::FileSystem),
             "render_graph" => Some(Self::RenderGraph),
@@ -127,6 +130,7 @@ impl ToolId {
         match self {
             Self::DateTime => "date_time",
             Self::WebSearch => "web_search",
+            Self::Extract => "extract",
             Self::CodeExec => "code_exec",
             Self::FileSystem => "file_system",
             Self::RenderGraph => "render_graph",
@@ -148,6 +152,7 @@ impl ToolId {
         match self {
             Self::DateTime => vec![datetime::definition()],
             Self::WebSearch => vec![web_search::definition()],
+            Self::Extract => vec![extract::definition()],
             Self::CodeExec => vec![code_exec::definition()],
             Self::FileSystem => filesystem::definitions(),
             Self::RenderGraph => render_graph::definitions(ctx),
@@ -170,7 +175,7 @@ impl ToolId {
             // Subchat groups read (safe) + spawn/send (moderate); classed moderate
             // here so it isn't in the safe default set. Per-call gating uses the
             // function name (see `tool_safety_by_name`).
-            Self::WebSearch | Self::FileSystem | Self::SwitchZone | Self::Subchat => 1,
+            Self::WebSearch | Self::Extract | Self::FileSystem | Self::SwitchZone | Self::Subchat => 1,
             Self::CodeExec | Self::Shell => 2,
         }
     }
@@ -183,6 +188,7 @@ pub fn safe_tool_ids() -> Vec<&'static str> {
     [
         ToolId::DateTime,
         ToolId::WebSearch,
+        ToolId::Extract,
         ToolId::CodeExec,
         ToolId::FileSystem,
         ToolId::RenderGraph,
@@ -208,7 +214,7 @@ pub fn tool_safety_by_name(name: &str) -> u8 {
         | "save_memory" | "read_memory" | "delete_memory"
         | "load_skill" | "search_knowledge" | "read_subchat"
         | "present_file" => 0,
-        "web_search" | "read_file" | "list_directory"
+        "web_search" | "extract_url" | "read_file" | "list_directory"
         | "create_file" | "edit_file" | "list_zones" | "change_zone"
         | "spawn_subagent" | "send_subchat_message" => 1,
         "execute_code" | "run_command" => 2,
@@ -247,6 +253,7 @@ pub async fn dispatch(
     match name {
         "get_current_datetime" => datetime::run(&args).await,
         "web_search" => web_search::run(&args, zone_config, http).await,
+        "extract_url" => extract::run(&args, http).await,
         "execute_code" => code_exec::run(&args, zone_config).await,
         "read_file" => filesystem::read_file(&args, zone_config, project_dir).await,
         "list_directory" => filesystem::list_directory(&args, zone_config, project_dir).await,

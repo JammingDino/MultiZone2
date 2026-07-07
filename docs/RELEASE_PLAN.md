@@ -250,6 +250,19 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [x] Knowledge base viewer: list ingested documents with chunk count and index time; re-index, remove a document, or clear the whole index — Knowledge section in the project editor + Settings → Knowledge for the global KB
 - [x] Retrieval transparency: retrieved chunks surface as ordinary `search_knowledge` tool calls in the message thread, **and as inline `[n]` citations + a collapsible Sources list** (filtered to only the passages the model cited), mirroring web search
 
+### 0.4.4 — URL extract tool
+
+*The read-the-full-page complement to `web_search`, closing the research loop so a model can search → pick a result → read it in full. Implemented as a new `extract` tool ([extract.rs](../src-tauri/src/tools/extract.rs), fn `extract_url`) — pure-Rust, no headless browser (consistent with the native-dependency-avoidance stance), fetching each URL with `reqwest` and cleaning the HTML with the existing `scraper` dep. Registered like any built-in tool: `ToolId::Extract`, dispatch, moderate (level-1) safety like `web_search`, and an ALL_TOOLS entry ("Read URL") so it's selectable per-zone. Added to the Deep Researcher and Fact Checker curated zones (versions bumped) with a "search, then read" nudge in the Deep Researcher prompt.*
+
+*Status: built & typechecked (cargo build + `npm run build` green; 4 unit tests pass — DOM extraction, chrome stripping, image URL resolution, relevance scoring); not yet runtime-tested against live pages.*
+
+- [x] `extract` tool reads one or more URLs in full (accepts `urls[]` or a single `url`, max 10) and returns clean main text as lightweight markdown — semantic content root (`main`/`article`/`body`), headings/lists/blockquotes/pre preserved, nav/header/footer/aside/script/style/forms stripped
+- [x] Content-type guard rejects binary payloads (only HTML/text/xml read); per-URL `max_chars` budget with a `truncated` flag; concurrent fetches
+- [x] Optional `query` reranks extracted paragraphs by keyword overlap so a long page truncates least-relevant content first
+- [x] Opt-in `include_images` returns the page's image URLs, resolved to absolute against the page URL
+- [x] Inline-citation integration: each page carries a `ref` number + `citation_instructions`, mirroring `web_search`, so the existing `[n]` marker + Sources pipeline works unchanged
+- [~] *Limitations:* no headless browser, so JS-only pages return whatever static markup they ship (surfaced as a note in the tool description and an explicit "no readable text" content message); the roadmap's "advanced" depth toggle for JS-heavy/protected sites is out of scope for the pure-Rust MVP
+
 ---
 
 ## 0.5.x — Subchats & Orchestration Infrastructure

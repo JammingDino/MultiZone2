@@ -599,6 +599,7 @@ function BotTurnViewImpl({ turn, isLatest = false }: { turn: BotTurn; isLatest?:
               regenerateZoneId={p.zoneId}
               canRegenerate={isLatest}
               layout={layout}
+              branchFromMessageId={p.messageId}
               fileSources={fileSources}
             />
           ))}

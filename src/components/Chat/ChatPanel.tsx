@@ -7,6 +7,7 @@ import { MessageThread } from "./MessageThread";
 import { InputBar, type InputBarHandle } from "./InputBar";
 import { ZonePicker } from "./ZonePicker";
 import { ExportMenu } from "./ExportMenu";
+import { ConversationIndicator } from "./ConversationIndicator";
 import { HomeScreen } from "./HomeScreen";
 import { SettingsModal } from "@/components/Settings/SettingsModal";
 import { ZoneEditor } from "@/components/Zones/ZoneEditor";
@@ -261,6 +262,7 @@ export function ChatPanel() {
         <>
           <header className="flex min-h-12 flex-wrap items-center gap-2 border-b border-[var(--color-border)] px-3 py-1.5 sm:flex-nowrap sm:gap-3 sm:px-4">
             <div className="min-w-0 flex-1 truncate text-sm font-medium">{activeChat.title}</div>
+            <ConversationIndicator chatId={activeChat.id} />
             <PerspectiveZoneChips
               zones={(chatZonesByChat[activeChat.id] ?? [])
                 .map((cz) => zones.find((z) => z.id === cz.zoneId))

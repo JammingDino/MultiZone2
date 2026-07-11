@@ -1,7 +1,8 @@
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
-import { Paperclip, Send, X, FileText, Image as ImageIcon, FileType, Loader2, Square, ZoomIn, SlidersHorizontal, Zap, Brain, ScanText } from "lucide-react";
+import { Paperclip, Send, X, FileText, Image as ImageIcon, FileType, Loader2, Square, ZoomIn, SlidersHorizontal, Zap, Brain, ScanText, AudioLines } from "lucide-react";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
+import { useTts } from "@/store/tts";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
 import { useDictation, MicButton } from "@/components/Chat/useDictation";
 import type { InputPart } from "@/lib/types";
@@ -52,7 +53,24 @@ export function InputBar({ chatId, disabled, ref }: InputBarProps) {
   const taRef = useRef<HTMLTextAreaElement>(null);
   // Dictation (0.8.0): mic capture + transcribe-on-stop, shared with the
   // new-chat composer. Cancels a running recording when the chat switches.
-  const dictation = useDictation({ taRef, setText, cancelKey: chatId });
+  // In conversation mode (0.8.2) the committed transcript is auto-sent.
+  const dictation = useDictation({
+    taRef,
+    setText,
+    cancelKey: chatId,
+    onCommit: (finalText) => {
+      if (useApp.getState().conversationChatId === chatId && finalText.trim()) {
+        onSend(finalText.trim());
+      }
+    },
+  });
+  // Hands-free conversation mode (0.8.2): drives the STT → send → TTS → STT loop.
+  const conversationEnabled = useApp((s) => s.appSettings.voiceConversationEnabled);
+  const ttsConfigured = useApp((s) => !!s.appSettings.ttsProviderId && !!s.appSettings.ttsModel);
+  const conversationActive = useApp((s) => s.conversationChatId === chatId);
+  const setConversationChatId = useApp((s) => s.setConversationChatId);
+  const ttsStatus = useTts((s) => s.status);
+  const prevTtsStatusRef = useRef(ttsStatus);
   // Busy while any participant is generating — the primary OR a perspective
   // zone — so the stop button stays available until the whole turn settles.
   // cancel_stream cancels every participant at once (shared cancel flag).
@@ -61,6 +79,41 @@ export function InputBar({ chatId, disabled, ref }: InputBarProps) {
       Boolean(s.streamingByChat[chatId]) ||
       Object.keys(s.perspectiveStreamsByChat[chatId] ?? {}).length > 0,
   );
+
+  // Conversation loop: once a spoken response finishes (TTS returns to idle
+  // after playing) and nothing else is in flight, start listening again so the
+  // user can reply hands-free.
+  useEffect(() => {
+    const prev = prevTtsStatusRef.current;
+    prevTtsStatusRef.current = ttsStatus;
+    if (!conversationActive) return;
+    const wasSpeaking = prev === "playing" || prev === "paused" || prev === "loading";
+    if (wasSpeaking && ttsStatus === "idle" && !isStreaming && !dictation.voiceRecording && !dictation.transcribing) {
+      dictation.startListening();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationActive, ttsStatus, isStreaming]);
+
+  // Leaving the chat (or unmount) ends its conversation loop.
+  useEffect(() => {
+    return () => {
+      if (useApp.getState().conversationChatId === chatId) {
+        useApp.getState().setConversationChatId(null);
+        useTts.getState().stop();
+      }
+    };
+  }, [chatId]);
+
+  function toggleConversation() {
+    if (conversationActive) {
+      setConversationChatId(null);
+      dictation.cancelListening();
+      useTts.getState().stop();
+    } else {
+      setConversationChatId(chatId);
+      dictation.startListening();
+    }
+  }
 
   // One-shot overrides for the next send only. ovZone: undefined = use the
   // chat's own zone, null = Quick chat (no zone), string = a specific zone.
@@ -198,9 +251,10 @@ export function InputBar({ chatId, disabled, ref }: InputBarProps) {
     setPending((p) => p.filter((a) => a.id !== id));
   }
 
-  async function onSend() {
+  async function onSend(explicitText?: string) {
     if (sending || disabled) return;
-    const hasText = text.trim().length > 0;
+    const sourceText = explicitText ?? text;
+    const hasText = sourceText.trim().length > 0;
     if (!hasText && pending.length === 0) return;
 
     setSending(true);
@@ -210,7 +264,7 @@ export function InputBar({ chatId, disabled, ref }: InputBarProps) {
     try {
       const parts: InputPart[] = [];
       const visibleTextParts: string[] = [];
-      if (hasText) visibleTextParts.push(text.trim());
+      if (hasText) visibleTextParts.push(sourceText.trim());
 
       for (const att of pending) {
         if (att.fileType === "text") {
@@ -346,6 +400,20 @@ export function InputBar({ chatId, disabled, ref }: InputBarProps) {
             }}
           />
           <MicButton dictation={dictation} disabled={disabled} />
+          {conversationEnabled && ttsConfigured && (
+            <button
+              onClick={toggleConversation}
+              disabled={disabled}
+              title={conversationActive ? "End conversation mode" : "Start hands-free conversation"}
+              className={`rounded p-1.5 hover:bg-[var(--color-panel-hover)] disabled:opacity-40 ${
+                conversationActive
+                  ? "text-[var(--color-accent)]"
+                  : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+              }`}
+            >
+              <AudioLines size={16} className={conversationActive ? "animate-pulse" : ""} />
+            </button>
+          )}
           <div className="relative">
             <button
               onClick={() => setOvOpen((v) => !v)}
@@ -426,7 +494,7 @@ export function InputBar({ chatId, disabled, ref }: InputBarProps) {
             </button>
           ) : (
             <button
-              onClick={onSend}
+              onClick={() => onSend()}
               disabled={disabled || sending || (text.trim() === "" && pending.length === 0)}
               className="rounded bg-[var(--color-accent)] p-1.5 text-white hover:bg-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
               title="Send"

@@ -73,7 +73,11 @@ export function MessageThread({ chatId }: { chatId: string }) {
   // Auto-speak (0.8.1): stream the primary answer to TTS as it arrives, so
   // speech starts before the full response completes. A ref tracks which
   // message we've opened a streaming session for so we start/finish exactly once.
-  const autoSpeak = useApp((s) => s.appSettings.ttsAutoSpeak);
+  // Auto-speak when the setting is on, or whenever conversation mode is active
+  // for this chat (spoken responses are required for the hands-free loop).
+  const autoSpeakSetting = useApp((s) => s.appSettings.ttsAutoSpeak);
+  const conversationActive = useApp((s) => s.conversationChatId === chatId);
+  const autoSpeak = autoSpeakSetting || conversationActive;
   const ttsConfigured = useApp((s) => !!s.appSettings.ttsProviderId && !!s.appSettings.ttsModel);
   const globalVoice = useApp((s) => s.appSettings.ttsVoice);
   const chatZone = useApp((s) => {

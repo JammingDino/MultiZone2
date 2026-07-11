@@ -129,6 +129,11 @@ interface AppStore {
   cancelDictation: () => Promise<void>;
   refreshVoiceInputDevices: () => Promise<void>;
 
+  // Hands-free conversation mode (0.8.2): the chat whose STT↔TTS loop is active,
+  // or null. Transient — not persisted.
+  conversationChatId: string | null;
+  setConversationChatId: (id: string | null) => void;
+
   // ui
   settingsOpen: boolean;
   zoneEditorOpen: boolean;
@@ -326,6 +331,7 @@ export const useApp = create<AppStore>((set, get) => ({
   voiceRecording: false,
   voiceError: null,
   voiceInputDevices: [],
+  conversationChatId: null,
 
   settingsOpen: false,
   zoneEditorOpen: false,
@@ -937,6 +943,9 @@ export const useApp = create<AppStore>((set, get) => ({
     } catch (e) {
       console.warn("failed to cancel dictation", e);
     }
+  },
+  setConversationChatId(id) {
+    set({ conversationChatId: id });
   },
   async refreshVoiceInputDevices() {
     try {

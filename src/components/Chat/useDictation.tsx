@@ -22,10 +22,14 @@ export function useDictation({
   taRef,
   setText,
   cancelKey,
+  onCommit,
 }: {
   taRef: RefObject<HTMLTextAreaElement | null>;
   setText: Dispatch<SetStateAction<string>>;
   cancelKey?: string;
+  /** Fired with the final transcript once a recording is transcribed. Used by
+   *  conversation mode (0.8.2) to auto-send the utterance. */
+  onCommit?: (finalText: string) => void;
 }) {
   const sttActivationMode = useApp((s) => s.appSettings.sttActivationMode);
   const sttInsertionMode = useApp((s) => s.appSettings.sttInsertionMode);
@@ -68,6 +72,7 @@ export function useDictation({
     try {
       const finalText = await stopDictationAction();
       commitTranscript(finalText);
+      if (finalText && onCommit) onCommit(finalText);
     } catch (e) {
       setVoiceError(String(e));
     } finally {
@@ -121,6 +126,12 @@ export function useDictation({
     handleMicClick,
     handleMicPressStart,
     handleMicPressEnd,
+    // Programmatic controls for conversation mode (0.8.2).
+    startListening: beginDictation,
+    stopListening: endDictation,
+    cancelListening: () => {
+      if (voiceRecording) cancelDictationAction().catch(() => {});
+    },
   };
 }
 

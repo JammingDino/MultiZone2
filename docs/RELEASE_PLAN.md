@@ -422,10 +422,10 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ### 0.8.2 — Hands-free conversation mode
 
-- [ ] Voice conversation mode: STT input and TTS output chained into a continuous hands-free loop.
-- [ ] Barge-in — the user speaking interrupts and stops current playback
-- [ ] Conversation state indicator in the chat header (listening / thinking / speaking)
-- [ ] Fully offline when local STT + TTS are selected; API providers surfaced as a "leaves your machine" warning consistent with the local-first principle
+- [x] Voice conversation mode: STT input and TTS output chained into a continuous hands-free loop (toggle from the composer; committed transcript auto-sends, spoken response auto-restarts listening)
+- [x] Barge-in — the user speaking (starting dictation) interrupts and stops current playback
+- [x] Conversation state indicator in the chat header (listening / thinking / speaking)
+- [x] Fully offline when local STT + TTS are selected; API providers surfaced as a "leaves your machine" warning consistent with the local-first principle (noted in Settings → Voice)
 
 ---
 

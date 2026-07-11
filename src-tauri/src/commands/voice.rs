@@ -240,6 +240,14 @@ pub async fn synthesize_speech(
     let (base_url, api_key) = provider
         .ok_or_else(|| AppError::NotFound(format!("speech provider not found: {provider_id}")))?;
 
+    // If the chosen voice is a cloned voice, attach its reference clip + text so
+    // the endpoint can synthesize toward it (handled entirely in-app).
+    let reference = cloned_voice_reference(&state, &chosen_voice).await;
+    let reference = reference.as_ref().map(|(audio_b64, ref_text)| crate::tts_api::VoiceReference {
+        audio_b64,
+        ref_text,
+    });
+
     let (bytes, mime) = crate::tts_api::synthesize_via_provider(
         &state.http,
         &base_url,
@@ -248,6 +256,7 @@ pub async fn synthesize_speech(
         &chosen_voice,
         text,
         rate,
+        reference,
     )
     .await?;
     Ok(SynthesizedAudio {
@@ -279,8 +288,75 @@ pub async fn list_tts_voices(state: State<'_, AppState>) -> AppResult<Vec<String
     crate::tts_api::list_voices_via_provider(&state.http, &base_url, api_key.as_deref()).await
 }
 
-/// Registers a cloned voice: uploads the reference audio file at `audio_path`
-/// (and optional transcript) to the provider under `name`.
+// ── Cloned voices (stored in-app, sent per synthesis request) ────────────────
+//
+// A cloned voice is entirely app-side: its reference clip lives under the app
+// data dir and its transcript is stored alongside. There is no server-side
+// registration — the reference travels with each `synthesize_speech` call, so
+// any capable endpoint can clone toward it. `ClonedVoice` is what the UI sees;
+// the on-disk file name is kept internal.
+
+/// The cloned voices catalog, as exposed to the UI.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClonedVoice {
+    pub name: String,
+    pub ref_text: String,
+    #[serde(default)]
+    file: String,
+}
+
+fn cloned_voices_dir(state: &AppState) -> std::path::PathBuf {
+    state.app_data_dir.join("voices")
+}
+
+async fn read_cloned_voices(state: &AppState) -> Vec<ClonedVoice> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT value FROM settings WHERE key = 'tts_cloned_voices'")
+            .fetch_optional(&state.db)
+            .await
+            .ok()
+            .flatten();
+    row.and_then(|(raw,)| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
+}
+
+async fn write_cloned_voices(state: &AppState, voices: &[ClonedVoice]) -> AppResult<()> {
+    let json = serde_json::to_string(voices).unwrap_or_else(|_| "[]".to_string());
+    sqlx::query(
+        "INSERT INTO settings (key, value) VALUES ('tts_cloned_voices', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = ?1",
+    )
+    .bind(json)
+    .execute(&state.db)
+    .await?;
+    Ok(())
+}
+
+/// Looks up a cloned voice by name and returns (base64 audio, ref_text).
+pub async fn cloned_voice_reference(
+    state: &AppState,
+    name: &str,
+) -> Option<(String, String)> {
+    let voices = read_cloned_voices(state).await;
+    let v = voices.into_iter().find(|v| v.name == name)?;
+    let path = cloned_voices_dir(state).join(&v.file);
+    let bytes = std::fs::read(&path).ok()?;
+    Some((
+        base64::engine::general_purpose::STANDARD.encode(&bytes),
+        v.ref_text,
+    ))
+}
+
+/// The cloned voices catalog (names + transcripts) for the settings UI.
+#[tauri::command]
+pub async fn list_cloned_voices(state: State<'_, AppState>) -> AppResult<Vec<ClonedVoice>> {
+    Ok(read_cloned_voices(&state).await)
+}
+
+/// Registers a cloned voice in-app: copies the reference clip into the app data
+/// dir and records its name + transcript. The reference is sent with each
+/// synthesis request, so no server-side setup is needed.
 #[tauri::command]
 pub async fn create_cloned_voice(
     state: State<'_, AppState>,
@@ -288,28 +364,46 @@ pub async fn create_cloned_voice(
     audio_path: String,
     ref_text: String,
 ) -> AppResult<String> {
-    let name = name.trim();
+    let name = name.trim().to_string();
     if name.is_empty() {
         return Err(AppError::Invalid("voice name is required".to_string()));
     }
-    let (base_url, api_key) = tts_provider(&state).await?;
     let bytes = std::fs::read(&audio_path)
         .map_err(|e| AppError::Invalid(format!("could not read audio file {audio_path}: {e}")))?;
-    let file_name = std::path::Path::new(&audio_path)
-        .file_name()
+    let ext = std::path::Path::new(&audio_path)
+        .extension()
         .and_then(|s| s.to_str())
-        .unwrap_or("sample.wav")
-        .to_string();
-    crate::tts_api::upload_voice_via_provider(
-        &state.http,
-        &base_url,
-        api_key.as_deref(),
-        name,
-        ref_text.trim(),
-        &file_name,
-        bytes,
-    )
-    .await
+        .unwrap_or("wav")
+        .to_ascii_lowercase();
+
+    let dir = cloned_voices_dir(&state);
+    std::fs::create_dir_all(&dir)?;
+    let file = format!("{}.{ext}", crate::commands::new_id());
+    std::fs::write(dir.join(&file), &bytes)
+        .map_err(|e| AppError::Other(format!("could not store voice sample: {e}")))?;
+
+    let mut voices = read_cloned_voices(&state).await;
+    // Replace an existing same-named voice (and delete its old file).
+    if let Some(existing) = voices.iter().position(|v| v.name == name) {
+        let old = voices.remove(existing);
+        let _ = std::fs::remove_file(dir.join(&old.file));
+    }
+    voices.push(ClonedVoice { name: name.clone(), ref_text: ref_text.trim().to_string(), file });
+    write_cloned_voices(&state, &voices).await?;
+    Ok(name)
+}
+
+/// Deletes a cloned voice and its stored reference clip.
+#[tauri::command]
+pub async fn delete_cloned_voice(state: State<'_, AppState>, name: String) -> AppResult<()> {
+    let dir = cloned_voices_dir(&state);
+    let mut voices = read_cloned_voices(&state).await;
+    if let Some(pos) = voices.iter().position(|v| v.name == name) {
+        let removed = voices.remove(pos);
+        let _ = std::fs::remove_file(dir.join(&removed.file));
+        write_cloned_voices(&state, &voices).await?;
+    }
+    Ok(())
 }
 
 /// Transcribes an existing audio file through the configured STT provider —

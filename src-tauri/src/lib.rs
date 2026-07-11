@@ -180,7 +180,9 @@ pub fn run() {
             commands::voice::synthesize_speech,
             commands::voice::summarize_for_speech,
             commands::voice::list_tts_voices,
+            commands::voice::list_cloned_voices,
             commands::voice::create_cloned_voice,
+            commands::voice::delete_cloned_voice,
             commands::voice::transcribe_audio_file,
         ])
         .run(tauri::generate_context!())

@@ -11,6 +11,13 @@ use reqwest::Client;
 
 use crate::error::{AppError, AppResult};
 
+/// A cloned-voice reference passed alongside a synthesis request: the base64
+/// reference clip and its transcript.
+pub struct VoiceReference<'a> {
+    pub audio_b64: &'a str,
+    pub ref_text: &'a str,
+}
+
 /// POSTs `text` to a provider's OpenAI-compatible speech endpoint and returns
 /// the synthesized audio bytes (MP3). `voice`, `model` and `speed` map onto the
 /// standard `/audio/speech` request fields; `speed` is clamped to the range the
@@ -23,17 +30,30 @@ pub async fn synthesize_via_provider(
     voice: &str,
     text: &str,
     speed: f32,
+    reference: Option<VoiceReference<'_>>,
 ) -> AppResult<(Vec<u8>, String)> {
     let url = format!("{}/audio/speech", base_url.trim_end_matches('/'));
     let speed = speed.clamp(0.25, 4.0);
 
-    let body = serde_json::json!({
+    let mut body = serde_json::json!({
         "model": model,
         "input": text,
         "voice": voice,
         "response_format": "mp3",
         "speed": speed,
     });
+
+    // Voice cloning is handled per-request: when a cloned voice is selected the
+    // reference clip + its transcript ride along with the synthesis call, and a
+    // capable server (e.g. an F5-TTS shim) generates the audio toward that voice.
+    // Servers that don't clone simply ignore these fields and use `voice`.
+    if let Some(r) = reference {
+        if let Some(obj) = body.as_object_mut() {
+            obj.insert("reference_audio".into(), serde_json::Value::String(r.audio_b64.to_string()));
+            obj.insert("reference_text".into(), serde_json::Value::String(r.ref_text.to_string()));
+        }
+        tracing::info!("TTS request includes a cloned-voice reference ({} b64 chars, ref_text {} chars)", r.audio_b64.len(), r.ref_text.chars().count());
+    }
 
     // Diagnostics: this whole path prints to the `npm run tauri dev` console
     // (debug builds log at `multizone=debug`). It's the quickest way to tell a
@@ -152,61 +172,3 @@ pub async fn list_voices_via_provider(
     }
 }
 
-/// Registers a cloned voice by uploading a reference clip (and optional
-/// transcript) to the shim's `POST {base_url}/audio/voices` endpoint. Returns
-/// the name the provider stored it under.
-pub async fn upload_voice_via_provider(
-    http: &Client,
-    base_url: &str,
-    api_key: Option<&str>,
-    name: &str,
-    ref_text: &str,
-    file_name: &str,
-    audio_bytes: Vec<u8>,
-) -> AppResult<String> {
-    let url = format!("{}/audio/voices", base_url.trim_end_matches('/'));
-    let mime = mime_for_audio(file_name);
-    let form = reqwest::multipart::Form::new()
-        .text("name", name.to_string())
-        .text("ref_text", ref_text.to_string())
-        .part(
-            "file",
-            reqwest::multipart::Part::bytes(audio_bytes)
-                .file_name(file_name.to_string())
-                .mime_str(mime)?,
-        );
-
-    let mut req = http.post(&url).multipart(form);
-    if let Some(key) = api_key {
-        if !key.is_empty() {
-            req = req.bearer_auth(key);
-        }
-    }
-    let res = req.send().await.map_err(|e| {
-        AppError::Provider(format!(
-            "could not reach voice-upload endpoint {url}: {e} — does this provider support cloning?"
-        ))
-    })?;
-    let status = res.status();
-    if !status.is_success() {
-        let body = res.text().await.unwrap_or_default();
-        tracing::error!("voice upload {status} at {url}: {body}");
-        return Err(AppError::Provider(format!(
-            "voice upload failed ({status}): {body} — this provider may not support voice cloning"
-        )));
-    }
-    Ok(name.to_string())
-}
-
-/// Best-effort MIME for a reference audio file by extension.
-fn mime_for_audio(file_name: &str) -> &'static str {
-    match file_name.rsplit('.').next().map(str::to_ascii_lowercase).as_deref() {
-        Some("wav") => "audio/wav",
-        Some("mp3") => "audio/mpeg",
-        Some("m4a") | Some("mp4") => "audio/mp4",
-        Some("ogg") => "audio/ogg",
-        Some("flac") => "audio/flac",
-        Some("webm") => "audio/webm",
-        _ => "application/octet-stream",
-    }
-}

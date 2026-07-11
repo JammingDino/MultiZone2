@@ -851,6 +851,7 @@ function SpeechSynthesisSettings() {
   const providers = useApp((s) => s.providers);
   const [providerModels, setProviderModels] = useState<string[]>([]);
   const [serverVoices, setServerVoices] = useState<string[]>([]);
+  const [clonedVoices, setClonedVoices] = useState<string[]>([]);
 
   useEffect(() => {
     if (!appSettings.ttsProviderId) { setProviderModels([]); return; }
@@ -872,7 +873,15 @@ function SpeechSynthesisSettings() {
     return () => { cancelled = true; };
   }, [appSettings.ttsProviderId, appSettings.ttsModel]);
 
-  const voiceOptions = Array.from(new Set([...serverVoices, ...COMMON_TTS_VOICES]));
+  useEffect(() => {
+    let cancelled = false;
+    api.listClonedVoices()
+      .then((v) => { if (!cancelled) setClonedVoices(v.map((c) => c.name)); })
+      .catch(() => { if (!cancelled) setClonedVoices([]); });
+    return () => { cancelled = true; };
+  }, [appSettings.ttsVoice]);
+
+  const voiceOptions = Array.from(new Set([...clonedVoices, ...serverVoices, ...COMMON_TTS_VOICES]));
 
   return (
     <>
@@ -1025,15 +1034,14 @@ function VoiceCloningSettings() {
   const [refText, setRefText] = useState("");
   const [busy, setBusy] = useState<null | "transcribing" | "creating">(null);
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
-  const [voices, setVoices] = useState<string[]>([]);
+  const [voices, setVoices] = useState<import("@/lib/tauri").ClonedVoice[]>([]);
 
   const canConfigureProvider = !!appSettings.ttsProviderId && !!appSettings.ttsModel;
 
   const refreshVoices = () => {
-    if (!canConfigureProvider) { setVoices([]); return; }
-    api.listTtsVoices().then(setVoices).catch(() => setVoices([]));
+    api.listClonedVoices().then(setVoices).catch(() => setVoices([]));
   };
-  useEffect(() => { if (supported) refreshVoices(); /* eslint-disable-next-line */ }, [supported, appSettings.ttsProviderId, appSettings.ttsModel]);
+  useEffect(() => { refreshVoices(); }, []);
 
   async function pickAudio() {
     const picked = await open({
@@ -1081,11 +1089,12 @@ function VoiceCloningSettings() {
       </div>
       <p className="mb-3 text-xs text-[var(--color-text-muted)]">
         Some speech models can clone a voice from a short sample (e.g. a local F5-TTS server); most
-        hosted providers (like OpenAI) cannot — they only offer fixed built-in voices. Enable this only
-        if your speech provider supports cloning via a <span className="font-mono">/audio/voices</span> upload.
+        hosted providers (like OpenAI) cannot — they only offer fixed built-in voices. Cloning is
+        handled entirely in-app: your reference clip and its transcript are sent with each request, so
+        no server-side setup is needed. Enable this only if your speech model supports cloning.
       </p>
       <ToggleRow
-        label="My speech provider supports voice cloning"
+        label="My speech model supports voice cloning"
         checked={supported}
         onChange={(v) => setAppSettings({ ttsSupportsCloning: v })}
       />
@@ -1164,17 +1173,30 @@ function VoiceCloningSettings() {
 
           {voices.length > 0 && (
             <div className="border-t border-[var(--color-border)] pt-2">
-              <p className="mb-1 text-[11px] text-[var(--color-text-muted)]">Voices on this provider</p>
-              <div className="flex flex-wrap gap-1">
+              <p className="mb-1 text-[11px] text-[var(--color-text-muted)]">Your cloned voices</p>
+              <div className="flex flex-col gap-1">
                 {voices.map((v) => (
-                  <button
-                    key={v}
-                    onClick={() => setAppSettings({ ttsVoice: v })}
-                    className={`rounded-full border px-2 py-0.5 text-xs ${appSettings.ttsVoice === v ? "border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]" : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-accent)]"}`}
-                    title="Use this voice"
-                  >
-                    {v}
-                  </button>
+                  <div key={v.name} className="flex items-center gap-2">
+                    <button
+                      onClick={() => setAppSettings({ ttsVoice: v.name })}
+                      className={`rounded-full border px-2 py-0.5 text-xs ${appSettings.ttsVoice === v.name ? "border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]" : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-accent)]"}`}
+                      title="Use this voice"
+                    >
+                      {v.name}{appSettings.ttsVoice === v.name ? " ✓" : ""}
+                    </button>
+                    {v.refText && (
+                      <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--color-text-muted)]" title={v.refText}>
+                        {v.refText}
+                      </span>
+                    )}
+                    <button
+                      onClick={async () => { await api.deleteClonedVoice(v.name); refreshVoices(); }}
+                      className="text-[var(--color-text-muted)] hover:text-red-500"
+                      title="Delete voice"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
                 ))}
               </div>
             </div>

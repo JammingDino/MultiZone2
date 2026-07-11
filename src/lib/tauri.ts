@@ -323,9 +323,16 @@ export const summarizeForSpeech = (chatId: string, text: string) =>
   invoke<string>("summarize_for_speech", { chatId, text });
 /** List voices offered by the configured speech provider (empty if unsupported). */
 export const listTtsVoices = () => invoke<string[]>("list_tts_voices");
-/** Register a cloned voice from a reference audio file + optional transcript. */
+/** A cloned voice stored in-app: its name and reference transcript. */
+export interface ClonedVoice { name: string; refText: string }
+/** The in-app cloned voices catalog. */
+export const listClonedVoices = () => invoke<ClonedVoice[]>("list_cloned_voices");
+/** Register a cloned voice from a reference audio file + optional transcript (stored in-app). */
 export const createClonedVoice = (name: string, audioPath: string, refText: string) =>
   invoke<string>("create_cloned_voice", { name, audioPath, refText });
+/** Delete a cloned voice and its stored reference clip. */
+export const deleteClonedVoice = (name: string) =>
+  invoke<void>("delete_cloned_voice", { name });
 /** Transcribe an audio file via the STT provider (auto-fill a clone's transcript). */
 export const transcribeAudioFile = (audioPath: string) =>
   invoke<string>("transcribe_audio_file", { audioPath });

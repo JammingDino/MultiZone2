@@ -256,6 +256,99 @@ pub async fn synthesize_speech(
     })
 }
 
+/// Resolves the configured TTS provider's (base_url, api_key), or a typed error
+/// prompting configuration. Shared by the voice-cloning commands.
+async fn tts_provider(state: &AppState) -> AppResult<(String, Option<String>)> {
+    let settings = read_tts_settings(state).await;
+    let provider_id = settings.tts_provider_id.ok_or_else(|| {
+        AppError::Invalid("no speech provider configured — pick one in Settings → Voice".to_string())
+    })?;
+    let provider: Option<(String, Option<String>)> =
+        sqlx::query_as("SELECT base_url, api_key FROM providers WHERE id = ?1")
+            .bind(&provider_id)
+            .fetch_optional(&state.db)
+            .await?;
+    provider.ok_or_else(|| AppError::NotFound(format!("speech provider not found: {provider_id}")))
+}
+
+/// Lists the voices the configured speech provider offers (via its shim-only
+/// `/audio/voices` endpoint). Empty when the provider doesn't expose one.
+#[tauri::command]
+pub async fn list_tts_voices(state: State<'_, AppState>) -> AppResult<Vec<String>> {
+    let (base_url, api_key) = tts_provider(&state).await?;
+    crate::tts_api::list_voices_via_provider(&state.http, &base_url, api_key.as_deref()).await
+}
+
+/// Registers a cloned voice: uploads the reference audio file at `audio_path`
+/// (and optional transcript) to the provider under `name`.
+#[tauri::command]
+pub async fn create_cloned_voice(
+    state: State<'_, AppState>,
+    name: String,
+    audio_path: String,
+    ref_text: String,
+) -> AppResult<String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(AppError::Invalid("voice name is required".to_string()));
+    }
+    let (base_url, api_key) = tts_provider(&state).await?;
+    let bytes = std::fs::read(&audio_path)
+        .map_err(|e| AppError::Invalid(format!("could not read audio file {audio_path}: {e}")))?;
+    let file_name = std::path::Path::new(&audio_path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("sample.wav")
+        .to_string();
+    crate::tts_api::upload_voice_via_provider(
+        &state.http,
+        &base_url,
+        api_key.as_deref(),
+        name,
+        ref_text.trim(),
+        &file_name,
+        bytes,
+    )
+    .await
+}
+
+/// Transcribes an existing audio file through the configured STT provider —
+/// used to auto-fill a cloned voice's reference transcript from its sample.
+#[tauri::command]
+pub async fn transcribe_audio_file(
+    state: State<'_, AppState>,
+    audio_path: String,
+) -> AppResult<String> {
+    let settings = read_stt_settings(&state).await;
+    let provider_id = settings.stt_provider_id.ok_or_else(|| {
+        AppError::Invalid("no dictation provider configured — pick one in Settings → Voice".to_string())
+    })?;
+    if settings.stt_model.is_empty() {
+        return Err(AppError::Invalid(
+            "no dictation model selected — pick one in Settings → Voice".to_string(),
+        ));
+    }
+    let provider: Option<(String, Option<String>)> =
+        sqlx::query_as("SELECT base_url, api_key FROM providers WHERE id = ?1")
+            .bind(&provider_id)
+            .fetch_optional(&state.db)
+            .await?;
+    let (base_url, api_key) = provider
+        .ok_or_else(|| AppError::NotFound(format!("dictation provider not found: {provider_id}")))?;
+    let bytes = std::fs::read(&audio_path)
+        .map_err(|e| AppError::Invalid(format!("could not read audio file {audio_path}: {e}")))?;
+    let lang = if settings.stt_language.is_empty() { None } else { Some(settings.stt_language.clone()) };
+    crate::stt_api::transcribe_via_provider(
+        &state.http,
+        &base_url,
+        api_key.as_deref(),
+        &settings.stt_model,
+        bytes,
+        lang.as_deref(),
+    )
+    .await
+}
+
 /// Condenses a long assistant response into a short, speech-friendly summary
 /// so text-to-speech doesn't read out massive verbose blocks (code, tables,
 /// long enumerations). Runs through the chat's effective zone/provider — the

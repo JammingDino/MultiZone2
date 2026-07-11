@@ -1,20 +1,27 @@
 import { create } from "zustand";
 import * as api from "@/lib/tauri";
+import { useApp } from "@/store/app";
 
 /**
  * Text-to-speech playback (0.8.1). A single-active-session player that
- * synthesizes text through the configured provider and plays the returned MP3
+ * synthesizes text through the configured provider and plays the returned audio
  * clips back to back.
+ *
+ * Synthesis is pipelined ahead of playback: while a clip is playing, the next
+ * few sentences are synthesized in parallel (up to a configurable batch), so
+ * playback of clip N+1 can begin the instant clip N finishes rather than
+ * waiting for a fresh round-trip. Clips are always *played* in order, even
+ * though their synthesis may finish out of order.
  *
  * Two entry points feed the same queue:
  *  - `readAloud` — one-shot "Read aloud" of a finished message (optionally
- *    LLM-summarized first), split into sentences and queued all at once.
+ *    LLM-summarized first), split into sentences.
  *  - `startStreaming` / `feedStreaming` / `finishStreaming` — auto-speak, where
  *    sentences are queued as they arrive so speech starts before the full
  *    answer completes.
  *
- * Audio element + queue live in module scope (not the store) so token streaming
- * doesn't churn React; the store holds only the reactive status the UI reads.
+ * Audio element + buffers live in module scope (not the store) so token
+ * streaming doesn't churn React; the store holds only the reactive status.
  */
 
 export type TtsStatus = "idle" | "loading" | "playing" | "paused";
@@ -37,8 +44,14 @@ interface TtsStore {
   stop: () => void;
 }
 
-/** A zone's per-zone default voice (0.8.1), stored under `tts_voice` in its
- *  tool_config JSON. Returns null when unset so the global default wins. */
+/** A/A/A prefetch/concurrency default when the setting isn't available. */
+const DEFAULT_PREFETCH = 3;
+
+/** A synthesized clip, ready to play. */
+type Clip = { audio: string; mime: string };
+
+/** `zoneVoice` — a zone's per-zone default voice (0.8.1), stored under
+ *  `tts_voice` in its tool_config JSON. Returns null when unset. */
 export function zoneVoice(toolConfig: string | null | undefined): string | null {
   if (!toolConfig) return null;
   try {
@@ -49,22 +62,32 @@ export function zoneVoice(toolConfig: string | null | undefined): string | null 
   }
 }
 
-// ── Module-scoped playback engine ────────────────────────────────────────────
+// ── Module-scoped pipelined playback engine ──────────────────────────────────
 
 /** Bumped on every new session / stop; in-flight async work checks it to bail. */
 let sessionToken = 0;
-let queue: string[] = [];
+/** All text chunks appended so far (append-only within a session). */
+let chunksList: string[] = [];
+/** Next chunk index to hand to synthesis. */
+let nextSynthIndex = 0;
+/** Next clip index to play (playback is strictly in order). */
+let nextPlayIndex = 0;
+/** Synthesized-but-not-yet-played clips, keyed by chunk index. */
+const results = new Map<number, Clip>();
+/** Count of synthesis requests currently in flight. */
+let inFlight = 0;
 /** True while more chunks may still be fed (streaming not yet finished). */
 let streamingOpen = false;
-let workerRunning = false;
+let consumerRunning = false;
 let paused = false;
 let currentAudio: HTMLAudioElement | null = null;
 let voice: string | null = null;
+let batchSize = DEFAULT_PREFETCH;
 /** The message id of the active session, for attributing errors in the UI. */
 let sessionMessageId: string | null = null;
 /** Buffer of not-yet-sentence-complete streamed text. */
 let pendingBuffer = "";
-/** Count of sentences already queued for the active streaming session. */
+/** Count of sentences already appended for the active streaming session. */
 let emittedCount = 0;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -126,9 +149,50 @@ function setStatus(status: TtsStatus) {
   store?.set({ status });
 }
 
-function playBase64(b64: string, mime: string, token: number): Promise<void> {
+/**
+ * Kick off as many synthesis requests as the batch allows. Requests run in
+ * parallel (`inFlight` capped at `batchSize`) and never get more than
+ * `batchSize` chunks ahead of playback, so memory stays bounded. Results land
+ * in `results` keyed by index; the consumer plays them in order.
+ */
+function pump(token: number) {
+  while (
+    token === sessionToken &&
+    inFlight < batchSize &&
+    nextSynthIndex < chunksList.length &&
+    nextSynthIndex < nextPlayIndex + batchSize
+  ) {
+    const idx = nextSynthIndex++;
+    const chunk = cleanForSpeech(chunksList[idx]);
+    if (!chunk) {
+      // Nothing speakable — store an empty clip so the consumer skips it.
+      results.set(idx, { audio: "", mime: "" });
+      continue;
+    }
+    inFlight++;
+    api
+      .synthesizeSpeech(chunk, voice)
+      .then((res) => {
+        if (token !== sessionToken) return;
+        results.set(idx, res);
+      })
+      .catch((e) => {
+        if (token !== sessionToken) return;
+        console.error("[tts] synthesis failed:", e);
+        const failedId = sessionMessageId;
+        stopEngine();
+        store?.set({ error: String(e), errorMessageId: failedId });
+      })
+      .finally(() => {
+        inFlight--;
+        pump(token);
+      });
+  }
+}
+
+function playClip(clip: Clip, token: number): Promise<void> {
   return new Promise((resolve) => {
-    const audio = new Audio(`data:${mime || "audio/mpeg"};base64,${b64}`);
+    const audio = new Audio(`data:${clip.mime || "audio/mpeg"};base64,${clip.audio}`);
     currentAudio = audio;
     const done = () => {
       if (currentAudio === audio) currentAudio = null;
@@ -140,59 +204,60 @@ function playBase64(b64: string, mime: string, token: number): Promise<void> {
       setStatus("playing");
       audio.play().catch(done);
     } else if (paused) {
-      // Loaded but held; UI shows paused. Resume() will start it.
       setStatus("paused");
     }
   });
 }
 
-async function runWorker(token: number) {
-  if (workerRunning) return;
-  workerRunning = true;
+/** The single ordered playback loop for a session. */
+async function runConsumer(token: number) {
+  if (consumerRunning) return;
+  consumerRunning = true;
   try {
     while (token === sessionToken) {
       while (paused && token === sessionToken) await sleep(120);
       if (token !== sessionToken) break;
-      if (queue.length === 0) {
-        if (!streamingOpen) break;
-        setStatus((currentAudio ? "playing" : "loading"));
-        await sleep(80);
+
+      const clip = results.get(nextPlayIndex);
+      if (clip) {
+        results.delete(nextPlayIndex);
+        nextPlayIndex++;
+        pump(token); // window advanced — prefetch further ahead
+        if (clip.audio) await playClip(clip, token);
         continue;
       }
-      const raw = queue.shift()!;
-      const chunk = cleanForSpeech(raw);
-      if (!chunk) continue;
-      if (!currentAudio) setStatus("loading");
-      let res: { audio: string; mime: string } | null = null;
-      try {
-        res = await api.synthesizeSpeech(chunk, voice);
-      } catch (e) {
-        // Surfaced in the UI (Read-aloud button row) and logged to the webview
-        // console; the backend logs the full request/response to the tauri dev
-        // terminal. Between the two you can tell endpoint vs. model vs. voice.
-        console.error("[tts] synthesis failed:", e);
-        const failedId = sessionMessageId;
-        stopEngine();
-        store?.set({ error: String(e), errorMessageId: failedId });
-        return;
-      }
-      if (token !== sessionToken) break;
-      if (res && res.audio) await playBase64(res.audio, res.mime, token);
+
+      // Nothing ready to play at the front of the queue.
+      const allChunksKnown = !streamingOpen;
+      if (allChunksKnown && nextPlayIndex >= chunksList.length) break; // done
+      // Otherwise we're waiting on synthesis (or more streamed text).
+      setStatus(currentAudio ? "playing" : "loading");
+      pump(token);
+      await sleep(60);
     }
   } finally {
-    workerRunning = false;
-    if (token === sessionToken && queue.length === 0 && !streamingOpen && !currentAudio) {
+    consumerRunning = false;
+    if (token === sessionToken && nextPlayIndex >= chunksList.length && !streamingOpen && !currentAudio) {
       store?.set({ activeMessageId: null, status: "idle" });
     }
   }
 }
 
+function resetBuffers() {
+  chunksList = [];
+  nextSynthIndex = 0;
+  nextPlayIndex = 0;
+  results.clear();
+  inFlight = 0;
+  pendingBuffer = "";
+  emittedCount = 0;
+}
+
 function stopEngine() {
   sessionToken++;
-  queue = [];
   streamingOpen = false;
   paused = false;
-  pendingBuffer = "";
+  resetBuffers();
   if (currentAudio) {
     currentAudio.onended = null;
     currentAudio.onerror = null;
@@ -202,18 +267,22 @@ function stopEngine() {
   store?.set({ activeMessageId: null, status: "idle" });
 }
 
+function currentPrefetch(): number {
+  const n = useApp.getState().appSettings.ttsPrefetch;
+  return typeof n === "number" && n >= 1 ? Math.min(n, 8) : DEFAULT_PREFETCH;
+}
+
 function beginSession(messageId: string, v: string | null, open: boolean) {
   stopEngine();
   const token = ++sessionToken;
-  queue = [];
   streamingOpen = open;
   paused = false;
-  pendingBuffer = "";
-  emittedCount = 0;
+  resetBuffers();
   voice = v;
+  batchSize = DEFAULT_PREFETCH;
   sessionMessageId = messageId;
   store?.set({ activeMessageId: messageId, status: "loading", error: null, errorMessageId: null });
-  runWorker(token);
+  runConsumer(token);
   return token;
 }
 
@@ -234,9 +303,10 @@ export const useTts = create<TtsStore>((set, get) => {
         stopEngine();
         return;
       }
+      const settings = useApp.getState().appSettings;
       const token = beginSession(messageId, v, false);
+      batchSize = currentPrefetch();
       let toSpeak = text;
-      const settings = (await import("@/store/app")).useApp.getState().appSettings;
       if (settings.ttsAutoSummarize && text.length > settings.ttsSummarizeThreshold) {
         try {
           const summary = await api.summarizeForSpeech(chatId, text);
@@ -248,38 +318,36 @@ export const useTts = create<TtsStore>((set, get) => {
       }
       const [sentences] = drainSentences(toSpeak, true);
       if (token !== sessionToken) return;
-      queue.push(...sentences);
+      chunksList.push(...sentences);
       streamingOpen = false;
-      runWorker(token);
+      pump(token);
     },
 
     startStreaming(messageId, v) {
-      beginSession(messageId, v, true);
+      const token = beginSession(messageId, v, true);
+      batchSize = currentPrefetch();
+      void token;
     },
 
     feedStreaming(fullTextSoFar) {
       if (!streamingOpen) return;
-      // Recompute from the full accumulated text each call — cheap and avoids
-      // drift versus tracking deltas across React renders.
       const [sentences, remainder] = drainSentences(fullTextSoFar, false);
-      // Only enqueue sentences we haven't queued before: track by consuming from
-      // pendingBuffer length. Simplest correct approach: derive newly-complete
-      // sentences by diffing against what we've already emitted.
-      const alreadyEmitted = emittedCount;
-      if (sentences.length > alreadyEmitted) {
-        const fresh = sentences.slice(alreadyEmitted);
-        queue.push(...fresh);
+      if (sentences.length > emittedCount) {
+        const fresh = sentences.slice(emittedCount);
+        chunksList.push(...fresh);
         emittedCount = sentences.length;
+        pump(sessionToken);
       }
       pendingBuffer = remainder;
     },
 
     finishStreaming() {
       if (!streamingOpen) return;
-      if (pendingBuffer.trim()) queue.push(pendingBuffer.trim());
+      if (pendingBuffer.trim()) chunksList.push(pendingBuffer.trim());
       pendingBuffer = "";
       emittedCount = 0;
       streamingOpen = false;
+      pump(sessionToken);
     },
 
     pause() {

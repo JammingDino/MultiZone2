@@ -321,3 +321,11 @@ export const synthesizeSpeech = (text: string, voice: string | null) =>
 /** Condense a long response into a short spoken summary via the chat's model. */
 export const summarizeForSpeech = (chatId: string, text: string) =>
   invoke<string>("summarize_for_speech", { chatId, text });
+/** List voices offered by the configured speech provider (empty if unsupported). */
+export const listTtsVoices = () => invoke<string[]>("list_tts_voices");
+/** Register a cloned voice from a reference audio file + optional transcript. */
+export const createClonedVoice = (name: string, audioPath: string, refText: string) =>
+  invoke<string>("create_cloned_voice", { name, audioPath, refText });
+/** Transcribe an audio file via the STT provider (auto-fill a clone's transcript). */
+export const transcribeAudioFile = (audioPath: string) =>
+  invoke<string>("transcribe_audio_file", { audioPath });

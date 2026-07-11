@@ -522,6 +522,18 @@ export interface AppSettings {
   /** Automatically speak assistant responses as they stream in. */
   ttsAutoSpeak: boolean;
   /**
+   * How many sentences to synthesize in parallel ahead of playback (1–8). Higher
+   * values start later clips sooner (less gap between sentences) at the cost of
+   * more concurrent requests to the provider.
+   */
+  ttsPrefetch: number;
+  /**
+   * Whether the selected speech provider supports voice cloning via an
+   * OpenAI-shim `/audio/voices` upload endpoint (e.g. a local F5-TTS server).
+   * Gates the voice-cloning UI; most hosted providers (OpenAI) do not.
+   */
+  ttsSupportsCloning: boolean;
+  /**
    * Hands-free conversation mode (0.8.2): after a spoken response finishes,
    * automatically start listening again so the user can reply by voice, chaining
    * STT → send → TTS → STT into a continuous loop.
@@ -575,6 +587,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   ttsAutoSummarize: false,
   ttsSummarizeThreshold: 800,
   ttsAutoSpeak: false,
+  ttsPrefetch: 3,
+  ttsSupportsCloning: false,
   voiceConversationEnabled: false,
 };
 

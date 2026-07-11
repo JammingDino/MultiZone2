@@ -427,6 +427,14 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [x] Conversation state indicator in the chat header (listening / thinking / speaking)
 - [x] Fully offline when local STT + TTS are selected; API providers surfaced as a "leaves your machine" warning consistent with the local-first principle (noted in Settings → Voice)
 
+### 0.8.3 — Speech pipelining & voice cloning
+
+- [x] Pipelined synthesis: upcoming sentences are synthesized in parallel ahead of playback (configurable prefetch depth, 1–8) so the next clip is ready the instant the current one ends, instead of a synth round-trip per sentence; clips still play strictly in order
+- [x] Voice cloning: upload a reference sample + transcript (with optional auto-transcription of the sample via the STT provider) to register a named custom voice, for providers that support it (e.g. a local F5-TTS OpenAI-shim exposing `/audio/voices`); capability is a clearly-labelled toggle since most hosted providers don't support it
+- [x] Provider-advertised voices: the voice field autocompletes from the provider's `/audio/voices` list when available, falling back to free text
+- [x] Settings: split Voice into dedicated **Dictation** (STT) and **Speech** (TTS, cloning, conversation) sections
+- [x] Response MIME pass-through so speech providers that return WAV (not MP3) play correctly
+
 ---
 
 ## 1.0.0 — Hardening & Public Release

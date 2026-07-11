@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { X, Plus, Trash2, RefreshCw, Server, Palette, MessageSquare, Database, AlertTriangle, Loader2, Folder, FolderOpen, Globe, Copy, Check, Search, Brain, Sparkles, FileUp, FileDown, Plug, Wifi, WifiOff, Library, ChevronDown, Mic } from "lucide-react";
+import { X, Plus, Trash2, RefreshCw, Server, Palette, MessageSquare, Database, AlertTriangle, Loader2, Folder, FolderOpen, Globe, Copy, Check, Search, Brain, Sparkles, FileUp, FileDown, Plug, Wifi, WifiOff, Library, ChevronDown, Mic, Volume2, AudioLines } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useApp } from "@/store/app";
 import type { BackgroundEffect } from "@/store/app";
@@ -10,7 +10,7 @@ import { VisionOverrideSelect } from "@/components/common/VisionOverrideSelect";
 import { Modal, ModalTitle } from "@/components/common/Modal";
 import type { DbStats, GlobalKbView, IndexSummary, KbDocument, McpServerView, McpTool, Provider, Skill } from "@/lib/types";
 
-type Tab = "providers" | "appearance" | "chat" | "voice" | "search" | "skills" | "mcp" | "knowledge" | "memory" | "api" | "data";
+type Tab = "providers" | "appearance" | "chat" | "voice" | "speech" | "search" | "skills" | "mcp" | "knowledge" | "memory" | "api" | "data";
 
 export function SettingsModal() {
   const closeSettings = useApp((s) => s.closeSettings);
@@ -27,7 +27,8 @@ export function SettingsModal() {
             <NavGroup label="Interface" />
             <TabButton active={tab === "appearance"} icon={<Palette size={14} />} label="Appearance" onClick={() => setTab("appearance")} />
             <TabButton active={tab === "chat"} icon={<MessageSquare size={14} />} label="Chat" onClick={() => setTab("chat")} />
-            <TabButton active={tab === "voice"} icon={<Mic size={14} />} label="Voice" onClick={() => setTab("voice")} />
+            <TabButton active={tab === "voice"} icon={<Mic size={14} />} label="Dictation" onClick={() => setTab("voice")} />
+            <TabButton active={tab === "speech"} icon={<Volume2 size={14} />} label="Speech" onClick={() => setTab("speech")} />
 
             <NavGroup label="Tools & context" />
             <TabButton active={tab === "search"} icon={<Search size={14} />} label="Search" onClick={() => setTab("search")} />
@@ -45,6 +46,7 @@ export function SettingsModal() {
             {tab === "appearance" && <AppearanceTab />}
             {tab === "chat" && <ChatTab />}
             {tab === "voice" && <VoiceTab />}
+            {tab === "speech" && <SpeechTab />}
             {tab === "search" && <SearchTab />}
             {tab === "skills" && <SkillsTab />}
             {tab === "mcp" && <McpTab />}
@@ -823,10 +825,6 @@ function VoiceTab() {
           </div>
         )}
       </section>
-
-      <div className="my-2 border-t border-[var(--color-border)]" />
-      <SpeechSynthesisSettings />
-      <ConversationModeSettings />
     </div>
   );
 }
@@ -835,11 +833,24 @@ function VoiceTab() {
 
 const COMMON_TTS_VOICES = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"];
 
+function SpeechTab() {
+  return (
+    <div className="flex flex-col gap-6">
+      <SpeechSynthesisSettings />
+      <div className="border-t border-[var(--color-border)]" />
+      <VoiceCloningSettings />
+      <div className="border-t border-[var(--color-border)]" />
+      <ConversationModeSettings />
+    </div>
+  );
+}
+
 function SpeechSynthesisSettings() {
   const appSettings = useApp((s) => s.appSettings);
   const setAppSettings = useApp((s) => s.setAppSettings);
   const providers = useApp((s) => s.providers);
   const [providerModels, setProviderModels] = useState<string[]>([]);
+  const [serverVoices, setServerVoices] = useState<string[]>([]);
 
   useEffect(() => {
     if (!appSettings.ttsProviderId) { setProviderModels([]); return; }
@@ -849,6 +860,19 @@ function SpeechSynthesisSettings() {
       .catch(() => { if (!cancelled) setProviderModels([]); });
     return () => { cancelled = true; };
   }, [appSettings.ttsProviderId]);
+
+  // Voices advertised by the provider itself (a local shim's /audio/voices),
+  // merged with the OpenAI names as datalist suggestions.
+  useEffect(() => {
+    if (!appSettings.ttsProviderId || !appSettings.ttsModel) { setServerVoices([]); return; }
+    let cancelled = false;
+    api.listTtsVoices()
+      .then((v) => { if (!cancelled) setServerVoices(v); })
+      .catch(() => { if (!cancelled) setServerVoices([]); });
+    return () => { cancelled = true; };
+  }, [appSettings.ttsProviderId, appSettings.ttsModel]);
+
+  const voiceOptions = Array.from(new Set([...serverVoices, ...COMMON_TTS_VOICES]));
 
   return (
     <>
@@ -894,8 +918,21 @@ function SpeechSynthesisSettings() {
               className="w-full rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 text-sm outline-none focus:border-[var(--color-accent)]"
             />
             <datalist id="tts-voice-options">
-              {COMMON_TTS_VOICES.map((v) => <option key={v} value={v} />)}
+              {voiceOptions.map((v) => <option key={v} value={v} />)}
             </datalist>
+            {serverVoices.length > 0 && (
+              <p className="text-[11px] text-[var(--color-text-muted)]">
+                Voices from this provider: {serverVoices.map((v) => (
+                  <button
+                    key={v}
+                    onClick={() => setAppSettings({ ttsVoice: v })}
+                    className={`mr-1 rounded px-1.5 py-0.5 ${appSettings.ttsVoice === v ? "bg-[var(--color-accent)]/15 text-[var(--color-accent)]" : "hover:bg-[var(--color-panel-hover)]"}`}
+                  >
+                    {v}
+                  </button>
+                ))}
+              </p>
+            )}
             <p className="text-[11px] text-[var(--color-text-muted)]">
               A zone can override this with its own voice in the zone editor. Audio leaves your machine
               unless the provider runs locally.
@@ -955,7 +992,196 @@ function SpeechSynthesisSettings() {
           onChange={(v) => setAppSettings({ ttsAutoSpeak: v })}
         />
       </section>
+
+      <section>
+        <h3 className="mb-1 text-sm font-medium">Prefetch</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          How many upcoming sentences are synthesized in parallel while the current one plays. Higher
+          removes the gap between sentences but sends more concurrent requests to the provider.
+        </p>
+        <SliderRow
+          label="Sentences ahead"
+          value={appSettings.ttsPrefetch}
+          min={1}
+          max={8}
+          step={1}
+          display={appSettings.ttsPrefetch === 1 ? "1 (sequential)" : `${appSettings.ttsPrefetch}`}
+          onChange={(v) => setAppSettings({ ttsPrefetch: v })}
+        />
+      </section>
     </>
+  );
+}
+
+// ─── Voice cloning (0.8.3) ────────────────────────────────────────────────────
+
+function VoiceCloningSettings() {
+  const appSettings = useApp((s) => s.appSettings);
+  const setAppSettings = useApp((s) => s.setAppSettings);
+  const supported = appSettings.ttsSupportsCloning;
+
+  const [name, setName] = useState("");
+  const [audioPath, setAudioPath] = useState<string | null>(null);
+  const [refText, setRefText] = useState("");
+  const [busy, setBusy] = useState<null | "transcribing" | "creating">(null);
+  const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [voices, setVoices] = useState<string[]>([]);
+
+  const canConfigureProvider = !!appSettings.ttsProviderId && !!appSettings.ttsModel;
+
+  const refreshVoices = () => {
+    if (!canConfigureProvider) { setVoices([]); return; }
+    api.listTtsVoices().then(setVoices).catch(() => setVoices([]));
+  };
+  useEffect(() => { if (supported) refreshVoices(); /* eslint-disable-next-line */ }, [supported, appSettings.ttsProviderId, appSettings.ttsModel]);
+
+  async function pickAudio() {
+    const picked = await open({
+      multiple: false,
+      filters: [{ name: "Audio", extensions: ["wav", "mp3", "m4a", "ogg", "flac", "webm"] }],
+    });
+    if (typeof picked === "string") { setAudioPath(picked); setMsg(null); }
+  }
+
+  async function autoTranscribe() {
+    if (!audioPath) return;
+    setBusy("transcribing"); setMsg(null);
+    try {
+      const text = await api.transcribeAudioFile(audioPath);
+      setRefText(text);
+    } catch (e) {
+      setMsg({ kind: "err", text: `Transcription failed: ${e}` });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function createVoice() {
+    if (!name.trim() || !audioPath) return;
+    setBusy("creating"); setMsg(null);
+    try {
+      const saved = await api.createClonedVoice(name.trim(), audioPath, refText.trim());
+      setMsg({ kind: "ok", text: `Created voice "${saved}". Set it as your voice above or per-zone.` });
+      setName(""); setAudioPath(null); setRefText("");
+      refreshVoices();
+    } catch (e) {
+      setMsg({ kind: "err", text: String(e) });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const fileName = audioPath ? audioPath.split(/[\\/]/).pop() : null;
+
+  return (
+    <section>
+      <div className="mb-1 flex items-center gap-2">
+        <AudioLines size={14} className="text-[var(--color-accent)]" />
+        <h3 className="text-sm font-medium">Voice cloning</h3>
+      </div>
+      <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+        Some speech models can clone a voice from a short sample (e.g. a local F5-TTS server); most
+        hosted providers (like OpenAI) cannot — they only offer fixed built-in voices. Enable this only
+        if your speech provider supports cloning via a <span className="font-mono">/audio/voices</span> upload.
+      </p>
+      <ToggleRow
+        label="My speech provider supports voice cloning"
+        checked={supported}
+        onChange={(v) => setAppSettings({ ttsSupportsCloning: v })}
+      />
+
+      {!supported ? null : !canConfigureProvider ? (
+        <p className="mt-3 text-xs text-amber-600 dark:text-amber-400">
+          Choose a speech provider and model above first.
+        </p>
+      ) : (
+        <div className="mt-4 flex flex-col gap-3 rounded-lg border border-[var(--color-border)] p-3">
+          <div>
+            <p className="mb-1 text-xs text-[var(--color-text-muted)]">Voice name</p>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. my-voice"
+              spellCheck={false}
+              className="input"
+            />
+          </div>
+
+          <div>
+            <p className="mb-1 text-xs text-[var(--color-text-muted)]">Reference sample</p>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={pickAudio}
+                className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:border-[var(--color-accent)]"
+              >
+                <FileUp size={12} /> Choose audio…
+              </button>
+              {fileName && <span className="truncate text-xs text-[var(--color-text-muted)]">{fileName}</span>}
+            </div>
+            <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+              3–10 seconds of clean, single-speaker speech works best.
+            </p>
+          </div>
+
+          <div>
+            <div className="mb-1 flex items-center justify-between">
+              <p className="text-xs text-[var(--color-text-muted)]">Sample transcript (optional)</p>
+              <button
+                onClick={autoTranscribe}
+                disabled={!audioPath || busy !== null}
+                className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-[var(--color-accent)] hover:bg-[var(--color-panel-hover)] disabled:opacity-40"
+                title="Transcribe the sample using your dictation provider"
+              >
+                {busy === "transcribing" ? <Loader2 size={11} className="animate-spin" /> : <Mic size={11} />}
+                Auto-transcribe
+              </button>
+            </div>
+            <textarea
+              value={refText}
+              onChange={(e) => setRefText(e.target.value)}
+              rows={2}
+              placeholder="Exact words spoken in the sample. Leave empty to let the server transcribe it."
+              className="input font-normal"
+            />
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={createVoice}
+              disabled={!name.trim() || !audioPath || busy !== null}
+              className="flex items-center gap-1.5 rounded bg-[var(--color-accent)] px-3 py-1.5 text-xs text-white hover:bg-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {busy === "creating" ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+              Create voice
+            </button>
+            {msg && (
+              <span className={`text-xs ${msg.kind === "ok" ? "text-emerald-500" : "text-red-500"}`}>
+                {msg.text}
+              </span>
+            )}
+          </div>
+
+          {voices.length > 0 && (
+            <div className="border-t border-[var(--color-border)] pt-2">
+              <p className="mb-1 text-[11px] text-[var(--color-text-muted)]">Voices on this provider</p>
+              <div className="flex flex-wrap gap-1">
+                {voices.map((v) => (
+                  <button
+                    key={v}
+                    onClick={() => setAppSettings({ ttsVoice: v })}
+                    className={`rounded-full border px-2 py-0.5 text-xs ${appSettings.ttsVoice === v ? "border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]" : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-accent)]"}`}
+                    title="Use this voice"
+                  >
+                    {v}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 

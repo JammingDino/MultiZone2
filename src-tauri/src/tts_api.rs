@@ -23,7 +23,7 @@ pub async fn synthesize_via_provider(
     voice: &str,
     text: &str,
     speed: f32,
-) -> AppResult<Vec<u8>> {
+) -> AppResult<(Vec<u8>, String)> {
     let url = format!("{}/audio/speech", base_url.trim_end_matches('/'));
     let speed = speed.clamp(0.25, 4.0);
 
@@ -99,5 +99,14 @@ pub async fn synthesize_via_provider(
             "speech endpoint returned an empty audio body".to_string(),
         ));
     }
-    Ok(bytes.to_vec())
+    // Pass the real MIME back so the webview plays it with the right type — some
+    // endpoints (e.g. a local F5-TTS shim) return WAV, not MP3. Default to
+    // audio/mpeg when the header is missing or generic.
+    let mime = if content_type.is_empty() || content_type == "application/octet-stream" {
+        "audio/mpeg".to_string()
+    } else {
+        // Strip any "; charset=..." parameter.
+        content_type.split(';').next().unwrap_or("audio/mpeg").trim().to_string()
+    };
+    Ok((bytes.to_vec(), mime))
 }

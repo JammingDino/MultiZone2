@@ -188,18 +188,27 @@ async fn read_tts_settings(state: &AppState) -> TtsSettings {
     serde_json::from_str(&raw).unwrap_or_default()
 }
 
+/// Base64 audio plus its MIME type, so the webview can build a playable data
+/// URL with the type the endpoint actually returned (MP3, WAV, …).
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SynthesizedAudio {
+    audio: String,
+    mime: String,
+}
+
 /// Synthesizes `text` to speech through the configured TTS provider and returns
-/// the audio as a base64-encoded MP3 (played from a Blob in the webview). An
-/// optional `voice` override lets a per-zone voice win over the global default.
+/// the base64-encoded audio and its MIME type. An optional `voice` override lets
+/// a per-zone voice win over the global default.
 #[tauri::command]
 pub async fn synthesize_speech(
     state: State<'_, AppState>,
     text: String,
     voice: Option<String>,
-) -> AppResult<String> {
+) -> AppResult<SynthesizedAudio> {
     let text = text.trim();
     if text.is_empty() {
-        return Ok(String::new());
+        return Ok(SynthesizedAudio { audio: String::new(), mime: String::new() });
     }
 
     let settings = read_tts_settings(&state).await;
@@ -231,7 +240,7 @@ pub async fn synthesize_speech(
     let (base_url, api_key) = provider
         .ok_or_else(|| AppError::NotFound(format!("speech provider not found: {provider_id}")))?;
 
-    let bytes = crate::tts_api::synthesize_via_provider(
+    let (bytes, mime) = crate::tts_api::synthesize_via_provider(
         &state.http,
         &base_url,
         api_key.as_deref(),
@@ -241,7 +250,10 @@ pub async fn synthesize_speech(
         rate,
     )
     .await?;
-    Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
+    Ok(SynthesizedAudio {
+        audio: base64::engine::general_purpose::STANDARD.encode(&bytes),
+        mime,
+    })
 }
 
 /// Condenses a long assistant response into a short, speech-friendly summary

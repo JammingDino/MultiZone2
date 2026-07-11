@@ -313,9 +313,11 @@ export const cancelDictation = (sessionId: string) =>
   invoke<void>("cancel_dictation", { sessionId });
 
 // Text-to-speech (0.8.1)
-/** Synthesize `text` to speech; returns base64-encoded MP3. `voice` overrides the global default. */
+/** Synthesized audio: base64 payload plus its MIME type (e.g. audio/mpeg, audio/wav). */
+export interface SynthesizedAudio { audio: string; mime: string }
+/** Synthesize `text` to speech. `voice` overrides the global default. */
 export const synthesizeSpeech = (text: string, voice: string | null) =>
-  invoke<string>("synthesize_speech", { text, voice });
+  invoke<SynthesizedAudio>("synthesize_speech", { text, voice });
 /** Condense a long response into a short spoken summary via the chat's model. */
 export const summarizeForSpeech = (chatId: string, text: string) =>
   invoke<string>("summarize_for_speech", { chatId, text });

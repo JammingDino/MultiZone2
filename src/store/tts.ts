@@ -126,9 +126,9 @@ function setStatus(status: TtsStatus) {
   store?.set({ status });
 }
 
-function playBase64(b64: string, token: number): Promise<void> {
+function playBase64(b64: string, mime: string, token: number): Promise<void> {
   return new Promise((resolve) => {
-    const audio = new Audio(`data:audio/mp3;base64,${b64}`);
+    const audio = new Audio(`data:${mime || "audio/mpeg"};base64,${b64}`);
     currentAudio = audio;
     const done = () => {
       if (currentAudio === audio) currentAudio = null;
@@ -163,9 +163,9 @@ async function runWorker(token: number) {
       const chunk = cleanForSpeech(raw);
       if (!chunk) continue;
       if (!currentAudio) setStatus("loading");
-      let b64 = "";
+      let res: { audio: string; mime: string } | null = null;
       try {
-        b64 = await api.synthesizeSpeech(chunk, voice);
+        res = await api.synthesizeSpeech(chunk, voice);
       } catch (e) {
         // Surfaced in the UI (Read-aloud button row) and logged to the webview
         // console; the backend logs the full request/response to the tauri dev
@@ -177,7 +177,7 @@ async function runWorker(token: number) {
         return;
       }
       if (token !== sessionToken) break;
-      if (b64) await playBase64(b64, token);
+      if (res && res.audio) await playBase64(res.audio, res.mime, token);
     }
   } finally {
     workerRunning = false;

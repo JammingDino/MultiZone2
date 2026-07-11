@@ -79,8 +79,12 @@ let inFlight = 0;
 /** True while more chunks may still be fed (streaming not yet finished). */
 let streamingOpen = false;
 let consumerRunning = false;
+/** The session token the running consumer belongs to. */
+let consumerToken = -1;
 let paused = false;
 let currentAudio: HTMLAudioElement | null = null;
+/** Resolver for the clip currently being awaited, so a stop can release it. */
+let currentPlayResolve: (() => void) | null = null;
 let voice: string | null = null;
 let batchSize = DEFAULT_PREFETCH;
 /** The message id of the active session, for attributing errors in the UI. */
@@ -196,8 +200,12 @@ function playClip(clip: Clip, token: number): Promise<void> {
     currentAudio = audio;
     const done = () => {
       if (currentAudio === audio) currentAudio = null;
+      if (currentPlayResolve === done) currentPlayResolve = null;
       resolve();
     };
+    // Registered so stopEngine() can release this await even though pausing the
+    // element (on teardown) never fires `ended`.
+    currentPlayResolve = done;
     audio.onended = done;
     audio.onerror = done;
     if (token === sessionToken && !paused) {
@@ -211,8 +219,13 @@ function playClip(clip: Clip, token: number): Promise<void> {
 
 /** The single ordered playback loop for a session. */
 async function runConsumer(token: number) {
-  if (consumerRunning) return;
+  // A stale consumer (older session) may still be unwinding; wait for it to
+  // release before taking over, so we never run two loops or block the new one.
+  while (consumerRunning && consumerToken !== token) await sleep(20);
+  if (consumerRunning && consumerToken === token) return; // already running
+  if (token !== sessionToken) return;
   consumerRunning = true;
+  consumerToken = token;
   try {
     while (token === sessionToken) {
       while (paused && token === sessionToken) await sleep(120);
@@ -236,7 +249,7 @@ async function runConsumer(token: number) {
       await sleep(60);
     }
   } finally {
-    consumerRunning = false;
+    if (consumerToken === token) consumerRunning = false;
     if (token === sessionToken && nextPlayIndex >= chunksList.length && !streamingOpen && !currentAudio) {
       store?.set({ activeMessageId: null, status: "idle" });
     }
@@ -264,6 +277,12 @@ function stopEngine() {
     currentAudio.pause();
     currentAudio = null;
   }
+  // Release any consumer awaiting a clip that will now never fire `ended`.
+  if (currentPlayResolve) {
+    const r = currentPlayResolve;
+    currentPlayResolve = null;
+    r();
+  }
   store?.set({ activeMessageId: null, status: "idle" });
 }
 
@@ -282,7 +301,10 @@ function beginSession(messageId: string, v: string | null, open: boolean) {
   batchSize = DEFAULT_PREFETCH;
   sessionMessageId = messageId;
   store?.set({ activeMessageId: messageId, status: "loading", error: null, errorMessageId: null });
-  runConsumer(token);
+  // NOTE: the consumer is started by the caller *after* work is queued (or, for
+  // streaming, with streamingOpen=true so it waits) — starting it here with an
+  // empty queue and streamingOpen=false makes it exit before the first chunk
+  // is ever pushed.
   return token;
 }
 
@@ -321,12 +343,15 @@ export const useTts = create<TtsStore>((set, get) => {
       chunksList.push(...sentences);
       streamingOpen = false;
       pump(token);
+      runConsumer(token);
     },
 
     startStreaming(messageId, v) {
       const token = beginSession(messageId, v, true);
       batchSize = currentPrefetch();
-      void token;
+      // streamingOpen=true, so the consumer waits for the first fed chunk
+      // rather than exiting on the empty queue.
+      runConsumer(token);
     },
 
     feedStreaming(fullTextSoFar) {

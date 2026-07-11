@@ -412,16 +412,17 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ### 0.8.1 — Text-to-speech (spoken responses)
 
-- [ ] TTS provider config in Settings → Voice: local (Piper / Kokoro) or API (OpenAI, ElevenLabs) — local is the default
-- [ ] "Read aloud" action on any assistant / perspective response (in MessageActions) with pause / stop controls
-- [ ] Streaming-aware playback: responses are chunked by sentence and queued as they arrive so speech starts before the full answer completes
-- [ ] Auto-speak toggle: assistant responses are spoken automatically as they stream
-- [ ] Voice selection per provider; rate and pitch controls
-- [ ] Per-zone default voice so different zones can sound distinct
+- [x] TTS provider config in Settings → Voice: reuses a configured Provider's OpenAI-compatible `/audio/speech` endpoint (no fixed vendor list), with model + voice selection
+- [x] "Read aloud" action on any assistant / perspective response (in MessageActions) with pause / resume / stop controls
+- [x] Auto-summarizing of the responses as to avoid tts-ing massive blocks of verbose response — condensed via the chat's own model above a configurable character threshold
+- [x] Streaming-aware playback: responses are chunked by sentence and queued as they arrive so speech starts before the full answer completes
+- [x] Auto-speak toggle: assistant responses are spoken automatically as they stream
+- [x] Voice selection per provider; playback speed (rate) control
+- [x] Per-zone default voice so different zones can sound distinct (stored in the zone's tool_config, overrides the global voice)
 
 ### 0.8.2 — Hands-free conversation mode
 
-- [ ] Voice conversation mode: STT input and TTS output chained into a continuous hands-free loop
+- [ ] Voice conversation mode: STT input and TTS output chained into a continuous hands-free loop.
 - [ ] Barge-in — the user speaking interrupts and stops current playback
 - [ ] Conversation state indicator in the chat header (listening / thinking / speaking)
 - [ ] Fully offline when local STT + TTS are selected; API providers surfaced as a "leaves your machine" warning consistent with the local-first principle
@@ -444,7 +445,6 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 ## Backlog — unscheduled
 
 - [ ] Code interface: chat window for local models working on codebases; uses RAG from 0.4.3; requires design session
-- [ ] Diffusion LLM support: text generation via diffusion-first models; architecturally isolated from the chat-completion pipeline
 - [ ] Mobile: Tauri mobile target (iOS/Android)
 - [ ] Deep research mode: multi-step sourced research using subchats; requires design session before scheduling
 - [ ] Zone snapshot/versioning: save zone config at chat creation time so editing a zone does not alter historical context

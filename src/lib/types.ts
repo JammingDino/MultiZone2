@@ -502,6 +502,31 @@ export interface AppSettings {
   sttInsertionMode: "cursor" | "replace";
   /** Auto-send the message after this many ms of sustained silence while dictating; 0 = off. */
   sttAutoSendSilenceMs: number;
+  /**
+   * Text-to-speech (0.8.1). The id of one of this app's `Provider` rows — the
+   * same providers zones point at — so any provider exposing an
+   * OpenAI-compatible `/audio/speech` endpoint (OpenAI, or a local server)
+   * works. Null = no speech provider configured yet.
+   */
+  ttsProviderId: string | null;
+  /** Model name requested from ttsProviderId (e.g. "tts-1"). */
+  ttsModel: string;
+  /** Default voice name (e.g. "alloy"). Zones may override per-zone. */
+  ttsVoice: string;
+  /** Playback speed multiplier passed to the endpoint (0.25–4.0). */
+  ttsRate: number;
+  /** Condense long responses via the LLM before speaking them. */
+  ttsAutoSummarize: boolean;
+  /** Character count above which auto-summarize kicks in (when enabled). */
+  ttsSummarizeThreshold: number;
+  /** Automatically speak assistant responses as they stream in. */
+  ttsAutoSpeak: boolean;
+  /**
+   * Hands-free conversation mode (0.8.2): after a spoken response finishes,
+   * automatically start listening again so the user can reply by voice, chaining
+   * STT → send → TTS → STT into a continuous loop.
+   */
+  voiceConversationEnabled: boolean;
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -543,6 +568,14 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   sttActivationMode: "toggle",
   sttInsertionMode: "cursor",
   sttAutoSendSilenceMs: 0,
+  ttsProviderId: null,
+  ttsModel: "",
+  ttsVoice: "",
+  ttsRate: 1.0,
+  ttsAutoSummarize: false,
+  ttsSummarizeThreshold: 800,
+  ttsAutoSpeak: false,
+  voiceConversationEnabled: false,
 };
 
 export interface DbStats {

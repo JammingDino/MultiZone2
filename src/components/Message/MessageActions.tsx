@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { Copy, Check, RotateCcw, BarChart3, Pencil, GitBranch } from "lucide-react";
+import { Copy, Check, RotateCcw, BarChart3, Pencil, GitBranch, Volume2, Pause, Play, Square } from "lucide-react";
 import { useApp } from "@/store/app";
+import { useTts, zoneVoice } from "@/store/tts";
 import * as api from "@/lib/tauri";
 import { formatTokens } from "@/lib/format";
 
@@ -101,6 +102,15 @@ export function MessageActions({
         {copied ? <Check size={11} /> : <Copy size={11} />}
       </ActionButton>
 
+      {variant !== "user" && messageId && (
+        <ReadAloudButton
+          messageId={messageId}
+          chatId={chatId}
+          text={text}
+          zoneId={regenerateZoneId ?? null}
+        />
+      )}
+
       {variant !== "user" && canRegenerate && (
         <ActionButton
           onClick={onRegenerate}
@@ -178,6 +188,66 @@ export function MessageActions({
         </span>
       )}
     </div>
+  );
+}
+
+/**
+ * "Read aloud" (0.8.1): speaks this message through the configured TTS
+ * provider. Once playing it swaps to pause/resume + stop controls. The voice is
+ * the message's zone default (if set) falling back to the global default.
+ */
+function ReadAloudButton({
+  messageId,
+  chatId,
+  text,
+  zoneId,
+}: {
+  messageId: string;
+  chatId: string;
+  text: string;
+  zoneId: string | null;
+}) {
+  const ttsConfigured = useApp((s) => !!s.appSettings.ttsProviderId && !!s.appSettings.ttsModel);
+  const globalVoice = useApp((s) => s.appSettings.ttsVoice);
+  const chatZoneId = useApp((s) => s.chats.find((c) => c.id === chatId)?.zoneId ?? null);
+  const zone = useApp((s) => s.zones.find((z) => z.id === (zoneId ?? chatZoneId)));
+  const activeMessageId = useTts((s) => s.activeMessageId);
+  const status = useTts((s) => s.status);
+  const readAloud = useTts((s) => s.readAloud);
+  const pause = useTts((s) => s.pause);
+  const resume = useTts((s) => s.resume);
+  const stop = useTts((s) => s.stop);
+
+  if (!ttsConfigured) return null;
+  const isActive = activeMessageId === messageId && status !== "idle";
+  const voice = zoneVoice(zone?.toolConfig) ?? (globalVoice || null);
+
+  if (!isActive) {
+    return (
+      <ActionButton
+        onClick={() => readAloud(messageId, chatId, text, voice)}
+        label="Read aloud"
+      >
+        <Volume2 size={11} />
+      </ActionButton>
+    );
+  }
+
+  return (
+    <>
+      {status === "paused" ? (
+        <ActionButton onClick={resume} label="Resume">
+          <Play size={11} />
+        </ActionButton>
+      ) : (
+        <ActionButton onClick={pause} label={status === "loading" ? "Loading…" : "Pause"}>
+          <Pause size={11} />
+        </ActionButton>
+      )}
+      <ActionButton onClick={stop} label="Stop">
+        <Square size={11} />
+      </ActionButton>
+    </>
   );
 }
 

@@ -5,11 +5,15 @@
 //! server (e.g. LM Studio serving a whisper model), the same way the rest of the
 //! app treats providers.
 
+use base64::Engine;
 use serde::Deserialize;
 use tauri::State;
 
 use crate::audio::{self, CaptureHandle, VoiceInputDevice};
 use crate::error::{AppError, AppResult};
+use crate::llm::client::LlmClient;
+use crate::llm::thinking::strip_thinking_blocks;
+use crate::llm::types::{ChatMessage, ChatRequest, MessageContent};
 use crate::state::AppState;
 
 #[tauri::command]
@@ -155,6 +159,162 @@ fn encode_wav(samples: &[f32]) -> AppResult<Vec<u8>> {
             .map_err(|e| AppError::Other(format!("wav encode failed: {e}")))?;
     }
     Ok(buf.into_inner())
+}
+
+/// Text-to-speech settings, read out of the same `app_settings` JSON blob as
+/// the STT ones. `tts_provider_id` is the id of an existing `Provider` row, so
+/// any OpenAI-compatible `/audio/speech` endpoint (OpenAI's, or a local server)
+/// works the same way. `None` means the user hasn't configured a TTS provider
+/// yet, and `synthesize_speech` returns a typed error prompting them to.
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+struct TtsSettings {
+    tts_provider_id: Option<String>,
+    tts_model: String,
+    tts_voice: String,
+    tts_rate: f32,
+}
+
+async fn read_tts_settings(state: &AppState) -> TtsSettings {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT value FROM settings WHERE key = 'app_settings'")
+            .fetch_optional(&state.db)
+            .await
+            .ok()
+            .flatten();
+    let Some((raw,)) = row else {
+        return TtsSettings::default();
+    };
+    serde_json::from_str(&raw).unwrap_or_default()
+}
+
+/// Synthesizes `text` to speech through the configured TTS provider and returns
+/// the audio as a base64-encoded MP3 (played from a Blob in the webview). An
+/// optional `voice` override lets a per-zone voice win over the global default.
+#[tauri::command]
+pub async fn synthesize_speech(
+    state: State<'_, AppState>,
+    text: String,
+    voice: Option<String>,
+) -> AppResult<String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Ok(String::new());
+    }
+
+    let settings = read_tts_settings(&state).await;
+    let provider_id = settings.tts_provider_id.ok_or_else(|| {
+        AppError::Invalid(
+            "no speech provider configured — pick one in Settings → Voice".to_string(),
+        )
+    })?;
+    if settings.tts_model.is_empty() {
+        return Err(AppError::Invalid(
+            "no speech model selected for this provider — pick one in Settings → Voice".to_string(),
+        ));
+    }
+    let chosen_voice = voice
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| settings.tts_voice.clone());
+    if chosen_voice.is_empty() {
+        return Err(AppError::Invalid(
+            "no voice selected for speech — pick one in Settings → Voice".to_string(),
+        ));
+    }
+    let rate = if settings.tts_rate > 0.0 { settings.tts_rate } else { 1.0 };
+
+    let provider: Option<(String, Option<String>)> =
+        sqlx::query_as("SELECT base_url, api_key FROM providers WHERE id = ?1")
+            .bind(&provider_id)
+            .fetch_optional(&state.db)
+            .await?;
+    let (base_url, api_key) = provider
+        .ok_or_else(|| AppError::NotFound(format!("speech provider not found: {provider_id}")))?;
+
+    let bytes = crate::tts_api::synthesize_via_provider(
+        &state.http,
+        &base_url,
+        api_key.as_deref(),
+        &settings.tts_model,
+        &chosen_voice,
+        text,
+        rate,
+    )
+    .await?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
+}
+
+/// Condenses a long assistant response into a short, speech-friendly summary
+/// so text-to-speech doesn't read out massive verbose blocks (code, tables,
+/// long enumerations). Runs through the chat's effective zone/provider — the
+/// same model the chat already uses — so no extra configuration is needed.
+#[tauri::command]
+pub async fn summarize_for_speech(
+    state: State<'_, AppState>,
+    chat_id: String,
+    text: String,
+) -> AppResult<String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Ok(String::new());
+    }
+
+    let (zone, provider) =
+        crate::commands::messages::effective_zone_and_provider(&state.db, &chat_id).await?;
+
+    let prompt = format!(
+        "Rewrite the following assistant response as a concise spoken summary suitable for text-to-speech. \
+Drop code blocks, tables, URLs and markdown formatting; keep it to a few natural sentences that capture the key points. \
+Respond with ONLY the spoken summary — no preamble, no markdown.\n\nResponse:\n{text}"
+    );
+
+    let req = ChatRequest {
+        model: zone.model.clone(),
+        messages: vec![ChatMessage {
+            role: "user".into(),
+            content: Some(MessageContent::Text(prompt)),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        }],
+        temperature: Some(0.3),
+        max_tokens: Some(1024),
+        top_p: None,
+        tools: None,
+        reasoning_effort: None,
+        stream: false,
+    };
+
+    let client = LlmClient::new(&state.http, &provider.base_url, provider.api_key.as_deref());
+    let resp = client.chat_completion(&req).await?;
+    let summary = resp
+        .choices
+        .first()
+        .and_then(|c| match &c.message.content {
+            Some(MessageContent::Text(s)) => Some(s.clone()),
+            Some(MessageContent::Parts(parts)) => {
+                let joined: String = parts
+                    .iter()
+                    .filter_map(|p| match p {
+                        crate::llm::types::ContentPart::Text { text } => Some(text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                if joined.is_empty() { None } else { Some(joined) }
+            }
+            None => None,
+        })
+        .unwrap_or_default();
+
+    let summary = strip_thinking_blocks(&summary);
+    let summary = summary.trim().to_string();
+    if summary.is_empty() {
+        // Fall back to the original text if the model returned nothing usable.
+        Ok(text.to_string())
+    } else {
+        Ok(summary)
+    }
 }
 
 #[tauri::command]

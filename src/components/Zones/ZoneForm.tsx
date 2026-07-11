@@ -245,6 +245,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
   const mcpServers = useApp((s) => s.mcpServers);
   const refreshMcpServers = useApp((s) => s.refreshMcpServers);
   const [ceHeadless, setCeHeadless] = useState(false);
+  const [ttsVoice, setTtsVoice] = useState("");
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
   const [includeThinkingInContext, setIncludeThinkingInContext] = useState(false);
   const [isLeader, setIsLeader] = useState(false);
@@ -279,6 +280,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
         const parsed = JSON.parse(tc);
         const ce = parsed?.code_exec ?? {};
         setCeHeadless(ce.headless ?? false);
+        setTtsVoice(typeof parsed?.tts_voice === "string" ? parsed.tts_voice : "");
       } catch { /* ignore */ }
       setThinkingEnabled(zone.thinkingEnabled ?? false);
       setIncludeThinkingInContext(zone.includeThinkingInContext ?? false);
@@ -296,6 +298,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
       setTools([]);
       setToolConfig("{}");
       setCeHeadless(false);
+      setTtsVoice("");
       setThinkingEnabled(false);
       setIncludeThinkingInContext(false);
       setIsLeader(false);
@@ -344,6 +347,15 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
   async function onSave() {
     if (!name.trim() || !model.trim()) return;
     setSaving(true);
+    // Fold the per-zone TTS voice (0.8.1) into the tool_config JSON so it rides
+    // along with the rest of the zone config rather than needing its own column.
+    let finalToolConfig = toolConfig;
+    try {
+      const obj = JSON.parse(toolConfig || "{}") as Record<string, unknown>;
+      if (ttsVoice.trim()) obj.tts_voice = ttsVoice.trim();
+      else delete obj.tts_voice;
+      finalToolConfig = JSON.stringify(obj, null, 2);
+    } catch { /* keep raw toolConfig if it isn't valid JSON */ }
     try {
       const saved = await api.upsertZone({
         id: zone?.id,
@@ -355,7 +367,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
         maxTokens: maxTokens ? parseInt(maxTokens, 10) : null,
         topP: topP ? parseFloat(topP) : null,
         toolsEnabled: JSON.stringify(tools),
-        toolConfig,
+        toolConfig: finalToolConfig,
         thinkingEnabled,
         includeThinkingInContext,
         isLeader,
@@ -817,6 +829,21 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
               </div>
             </div>
           </label>
+        </Field>
+
+        <Field label="Voice (read aloud)">
+          <input
+            type="text"
+            value={ttsVoice}
+            onChange={(e) => setTtsVoice(e.target.value)}
+            className="input"
+            placeholder="Inherit global voice (e.g. alloy, nova)"
+            spellCheck={false}
+          />
+          <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+            Voice used when responses from this zone are spoken. Leave empty to use the global default
+            from Settings → Voice.
+          </p>
         </Field>
 
         <Field label="Tool config (JSON)">

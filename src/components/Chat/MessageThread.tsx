@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Wrench, Cog, Brain, ArrowDown } from "lucide-react";
 import { useApp, type StreamingState } from "@/store/app";
+import { useTts, zoneVoice } from "@/store/tts";
 import type { Message } from "@/lib/types";
 import { UserMessage, BotTurnView } from "@/components/Message/Message";
 import { groupMessages } from "@/lib/grouping";
@@ -68,6 +69,34 @@ export function MessageThread({ chatId }: { chatId: string }) {
   useEffect(() => {
     if (!messagesLoaded) loadMessages(chatId);
   }, [chatId, messagesLoaded, loadMessages]);
+
+  // Auto-speak (0.8.1): stream the primary answer to TTS as it arrives, so
+  // speech starts before the full response completes. A ref tracks which
+  // message we've opened a streaming session for so we start/finish exactly once.
+  const autoSpeak = useApp((s) => s.appSettings.ttsAutoSpeak);
+  const ttsConfigured = useApp((s) => !!s.appSettings.ttsProviderId && !!s.appSettings.ttsModel);
+  const globalVoice = useApp((s) => s.appSettings.ttsVoice);
+  const chatZone = useApp((s) => {
+    const zid = s.chats.find((c) => c.id === chatId)?.zoneId ?? null;
+    return s.zones.find((z) => z.id === zid);
+  });
+  const autoSpokenIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!autoSpeak || !ttsConfigured) return;
+    const tts = useTts.getState();
+    if (streaming) {
+      if (autoSpokenIdRef.current !== streaming.messageId) {
+        autoSpokenIdRef.current = streaming.messageId;
+        const voice = zoneVoice(chatZone?.toolConfig) ?? (globalVoice || null);
+        tts.startStreaming(streaming.messageId, voice);
+      }
+      if (streaming.content) tts.feedStreaming(streaming.content);
+    } else if (autoSpokenIdRef.current) {
+      // Stream ended — flush the tail so the last sentence is spoken.
+      autoSpokenIdRef.current = null;
+      tts.finishStreaming();
+    }
+  }, [autoSpeak, ttsConfigured, globalVoice, chatZone, streaming?.messageId, streaming?.content, streaming]);
 
   // When switching chats, default to pinned and jump to the bottom.
   useEffect(() => {

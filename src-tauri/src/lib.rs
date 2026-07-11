@@ -10,6 +10,7 @@ mod commands;
 mod state;
 mod error;
 mod stt_api;
+mod tts_api;
 
 use state::AppState;
 use tauri::Manager;
@@ -176,6 +177,8 @@ pub fn run() {
             commands::voice::start_dictation,
             commands::voice::stop_dictation,
             commands::voice::cancel_dictation,
+            commands::voice::synthesize_speech,
+            commands::voice::summarize_for_speech,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

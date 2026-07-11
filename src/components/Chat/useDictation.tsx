@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import { Loader2, Mic } from "lucide-react";
 import { useApp } from "@/store/app";
+import { useTts } from "@/store/tts";
 
 /**
  * Shared dictation controller for a text composer (0.8.0). Wires the mic
@@ -49,6 +50,9 @@ export function useDictation({
   }
 
   async function beginDictation() {
+    // Barge-in (0.8.2): starting to speak stops any in-progress spoken response
+    // so the user isn't talking over the assistant.
+    useTts.getState().stop();
     const el = taRef.current;
     dictationCursorRef.current = el?.selectionStart ?? el?.value.length ?? 0;
     setVoiceError(null);

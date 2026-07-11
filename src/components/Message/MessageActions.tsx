@@ -213,6 +213,9 @@ function ReadAloudButton({
   const zone = useApp((s) => s.zones.find((z) => z.id === (zoneId ?? chatZoneId)));
   const activeMessageId = useTts((s) => s.activeMessageId);
   const status = useTts((s) => s.status);
+  const error = useTts((s) => s.error);
+  const errorMessageId = useTts((s) => s.errorMessageId);
+  const clearError = useTts((s) => s.clearError);
   const readAloud = useTts((s) => s.readAloud);
   const pause = useTts((s) => s.pause);
   const resume = useTts((s) => s.resume);
@@ -224,12 +227,24 @@ function ReadAloudButton({
 
   if (!isActive) {
     return (
-      <ActionButton
-        onClick={() => readAloud(messageId, chatId, text, voice)}
-        label="Read aloud"
-      >
-        <Volume2 size={11} />
-      </ActionButton>
+      <>
+        <ActionButton
+          onClick={() => readAloud(messageId, chatId, text, voice)}
+          label="Read aloud"
+        >
+          <Volume2 size={11} />
+        </ActionButton>
+        {error && errorMessageId === messageId && (
+          <span
+            className="max-w-[420px] truncate text-[11px] text-red-500"
+            title={error}
+            onClick={clearError}
+            role="button"
+          >
+            {error}
+          </span>
+        )}
+      </>
     );
   }
 

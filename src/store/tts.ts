@@ -24,6 +24,9 @@ interface TtsStore {
   activeMessageId: string | null;
   status: TtsStatus;
   error: string | null;
+  /** The message whose playback errored, so the UI can show it in context. */
+  errorMessageId: string | null;
+  clearError: () => void;
 
   readAloud: (messageId: string, chatId: string, text: string, voice: string | null) => Promise<void>;
   startStreaming: (messageId: string, voice: string | null) => void;
@@ -57,6 +60,8 @@ let workerRunning = false;
 let paused = false;
 let currentAudio: HTMLAudioElement | null = null;
 let voice: string | null = null;
+/** The message id of the active session, for attributing errors in the UI. */
+let sessionMessageId: string | null = null;
 /** Buffer of not-yet-sentence-complete streamed text. */
 let pendingBuffer = "";
 /** Count of sentences already queued for the active streaming session. */
@@ -162,8 +167,13 @@ async function runWorker(token: number) {
       try {
         b64 = await api.synthesizeSpeech(chunk, voice);
       } catch (e) {
-        store?.set({ error: String(e) });
+        // Surfaced in the UI (Read-aloud button row) and logged to the webview
+        // console; the backend logs the full request/response to the tauri dev
+        // terminal. Between the two you can tell endpoint vs. model vs. voice.
+        console.error("[tts] synthesis failed:", e);
+        const failedId = sessionMessageId;
         stopEngine();
+        store?.set({ error: String(e), errorMessageId: failedId });
         return;
       }
       if (token !== sessionToken) break;
@@ -201,7 +211,8 @@ function beginSession(messageId: string, v: string | null, open: boolean) {
   pendingBuffer = "";
   emittedCount = 0;
   voice = v;
-  store?.set({ activeMessageId: messageId, status: "loading", error: null });
+  sessionMessageId = messageId;
+  store?.set({ activeMessageId: messageId, status: "loading", error: null, errorMessageId: null });
   runWorker(token);
   return token;
 }
@@ -214,6 +225,8 @@ export const useTts = create<TtsStore>((set, get) => {
     activeMessageId: null,
     status: "idle",
     error: null,
+    errorMessageId: null,
+    clearError: () => set({ error: null, errorMessageId: null }),
 
     async readAloud(messageId, chatId, text, v) {
       // Toggle off if this message is already the active one.

@@ -5,7 +5,8 @@ use crate::state::AppState;
 use serde::Deserialize;
 use tauri::State;
 
-const SKILL_COLS: &str = "id, name, description, content, enabled, created_at, updated_at";
+const SKILL_COLS: &str =
+    "id, name, description, content, enabled, authored_by_zone_id, created_at, updated_at";
 
 #[tauri::command]
 pub async fn list_skills(state: State<'_, AppState>) -> AppResult<Vec<Skill>> {

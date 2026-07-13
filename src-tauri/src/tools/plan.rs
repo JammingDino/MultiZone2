@@ -1,0 +1,134 @@
+//! `update_plan` — a scratch checklist the model keeps across a long, multi-step
+//! turn (0.9.3).
+//!
+//! Deliberately stateless on the backend: the plan lives in the conversation as
+//! tool calls and results, so it survives reload, branching, and export with no
+//! new table, and a sub-agent's plan can't collide with its leader's. Each call
+//! replaces the whole list — the model restates every step with its current
+//! status, which also keeps the plan in its own context window where it does the
+//! most good.
+//!
+//! The result carries `rendered: "plan"` so the frontend can draw it as a
+//! checklist rather than a raw tool-output blob (mirroring `present_file`).
+
+use crate::error::AppResult;
+use crate::llm::types::{Tool, ToolFunction};
+use serde_json::{json, Value};
+
+const MAX_STEPS: usize = 30;
+
+pub fn definition() -> Tool {
+    Tool {
+        tool_type: "function".into(),
+        function: ToolFunction {
+            name: "update_plan".into(),
+            description:
+                "Keep a visible checklist of the steps in a multi-step task. Call it once at the \
+                 start with the whole plan, then again after each step to mark progress. Each call \
+                 replaces the previous list, so always send every step with its current status.\n\n\
+                 Use it when a task takes several distinct steps or several tool calls — it keeps \
+                 you on track and shows the user what you are doing and what is left. Skip it for \
+                 anything you can answer in one step. Mark exactly one step `in_progress` at a \
+                 time, and finish by marking the last step `done`."
+                    .into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "steps": {
+                        "type": "array",
+                        "description": "The full checklist, in order.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "step": {
+                                    "type": "string",
+                                    "description": "What is being done, in a few words."
+                                },
+                                "status": {
+                                    "type": "string",
+                                    "enum": ["pending", "in_progress", "done", "skipped"],
+                                    "description": "Current status of this step.",
+                                    "default": "pending"
+                                }
+                            },
+                            "required": ["step"]
+                        }
+                    }
+                },
+                "required": ["steps"]
+            }),
+        },
+    }
+}
+
+pub async fn run(args: &Value) -> AppResult<String> {
+    let raw = match args.get("steps").and_then(|v| v.as_array()) {
+        Some(a) if !a.is_empty() => a,
+        _ => return Ok(json!({ "error": "update_plan needs a non-empty 'steps' array" }).to_string()),
+    };
+    if raw.len() > MAX_STEPS {
+        return Ok(json!({
+            "error": format!("Too many steps ({}); keep the plan to {MAX_STEPS} or fewer by grouping them.", raw.len())
+        })
+        .to_string());
+    }
+
+    let mut steps: Vec<Value> = Vec::with_capacity(raw.len());
+    for item in raw {
+        // Accept both {step, status} and a bare string, since models reliably
+        // shortcut to the latter.
+        let (text, status) = match item {
+            Value::String(s) => (s.trim().to_string(), "pending".to_string()),
+            Value::Object(_) => {
+                let text = item
+                    .get("step")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                let status = item
+                    .get("status")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("pending")
+                    .trim()
+                    .to_ascii_lowercase();
+                (text, status)
+            }
+            _ => continue,
+        };
+        if text.is_empty() {
+            continue;
+        }
+        let status = match status.as_str() {
+            "in_progress" | "done" | "skipped" | "pending" => status,
+            // Tolerate near-misses rather than failing the call over a synonym.
+            "doing" | "active" | "current" => "in_progress".to_string(),
+            "complete" | "completed" | "finished" => "done".to_string(),
+            _ => "pending".to_string(),
+        };
+        steps.push(json!({ "step": text, "status": status }));
+    }
+
+    if steps.is_empty() {
+        return Ok(json!({ "error": "no valid steps — each step needs a non-empty 'step' string" }).to_string());
+    }
+
+    let done = steps.iter().filter(|s| s["status"] == "done").count();
+    let total = steps.len();
+    let next = steps
+        .iter()
+        .find(|s| s["status"] == "in_progress")
+        .or_else(|| steps.iter().find(|s| s["status"] == "pending"))
+        .and_then(|s| s["step"].as_str())
+        .map(str::to_string);
+
+    Ok(json!({
+        "rendered": "plan",
+        "ok": true,
+        "steps": steps,
+        "done": done,
+        "total": total,
+        "current": next,
+    })
+    .to_string())
+}

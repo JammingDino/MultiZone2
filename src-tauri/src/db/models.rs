@@ -179,6 +179,10 @@ pub struct Skill {
     pub content: String,
     /// When true, the skill appears in the catalog offered to agents.
     pub enabled: bool,
+    /// Set when a zone wrote this skill itself via `create_skill` (0.9.2); NULL
+    /// when the user wrote it. Self-authored skills are created disabled and stay
+    /// out of every catalog until the user reviews and enables them.
+    pub authored_by_zone_id: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }

@@ -17,6 +17,7 @@ import { MathPlotBlock, type MathPlotData } from "@/components/Renderers/MathPlo
 import { MermaidBlock } from "@/components/Renderers/MermaidBlock";
 import { HtmlReportBlock } from "@/components/Renderers/HtmlReportBlock";
 import { SavedFileChip } from "@/components/Renderers/SavedFileChip";
+import { PlanBlock, toPlanData } from "@/components/Renderers/PlanBlock";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 
@@ -349,6 +350,10 @@ function renderToolOutput(
         )}
       </>
     );
+  }
+  if (name === "update_plan") {
+    const data = toPlanData(parsed);
+    return data ? <PlanBlock {...data} /> : null;
   }
   if (name === "present_file") {
     if (typeof parsed.path !== "string") return null;

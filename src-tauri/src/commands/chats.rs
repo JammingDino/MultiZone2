@@ -7,7 +7,10 @@ use crate::llm::types::{ChatMessage, ChatRequest, MessageContent};
 use crate::state::AppState;
 use tauri::{AppHandle, Emitter, State};
 
-const CHAT_COLS: &str =
+/// Every column of the `chats` table, in `Chat` field order. Shared with
+/// `commands::messages` — `query_as::<Chat>` fails to decode if the list and the
+/// struct drift, so there must only ever be one of these.
+pub const CHAT_COLS: &str =
     "id, title, zone_id, project_id, project_context_enabled, knowledge_enabled, perspective_mode, smart_routing, parent_chat_id, branched_from_message_id, initiated_by_zone_id, context_summary, context_summary_through, created_at, updated_at";
 
 /// The global default for whether new chats start with knowledge enabled, read

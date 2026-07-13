@@ -61,11 +61,17 @@ mod tests {
             .await;
         assert!(old.is_err(), "short column list should fail to decode Chat");
 
-        // The current constant must succeed.
-        let new_cols = "id, title, zone_id, project_id, project_context_enabled, knowledge_enabled, perspective_mode, smart_routing, parent_chat_id, branched_from_message_id, initiated_by_zone_id, context_summary, context_summary_through, created_at, updated_at";
-        let new = sqlx::query_as::<_, Chat>(&format!("SELECT {new_cols} FROM chats WHERE id='c1'"))
-            .fetch_one(&pool)
-            .await;
-        assert!(new.is_ok(), "full column list should decode Chat: {new:?}");
+        // The real constant the app queries with — NOT a copy of it. This test
+        // previously re-typed the list here, so when a column was added to `Chat`
+        // and to only one of the two CHAT_COLS constants that existed, the test
+        // still passed while every send failed to decode a Chat row. Referencing
+        // the shipped constant is the whole point of the guard.
+        let new = sqlx::query_as::<_, Chat>(&format!(
+            "SELECT {} FROM chats WHERE id='c1'",
+            crate::commands::chats::CHAT_COLS
+        ))
+        .fetch_one(&pool)
+        .await;
+        assert!(new.is_ok(), "CHAT_COLS should decode Chat: {new:?}");
     }
 }

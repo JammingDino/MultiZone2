@@ -13,6 +13,7 @@ pub mod skills;
 pub mod knowledge;
 pub mod subchat;
 pub mod plan;
+pub mod http;
 
 use crate::commands::messages::{EngineCtx, StreamSink};
 use crate::error::AppResult;
@@ -108,6 +109,8 @@ pub enum ToolId {
     FileSearch,
     /// 0.9.3 — the model's own multi-step checklist.
     Plan,
+    /// 0.9.3 — general HTTP call (API access), distinct from `extract`'s page read.
+    HttpRequest,
 }
 
 impl ToolId {
@@ -133,6 +136,7 @@ impl ToolId {
             "file_manage" => Some(Self::FileManage),
             "file_search" => Some(Self::FileSearch),
             "plan" => Some(Self::Plan),
+            "http_request" => Some(Self::HttpRequest),
             // `save_output` is the legacy id for this group (briefly shipped as a
             // write+present tool); it now maps to the present-only tool.
             "present_file" | "save_output" => Some(Self::PresentFile),
@@ -159,6 +163,7 @@ impl ToolId {
             Self::FileManage => "file_manage",
             Self::FileSearch => "file_search",
             Self::Plan => "plan",
+            Self::HttpRequest => "http_request",
         }
     }
 
@@ -190,6 +195,7 @@ impl ToolId {
             Self::FileManage => filesystem::manage_definitions(),
             Self::FileSearch => filesystem::search_definitions(),
             Self::Plan => vec![plan::definition()],
+            Self::HttpRequest => vec![http::definition()],
         }
     }
 
@@ -212,7 +218,9 @@ impl ToolId {
             // FileManage contains `delete_file`; the group is dangerous so it never
             // lands in a default toolset, and per-call gating keeps move/copy at
             // moderate while every delete prompts.
-            Self::CodeExec | Self::Shell | Self::FileManage => 2,
+            // HttpRequest can send data off the machine and mutate remote state;
+            // the approval prompt is its security boundary (see http.rs).
+            Self::CodeExec | Self::Shell | Self::FileManage | Self::HttpRequest => 2,
         }
     }
 }
@@ -264,7 +272,7 @@ pub fn tool_safety_by_name(name: &str) -> u8 {
         | "update_skill"
         | "find_files" | "search_file_text"
         | "move_file" | "copy_file" | "create_folder" => 1,
-        "execute_code" | "run_command" | "delete_file" => 2,
+        "execute_code" | "run_command" | "delete_file" | "http_request" => 2,
         _ => 1,
     }
 }
@@ -330,6 +338,7 @@ pub async fn dispatch(
         "find_files" => filesystem::find_files(&args, zone_config, project_dir).await,
         "search_file_text" => filesystem::search_file_text(&args, zone_config, project_dir).await,
         "update_plan" => plan::run(&args).await,
+        "http_request" => http::run(&args, http).await,
         "spawn_subagent" => subchat::spawn(&args, ctx, sink, caller_zone_id, chat_id).await,
         "send_subchat_message" => subchat::send(&args, ctx, sink).await,
         "read_subchat" => subchat::read(&args, db).await,

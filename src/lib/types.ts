@@ -645,6 +645,7 @@ export const ALL_TOOLS: ToolInfo[] = [
   // Web
   { id: "web_search",   label: "Search the web",      category: "Web", safety: 1, description: "Search the web through your configured search provider and read the result snippets." },
   { id: "extract",      label: "Read a web page",     category: "Web", safety: 1, description: "Open one or more web pages and read them in full, not just the search snippet." },
+  { id: "http_request", label: "Call an API",         category: "Web", safety: 2, description: "Make an HTTP request to any URL and get back the raw status, headers, and body — for talking to an API rather than reading a page. You approve each request, and can see the method, URL, and body first." },
 
   // Knowledge
   { id: "skills",       label: "Skills",              category: "Knowledge", safety: 0, description: "Load a set of instructions from your Skills catalog when a task calls for it — and write a new skill when the assistant works out a procedure worth keeping (saved disabled for your review)." },

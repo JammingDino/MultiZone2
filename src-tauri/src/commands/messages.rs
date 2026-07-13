@@ -1767,6 +1767,25 @@ async fn build_message_history(
         }
     }
 
+    // Context compaction (0.9.3): once the history is long, nudge the model to
+    // summarize it — but only if this zone actually has the tool to do so,
+    // otherwise the nudge is noise it can't act on.
+    if serde_json::from_str::<Vec<String>>(&zone.tools_enabled)
+        .map_or(false, |t| t.iter().any(|id| id == "compact"))
+    {
+        let history_chars: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(SUM(LENGTH(content)), 0) FROM messages
+             WHERE chat_id = ?1 AND zone_id IS NULL",
+        )
+        .bind(chat_id)
+        .fetch_one(db)
+        .await
+        .unwrap_or(0);
+        if history_chars as usize >= crate::tools::compact::COMPACT_HINT_CHARS {
+            snippets.push(crate::tools::compact::compact_hint(history_chars as usize));
+        }
+    }
+
     let mut out: Vec<ChatMessage> = Vec::new();
     if !snippets.is_empty() {
         out.push(ChatMessage {
@@ -1783,15 +1802,36 @@ async fn build_message_history(
         return Ok(out);
     }
 
-    // ── Single-zone history (unchanged) ───────────────────────────────────────
+    // ── Single-zone history ───────────────────────────────────────────────────
     // Exclude perspective messages (zone_id IS NOT NULL) from the history sent
     // to any zone so they never pollute the primary conversation context.
-    let rows = sqlx::query_as::<_, Message>(&format!(
+    //
+    // Context compaction (0.9.3): if the model has summarized this chat's older
+    // turns, those turns are replaced here by the summary. `created_at > cutoff`
+    // drops them from the request only — they remain in the DB and on screen.
+    let mut rows = sqlx::query_as::<_, Message>(&format!(
         "SELECT {MSG_COLS} FROM messages WHERE chat_id = ?1 AND zone_id IS NULL ORDER BY created_at ASC"
     ))
     .bind(chat_id)
     .fetch_all(db)
     .await?;
+
+    if let Some((summary_block, cutoff)) = crate::tools::compact::compacted_prefix(db, chat_id).await {
+        let before = rows.len();
+        rows.retain(|m| m.created_at > cutoff);
+        // Only claim the compaction if it actually elided something; a cutoff
+        // older than every surviving message would otherwise inject a summary
+        // alongside the very turns it summarizes.
+        if rows.len() < before {
+            out.push(ChatMessage {
+                role: "system".into(),
+                content: Some(MessageContent::Text(summary_block)),
+                tool_calls: None,
+                tool_call_id: None,
+                name: None,
+            });
+        }
+    }
 
     // Find the last user message so we can downgrade images in earlier turns.
     // Qwen2-VL tokenises images at native resolution (~700-1000 tokens each);

@@ -60,6 +60,14 @@ export interface Chat {
    * Subchats are observable but read-only from the user's perspective.
    */
   initiatedByZoneId: string | null;
+  /**
+   * Context compaction (0.9.3): the model's summary of this chat's older turns,
+   * written by `compact_context`. Messages at or before `contextSummaryThrough`
+   * are replaced by it in the history sent to the model — they are never deleted,
+   * and the UI still shows the whole conversation.
+   */
+  contextSummary: string | null;
+  contextSummaryThrough: number | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -650,6 +658,7 @@ export const ALL_TOOLS: ToolInfo[] = [
   // Knowledge
   { id: "skills",       label: "Skills",              category: "Knowledge", safety: 0, description: "Load a set of instructions from your Skills catalog when a task calls for it — and write a new skill when the assistant works out a procedure worth keeping (saved disabled for your review)." },
   { id: "memory",       label: "Remember things",     category: "Knowledge", safety: 0, description: "Save, read, and delete facts that persist across turns — scoped to this chat, this project, or everywhere." },
+  { id: "compact",      label: "Condense a long chat", category: "Knowledge", safety: 1, description: "When a conversation grows long, let the assistant summarize the earlier turns so it keeps its thread instead of quietly losing the oldest messages. You still see the whole conversation — only what the model re-reads is condensed." },
 
   // Agents
   { id: "subchat",      label: "Delegate to other zones", category: "Agents", safety: 1, description: "Hand a task to another zone in its own subchat, exchange messages with it, and read the transcript — the basis of Multizone mode." },

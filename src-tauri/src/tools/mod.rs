@@ -14,6 +14,7 @@ pub mod knowledge;
 pub mod subchat;
 pub mod plan;
 pub mod http;
+pub mod compact;
 
 use crate::commands::messages::{EngineCtx, StreamSink};
 use crate::error::AppResult;
@@ -111,6 +112,8 @@ pub enum ToolId {
     Plan,
     /// 0.9.3 — general HTTP call (API access), distinct from `extract`'s page read.
     HttpRequest,
+    /// 0.9.3 — the model summarizes its own older turns when a chat grows long.
+    Compact,
 }
 
 impl ToolId {
@@ -137,6 +140,7 @@ impl ToolId {
             "file_search" => Some(Self::FileSearch),
             "plan" => Some(Self::Plan),
             "http_request" => Some(Self::HttpRequest),
+            "compact" => Some(Self::Compact),
             // `save_output` is the legacy id for this group (briefly shipped as a
             // write+present tool); it now maps to the present-only tool.
             "present_file" | "save_output" => Some(Self::PresentFile),
@@ -164,6 +168,7 @@ impl ToolId {
             Self::FileSearch => "file_search",
             Self::Plan => "plan",
             Self::HttpRequest => "http_request",
+            Self::Compact => "compact",
         }
     }
 
@@ -196,6 +201,7 @@ impl ToolId {
             Self::FileSearch => filesystem::search_definitions(),
             Self::Plan => vec![plan::definition()],
             Self::HttpRequest => vec![http::definition()],
+            Self::Compact => vec![compact::definition()],
         }
     }
 
@@ -213,8 +219,10 @@ impl ToolId {
             // here so it isn't in the safe default set. Per-call gating uses the
             // function name (see `tool_safety_by_name`). FileSearch reads file
             // contents, so it is gated like the other file reads rather than as safe.
+            // Compact is a lossy rewrite of what the model can see, so the user
+            // approves it rather than having it happen behind their back.
             Self::WebSearch | Self::Extract | Self::FileSystem | Self::FileSearch
-            | Self::SwitchZone | Self::Subchat => 1,
+            | Self::SwitchZone | Self::Subchat | Self::Compact => 1,
             // FileManage contains `delete_file`; the group is dangerous so it never
             // lands in a default toolset, and per-call gating keeps move/copy at
             // moderate while every delete prompts.
@@ -271,7 +279,8 @@ pub fn tool_safety_by_name(name: &str) -> u8 {
         | "spawn_subagent" | "send_subchat_message"
         | "update_skill"
         | "find_files" | "search_file_text"
-        | "move_file" | "copy_file" | "create_folder" => 1,
+        | "move_file" | "copy_file" | "create_folder"
+        | "compact_context" => 1,
         "execute_code" | "run_command" | "delete_file" | "http_request" => 2,
         _ => 1,
     }
@@ -339,6 +348,7 @@ pub async fn dispatch(
         "search_file_text" => filesystem::search_file_text(&args, zone_config, project_dir).await,
         "update_plan" => plan::run(&args).await,
         "http_request" => http::run(&args, http).await,
+        "compact_context" => compact::run(&args, db, chat_id).await,
         "spawn_subagent" => subchat::spawn(&args, ctx, sink, caller_zone_id, chat_id).await,
         "send_subchat_message" => subchat::send(&args, ctx, sink).await,
         "read_subchat" => subchat::read(&args, db).await,

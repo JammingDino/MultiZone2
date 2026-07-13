@@ -73,6 +73,13 @@ pub struct Chat {
     /// `branched_from_message_id` instead). Subchats are read-only from the
     /// user's perspective. Cleared to NULL if the owning zone is deleted.
     pub initiated_by_zone_id: Option<String>,
+    /// Context compaction (0.9.3): the model's summary of this chat's older
+    /// turns, written by `compact_context`. When set, every message created at
+    /// or before `context_summary_through` is replaced by this summary in the
+    /// history sent to the model. The messages themselves are never deleted —
+    /// they stay in the DB and on screen.
+    pub context_summary: Option<String>,
+    pub context_summary_through: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
 }

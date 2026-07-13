@@ -44,7 +44,7 @@ export interface Chat {
   zoneId: string | null;
   projectId: string | null;
   projectContextEnabled: boolean;
-  /** Per-chat opt-in for project knowledge (RAG); offers the search_knowledge tool. */
+  /** Per-chat opt-in for project knowledge (RAG); offers the search_local_files tool. */
   knowledgeEnabled: boolean;
   /** Per-chat override for perspective execution; null = inherit global setting. */
   perspectiveMode: "sequential" | "parallel" | null;
@@ -222,6 +222,12 @@ export interface Skill {
   content: string;
   /** When true, the skill appears in the catalog offered to agents. */
   enabled: boolean;
+  /**
+   * Id of the zone that wrote this skill itself via `create_skill` (0.9.2), or
+   * null when you wrote it. Self-authored skills arrive disabled and stay out of
+   * every agent's catalog until reviewed and enabled.
+   */
+  authoredByZoneId: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -457,7 +463,7 @@ export interface AppSettings {
    */
   autoReindex: boolean;
   /**
-   * When true, new chats start with knowledge enabled (the search_knowledge tool
+   * When true, new chats start with knowledge enabled (the search_local_files tool
    * is offered from the first message). Projects can override this per-project.
    */
   knowledgeDefaultEnabled: boolean;
@@ -609,19 +615,51 @@ export interface VoiceInputDevice {
 /** 0 = safe, 1 = moderate, 2 = dangerous — mirrors the Rust backend. */
 export type ToolSafety = 0 | 1 | 2;
 
-export const ALL_TOOLS: { id: string; label: string; description: string; safety: ToolSafety }[] = [
-  { id: "date_time",    label: "Date / time",      description: "Returns the current date and time.",                                                              safety: 0 },
-  { id: "ask_user",     label: "Ask user",          description: "Lets the model pause and ask the user a clarifying question with answer buttons.",               safety: 0 },
-  { id: "manage_tags",  label: "Tag chat",          description: "Lets the model create tags and assign them to the current chat to categorize it.",               safety: 0 },
-  { id: "memory",       label: "Memory",            description: "Lets the model save, read, and delete long-term memories scoped to the chat, project, or globally.", safety: 0 },
-  { id: "skills",       label: "Skills",            description: "Lets the model load specialized instruction sets on demand from your global Skills catalog.",       safety: 0 },
-  { id: "render_graph", label: "Graph / diagram",   description: "Render Mermaid diagrams or math plots inline.",                                                  safety: 0 },
-  { id: "present_file", label: "Present file",       description: "Present an existing file inline in the chat — HTML reports get a live preview with an open-in-browser button; other files get an open card.", safety: 0 },
-  { id: "web_search",   label: "Web search",        description: "Search the web via a configured provider.",                                                      safety: 1 },
-  { id: "extract",      label: "Read URL",          description: "Fetch one or more web pages and return their clean main text as markdown — the read-the-full-page complement to web search.", safety: 1 },
-  { id: "file_system",  label: "File system",       description: "Read, write, and list files within allowed paths.",                                              safety: 1 },
-  { id: "switch_zone",  label: "Switch zone",       description: "Lets the model list zones and switch the chat to a different zone mid-conversation.",            safety: 1 },
-  { id: "subchat",      label: "Subagents",         description: "Lets the model spawn subchats driven by other zones, send them messages, and read their transcripts (delegation).", safety: 1 },
-  { id: "code_exec",    label: "Code execution",    description: "Run code snippets in a sandboxed subprocess (Python, Node, Bash, PowerShell).",                  safety: 2 },
-  { id: "shell_exec",   label: "Shell / terminal",  description: "Run arbitrary shell commands in the chat's working directory (cmd, PowerShell, bash).",          safety: 2 },
+/** Groups the zone editor's tool list is sorted into, in display order (0.9.0). */
+export const TOOL_CATEGORIES = ["Files", "Web", "Knowledge", "Agents", "System"] as const;
+export type ToolCategory = (typeof TOOL_CATEGORIES)[number];
+
+export interface ToolInfo {
+  /** Machine id stored in a zone's `toolsEnabled`. Must match Rust's `ToolId::as_str`. */
+  id: string;
+  /** Human-facing name shown in the UI — never sent to the model. */
+  label: string;
+  description: string;
+  safety: ToolSafety;
+  category: ToolCategory;
+}
+
+/**
+ * Every built-in tool a zone can enable. `label`/`description` are for the user;
+ * the model sees the machine names and the descriptions written in the Rust tool
+ * definitions. Renamed ids keep working via the alias map in Rust's
+ * `ToolId::from_str`, so a zone saved before a rename still resolves.
+ */
+export const ALL_TOOLS: ToolInfo[] = [
+  // Files
+  { id: "file_system",  label: "Read & write files",  category: "Files", safety: 1, description: "Read a file, list a folder, create a file, and make targeted edits — within the project directory and any allowed paths." },
+  { id: "file_search",  label: "Find files by name or contents", category: "Files", safety: 1, description: "Find files by name pattern, or search inside files for an exact word, string, or symbol. Exact search — the counterpart to the meaning-based search in Knowledge." },
+  { id: "file_manage",  label: "Rename, move & delete files",    category: "Files", safety: 2, description: "Rename or move a file, copy it, create a folder, and delete files. Every delete asks for your approval." },
+  { id: "present_file", label: "Show a file in the chat",        category: "Files", safety: 0, description: "Display a file the assistant has produced, inline in the conversation — HTML reports get a live preview with an open-in-browser button; other files get a card that opens them." },
+
+  // Web
+  { id: "web_search",   label: "Search the web",      category: "Web", safety: 1, description: "Search the web through your configured search provider and read the result snippets." },
+  { id: "extract",      label: "Read a web page",     category: "Web", safety: 1, description: "Open one or more web pages and read them in full, not just the search snippet." },
+
+  // Knowledge
+  { id: "skills",       label: "Skills",              category: "Knowledge", safety: 0, description: "Load a set of instructions from your Skills catalog when a task calls for it — and write a new skill when the assistant works out a procedure worth keeping (saved disabled for your review)." },
+  { id: "memory",       label: "Remember things",     category: "Knowledge", safety: 0, description: "Save, read, and delete facts that persist across turns — scoped to this chat, this project, or everywhere." },
+
+  // Agents
+  { id: "subchat",      label: "Delegate to other zones", category: "Agents", safety: 1, description: "Hand a task to another zone in its own subchat, exchange messages with it, and read the transcript — the basis of Multizone mode." },
+  { id: "plan",         label: "Plan a multi-step task",  category: "Agents", safety: 0, description: "Keep a visible checklist of the steps in a long task, ticking them off as it goes. Helps the assistant stay on track and shows you what it is doing." },
+  { id: "ask_user",     label: "Ask you a question",      category: "Agents", safety: 0, description: "Pause and ask you a clarifying question, with answer buttons, instead of guessing." },
+  { id: "switch_zone",  label: "Switch zone",             category: "Agents", safety: 1, description: "List your zones and switch this chat to a better-suited one mid-conversation." },
+
+  // System
+  { id: "render_graph", label: "Draw a chart or diagram",  category: "System", safety: 0, description: "Render a diagram or plot a maths function inline in the chat." },
+  { id: "date_time",    label: "Check the date & time",    category: "System", safety: 0, description: "Look up the current date and time." },
+  { id: "manage_tags",  label: "Tag this chat",            category: "System", safety: 0, description: "Create tags and apply them to this chat so it is easier to find later." },
+  { id: "code_exec",    label: "Run code",                 category: "System", safety: 2, description: "Run a code snippet in a sandboxed subprocess (Python, Node, Bash, PowerShell)." },
+  { id: "shell_exec",   label: "Run terminal commands",    category: "System", safety: 2, description: "Run any shell command in the chat's working directory. The most powerful and most dangerous tool here." },
 ];

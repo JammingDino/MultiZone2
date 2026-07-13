@@ -516,7 +516,7 @@ function KnowledgeSection({ project }: { project: Project }) {
       </div>
       <p className="mb-3 text-xs text-[var(--color-text-muted)]">
         Index this project's directory so zones can search it during a chat (the{" "}
-        <code className="rounded bg-[var(--color-bg)] px-1">search_knowledge</code> tool). Pick an
+        <code className="rounded bg-[var(--color-bg)] px-1">search_local_files</code> tool). Pick an
         embedding model from one of your providers — for a local model, add Ollama as a provider and
         choose an embedding model such as <code className="rounded bg-[var(--color-bg)] px-1">nomic-embed-text</code>.
       </p>
@@ -688,7 +688,7 @@ function KnowledgeSection({ project }: { project: Project }) {
           </select>
         </label>
         <div className="mt-1 text-[10px] text-[var(--color-text-muted)]">
-          Whether chats in this project start with the <code className="rounded bg-[var(--color-bg)] px-1">search_knowledge</code> tool available from the first message.
+          Whether chats in this project start with the <code className="rounded bg-[var(--color-bg)] px-1">search_local_files</code> tool available from the first message.
         </div>
       </div>
     </div>

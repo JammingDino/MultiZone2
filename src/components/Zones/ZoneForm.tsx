@@ -4,7 +4,7 @@ import * as api from "@/lib/tauri";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
 import { VisionOverrideSelect } from "@/components/common/VisionOverrideSelect";
 import type { Provider, Zone } from "@/lib/types";
-import { ALL_TOOLS, mcpToolEnableId } from "@/lib/types";
+import { ALL_TOOLS, TOOL_CATEGORIES, mcpToolEnableId } from "@/lib/types";
 import { useApp } from "@/store/app";
 import { DEFAULT_ZONES } from "@/lib/defaultZones";
 
@@ -13,6 +13,49 @@ const SAFETY_BADGE: Record<number, { label: string; cls: string }> = {
   1: { label: "Moderate",  cls: "border-yellow-600/40 bg-yellow-600/10 text-yellow-500" },
   2: { label: "Dangerous", cls: "border-red-600/40    bg-red-600/10    text-red-500" },
 };
+
+/**
+ * Header row that switches a whole group of tools on or off (0.9.0). Tri-state:
+ * `mixed` renders an indeterminate box, so a partially-enabled group reads as
+ * partial rather than off. Clicking a mixed or empty group enables all of it;
+ * clicking a full group clears it.
+ */
+function GroupToggle({
+  label,
+  enabled,
+  mixed,
+  onToggle,
+  emphasis,
+}: {
+  label: string;
+  enabled: boolean;
+  mixed: boolean;
+  onToggle: () => void;
+  emphasis?: boolean;
+}) {
+  const box = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (box.current) box.current.indeterminate = mixed;
+  }, [mixed]);
+  return (
+    <label
+      className={`flex cursor-pointer select-none items-center gap-2 rounded px-0.5 py-1 text-[10px] font-medium uppercase tracking-wide hover:text-[var(--color-text)] ${
+        emphasis
+          ? "border-b border-[var(--color-border)] pb-1.5 text-[var(--color-text)]"
+          : "text-[var(--color-text-muted)]"
+      }`}
+    >
+      <input
+        ref={box}
+        type="checkbox"
+        checked={enabled}
+        onChange={onToggle}
+        className="shrink-0"
+      />
+      {label}
+    </label>
+  );
+}
 import {
   ZONE_ICON_GROUPS,
   ZONE_ICONS,
@@ -390,6 +433,29 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
     setTools((t) => (t.includes(id) ? t.filter((x) => x !== id) : [...t, id]));
   }
 
+  /** Switch a whole group (a category, or one MCP server's tools) on or off. */
+  function setGroupEnabled(ids: string[], enabled: boolean) {
+    setTools((t) => {
+      const rest = t.filter((x) => !ids.includes(x));
+      return enabled ? [...rest, ...ids] : rest;
+    });
+  }
+
+  // Every id the master toggle covers: the built-ins plus the tools of every
+  // connected MCP server, so "all" really means all of what this zone can see.
+  const allToolIds = useMemo(
+    () => [
+      ...ALL_TOOLS.map((t) => t.id),
+      ...mcpServers
+        .filter((s) => s.enabled)
+        .flatMap((s) => s.tools.map((t) => mcpToolEnableId(s.id, t.name))),
+    ],
+    [mcpServers],
+  );
+  const enabledCount = allToolIds.filter((id) => tools.includes(id)).length;
+  const everyToolEnabled = allToolIds.length > 0 && enabledCount === allToolIds.length;
+  const someToolEnabled = enabledCount > 0;
+
   function applyTemplate(tpl: PromptTemplate) {
     setSystemPrompt(tpl.prompt);
     if (tpl.suggestedTools) {
@@ -671,72 +737,112 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
 
         <Field label="Tools">
           <div className="flex flex-col gap-1.5">
-            {ALL_TOOLS.map((t) => {
-              const badge = SAFETY_BADGE[t.safety];
+            {/* Master toggle. Enabling writes out every id explicitly rather than
+                storing a wildcard, so a zone's toolset stays a fixed, reviewable
+                list and a tool added in a later release is never silently granted
+                to it — which matters now that `file_manage` can delete. */}
+            <GroupToggle
+              label="All tools"
+              enabled={everyToolEnabled}
+              mixed={someToolEnabled && !everyToolEnabled}
+              onToggle={() => setTools(everyToolEnabled ? [] : allToolIds)}
+              emphasis
+            />
+
+            {TOOL_CATEGORIES.map((category) => {
+              const inCategory = ALL_TOOLS.filter((t) => t.category === category);
+              if (inCategory.length === 0) return null;
+              const ids = inCategory.map((t) => t.id);
+              const on = ids.filter((id) => tools.includes(id)).length;
               return (
-                <label
-                  key={t.id}
-                  className="flex cursor-pointer items-start gap-2 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-2 text-xs hover:border-[var(--color-accent)]"
-                >
-                  <input
-                    type="checkbox"
-                    checked={tools.includes(t.id)}
-                    onChange={() => toggleTool(t.id)}
-                    className="mt-0.5 shrink-0"
+                <div key={category} className="mt-1">
+                  <GroupToggle
+                    label={category}
+                    enabled={on === ids.length}
+                    mixed={on > 0 && on < ids.length}
+                    onToggle={() => setGroupEnabled(ids, on !== ids.length)}
                   />
-                  <div className="flex-1">
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-medium">{t.label}</span>
-                      <span className={`rounded border px-1.5 py-0.5 text-[10px] font-medium ${badge.cls}`}>
-                        {badge.label}
-                      </span>
-                    </div>
-                    <div className="mt-0.5 text-[var(--color-text-muted)]">{t.description}</div>
+                  <div className="mt-1 flex flex-col gap-1.5">
+                    {inCategory.map((t) => {
+                      const badge = SAFETY_BADGE[t.safety];
+                      return (
+                        <label
+                          key={t.id}
+                          className="flex cursor-pointer items-start gap-2 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-2 text-xs hover:border-[var(--color-accent)]"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={tools.includes(t.id)}
+                            onChange={() => toggleTool(t.id)}
+                            className="mt-0.5 shrink-0"
+                          />
+                          <div className="flex-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-medium">{t.label}</span>
+                              <span className={`rounded border px-1.5 py-0.5 text-[10px] font-medium ${badge.cls}`}>
+                                {badge.label}
+                              </span>
+                            </div>
+                            <div className="mt-0.5 text-[var(--color-text-muted)]">{t.description}</div>
+                          </div>
+                        </label>
+                      );
+                    })}
                   </div>
-                </label>
+                </div>
               );
             })}
 
             {/* MCP tools from connected servers, alongside built-in tools. Each
                 carries its user-assigned danger badge; toggling adds/removes the
-                qualified `mcp__server__tool` id from this zone's enabled set. */}
+                qualified `mcp__server__tool` id from this zone's enabled set. The
+                group header toggles every tool from that one server at once. */}
             {mcpServers
               .filter((s) => s.enabled && s.tools.length > 0)
-              .map((s) => (
-                <div key={s.id} className="mt-1.5">
-                  <div className="mb-1 flex items-center gap-1.5 px-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
-                    MCP · {s.name}
+              .map((s) => {
+                const ids = s.tools.map((t) => mcpToolEnableId(s.id, t.name));
+                const on = ids.filter((id) => tools.includes(id)).length;
+                return (
+                  <div key={s.id} className="mt-1">
+                    <GroupToggle
+                      label={`MCP · ${s.name}`}
+                      enabled={on === ids.length}
+                      mixed={on > 0 && on < ids.length}
+                      onToggle={() => setGroupEnabled(ids, on !== ids.length)}
+                    />
+                    <div className="mt-1 flex flex-col gap-1.5">
+                      {s.tools.map((t) => {
+                        const id = mcpToolEnableId(s.id, t.name);
+                        const badge = SAFETY_BADGE[t.dangerLevel] ?? SAFETY_BADGE[1];
+                        return (
+                          <label
+                            key={t.id}
+                            className="flex cursor-pointer items-start gap-2 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-2 text-xs hover:border-[var(--color-accent)]"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={tools.includes(id)}
+                              onChange={() => toggleTool(id)}
+                              className="mt-0.5 shrink-0"
+                            />
+                            <div className="flex-1">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-mono font-medium">{t.name}</span>
+                                <span className={`rounded border px-1.5 py-0.5 text-[10px] font-medium ${badge.cls}`}>
+                                  {badge.label}
+                                </span>
+                              </div>
+                              {t.description && (
+                                <div className="mt-0.5 line-clamp-2 text-[var(--color-text-muted)]">{t.description}</div>
+                              )}
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
                   </div>
-                  {s.tools.map((t) => {
-                    const id = mcpToolEnableId(s.id, t.name);
-                    const badge = SAFETY_BADGE[t.dangerLevel] ?? SAFETY_BADGE[1];
-                    return (
-                      <label
-                        key={t.id}
-                        className="mb-1.5 flex cursor-pointer items-start gap-2 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-2 text-xs hover:border-[var(--color-accent)]"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={tools.includes(id)}
-                          onChange={() => toggleTool(id)}
-                          className="mt-0.5 shrink-0"
-                        />
-                        <div className="flex-1">
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-mono font-medium">{t.name}</span>
-                            <span className={`rounded border px-1.5 py-0.5 text-[10px] font-medium ${badge.cls}`}>
-                              {badge.label}
-                            </span>
-                          </div>
-                          {t.description && (
-                            <div className="mt-0.5 line-clamp-2 text-[var(--color-text-muted)]">{t.description}</div>
-                          )}
-                        </div>
-                      </label>
-                    );
-                  })}
-                </div>
-              ))}
+                );
+              })}
           </div>
         </Field>
 

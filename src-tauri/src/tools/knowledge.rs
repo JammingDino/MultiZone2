@@ -1,5 +1,10 @@
-//! `search_knowledge` — agentic retrieval over the chat's project knowledge base
+//! `search_local_files` — agentic retrieval over the chat's project knowledge base
 //! (0.4.3). Read-only (safety level 0), so it runs without an approval prompt.
+//!
+//! Renamed from `search_knowledge` in 0.9.0: "knowledge" told neither the user nor
+//! a small local model what the tool actually does. The old name still dispatches
+//! (see `tool_safety_by_name` / `dispatch`) so zones and stored tool-call history
+//! written before the rename keep working.
 //!
 //! The tool is offered to a chat only when the chat's `knowledge_enabled` flag
 //! is on and its project has a non-empty index (see the request builder in
@@ -20,11 +25,14 @@ pub fn definition() -> Tool {
     Tool {
         tool_type: "function".into(),
         function: ToolFunction {
-            name: "search_knowledge".into(),
-            description: "Search this project's indexed documents (the knowledge base) for \
-passages relevant to a query, using semantic similarity. Use it whenever the user's question \
-might be answered by the project's files, or to ground your answer in their documents. Returns \
-the most relevant text chunks with their source file path; cite the file when you use a chunk."
+            name: "search_local_files".into(),
+            description: "Search the user's own local files — the documents in this project's \
+folder, which have been indexed for you — and return the passages most relevant to a query. \
+This is a meaning-based (semantic) search: describe what you are looking for in plain language \
+rather than guessing exact wording. Use it whenever the user's question might be answered by \
+their own files, or to ground your answer in their documents. Returns the most relevant text \
+chunks with the file each came from; cite that file when you use a chunk. To find an exact \
+string or symbol instead of a topic, use `search_file_text`."
                 .into(),
             parameters: json!({
                 "type": "object",

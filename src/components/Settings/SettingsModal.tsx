@@ -1233,6 +1233,7 @@ function ConversationModeSettings() {
 
 function SkillsTab() {
   const skills = useApp((s) => s.skills);
+  const zones = useApp((s) => s.zones);
   const refreshSkills = useApp((s) => s.refreshSkills);
   const fileRef = useRef<HTMLInputElement>(null);
   const [editing, setEditing] = useState<Skill | null>(null);
@@ -1256,6 +1257,16 @@ function SkillsTab() {
     await api.deleteSkill(s.id);
     await refreshSkills();
   }
+
+  // Skills a zone wrote itself and that the user hasn't looked at yet. Sorted to
+  // the top so the review queue is the first thing on the page.
+  const pendingReview = skills.filter((s) => s.authoredByZoneId && !s.enabled);
+  const sortedSkills = [...skills].sort((a, b) => {
+    const aPending = a.authoredByZoneId && !a.enabled ? 0 : 1;
+    const bPending = b.authoredByZoneId && !b.enabled ? 0 : 1;
+    return aPending - bPending || a.name.localeCompare(b.name);
+  });
+  const zoneName = (id: string) => zones.find((z) => z.id === id)?.name ?? "a zone";
 
   if (editing || creating) {
     return (
@@ -1301,20 +1312,51 @@ function SkillsTab() {
         />
       </div>
 
+      {/* Self-authored drafts (0.9.2): a zone wrote these itself via `create_skill`.
+          They are created disabled and enter no agent's catalog until reviewed, so
+          surface them here rather than letting them sit unnoticed in the list. */}
+      {pendingReview.length > 0 && (
+        <div className="rounded border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/5 p-3 text-xs">
+          <div className="font-medium">
+            {pendingReview.length === 1
+              ? "1 skill written by a zone is waiting for your review"
+              : `${pendingReview.length} skills written by zones are waiting for your review`}
+          </div>
+          <div className="mt-0.5 text-[var(--color-text-muted)]">
+            They are disabled — no agent can load them until you enable them below.
+          </div>
+        </div>
+      )}
+
       {skills.length === 0 ? (
         <div className="rounded border border-dashed border-[var(--color-border)] p-4 text-xs text-[var(--color-text-muted)]">
           No skills yet.
         </div>
       ) : (
         <div className="flex flex-col gap-2">
-          {skills.map((s) => (
-            <div key={s.id} className="rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+          {sortedSkills.map((s) => (
+            <div
+              key={s.id}
+              className={`rounded border bg-[var(--color-bg)] p-3 ${
+                s.authoredByZoneId && !s.enabled
+                  ? "border-[var(--color-accent)]/40"
+                  : "border-[var(--color-border)]"
+              }`}
+            >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="truncate text-sm font-medium">{s.name}</span>
                     {!s.enabled && (
                       <span className="rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]">disabled</span>
+                    )}
+                    {s.authoredByZoneId && (
+                      <span
+                        className="rounded border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/10 px-1.5 py-0.5 text-[10px] text-[var(--color-accent)]"
+                        title={`Written by the ${zoneName(s.authoredByZoneId)} zone on ${new Date(s.createdAt * 1000).toLocaleDateString()} — review before enabling`}
+                      >
+                        written by {zoneName(s.authoredByZoneId)}
+                      </span>
                     )}
                   </div>
                   {s.description && <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">{s.description}</div>}
@@ -1849,7 +1891,7 @@ function KnowledgeTab() {
           Set a <span className="font-medium">default embedding model</span> — new projects inherit it
           automatically — and index your <span className="font-medium">default directory</span> into a
           global knowledge base that chats without a project can search via the{" "}
-          <code className="rounded bg-[var(--color-bg)] px-1">search_knowledge</code> tool. For a local
+          <code className="rounded bg-[var(--color-bg)] px-1">search_local_files</code> tool. For a local
           model, add Ollama as a provider and pick something like{" "}
           <code className="rounded bg-[var(--color-bg)] px-1">nomic-embed-text</code>.
         </p>
@@ -1952,7 +1994,7 @@ function KnowledgeTab() {
           >
             <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all duration-200 ${appSettings.knowledgeDefaultEnabled ? "translate-x-4" : ""}`} />
           </button>
-          <span>Enable knowledge in new chats by default — the <code className="rounded bg-[var(--color-bg)] px-1">search_knowledge</code> tool is available from the first message (projects can override this)</span>
+          <span>Enable knowledge in new chats by default — the <code className="rounded bg-[var(--color-bg)] px-1">search_local_files</code> tool is available from the first message (projects can override this)</span>
         </label>
 
         {summary && (

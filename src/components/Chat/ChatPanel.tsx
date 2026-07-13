@@ -447,7 +447,7 @@ function ProjectTagStrip({
   const unassignedTags = allTags.filter((t) => !chatTags.some((ct) => ct.tagId === t.id));
   const projectHasSnippet = !!project?.contextSnippet?.trim();
   // The project has a knowledge index built (set after a successful index run).
-  // Only then is the search_knowledge tool useful, so we only show the toggle then.
+  // Only then is the search_local_files tool useful, so we only show the toggle then.
   const projectIndexed = !!project?.kbIndexedAt;
 
   // Everything currently being prepended to the system prompt for this chat:
@@ -557,7 +557,7 @@ function ProjectTagStrip({
               title={
                 knowledgeEnabled
                   ? "Knowledge ON — the assistant can search this project's indexed documents. Click to disable."
-                  : "Knowledge OFF — click to let the assistant search this project's documents (the search_knowledge tool)."
+                  : "Knowledge OFF — click to let the assistant search this project's documents (the search_local_files tool)."
               }
               className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition ${
                 knowledgeEnabled

@@ -90,7 +90,10 @@ export function collectCitations(blocks: TurnBlock[], fileSources: FileSource[] 
   for (const b of blocks) {
     if (b.kind !== "step" || b.step.kind !== "tool" || !b.step.toolResult) continue;
     const name = b.step.toolCall.function.name;
-    if (name !== "web_search" && name !== "search_knowledge" && name !== "read_file") continue;
+    // `search_knowledge` is the pre-0.9.0 name for `search_local_files`; stored
+    // history from before the rename still carries it.
+    const isLocalSearch = name === "search_local_files" || name === "search_knowledge";
+    if (name !== "web_search" && !isLocalSearch && name !== "read_file") continue;
 
     let data: any;
     try {
@@ -112,7 +115,7 @@ export function collectCitations(blocks: TurnBlock[], fileSources: FileSource[] 
           snippet: typeof r?.snippet === "string" ? r.snippet : undefined,
         });
       }
-    } else if (name === "search_knowledge") {
+    } else if (isLocalSearch) {
       // One citation per source file (chunks of the same file collapse).
       const results = Array.isArray(data?.results) ? data.results : [];
       for (const r of results) {

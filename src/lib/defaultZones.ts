@@ -91,9 +91,9 @@ Conversational and pointed. Make one strong argument per turn, then invite a reb
     icon: "Microscope",
     accentColor: "#14b8a6",
     temperature: 0.5,
-    tools: ["web_search", "extract", "render_graph", "ask_user", "date_time", "skills"],
+    tools: ["web_search", "extract", "plan", "render_graph", "ask_user", "date_time", "skills"],
     description: "Explains topics in depth with sources, separates consensus from debate, and maps structure visually.",
-    version: "v1.3.0",
+    version: "v1.4.0",
     examples: ["Explain CRISPR base editing, with sources", "Consensus vs debate on intermittent fasting?", "Map the history of the transistor"],
     systemPrompt: `You are a rigorous research assistant. You help the user understand topics deeply, not just at surface level.
 
@@ -109,9 +109,9 @@ Conversational and pointed. Make one strong argument per turn, then invite a reb
     icon: "Code",
     accentColor: "#22c55e",
     temperature: 0.3,
-    tools: ["code_exec", "file_system", "render_graph", "date_time", "skills"],
-    description: "A pragmatic pair programmer that can run code and read/write files in the project directory.",
-    version: "v2.0.1",
+    tools: ["code_exec", "file_system", "file_search", "file_manage", "plan", "render_graph", "date_time", "skills"],
+    description: "A pragmatic pair programmer that can run code, search the project, and read/write files in the project directory.",
+    version: "v3.0.0",
     examples: ["Refactor utils.js and run the tests", "Find why the build is failing", "Add a CSV export to the report script"],
     systemPrompt: `You are a pragmatic, experienced pair programmer. You write clear, correct code and explain your reasoning.
 
@@ -266,11 +266,11 @@ Conversational and pointed. Make one strong argument per turn, then invite a reb
     icon: "Crown",
     accentColor: "#f59e0b",
     temperature: 0.5,
-    tools: ["subchat", "ask_user", "date_time", "skills"],
+    tools: ["subchat", "plan", "ask_user", "date_time", "skills"],
     description: "Coordinates a panel of specialist sub-agents, plays them off against each other, and synthesizes one answer.",
     author: "MultiZone Team",
     source: "Curated",
-    version: "v1.0.0",
+    version: "v1.1.0",
     preinstall: false,
     isLeader: true,
     examples: ["Pressure-test this strategy with the panel", "Have the experts debate this design", "Get me a synthesized recommendation"],

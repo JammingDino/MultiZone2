@@ -31,6 +31,7 @@ Semantic versioning. Each release is tagged `vMAJOR.MINOR.PATCH`.
 | **0.6.x** | Multizone Mode | Planned |
 | **0.7.x** | Settings rework, UI/UX polish, DB/Markdown toggle | Planned |
 | **0.8.x** | Voice I/O — STT dictation, TTS, hands-free mode | Planned |
+| **0.9.x** | Tool Improvements — naming clarity, file management, self-authored skills | In progress |
 | **1.0.0** | Hardening & Public Release | Planned |
 | **Post-1.0** | Code interface, Diffusion LLM, Mobile | Backlog |
 
@@ -99,6 +100,14 @@ A full settings audit and consistency pass. Every panel is reviewed for clarity,
 Voice dictation in and spoken responses out. Speech-to-text lets the user dictate into the input bar — push-to-talk or toggle-to-dictate — with the transcript committed when recording stops, and an optional auto-send on silence. Text-to-speech reads any response aloud, streaming-aware so playback starts sentence by sentence before the full answer lands, with an auto-speak toggle and per-zone voices. The two combine into a hands-free conversation mode with barge-in. STT/TTS are served by any configured Provider exposing an OpenAI-compatible endpoint — reusing the same Provider rows zones already point at rather than a fixed vendor list, with no embedded model host. On-device transcription holds the local-first line by pointing that provider at a local server (e.g. LM Studio serving a whisper model), the same way local LLMs work here; non-local providers are clearly marked as leaving the machine.
 
 **Done when:** a user can hold a full spoken conversation with a zone — dictate a message, hear the response read back, and interrupt it — and "read aloud" works reliably on any individual response.
+
+---
+
+### 0.9.x — Tool Improvements
+
+The toolset gets a pass of its own, having grown organically across eight releases. Tool names become plainly understandable to a non-technical user and to a small local model: `search_knowledge` becomes "search local files", `list_directory` and friends read as what they do rather than what they call. Every tool carries a human-facing display name and a one-line plain-English description in the zone editor, separate from the machine name the model sees. The tool list itself becomes manageable rather than a wall of checkboxes: tools are grouped by category, and enable-all / disable-all toggles — app-wide and per category — let a user arm or strip a zone's toolset in one click instead of a dozen. File management is completed — models can rename, move, copy, and (with approval) delete files, which today they cannot, making the file tools write-only in practice. Fast literal and pattern search over files (`find_files` / `search_file_text`) complements RAG: embeddings answer "what is this about", exact search answers "where is this string", and a local model working on a codebase needs both. Finally, skills become self-authored: a `create_skill` tool lets a zone write a new skill from what it just worked out, so knowledge learned in one chat is available to every future chat — memory captures facts, skills capture procedures. Self-authored skills are always visible and editable in Settings → Skills, and are created disabled-by-default pending a user glance, keeping the "user stays in control" line intact.
+
+**Done when:** a new user can read the zone editor's tool list and understand every entry without guessing; a model can rename and move files as fluently as it creates them; a model can find an exact string in a project without an embedding round-trip; and a zone can write a skill that measurably improves its own later runs.
 
 ---
 

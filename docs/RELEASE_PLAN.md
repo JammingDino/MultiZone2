@@ -437,6 +437,65 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## 0.9.x — Tool Improvements
+
+*A dedicated pass over the toolset, which has grown organically since 0.1.x. Three themes: **naming clarity** (tools that read plainly to a user and to a small local model), **completing the file tools** (rename/move/copy/delete + fast search, so file handling isn't write-only), and **self-authored skills** (a zone can write a skill from what it just learned). Every rename must keep the old machine name resolving — `ToolId::from_str` already accepts a legacy alias (`"present_file" | "save_output"`), which is the pattern to follow so existing zones' `tools_enabled` arrays and stored tool-call history don't break.*
+
+### 0.9.0 — Tool naming & discoverability
+
+*Status: built & typechecked (`cargo check` + `cargo test` (22 pass) + `npm run build` green); not yet runtime-tested in the app.*
+
+*Naming was split in two rather than done as one sweep. **User-facing** names/descriptions ([types.ts](../src/lib/types.ts) `ALL_TOOLS`, now a typed `ToolInfo` with a `category`) were rewritten wholesale for a reader who doesn't know the jargon — "Read & write files", "Read a web page", "Run terminal commands". **Machine** names (what the model sees) were left alone except for the knowledge rename, because every machine-name change is a stored-data migration: a zone's `toolsEnabled`, the curated presets, and every historical tool call carry the raw id. The model reads the tool's `description`, not its id, so the plain-English work that actually improves a small local model's tool use is in the Rust definitions — which is where the effort went.*
+
+- [x] **Human-facing tool metadata**: display name + plain-English description per tool, separate from the machine name sent to the model — the pre-existing `label`/`description` fields were rewritten and gained a `category`
+- [x] **Rename the knowledge tool**: `search_knowledge` → `search_local_files`, with a description that says what it is (searching the user's own files, by meaning) and points at `search_file_text` for exact matches. Old name still dispatches; UI copy in Settings → Knowledge, the project editor, and the chat header updated
+- [x] **Plain-English pass across the built-in set** — every user-facing label/description rewritten ("Read a web page", "Draw a chart or diagram", "Rename, move & delete files"); machine names deliberately unchanged apart from the knowledge tool (see status note)
+- [x] Legacy alias map in `ToolId::from_str` + `tool_safety_by_name` + `dispatch`, so a renamed tool still resolves from an existing zone's `tools_enabled` and from stored tool-call history — *no id-rewriting migration needed, since aliases cover it and nothing was orphaned*
+- [x] Tools grouped by category in the zone editor (Files · Web · Knowledge · Agents · System · MCP) rather than one flat list
+- [x] **Enable/disable all tools** — tri-state master toggle (on / off / mixed) plus a per-category and per-MCP-server group toggle (`GroupToggle` in [ZoneForm.tsx](../src/components/Zones/ZoneForm.tsx)). Writes the full id set into `toolsEnabled` rather than a wildcard, so a zone's toolset stays explicit and a tool added in a later release is never silently granted to it
+- [x] Curated zone presets updated (Code Companion gains file search/manage + plan; Deep Researcher and Response Leader gain plan); `safe_tool_ids` gains `plan`; curated library version bumped to 8
+
+### 0.9.1 — File management & search tools
+
+*Status: built & typechecked; 7 new unit tests cover the scoping guards and both search tools (`cargo test` 22 pass). Not yet runtime-tested in the app.*
+
+*Shipped as two new zone-selectable groups rather than bolted onto `file_system`, so a zone can be given the ability to produce files without the ability to destroy them: **`file_manage`** (move/copy/delete/create_folder — group classed dangerous so it never lands in a default toolset) and **`file_search`** (find_files/search_file_text — read-only, gated like the other file reads). Per-call safety still comes from `tool_safety_by_name`, so move/copy/create_folder prompt as moderate while every `delete_file` prompts as dangerous. Two pure-Rust deps added — `globset` and `regex` — consistent with the no-native-deps stance.*
+
+- [x] `move_file(from, to)` — move or rename a file/folder (rename = same parent, new final segment); moderate safety. Refuses an existing destination unless `overwrite: true`, and clears the destination first so a replace works on Windows
+- [x] `copy_file(from, to)` — moderate safety; single files only
+- [x] `delete_file(path)` — **dangerous** (always approved); refuses a directory unless `recursive: true`, and refuses to delete an allowed root itself
+- [x] `create_folder(path)` — idempotent mkdir -p
+- [x] `find_files(pattern)` — glob over paths, returning paths only (token-cheap); matches against both the relative path and the bare filename so `*.rs` works without a leading `**/`
+- [x] `search_file_text(query, glob?)` — regex (or `literal`) content search returning file + line number + the matching line; skips binaries (NUL sniff), files over 2 MB, and noise directories (`node_modules`, `target`, `.git`, …); an invalid regex returns an error that tells the model to retry with `literal: true`
+- [x] Both endpoints of every move/copy are scope-checked through one shared `checked_path`, so a move cannot be used to escape the allowed roots — covered by a test
+- [~] Renames/moves/deletes inside a knowledge-indexed directory should trigger the existing auto re-index watcher (it watches the directory, so this ought to be free) — **not yet verified**
+
+### 0.9.2 — Self-authored skills
+
+*Memory (0.3.3) captures **facts**; skills (0.3.2) capture **procedures**. The gap today is that only the user can author a skill — a zone that works out a good procedure has no way to keep it. `create_skill` closes that loop, guarded so an agent can't silently rewrite its own instructions.*
+
+*Status: built & typechecked (migration 023 adds `skills.authored_by_zone_id`); not yet runtime-tested. Both tools live under the existing `skills` ToolId, so any zone with Skills can already author them.*
+
+- [x] `create_skill(name, description, instructions)` tool: the model writes a new skill into the global `skills` table, stamped with the authoring zone (`caller_zone_id`, already threaded through `dispatch`). The tool description tells it to frame `description` as the triggering use case and to prefer `save_memory` for one-off facts
+- [x] Self-authored skills are created **disabled** and flagged with `authored_by_zone_id` — they enter no catalog until the user enables them in Settings → Skills. Safety stays 0 for `create_skill` precisely *because* a disabled skill changes nothing an agent can act on
+- [x] `update_skill(name, instructions)` — moderate safety (approval), since revising an existing instruction set *does* change behaviour. Leaves the enabled state alone
+- [x] Settings → Skills: self-authored entries carry a "written by <zone>" badge (with the date on hover), sort to the top of the list, and a banner counts how many are awaiting review
+- [~] Notification when a skill is written mid-turn — the `create_skill` call is visible in the message thread like any tool call, and the review banner catches it in settings, but there's **no toast**; revisit if it proves easy to miss
+- [x] Guardrails: duplicate-name detection (tells the model to call `update_skill` instead), and a cap of 20 unreviewed self-authored skills before `create_skill` starts refusing
+
+### 0.9.3 — Other recommended agent tools
+
+*Candidates surfaced from the gaps in the current set; each is independently movable and some may be cut. The plan tool shipped with 0.9.0–0.9.2; the rest are still open.*
+
+- [x] **`plan` tool** ([plan.rs](../src-tauri/src/tools/plan.rs), `update_plan`) — a checklist the model maintains across a long multi-step turn, rendered inline as a progress list ([PlanBlock.tsx](../src/components/Renderers/PlanBlock.tsx)) rather than raw JSON. Deliberately **stateless on the backend**: the plan lives in the conversation as tool calls/results, so it survives reload/branching/export with no new table and a sub-agent's plan can't collide with its leader's. Each call replaces the whole list, which also keeps the plan in the model's own context where it does the most good. Safe (level 0); added to Code Companion, Deep Researcher, and Response Leader
+- [ ] **`http_request(url, method, headers?, body?)`** — a general request tool beyond `extract_url`'s read-a-page path, so a zone can call an API. Dangerous level; strong candidate but overlaps MCP — decide at implementation time whether MCP servers cover it
+- [ ] **`summarize_chat` / context compaction** — the model condenses its own older history when a long chat approaches the context limit, instead of the turn silently degrading
+- [ ] **`ask_user` follow-up affordance** — exists, but no way for a model to offer *choices*; add structured options so an approval/clarification renders as buttons
+- [ ] **User-editable tool descriptions** — let a power user rewrite any tool's description per zone (the single highest-leverage knob on whether a small local model uses a tool correctly)
+- [ ] **Tool usage stats** — per-zone counts of which tools get called and how often they error, so a user can prune a bloated zone toolset
+
+---
+
 ## 1.0.0 — Hardening & Public Release
 
 - [ ] Performance: measure and optimize startup time, first message render, large chat (500+ messages) scroll — fixed the main structural cause of wasted re-renders: `Sidebar`/`ChatPanel`/`MessageThread`/`ChatList`/`ZoneEditor`/`ProjectsPanel`/`SettingsModal` subscribed to the whole zustand store unfiltered, so *any* state change anywhere re-rendered all of them; converted to shallow/per-field selectors, and `UserMessage`/`BotTurnView` are now memoized (with a custom comparator for `BotTurnView` since `groupMessages` rebuilds turn objects each call) so a streaming token only re-renders the turn actually generating, not the whole history. Still open: no virtualization for very long (500+) message lists, and no measured before/after startup or first-paint numbers.

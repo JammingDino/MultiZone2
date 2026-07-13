@@ -623,6 +623,20 @@ export interface VoiceInputDevice {
 /** 0 = safe, 1 = moderate, 2 = dangerous — mirrors the Rust backend. */
 export type ToolSafety = 0 | 1 | 2;
 
+/**
+ * One callable function inside a tool group, as reported by Rust (0.9.3). A group
+ * (`file_system`) can expose several functions (`read_file`, `edit_file`, …), and
+ * a per-zone description override is keyed by function name.
+ */
+export interface ToolFunctionInfo {
+  /** The group id stored in a zone's `toolsEnabled`. */
+  toolId: string;
+  /** The function name the model calls. */
+  name: string;
+  /** The shipped description an override replaces. */
+  description: string;
+}
+
 /** Groups the zone editor's tool list is sorted into, in display order (0.9.0). */
 export const TOOL_CATEGORIES = ["Files", "Web", "Knowledge", "Agents", "System"] as const;
 export type ToolCategory = (typeof TOOL_CATEGORIES)[number];

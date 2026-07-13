@@ -3,7 +3,7 @@ import { RefreshCw, Trash2, X, BookOpen, ChevronDown, Crown } from "lucide-react
 import * as api from "@/lib/tauri";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
 import { VisionOverrideSelect } from "@/components/common/VisionOverrideSelect";
-import type { Provider, Zone } from "@/lib/types";
+import type { Provider, ToolFunctionInfo, Zone } from "@/lib/types";
 import { ALL_TOOLS, TOOL_CATEGORIES, mcpToolEnableId } from "@/lib/types";
 import { useApp } from "@/store/app";
 import { DEFAULT_ZONES } from "@/lib/defaultZones";
@@ -285,6 +285,16 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
   const [topP, setTopP] = useState("");
   const [tools, setTools] = useState<string[]>([]);
   const [toolConfig, setToolConfig] = useState("{}");
+  /** Per-zone tool description overrides (0.9.3), keyed by function name. */
+  const [descOverrides, setDescOverrides] = useState<Record<string, string>>({});
+  /** The shipped descriptions, read from Rust so there's one source of truth. */
+  const [toolFns, setToolFns] = useState<ToolFunctionInfo[]>([]);
+  /** Which tool group has its description editor open. */
+  const [editingDesc, setEditingDesc] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.listToolFunctions().then(setToolFns).catch(console.error);
+  }, []);
   const mcpServers = useApp((s) => s.mcpServers);
   const refreshMcpServers = useApp((s) => s.refreshMcpServers);
   const [ceHeadless, setCeHeadless] = useState(false);
@@ -324,6 +334,11 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
         const ce = parsed?.code_exec ?? {};
         setCeHeadless(ce.headless ?? false);
         setTtsVoice(typeof parsed?.tts_voice === "string" ? parsed.tts_voice : "");
+        setDescOverrides(
+          parsed?.tool_descriptions && typeof parsed.tool_descriptions === "object"
+            ? (parsed.tool_descriptions as Record<string, string>)
+            : {},
+        );
       } catch { /* ignore */ }
       setThinkingEnabled(zone.thinkingEnabled ?? false);
       setIncludeThinkingInContext(zone.includeThinkingInContext ?? false);
@@ -342,6 +357,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
       setToolConfig("{}");
       setCeHeadless(false);
       setTtsVoice("");
+      setDescOverrides({});
       setThinkingEnabled(false);
       setIncludeThinkingInContext(false);
       setIsLeader(false);
@@ -397,6 +413,14 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
       const obj = JSON.parse(toolConfig || "{}") as Record<string, unknown>;
       if (ttsVoice.trim()) obj.tts_voice = ttsVoice.trim();
       else delete obj.tts_voice;
+      // Per-zone tool description overrides (0.9.3). Only non-empty entries are
+      // persisted — clearing a box restores the shipped description rather than
+      // sending the model an empty one.
+      const overrides = Object.fromEntries(
+        Object.entries(descOverrides).filter(([, v]) => v.trim()),
+      );
+      if (Object.keys(overrides).length > 0) obj.tool_descriptions = overrides;
+      else delete obj.tool_descriptions;
       finalToolConfig = JSON.stringify(obj, null, 2);
     } catch { /* keep raw toolConfig if it isn't valid JSON */ }
     try {
@@ -765,27 +789,101 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
                   <div className="mt-1 flex flex-col gap-1.5">
                     {inCategory.map((t) => {
                       const badge = SAFETY_BADGE[t.safety];
+                      const enabled = tools.includes(t.id);
+                      const fns = toolFns.filter((f) => f.toolId === t.id);
+                      const customized = fns.filter((f) => descOverrides[f.name]?.trim()).length;
                       return (
-                        <label
+                        <div
                           key={t.id}
-                          className="flex cursor-pointer items-start gap-2 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-2 text-xs hover:border-[var(--color-accent)]"
+                          className="rounded border border-[var(--color-border)] bg-[var(--color-bg)] text-xs"
                         >
-                          <input
-                            type="checkbox"
-                            checked={tools.includes(t.id)}
-                            onChange={() => toggleTool(t.id)}
-                            className="mt-0.5 shrink-0"
-                          />
-                          <div className="flex-1">
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-medium">{t.label}</span>
-                              <span className={`rounded border px-1.5 py-0.5 text-[10px] font-medium ${badge.cls}`}>
-                                {badge.label}
-                              </span>
+                          <label className="flex cursor-pointer items-start gap-2 p-2 hover:border-[var(--color-accent)]">
+                            <input
+                              type="checkbox"
+                              checked={enabled}
+                              onChange={() => toggleTool(t.id)}
+                              className="mt-0.5 shrink-0"
+                            />
+                            <div className="flex-1">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-medium">{t.label}</span>
+                                <span className={`rounded border px-1.5 py-0.5 text-[10px] font-medium ${badge.cls}`}>
+                                  {badge.label}
+                                </span>
+                                {customized > 0 && (
+                                  <span className="rounded border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/10 px-1.5 py-0.5 text-[10px] text-[var(--color-accent)]">
+                                    {customized} custom
+                                  </span>
+                                )}
+                              </div>
+                              <div className="mt-0.5 text-[var(--color-text-muted)]">{t.description}</div>
                             </div>
-                            <div className="mt-0.5 text-[var(--color-text-muted)]">{t.description}</div>
-                          </div>
-                        </label>
+                          </label>
+
+                          {/* Per-zone description overrides (0.9.3). A tool's
+                              description is the whole of what the model knows about
+                              when to call it, and the wording that works for a
+                              frontier model often isn't the wording that works for a
+                              7B local one — so it's editable, per zone. Only offered
+                              for enabled tools, to keep the list quiet. */}
+                          {enabled && fns.length > 0 && (
+                            <div className="border-t border-[var(--color-border)]">
+                              <button
+                                type="button"
+                                onClick={() => setEditingDesc(editingDesc === t.id ? null : t.id)}
+                                className="flex w-full items-center gap-1 px-2 py-1 text-[10px] text-[var(--color-text-muted)] hover:text-[var(--color-accent)]"
+                              >
+                                <ChevronDown
+                                  size={10}
+                                  className={`transition-transform ${editingDesc === t.id ? "" : "-rotate-90"}`}
+                                />
+                                What the model is told ({fns.length})
+                              </button>
+
+                              {editingDesc === t.id && (
+                                <div className="flex flex-col gap-2 p-2 pt-0">
+                                  {fns.map((f) => (
+                                    <div key={f.name}>
+                                      <div className="mb-0.5 flex items-center gap-1.5">
+                                        <span className="font-mono text-[10px]">{f.name}</span>
+                                        {descOverrides[f.name]?.trim() && (
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              setDescOverrides((d) => {
+                                                const next = { ...d };
+                                                delete next[f.name];
+                                                return next;
+                                              })
+                                            }
+                                            className="text-[10px] text-[var(--color-text-muted)] underline hover:text-[var(--color-accent)]"
+                                          >
+                                            reset
+                                          </button>
+                                        )}
+                                      </div>
+                                      <textarea
+                                        value={descOverrides[f.name] ?? ""}
+                                        onChange={(e) =>
+                                          setDescOverrides((d) => ({ ...d, [f.name]: e.target.value }))
+                                        }
+                                        placeholder={f.description}
+                                        rows={3}
+                                        className="input w-full resize-y font-mono text-[10px] leading-relaxed"
+                                      />
+                                    </div>
+                                  ))}
+                                  <p className="text-[10px] text-[var(--color-text-muted)]">
+                                    Leave a box empty to use the built-in description shown as
+                                    placeholder text. This is what the model reads to decide when and
+                                    how to call the tool — rewriting it is the most direct way to fix a
+                                    model that ignores a tool or uses it wrongly.
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       );
                     })}
                   </div>

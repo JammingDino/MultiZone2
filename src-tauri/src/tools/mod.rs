@@ -233,6 +233,31 @@ impl ToolId {
     }
 }
 
+/// Every built-in tool group. The single source of truth for enumerating tools
+/// (e.g. `list_tool_functions`, which flattens each group into the functions the
+/// model actually sees). Keep in step with the `ToolId` variants.
+pub const ALL_TOOL_IDS: [ToolId; 19] = [
+    ToolId::DateTime,
+    ToolId::WebSearch,
+    ToolId::Extract,
+    ToolId::HttpRequest,
+    ToolId::CodeExec,
+    ToolId::FileSystem,
+    ToolId::FileSearch,
+    ToolId::FileManage,
+    ToolId::PresentFile,
+    ToolId::RenderGraph,
+    ToolId::AskUser,
+    ToolId::ManageTags,
+    ToolId::SwitchZone,
+    ToolId::Shell,
+    ToolId::Memory,
+    ToolId::Skills,
+    ToolId::Compact,
+    ToolId::Plan,
+    ToolId::Subchat,
+];
+
 /// Tool ids classified as "safe" (safety level 0). Used as the default toolset
 /// for quick/simple chats so the default model is useful out of the box without
 /// exposing anything that needs approval.

@@ -2242,7 +2242,64 @@ async fn build_tools_for_zone(db: &SqlitePool, zone: &Zone, ctx: &ToolContext) -
     }
     // MCP tools enabled on this zone (qualified ids `mcp__<server>__<tool>`).
     tools.extend(crate::mcp::tool_defs_for_ids(db, &ids).await);
+
+    // Per-zone description overrides (0.9.3). A tool's description is the whole
+    // of what the model knows about when and how to call it, and the wording
+    // that works for a frontier model often isn't the wording that works for a
+    // 7B local one — so let the user rewrite it per zone. Stored in the zone's
+    // tool_config as `{"tool_descriptions": {"<function name>": "..."}}`; an
+    // empty or absent entry leaves the shipped description alone. Covers MCP
+    // tools too, since they're keyed by function name like everything else.
+    if let Some(overrides) = serde_json::from_str::<Value>(&zone.tool_config)
+        .ok()
+        .and_then(|c| c.get("tool_descriptions").cloned())
+        .and_then(|v| v.as_object().cloned())
+    {
+        for tool in &mut tools {
+            if let Some(text) = overrides
+                .get(&tool.function.name)
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                tool.function.description = text.to_string();
+            }
+        }
+    }
+
     tools
+}
+
+/// One callable function a zone can enable, flattened out of the tool groups.
+/// The zone editor needs this because a group id (`file_system`) can expose
+/// several functions (`read_file`, `edit_file`, …), and a description override
+/// is per function. Derived from the Rust definitions so there is one source of
+/// truth for what the model actually sees.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolFunctionInfo {
+    /// The group id as stored in a zone's `tools_enabled`, e.g. "file_system".
+    pub tool_id: String,
+    /// The function name the model calls, e.g. "read_file".
+    pub name: String,
+    /// The shipped description — the default an override replaces.
+    pub description: String,
+}
+
+#[tauri::command]
+pub async fn list_tool_functions(state: State<'_, AppState>) -> AppResult<Vec<ToolFunctionInfo>> {
+    let ctx = load_tool_context(&state.db).await;
+    let mut out = Vec::new();
+    for id in crate::tools::ALL_TOOL_IDS {
+        for def in id.definitions(&ctx) {
+            out.push(ToolFunctionInfo {
+                tool_id: id.as_str().to_string(),
+                name: def.function.name,
+                description: def.function.description,
+            });
+        }
+    }
+    Ok(out)
 }
 
 /// If the tool result JSON is an array of ContentParts (e.g. from read_file with

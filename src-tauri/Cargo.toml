@@ -1,6 +1,6 @@
 [package]
 name = "multizone"
-version = "0.8.3"
+version = "0.9.0"
 description = "MultiZone — LLM interface"
 authors = ["MultiZone"]
 edition = "2021"
@@ -45,6 +45,11 @@ base64 = "0.22"
 opener = "0.7"
 scraper = "0.20"
 pdf-extract = "0.7"
+
+# File search tools (0.9.1): `find_files` matches paths against a glob,
+# `search_file_text` matches file contents against a regex. Both pure Rust.
+globset = "0.4"
+regex = "1.11"
 
 # Live auto re-index (0.4.3): watch knowledge directories and re-embed changed
 # files. The debouncer coalesces editor save-bursts into a single re-index.

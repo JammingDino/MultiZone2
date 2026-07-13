@@ -177,6 +177,151 @@ pub fn present_file_definitions() -> Vec<Tool> {
     }]
 }
 
+/// Definitions for the `file_manage` group (0.9.1): rename/move, copy, delete,
+/// create folder. Split from the read/write `file_system` group so a zone can be
+/// given the ability to produce files without the ability to destroy them —
+/// `delete_file` is classed dangerous and always prompts for approval.
+pub fn manage_definitions() -> Vec<Tool> {
+    vec![
+        Tool {
+            tool_type: "function".into(),
+            function: ToolFunction {
+                name: "move_file".into(),
+                description:
+                    "Move or rename a file or folder. To rename in place, keep the same parent \
+                     directory and change only the final path segment. Missing parent directories \
+                     of the destination are created. Fails if the destination already exists \
+                     unless `overwrite` is true. Both paths must be inside the project directory \
+                     or the zone's allowed roots."
+                        .into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "from": { "type": "string", "description": "Existing path. Absolute, or relative to the project directory." },
+                        "to":   { "type": "string", "description": "Destination path, including the new filename when renaming." },
+                        "overwrite": { "type": "boolean", "description": "Replace the destination if it already exists.", "default": false }
+                    },
+                    "required": ["from", "to"]
+                }),
+            },
+        },
+        Tool {
+            tool_type: "function".into(),
+            function: ToolFunction {
+                name: "copy_file".into(),
+                description:
+                    "Copy a file to a new path. Missing parent directories are created. Fails if \
+                     the destination exists unless `overwrite` is true. Copies a single file, not \
+                     a directory."
+                        .into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "from": { "type": "string", "description": "Path of the file to copy." },
+                        "to":   { "type": "string", "description": "Destination path for the copy." },
+                        "overwrite": { "type": "boolean", "description": "Replace the destination if it already exists.", "default": false }
+                    },
+                    "required": ["from", "to"]
+                }),
+            },
+        },
+        Tool {
+            tool_type: "function".into(),
+            function: ToolFunction {
+                name: "delete_file".into(),
+                description:
+                    "Delete a file. This is destructive and cannot be undone — the user is asked \
+                     to approve every call. To delete a directory you must pass `recursive: true`, \
+                     which removes the directory and everything inside it; without it, a directory \
+                     path is refused."
+                        .into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "Path of the file (or directory, with `recursive`) to delete." },
+                        "recursive": {
+                            "type": "boolean",
+                            "description": "Required to delete a directory and all of its contents. Has no effect on a file.",
+                            "default": false
+                        }
+                    },
+                    "required": ["path"]
+                }),
+            },
+        },
+        Tool {
+            tool_type: "function".into(),
+            function: ToolFunction {
+                name: "create_folder".into(),
+                description:
+                    "Create a directory, including any missing parent directories. Succeeds \
+                     quietly if it already exists."
+                        .into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "Directory path to create." }
+                    },
+                    "required": ["path"]
+                }),
+            },
+        },
+    ]
+}
+
+/// Definitions for the `file_search` group (0.9.1): exact/pattern search over
+/// files. Read-only (safety 0). Complements semantic search (`search_local_files`):
+/// embeddings answer "what is this about", these answer "where is this string".
+pub fn search_definitions() -> Vec<Tool> {
+    vec![
+        Tool {
+            tool_type: "function".into(),
+            function: ToolFunction {
+                name: "find_files".into(),
+                description:
+                    "Find files by name. Returns matching paths only (no contents), so it is cheap \
+                     to call. `pattern` is a glob matched against each file's path — e.g. \
+                     \"*.rs\", \"src/**/*.ts\", \"*config*\". Use this when you know roughly what a \
+                     file is called; use `search_file_text` when you know what is inside it."
+                        .into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "pattern": { "type": "string", "description": "Glob pattern matched against the file path, e.g. \"**/*.rs\" or \"*test*\"." },
+                        "path": { "type": "string", "description": "Directory to search under. Defaults to the project directory." },
+                        "max_results": { "type": "integer", "description": "Cap on paths returned (default 100).", "default": 100 }
+                    },
+                    "required": ["pattern"]
+                }),
+            },
+        },
+        Tool {
+            tool_type: "function".into(),
+            function: ToolFunction {
+                name: "search_file_text".into(),
+                description:
+                    "Search the contents of files for an exact string or regular expression, and \
+                     return each match with its file path and line number. This is exact search, \
+                     not semantic search: use it to find where a specific name, string, or symbol \
+                     appears. Narrow the sweep with `glob` (e.g. \"**/*.ts\") when you can."
+                        .into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "Text to search for. Treated as a regular expression unless `literal` is true." },
+                        "literal": { "type": "boolean", "description": "Match `query` as plain text rather than a regex.", "default": false },
+                        "case_sensitive": { "type": "boolean", "description": "Match case exactly.", "default": false },
+                        "glob": { "type": "string", "description": "Only search files whose path matches this glob, e.g. \"**/*.rs\"." },
+                        "path": { "type": "string", "description": "Directory to search under. Defaults to the project directory." },
+                        "max_results": { "type": "integer", "description": "Cap on matching lines returned (default 50).", "default": 50 }
+                    },
+                    "required": ["query"]
+                }),
+            },
+        },
+    ]
+}
+
 /// Zone config:
 /// {
 ///   "file_system": {
@@ -518,6 +663,468 @@ pub async fn present_file(args: &Value, project_dir: Option<&str>) -> AppResult<
     .to_string())
 }
 
+// ---------------------------------------------------------------------------
+// 0.9.1 — file management: move/rename, copy, delete, create folder.
+// ---------------------------------------------------------------------------
+
+/// Resolve a path and check it against the allowed roots, returning the error
+/// JSON the tools return verbatim when it fails. Shared by every file tool so
+/// the scoping rules can't drift between them.
+fn checked_path(
+    path: &str,
+    zone_config: &Value,
+    project_dir: Option<&str>,
+) -> Result<PathBuf, String> {
+    let roots = allowed_roots(zone_config, project_dir);
+    if roots.is_empty() {
+        return Err(
+            json!({ "error": "no project directory or allowed_roots configured for file tools" })
+                .to_string(),
+        );
+    }
+    if path.trim().is_empty() {
+        return Err(json!({ "error": "a 'path' is required" }).to_string());
+    }
+    let p = resolve_path(path, project_dir);
+    if !is_within_roots(&p, &roots) {
+        return Err(
+            json!({ "error": "path is outside the project directory and allowed_roots" })
+                .to_string(),
+        );
+    }
+    Ok(p)
+}
+
+/// `move_file` — move or rename a file/folder within the allowed roots. Both
+/// endpoints are scope-checked: a move can't be used to escape the roots.
+pub async fn move_file(
+    args: &Value,
+    zone_config: &Value,
+    project_dir: Option<&str>,
+) -> AppResult<String> {
+    let from = args.get("from").and_then(|v| v.as_str()).unwrap_or("");
+    let to = args.get("to").and_then(|v| v.as_str()).unwrap_or("");
+    let overwrite = args.get("overwrite").and_then(|v| v.as_bool()).unwrap_or(false);
+
+    let src = match checked_path(from, zone_config, project_dir) {
+        Ok(p) => p,
+        Err(e) => return Ok(e),
+    };
+    let dst = match checked_path(to, zone_config, project_dir) {
+        Ok(p) => p,
+        Err(e) => return Ok(e),
+    };
+    if !src.exists() {
+        return Ok(json!({ "error": format!("source does not exist: {}", src.to_string_lossy()) }).to_string());
+    }
+    if dst.exists() && !overwrite {
+        return Ok(json!({
+            "error": format!("destination already exists: {} — pass overwrite: true to replace it", dst.to_string_lossy())
+        })
+        .to_string());
+    }
+    if let Some(parent) = dst.parent() {
+        if let Err(e) = tokio::fs::create_dir_all(parent).await {
+            return Ok(json!({ "error": format!("failed to create destination directory: {e}") }).to_string());
+        }
+    }
+    if dst.exists() && overwrite {
+        // rename() over an existing directory fails on Windows; clear it first.
+        let cleared = if dst.is_dir() {
+            tokio::fs::remove_dir_all(&dst).await
+        } else {
+            tokio::fs::remove_file(&dst).await
+        };
+        if let Err(e) = cleared {
+            return Ok(json!({ "error": format!("failed to replace destination: {e}") }).to_string());
+        }
+    }
+    match tokio::fs::rename(&src, &dst).await {
+        Ok(_) => Ok(json!({
+            "ok": true,
+            "from": src.to_string_lossy(),
+            "to": dst.to_string_lossy(),
+        })
+        .to_string()),
+        Err(e) => Ok(json!({ "error": e.to_string() }).to_string()),
+    }
+}
+
+/// `copy_file` — copy a single file. Directories are refused (a recursive copy
+/// is rarely what a model means, and is easy to do accidentally at scale).
+pub async fn copy_file(
+    args: &Value,
+    zone_config: &Value,
+    project_dir: Option<&str>,
+) -> AppResult<String> {
+    let from = args.get("from").and_then(|v| v.as_str()).unwrap_or("");
+    let to = args.get("to").and_then(|v| v.as_str()).unwrap_or("");
+    let overwrite = args.get("overwrite").and_then(|v| v.as_bool()).unwrap_or(false);
+
+    let src = match checked_path(from, zone_config, project_dir) {
+        Ok(p) => p,
+        Err(e) => return Ok(e),
+    };
+    let dst = match checked_path(to, zone_config, project_dir) {
+        Ok(p) => p,
+        Err(e) => return Ok(e),
+    };
+    if !src.is_file() {
+        return Ok(json!({ "error": "copy_file copies a single file; source is missing or is a directory" }).to_string());
+    }
+    if dst.exists() && !overwrite {
+        return Ok(json!({
+            "error": format!("destination already exists: {} — pass overwrite: true to replace it", dst.to_string_lossy())
+        })
+        .to_string());
+    }
+    if let Some(parent) = dst.parent() {
+        if let Err(e) = tokio::fs::create_dir_all(parent).await {
+            return Ok(json!({ "error": format!("failed to create destination directory: {e}") }).to_string());
+        }
+    }
+    match tokio::fs::copy(&src, &dst).await {
+        Ok(bytes) => Ok(json!({
+            "ok": true,
+            "from": src.to_string_lossy(),
+            "to": dst.to_string_lossy(),
+            "bytes_copied": bytes,
+        })
+        .to_string()),
+        Err(e) => Ok(json!({ "error": e.to_string() }).to_string()),
+    }
+}
+
+/// `delete_file` — destructive, so it is classed dangerous (level 2) and always
+/// goes through the approval gate. A directory is only removed when the model
+/// explicitly passes `recursive: true`.
+pub async fn delete_file(
+    args: &Value,
+    zone_config: &Value,
+    project_dir: Option<&str>,
+) -> AppResult<String> {
+    let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+    let recursive = args.get("recursive").and_then(|v| v.as_bool()).unwrap_or(false);
+
+    let p = match checked_path(path, zone_config, project_dir) {
+        Ok(p) => p,
+        Err(e) => return Ok(e),
+    };
+    if !p.exists() {
+        return Ok(json!({ "error": format!("path does not exist: {}", p.to_string_lossy()) }).to_string());
+    }
+    // Never let a delete take out an allowed root itself.
+    let roots = allowed_roots(zone_config, project_dir);
+    let is_root = roots.iter().any(|r| {
+        match (r.canonicalize(), p.canonicalize()) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => false,
+        }
+    });
+    if is_root {
+        return Ok(json!({ "error": "refusing to delete the project directory / allowed root itself" }).to_string());
+    }
+
+    if p.is_dir() {
+        if !recursive {
+            return Ok(json!({
+                "error": "path is a directory — pass recursive: true to delete it and all of its contents"
+            })
+            .to_string());
+        }
+        return match tokio::fs::remove_dir_all(&p).await {
+            Ok(_) => Ok(json!({ "ok": true, "deleted": p.to_string_lossy(), "kind": "directory" }).to_string()),
+            Err(e) => Ok(json!({ "error": e.to_string() }).to_string()),
+        };
+    }
+    match tokio::fs::remove_file(&p).await {
+        Ok(_) => Ok(json!({ "ok": true, "deleted": p.to_string_lossy(), "kind": "file" }).to_string()),
+        Err(e) => Ok(json!({ "error": e.to_string() }).to_string()),
+    }
+}
+
+/// `create_folder` — mkdir -p, idempotent.
+pub async fn create_folder(
+    args: &Value,
+    zone_config: &Value,
+    project_dir: Option<&str>,
+) -> AppResult<String> {
+    let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+    let p = match checked_path(path, zone_config, project_dir) {
+        Ok(p) => p,
+        Err(e) => return Ok(e),
+    };
+    match tokio::fs::create_dir_all(&p).await {
+        Ok(_) => Ok(json!({ "ok": true, "path": p.to_string_lossy() }).to_string()),
+        Err(e) => Ok(json!({ "error": e.to_string() }).to_string()),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 0.9.1 — file search: find_files (by name) and search_file_text (by content).
+// ---------------------------------------------------------------------------
+
+/// Directories never worth walking for either search tool. Keeps a search of a
+/// real project from drowning in dependency and VCS noise.
+const SKIP_DIRS: &[&str] = &[
+    ".git", "node_modules", "target", "dist", "build", ".next", ".venv",
+    "venv", "__pycache__", ".cache", ".svelte-kit",
+];
+
+const MAX_WALK_ENTRIES: usize = 20_000;
+/// Files above this size are skipped by the content search — they are almost
+/// always binaries or build artifacts, and reading them would blow the budget.
+const MAX_SEARCHABLE_BYTES: u64 = 2 * 1024 * 1024;
+
+/// Collect every file under `root` (breadth-unbounded, depth-first), skipping
+/// noise directories and stopping at `MAX_WALK_ENTRIES` so a search over a huge
+/// tree terminates. Returns paths only.
+fn walk_files(root: &Path) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    let mut stack: Vec<PathBuf> = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        if out.len() >= MAX_WALK_ENTRIES {
+            break;
+        }
+        let rd = match std::fs::read_dir(&dir) {
+            Ok(rd) => rd,
+            Err(_) => continue,
+        };
+        for entry in rd.flatten() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().to_string();
+            let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            if is_dir {
+                if SKIP_DIRS.contains(&name.as_str()) {
+                    continue;
+                }
+                stack.push(path);
+            } else {
+                out.push(path);
+                if out.len() >= MAX_WALK_ENTRIES {
+                    break;
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Search root: the caller's `path` when given, else the project directory, else
+/// the first allowed root. Always scope-checked.
+fn search_root(
+    args: &Value,
+    zone_config: &Value,
+    project_dir: Option<&str>,
+) -> Result<PathBuf, String> {
+    let roots = allowed_roots(zone_config, project_dir);
+    if roots.is_empty() {
+        return Err(
+            json!({ "error": "no project directory or allowed_roots configured for file tools" })
+                .to_string(),
+        );
+    }
+    match args.get("path").and_then(|v| v.as_str()).map(str::trim) {
+        Some(p) if !p.is_empty() => checked_path(p, zone_config, project_dir),
+        _ => Ok(roots
+            .iter()
+            .find(|r| r.is_dir())
+            .cloned()
+            .unwrap_or_else(|| roots[0].clone())),
+    }
+}
+
+/// `find_files` — glob over file paths. Matches against both the path relative
+/// to the search root and the bare filename, so "*.rs" behaves the way a user
+/// expects without requiring a leading "**/".
+pub async fn find_files(
+    args: &Value,
+    zone_config: &Value,
+    project_dir: Option<&str>,
+) -> AppResult<String> {
+    let pattern = args.get("pattern").and_then(|v| v.as_str()).unwrap_or("").trim();
+    if pattern.is_empty() {
+        return Ok(json!({ "error": "a glob 'pattern' is required" }).to_string());
+    }
+    let max = args
+        .get("max_results")
+        .and_then(|v| v.as_u64())
+        .map(|n| n.clamp(1, 1000) as usize)
+        .unwrap_or(100);
+    let root = match search_root(args, zone_config, project_dir) {
+        Ok(r) => r,
+        Err(e) => return Ok(e),
+    };
+
+    let glob = match globset::GlobBuilder::new(pattern)
+        .literal_separator(false)
+        .case_insensitive(true)
+        .build()
+    {
+        Ok(g) => g.compile_matcher(),
+        Err(e) => return Ok(json!({ "error": format!("invalid glob pattern: {e}") }).to_string()),
+    };
+
+    let root_for_walk = root.clone();
+    let files = tokio::task::spawn_blocking(move || walk_files(&root_for_walk))
+        .await
+        .unwrap_or_default();
+
+    let mut matches: Vec<String> = Vec::new();
+    let mut truncated = false;
+    for f in &files {
+        let rel = f.strip_prefix(&root).unwrap_or(f);
+        let rel_str = rel.to_string_lossy().replace('\\', "/");
+        let name = f.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        if glob.is_match(rel_str.as_str()) || glob.is_match(name.as_str()) {
+            if matches.len() >= max {
+                truncated = true;
+                break;
+            }
+            matches.push(rel_str);
+        }
+    }
+    matches.sort();
+
+    Ok(json!({
+        "root": root.to_string_lossy(),
+        "pattern": pattern,
+        "count": matches.len(),
+        "truncated": truncated,
+        "files": matches,
+        "note": if matches.is_empty() { Some("No files matched. Try a looser pattern, e.g. \"*name*\".") } else { None },
+    })
+    .to_string())
+}
+
+/// `search_file_text` — regex/literal content search, returning path + line
+/// number + the matching line. The exact-search counterpart to the semantic
+/// `search_local_files`.
+pub async fn search_file_text(
+    args: &Value,
+    zone_config: &Value,
+    project_dir: Option<&str>,
+) -> AppResult<String> {
+    let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
+    if query.trim().is_empty() {
+        return Ok(json!({ "error": "a 'query' is required" }).to_string());
+    }
+    let literal = args.get("literal").and_then(|v| v.as_bool()).unwrap_or(false);
+    let case_sensitive = args.get("case_sensitive").and_then(|v| v.as_bool()).unwrap_or(false);
+    let max = args
+        .get("max_results")
+        .and_then(|v| v.as_u64())
+        .map(|n| n.clamp(1, 500) as usize)
+        .unwrap_or(50);
+    let root = match search_root(args, zone_config, project_dir) {
+        Ok(r) => r,
+        Err(e) => return Ok(e),
+    };
+
+    let pattern = if literal { regex::escape(query) } else { query.to_string() };
+    let re = match regex::RegexBuilder::new(&pattern)
+        .case_insensitive(!case_sensitive)
+        .size_limit(1 << 20)
+        .build()
+    {
+        Ok(r) => r,
+        Err(e) => {
+            return Ok(json!({
+                "error": format!("invalid regular expression: {e} — pass literal: true to search for it as plain text")
+            })
+            .to_string())
+        }
+    };
+
+    let file_glob = match args.get("glob").and_then(|v| v.as_str()).map(str::trim).filter(|g| !g.is_empty()) {
+        Some(g) => match globset::GlobBuilder::new(g)
+            .literal_separator(false)
+            .case_insensitive(true)
+            .build()
+        {
+            Ok(built) => Some(built.compile_matcher()),
+            Err(e) => return Ok(json!({ "error": format!("invalid glob: {e}") }).to_string()),
+        },
+        None => None,
+    };
+
+    let root_for_walk = root.clone();
+    let root_for_scan = root.clone();
+    let scan = tokio::task::spawn_blocking(move || {
+        let files = walk_files(&root_for_walk);
+        let mut hits: Vec<Value> = Vec::new();
+        let mut truncated = false;
+        let mut files_searched = 0usize;
+
+        for f in files {
+            if hits.len() >= max {
+                truncated = true;
+                break;
+            }
+            let rel = f.strip_prefix(&root_for_scan).unwrap_or(&f);
+            let rel_str = rel.to_string_lossy().replace('\\', "/");
+            if let Some(g) = &file_glob {
+                let name = f.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                if !g.is_match(rel_str.as_str()) && !g.is_match(name.as_str()) {
+                    continue;
+                }
+            }
+            let too_big = std::fs::metadata(&f)
+                .map(|m| m.len() > MAX_SEARCHABLE_BYTES)
+                .unwrap_or(true);
+            if too_big {
+                continue;
+            }
+            let bytes = match std::fs::read(&f) {
+                Ok(b) => b,
+                Err(_) => continue,
+            };
+            // Binary sniff: a NUL byte in the first block means don't treat it as text.
+            if bytes.iter().take(1024).any(|b| *b == 0) {
+                continue;
+            }
+            files_searched += 1;
+            let content = bytes_to_string(bytes);
+            for (i, line) in content.lines().enumerate() {
+                if re.is_match(line) {
+                    if hits.len() >= max {
+                        truncated = true;
+                        break;
+                    }
+                    let trimmed = line.trim();
+                    let text: String = if trimmed.chars().count() > 300 {
+                        trimmed.chars().take(300).collect::<String>() + "…"
+                    } else {
+                        trimmed.to_string()
+                    };
+                    hits.push(json!({
+                        "file": rel_str,
+                        "line": i + 1,
+                        "text": text,
+                    }));
+                }
+            }
+        }
+        (hits, truncated, files_searched)
+    })
+    .await;
+
+    let (hits, truncated, files_searched) = match scan {
+        Ok(v) => v,
+        Err(e) => return Ok(json!({ "error": format!("search task failed: {e}") }).to_string()),
+    };
+
+    Ok(json!({
+        "root": root.to_string_lossy(),
+        "query": query,
+        "files_searched": files_searched,
+        "count": hits.len(),
+        "truncated": truncated,
+        "matches": hits,
+    })
+    .to_string())
+}
+
 pub async fn edit_file(
     args: &Value,
     zone_config: &Value,
@@ -553,5 +1160,221 @@ pub async fn edit_file(
         })
         .to_string()),
         Err(e) => Ok(json!({ "error": e.to_string() }).to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A scratch directory that is also the only allowed root, so the tests
+    /// exercise the same scoping the tools enforce in the app.
+    struct Sandbox {
+        root: PathBuf,
+    }
+
+    impl Sandbox {
+        fn new(tag: &str) -> Self {
+            let root = std::env::temp_dir().join(format!(
+                "mz_fs_test_{tag}_{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            std::fs::create_dir_all(&root).unwrap();
+            Self { root }
+        }
+
+        fn zone_config(&self) -> Value {
+            json!({ "file_system": { "allowed_roots": [self.root.to_string_lossy()] } })
+        }
+
+        fn write(&self, rel: &str, content: &str) {
+            let p = self.root.join(rel);
+            if let Some(parent) = p.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            std::fs::write(p, content).unwrap();
+        }
+
+        fn dir(&self) -> Option<&str> {
+            self.root.to_str()
+        }
+    }
+
+    impl Drop for Sandbox {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[tokio::test]
+    async fn move_file_renames_within_the_root() {
+        let sb = Sandbox::new("move");
+        sb.write("notes.txt", "hello");
+
+        let out = move_file(
+            &json!({ "from": "notes.txt", "to": "renamed.txt" }),
+            &sb.zone_config(),
+            sb.dir(),
+        )
+        .await
+        .unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+
+        assert_eq!(v["ok"], true);
+        assert!(!sb.root.join("notes.txt").exists());
+        assert_eq!(
+            std::fs::read_to_string(sb.root.join("renamed.txt")).unwrap(),
+            "hello"
+        );
+    }
+
+    #[tokio::test]
+    async fn move_file_refuses_an_existing_destination_without_overwrite() {
+        let sb = Sandbox::new("move_clobber");
+        sb.write("a.txt", "keep me");
+        sb.write("b.txt", "original");
+
+        let out = move_file(
+            &json!({ "from": "a.txt", "to": "b.txt" }),
+            &sb.zone_config(),
+            sb.dir(),
+        )
+        .await
+        .unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+
+        assert!(v["error"].is_string(), "expected a refusal, got {v}");
+        // Neither file was touched.
+        assert_eq!(std::fs::read_to_string(sb.root.join("b.txt")).unwrap(), "original");
+        assert!(sb.root.join("a.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn move_file_cannot_escape_the_allowed_roots() {
+        let sb = Sandbox::new("escape");
+        sb.write("secret.txt", "sensitive");
+
+        let out = move_file(
+            &json!({ "from": "secret.txt", "to": "../escaped.txt" }),
+            &sb.zone_config(),
+            sb.dir(),
+        )
+        .await
+        .unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+
+        assert!(v["error"].as_str().unwrap().contains("outside"));
+        assert!(sb.root.join("secret.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn delete_file_needs_recursive_for_a_directory_and_never_removes_the_root() {
+        let sb = Sandbox::new("delete");
+        sb.write("sub/inner.txt", "x");
+
+        // A directory without `recursive` is refused...
+        let out = delete_file(&json!({ "path": "sub" }), &sb.zone_config(), sb.dir())
+            .await
+            .unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert!(v["error"].as_str().unwrap().contains("recursive"));
+        assert!(sb.root.join("sub").exists());
+
+        // ...and the allowed root itself is refused even with it.
+        let out = delete_file(
+            &json!({ "path": ".", "recursive": true }),
+            &sb.zone_config(),
+            sb.dir(),
+        )
+        .await
+        .unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert!(v["error"].as_str().unwrap().contains("refusing"));
+        assert!(sb.root.exists());
+
+        // With `recursive`, a real subdirectory goes.
+        let out = delete_file(
+            &json!({ "path": "sub", "recursive": true }),
+            &sb.zone_config(),
+            sb.dir(),
+        )
+        .await
+        .unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["ok"], true);
+        assert!(!sb.root.join("sub").exists());
+    }
+
+    #[tokio::test]
+    async fn find_files_matches_globs_and_skips_noise_directories() {
+        let sb = Sandbox::new("find");
+        sb.write("src/main.rs", "fn main() {}");
+        sb.write("src/lib.rs", "");
+        sb.write("README.md", "");
+        sb.write("node_modules/dep/index.rs", "should never be walked");
+
+        let out = find_files(&json!({ "pattern": "**/*.rs" }), &sb.zone_config(), sb.dir())
+            .await
+            .unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        let files: Vec<&str> = v["files"].as_array().unwrap().iter().map(|f| f.as_str().unwrap()).collect();
+
+        assert_eq!(files, vec!["src/lib.rs", "src/main.rs"]);
+    }
+
+    #[tokio::test]
+    async fn search_file_text_reports_path_and_line_and_honours_the_glob() {
+        let sb = Sandbox::new("grep");
+        sb.write("src/a.rs", "let x = 1;\nlet needle = 2;\n");
+        sb.write("src/b.ts", "const needle = 3;\n");
+
+        // Unfiltered: both files hit.
+        let out = search_file_text(&json!({ "query": "needle" }), &sb.zone_config(), sb.dir())
+            .await
+            .unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["count"], 2);
+
+        // Filtered to Rust: only a.rs, and the line number is 1-indexed.
+        let out = search_file_text(
+            &json!({ "query": "needle", "glob": "**/*.rs" }),
+            &sb.zone_config(),
+            sb.dir(),
+        )
+        .await
+        .unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        let m = &v["matches"][0];
+        assert_eq!(v["count"], 1);
+        assert_eq!(m["file"], "src/a.rs");
+        assert_eq!(m["line"], 2);
+        assert_eq!(m["text"], "let needle = 2;");
+    }
+
+    #[tokio::test]
+    async fn search_file_text_falls_back_cleanly_on_a_bad_regex() {
+        let sb = Sandbox::new("badre");
+        sb.write("a.txt", "cost is 5+ dollars");
+
+        // An invalid regex is an error that tells the model how to recover...
+        let out = search_file_text(&json!({ "query": "cost (5" }), &sb.zone_config(), sb.dir())
+            .await
+            .unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert!(v["error"].as_str().unwrap().contains("literal"));
+
+        // ...and `literal: true` searches for it verbatim.
+        let out = search_file_text(
+            &json!({ "query": "5+ dollars", "literal": true }),
+            &sb.zone_config(),
+            sb.dir(),
+        )
+        .await
+        .unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["count"], 1);
     }
 }

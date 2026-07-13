@@ -207,6 +207,20 @@ pub struct Memory {
     pub updated_at: i64,
 }
 
+/// Per-zone, per-tool call counters (0.9.3). Surfaced in the zone editor so a
+/// user can see which tools a zone actually reaches for — every tool in a zone's
+/// set costs context on every turn, so an unused one is pure tax.
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolUsage {
+    pub zone_id: String,
+    /// The function name the model called, e.g. "read_file".
+    pub tool_name: String,
+    pub calls: i64,
+    pub errors: i64,
+    pub last_used_at: i64,
+}
+
 /// A registered MCP (Model Context Protocol) server. `transport` is "stdio"
 /// (spawn `command` as a local subprocess) or "sse" (connect to the remote
 /// `url`). Connection status is runtime-only and not stored here.

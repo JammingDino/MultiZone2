@@ -24,6 +24,7 @@ import type {
   SubchatNode,
   Tag,
   ToolFunctionInfo,
+  ToolUsage,
   VoiceInputDevice,
   Zone,
 } from "./types";
@@ -146,6 +147,12 @@ export const deleteTag = (id: string) => invoke<void>("delete_tag", { id });
  * model actually sees.
  */
 export const listToolFunctions = () => invoke<ToolFunctionInfo[]>("list_tool_functions");
+
+/** Per-zone tool call counters (0.9.3). Omit `zoneId` for every zone. */
+export const getToolUsage = (zoneId?: string) =>
+  invoke<ToolUsage[]>("get_tool_usage", { zoneId: zoneId ?? null });
+export const resetToolUsage = (zoneId?: string) =>
+  invoke<void>("reset_tool_usage", { zoneId: zoneId ?? null });
 
 // Skills (global, on-demand catalog)
 export const listSkills = () => invoke<Skill[]>("list_skills");

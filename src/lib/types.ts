@@ -637,6 +637,19 @@ export interface ToolFunctionInfo {
   description: string;
 }
 
+/**
+ * Per-zone, per-tool call counters (0.9.3). Every tool in a zone's set costs
+ * context on every turn, so these exist to show which ones actually earn it.
+ */
+export interface ToolUsage {
+  zoneId: string;
+  /** The function name the model called, e.g. "read_file". */
+  toolName: string;
+  calls: number;
+  errors: number;
+  lastUsedAt: number;
+}
+
 /** Groups the zone editor's tool list is sorted into, in display order (0.9.0). */
 export const TOOL_CATEGORIES = ["Files", "Web", "Knowledge", "Agents", "System"] as const;
 export type ToolCategory = (typeof TOOL_CATEGORIES)[number];

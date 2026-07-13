@@ -1465,6 +1465,19 @@ async fn run_participant_turn(
                 .to_string()
             };
 
+            // Usage counters (0.9.3), so the zone editor can show which tools a
+            // zone actually reaches for and which keep failing. Best-effort: a
+            // failed counter write never affects the turn. A denied approval
+            // counts as an error, which is the honest reading — the call didn't
+            // do what the model asked for.
+            crate::commands::tool_usage::record(
+                &ctx.db,
+                &zone.id,
+                &tc.function.name,
+                crate::commands::tool_usage::result_is_error(&result),
+            )
+            .await;
+
             // The tag tool mutates tags/chat_tags — tell the UI to refresh.
             if tc.function.name == "tag_chat" {
                 sink.emit_event(

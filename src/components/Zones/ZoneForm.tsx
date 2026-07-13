@@ -3,7 +3,7 @@ import { RefreshCw, Trash2, X, BookOpen, ChevronDown, Crown } from "lucide-react
 import * as api from "@/lib/tauri";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
 import { VisionOverrideSelect } from "@/components/common/VisionOverrideSelect";
-import type { Provider, ToolFunctionInfo, Zone } from "@/lib/types";
+import type { Provider, ToolFunctionInfo, ToolUsage, Zone } from "@/lib/types";
 import { ALL_TOOLS, TOOL_CATEGORIES, mcpToolEnableId } from "@/lib/types";
 import { useApp } from "@/store/app";
 import { DEFAULT_ZONES } from "@/lib/defaultZones";
@@ -40,9 +40,7 @@ function GroupToggle({
   return (
     <label
       className={`flex cursor-pointer select-none items-center gap-2 rounded px-0.5 py-1 text-[10px] font-medium uppercase tracking-wide hover:text-[var(--color-text)] ${
-        emphasis
-          ? "border-b border-[var(--color-border)] pb-1.5 text-[var(--color-text)]"
-          : "text-[var(--color-text-muted)]"
+        emphasis ? "text-[var(--color-text)]" : "text-[var(--color-text-muted)]"
       }`}
     >
       <input
@@ -292,9 +290,20 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
   /** Which tool group has its description editor open. */
   const [editingDesc, setEditingDesc] = useState<string | null>(null);
 
+  /** Per-tool call counters for this zone (0.9.3); empty for an unsaved zone. */
+  const [usage, setUsage] = useState<ToolUsage[]>([]);
+
   useEffect(() => {
     api.listToolFunctions().then(setToolFns).catch(console.error);
   }, []);
+
+  useEffect(() => {
+    if (!zone?.id) {
+      setUsage([]);
+      return;
+    }
+    api.getToolUsage(zone.id).then(setUsage).catch(console.error);
+  }, [zone?.id]);
   const mcpServers = useApp((s) => s.mcpServers);
   const refreshMcpServers = useApp((s) => s.refreshMcpServers);
   const [ceHeadless, setCeHeadless] = useState(false);
@@ -765,13 +774,27 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
                 storing a wildcard, so a zone's toolset stays a fixed, reviewable
                 list and a tool added in a later release is never silently granted
                 to it — which matters now that `file_manage` can delete. */}
-            <GroupToggle
-              label="All tools"
-              enabled={everyToolEnabled}
-              mixed={someToolEnabled && !everyToolEnabled}
-              onToggle={() => setTools(everyToolEnabled ? [] : allToolIds)}
-              emphasis
-            />
+            <div className="flex items-center gap-2 border-b border-[var(--color-border)] pb-1.5">
+              <GroupToggle
+                label="All tools"
+                enabled={everyToolEnabled}
+                mixed={someToolEnabled && !everyToolEnabled}
+                onToggle={() => setTools(everyToolEnabled ? [] : allToolIds)}
+                emphasis
+              />
+              {zone?.id && usage.length > 0 && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await api.resetToolUsage(zone.id);
+                    setUsage([]);
+                  }}
+                  className="ml-auto text-[10px] text-[var(--color-text-muted)] underline hover:text-[var(--color-accent)]"
+                >
+                  reset usage stats
+                </button>
+              )}
+            </div>
 
             {TOOL_CATEGORIES.map((category) => {
               const inCategory = ALL_TOOLS.filter((t) => t.category === category);
@@ -792,6 +815,12 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
                       const enabled = tools.includes(t.id);
                       const fns = toolFns.filter((f) => f.toolId === t.id);
                       const customized = fns.filter((f) => descOverrides[f.name]?.trim()).length;
+                      // Usage is counted per function; a group's figure is the sum
+                      // across the functions it exposes.
+                      const names = new Set(fns.map((f) => f.name));
+                      const stats = usage.filter((u) => names.has(u.toolName));
+                      const calls = stats.reduce((n, u) => n + u.calls, 0);
+                      const errors = stats.reduce((n, u) => n + u.errors, 0);
                       return (
                         <div
                           key={t.id}
@@ -813,6 +842,30 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
                                 {customized > 0 && (
                                   <span className="rounded border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/10 px-1.5 py-0.5 text-[10px] text-[var(--color-accent)]">
                                     {customized} custom
+                                  </span>
+                                )}
+                                {/* Usage (0.9.3): an enabled tool this zone has
+                                    never called is costing context on every turn
+                                    for nothing — say so plainly. */}
+                                {enabled && zone?.id && (
+                                  <span
+                                    className="ml-auto shrink-0 text-[10px] text-[var(--color-text-muted)]"
+                                    title={
+                                      calls === 0
+                                        ? "This zone has never called this tool. It still costs context on every turn."
+                                        : `Called ${calls}×${errors > 0 ? `, ${errors} failed` : ""}`
+                                    }
+                                  >
+                                    {calls === 0 ? (
+                                      "never used"
+                                    ) : (
+                                      <>
+                                        {calls}× used
+                                        {errors > 0 && (
+                                          <span className="text-[var(--color-danger)]"> · {errors} failed</span>
+                                        )}
+                                      </>
+                                    )}
                                   </span>
                                 )}
                               </div>

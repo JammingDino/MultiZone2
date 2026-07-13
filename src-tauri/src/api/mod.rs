@@ -37,8 +37,7 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::{oneshot, RwLock};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-const CHAT_COLS: &str =
-    "id, title, zone_id, project_id, project_context_enabled, knowledge_enabled, perspective_mode, smart_routing, parent_chat_id, branched_from_message_id, initiated_by_zone_id, created_at, updated_at";
+use crate::commands::chats::CHAT_COLS;
 const MSG_COLS: &str =
     "id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at";
 

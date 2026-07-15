@@ -4,6 +4,7 @@ import { useApp } from "@/store/app";
 import { useTts, zoneVoice } from "@/store/tts";
 import * as api from "@/lib/tauri";
 import { formatTokens } from "@/lib/format";
+import { estimateTokens } from "@/lib/tokens";
 
 interface Props {
   /** Used for copy. */
@@ -162,18 +163,26 @@ export function MessageActions({
                 value={formatTokens(estimateTokens(stats.contentChars))}
               />
               {stats.reasoningChars > 0 && (
-                <>
-                  <StatRow
-                    label="Thinking tokens (est.)"
-                    value={formatTokens(estimateTokens(stats.reasoningChars))}
-                  />
-                  <StatRow
-                    label="Total tokens (est.)"
-                    value={formatTokens(
-                      estimateTokens(stats.contentChars + stats.reasoningChars),
-                    )}
-                  />
-                </>
+                <StatRow
+                  label="Thinking tokens (est.)"
+                  value={formatTokens(estimateTokens(stats.reasoningChars))}
+                />
+              )}
+              {(stats.toolCallChars ?? 0) > 0 && (
+                <StatRow
+                  label="Tool call tokens (est.)"
+                  value={formatTokens(estimateTokens(stats.toolCallChars ?? 0))}
+                />
+              )}
+              {(stats.reasoningChars > 0 || (stats.toolCallChars ?? 0) > 0) && (
+                <StatRow
+                  label="Total tokens (est.)"
+                  value={formatTokens(
+                    estimateTokens(
+                      stats.contentChars + stats.reasoningChars + (stats.toolCallChars ?? 0),
+                    ),
+                  )}
+                />
               )}
               <StatRow label="Speed" value={formatSpeed(stats)} />
               <StatRow label="Chars" value={String(stats.contentChars)} />
@@ -299,10 +308,6 @@ function StatRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function estimateTokens(chars: number) {
-  return Math.max(1, Math.round(chars / 4));
-}
-
 function formatDuration(ms: number) {
   if (ms < 1000) return `${ms} ms`;
   const s = ms / 1000;
@@ -315,6 +320,7 @@ function formatSpeed(stats: {
   durationMs: number;
   contentChars: number;
   reasoningChars: number;
+  toolCallChars?: number;
   toolMs?: number;
 }) {
   // tok/s reflects generation throughput, so discount time spent executing
@@ -322,12 +328,21 @@ function formatSpeed(stats: {
   // separately, in full.
   const genMs = stats.durationMs - (stats.toolMs ?? 0);
   if (genMs <= 0) return "—";
-  // Speed includes thinking tokens — that's still tokens the model produced.
-  const tokens = estimateTokens(stats.contentChars + stats.reasoningChars);
+  // Speed includes thinking and tool-call tokens — both are tokens the model
+  // produced, so both affect throughput.
+  const tokens = estimateTokens(
+    stats.contentChars + stats.reasoningChars + (stats.toolCallChars ?? 0),
+  );
   const tps = (tokens / (genMs / 1000)).toFixed(1);
   return `${tps} tok/s`;
 }
 
-function formatTokenTotal(stats: { contentChars: number; reasoningChars: number }) {
-  return formatTokens(estimateTokens(stats.contentChars + stats.reasoningChars));
+function formatTokenTotal(stats: {
+  contentChars: number;
+  reasoningChars: number;
+  toolCallChars?: number;
+}) {
+  return formatTokens(
+    estimateTokens(stats.contentChars + stats.reasoningChars + (stats.toolCallChars ?? 0)),
+  );
 }

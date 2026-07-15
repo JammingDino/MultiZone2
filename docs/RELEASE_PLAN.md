@@ -496,6 +496,15 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+### 0.9.4 — Token accounting refinements
+
+*A follow-up to the 0.3.1 token counters. Tool-call output is now counted as the output tokens it is, and a per-chat context meter surfaces the whole conversation's size. All estimates are chars→tokens (~4 chars/token) — no exact tokenizer exists for arbitrary local models — so they're a guide, not a billed count. Centralized in [tokens.ts](../src/lib/tokens.ts).*
+
+- [x] **Tool-call output tokens** — the args a model streams to call a tool are real output tokens (they cost generation time), so they're now summed into the per-message `MessageStats` (`toolCallChars`, from the turn aggregate) and shown as their own "Tool call tokens (est.)" row in the stats popover. They already fed the live banner's token count; now they also count toward the saved total and tok/s. Perspective turns sum their pending tool args since they have no turn aggregate
+- [x] **Context meter** ([ContextMeter.tsx](../src/components/Chat/ContextMeter.tsx)) — chat-header readout of the current context size, estimated from all persisted messages: input (user turns, uploaded file text, tool responses, images at a flat per-image estimate) vs output (assistant answers, thinking, tool calls). Click for the input/output split. Recomputed via `chatContextEstimate` as messages change
+
+---
+
 ## 1.0.0 — Hardening & Public Release
 
 - [ ] Performance: measure and optimize startup time, first message render, large chat (500+ messages) scroll — fixed the main structural cause of wasted re-renders: `Sidebar`/`ChatPanel`/`MessageThread`/`ChatList`/`ZoneEditor`/`ProjectsPanel`/`SettingsModal` subscribed to the whole zustand store unfiltered, so *any* state change anywhere re-rendered all of them; converted to shallow/per-field selectors, and `UserMessage`/`BotTurnView` are now memoized (with a custom comparator for `BotTurnView` since `groupMessages` rebuilds turn objects each call) so a streaming token only re-renders the turn actually generating, not the whole history. Still open: no virtualization for very long (500+) message lists, and no measured before/after startup or first-paint numbers.

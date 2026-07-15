@@ -8,6 +8,7 @@ import { InputBar, type InputBarHandle } from "./InputBar";
 import { ZonePicker } from "./ZonePicker";
 import { ExportMenu } from "./ExportMenu";
 import { ConversationIndicator } from "./ConversationIndicator";
+import { ContextMeter } from "./ContextMeter";
 import { HomeScreen } from "./HomeScreen";
 import { SettingsModal } from "@/components/Settings/SettingsModal";
 import { ZoneEditor } from "@/components/Zones/ZoneEditor";
@@ -270,6 +271,7 @@ export function ChatPanel() {
               onOpen={(zoneId) => openZoneEditor(zoneId)}
             />
             <div className="flex shrink-0 items-center gap-2">
+            <ContextMeter chatId={activeChat.id} />
             {!isSubchat && <ExportMenu chatId={activeChat.id} />}
             <PerspectiveZonePicker
               chatId={activeChat.id}

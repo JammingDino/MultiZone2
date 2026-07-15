@@ -34,6 +34,10 @@ export interface MessageStats {
   timeToFirstTokenMs: number | null;
   contentChars: number;
   reasoningChars: number;
+  /** Chars the model generated as tool-call arguments this turn. These are
+   *  real output tokens — they cost generation time — so they count toward the
+   *  turn's output total and tok/s. */
+  toolCallChars: number;
   /** Cumulative time tools spent *executing* this turn. Excluded from tok/s so
    *  throughput reflects generation, not tool wall-clock. */
   toolMs: number;
@@ -526,6 +530,9 @@ export const useApp = create<AppStore>((set, get) => ({
                     : null,
                 contentChars: current.content.length,
                 reasoningChars: current.reasoning.length,
+                // Perspective streams don't track a turn aggregate, so tool-call
+                // args aren't summed separately here.
+                toolCallChars: current.pendingTools.reduce((n, t) => n + t.args.length, 0),
                 // Perspective streams don't track tool execution time separately.
                 toolMs: 0,
               };
@@ -752,6 +759,7 @@ export const useApp = create<AppStore>((set, get) => ({
                 firstTokenAt !== null ? firstTokenAt - turnStart : null,
               contentChars: turn ? turn.contentChars : current.content.length,
               reasoningChars: turn ? turn.reasoningChars : current.reasoning.length,
+              toolCallChars: turn ? turn.toolCallChars : 0,
               toolMs,
             };
           }

@@ -1,49 +1,7 @@
 import { Modal, ModalTitle } from "./Modal";
+import { CONTEXTUAL_GROUPS, globalShortcutsGroup, type ShortcutGroup } from "@/lib/shortcuts";
 
-const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform ?? navigator.userAgent);
-const MOD = isMac ? "⌘" : "Ctrl";
-
-type ShortcutGroup = {
-  title: string;
-  items: { keys: string[]; description: string }[];
-};
-
-const GROUPS: ShortcutGroup[] = [
-  {
-    title: "Messaging",
-    items: [
-      { keys: ["Enter"], description: "Send message" },
-      { keys: [MOD, "Enter"], description: "Send message (when \"send on Ctrl+Enter\" is set in Settings)" },
-      { keys: [MOD, "Enter"], description: "Save an in-progress message edit" },
-      { keys: ["Esc"], description: "Cancel a message edit, or close an open popover/menu" },
-    ],
-  },
-  {
-    title: "Scrolling",
-    items: [
-      { keys: ["↑", "↓", "PgUp", "PgDn", "Home", "End"], description: "Scroll the chat (unpins auto-scroll-to-bottom while streaming)" },
-    ],
-  },
-  {
-    title: "Lists & fields",
-    items: [
-      { keys: ["Enter"], description: "Confirm a rename or inline text field" },
-      { keys: ["Esc"], description: "Cancel a rename, or close a combobox" },
-    ],
-  },
-  {
-    title: "Diagrams",
-    items: [
-      { keys: [MOD, "Click"], description: "Pan/zoom interaction inside a Mermaid diagram" },
-    ],
-  },
-  {
-    title: "Help",
-    items: [
-      { keys: ["?"], description: "Open this shortcuts reference" },
-    ],
-  },
-];
+const GROUPS: ShortcutGroup[] = [globalShortcutsGroup(), ...CONTEXTUAL_GROUPS];
 
 export function ShortcutsHelpModal({ onClose }: { onClose: () => void }) {
   return (

@@ -51,6 +51,12 @@ export function InputBar({ chatId, disabled, ref }: InputBarProps) {
   const visionOverrides = useApp((s) => s.appSettings.visionOverrides);
   const fileRef = useRef<HTMLInputElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  // Focus-the-composer shortcut (Ctrl/Cmd+K): the store bumps a nonce and the
+  // mounted composer takes focus.
+  const focusComposerNonce = useApp((s) => s.focusComposerNonce);
+  useEffect(() => {
+    if (focusComposerNonce > 0) taRef.current?.focus();
+  }, [focusComposerNonce]);
   // Dictation (0.8.0): mic capture + transcribe-on-stop, shared with the
   // new-chat composer. Cancels a running recording when the chat switches.
   // In conversation mode (0.8.2) the committed transcript is auto-sent.

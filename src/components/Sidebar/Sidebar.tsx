@@ -5,7 +5,7 @@ import { useShallow } from "zustand/react/shallow";
 import * as api from "@/lib/tauri";
 import { ChatList } from "./ChatList";
 import { getZoneIcon } from "@/lib/zoneIcons";
-import { usePersistentSet, usePersistentBool } from "@/lib/uiState";
+import { usePersistentSet } from "@/lib/uiState";
 import type { Project } from "@/lib/types";
 
 export function Sidebar() {
@@ -27,6 +27,8 @@ export function Sidebar() {
     openZoneLibrary,
     openProjectsPanel,
     openShortcutsHelp,
+    sidebarOpen,
+    setSidebarOpen,
     loadThemeFromBackend,
     loadDefaultZone,
     loadAppSettings,
@@ -49,6 +51,8 @@ export function Sidebar() {
       openZoneLibrary: s.openZoneLibrary,
       openProjectsPanel: s.openProjectsPanel,
       openShortcutsHelp: s.openShortcutsHelp,
+      sidebarOpen: s.sidebarOpen,
+      setSidebarOpen: s.setSidebarOpen,
       loadThemeFromBackend: s.loadThemeFromBackend,
       loadDefaultZone: s.loadDefaultZone,
       loadAppSettings: s.loadAppSettings,
@@ -62,10 +66,10 @@ export function Sidebar() {
   // A new chat is possible if there's a zone to bind, or a usable Quick chat.
   const canNewChat = zones.length > 0 || quickAvailable;
 
-  // Which project folders are collapsed + whether the sidebar is open both
-  // persist across sessions (ui.* localStorage keys) so the layout is restored.
+  // Which project folders are collapsed persists across sessions (ui.* key) so
+  // the layout is restored. Sidebar open/closed now lives in the store (so a
+  // global shortcut can toggle it) but persists under the same key.
   const collapsed = usePersistentSet("collapsedProjects");
-  const [sidebarOpen, setSidebarOpen] = usePersistentBool("sidebarOpen", true);
   const [projectMenu, setProjectMenu] = useState<{ projectId: string; x: number; y: number } | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<Project | null>(null);
 

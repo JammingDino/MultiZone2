@@ -146,11 +146,40 @@ pub async fn run(args: &Value, zone_config: &Value, http: &reqwest::Client) -> A
 // HTML, stable selectors, no JS required. POST as a form submission so it looks
 // exactly like a human clicking the search button.
 
+/// Minimum spacing between DuckDuckGo requests.
+///
+/// Measured against the live endpoint: a burst is challenged after ~2 rapid
+/// requests, and the resulting block is IP-wide (it spans lite. and html.) and
+/// lasts minutes -- far longer than any in-turn retry could absorb. Avoiding the
+/// block is therefore the only workable strategy, so queries are spaced out
+/// rather than backed off after the fact. An agentic loop pays a small serial
+/// delay; a human-paced chat never notices, because the interval has usually
+/// already elapsed.
+const DDG_MIN_INTERVAL: std::time::Duration = std::time::Duration::from_millis(2500);
+
+static DDG_LAST_REQUEST: tokio::sync::Mutex<Option<std::time::Instant>> =
+    tokio::sync::Mutex::const_new(None);
+
+/// Sleep as needed so this request lands at least `DDG_MIN_INTERVAL` after the
+/// previous one. The lock is held across the sleep so concurrent searches
+/// (parallel sub-agents) queue instead of all firing at once.
+async fn ddg_rate_gate() {
+    let mut last = DDG_LAST_REQUEST.lock().await;
+    if let Some(prev) = *last {
+        let elapsed = prev.elapsed();
+        if elapsed < DDG_MIN_INTERVAL {
+            tokio::time::sleep(DDG_MIN_INTERVAL - elapsed).await;
+        }
+    }
+    *last = Some(std::time::Instant::now());
+}
+
 async fn search_duckduckgo(
     http: &reqwest::Client,
     query: &str,
     n: usize,
 ) -> Result<Vec<SearchHit>, String> {
+    ddg_rate_gate().await;
     let ua = pick_ua(query);
     // html.duckduckgo.com/html/ is server-rendered and uses stable double-underscore
     // class names (result__a, result__snippet). Do NOT set Accept-Encoding —
@@ -176,6 +205,22 @@ async fn search_duckduckgo(
     if !status.is_success() {
         return Err(format!("DuckDuckGo returned HTTP {status}"));
     }
+    // DDG does not answer a throttle with 429. It returns 202 (or occasionally
+    // 200) carrying an anti-bot challenge page, which `is_success()` happily
+    // accepts and the parser then finds zero results in — so a rate limit used
+    // to reach the model as "No results found.", i.e. a confident false
+    // negative rather than a visible failure. Measured empirically: a burst
+    // starts getting challenged after only ~2 rapid requests.
+    if is_ddg_challenge(status.as_u16(), &html) {
+        return Err(
+            "DuckDuckGo is rate-limiting this IP (anti-bot challenge, not a real \
+             empty result set). Measured: the block is IP-wide across DDG \
+             endpoints and persists for several minutes, so an immediate retry \
+             will not help. Prefer reading the pages you already have over \
+             issuing more queries. This is NOT evidence that no results exist."
+                .to_string(),
+        );
+    }
     warn!(
         "DDG HTML response: {} bytes, starts with: {:?}",
         html.len(),
@@ -184,6 +229,22 @@ async fn search_duckduckgo(
     let hits = parse_ddg_html(&html, n)?;
     warn!("DDG HTML parsed {} hits", hits.len());
     Ok(hits)
+}
+
+/// Detect DDG's anti-bot challenge page.
+///
+/// Keyed on markers observed in a real throttled response: the body is a short
+/// document (~14KB) mentioning "anomaly" and a challenge platform, served with
+/// 202. Requiring a *marker* — not just the status — keeps a genuinely empty
+/// result set distinguishable from a block.
+fn is_ddg_challenge(status: u16, html: &str) -> bool {
+    let lower = html.to_lowercase();
+    let challenged = lower.contains("anomaly")
+        || lower.contains("challenge-platform")
+        || lower.contains("unusual traffic");
+    // 202 on this endpoint is itself the throttle signal; otherwise require a
+    // marker so a legitimately empty page is not misreported as a block.
+    (status == 202 && challenged) || (status == 200 && challenged && !lower.contains("result__a"))
 }
 
 /// Parse html.duckduckgo.com/html/ results.

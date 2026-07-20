@@ -1161,7 +1161,7 @@ async fn run_participant_turn(
         .await?
         .flatten();
         raw.and_then(|s| serde_json::from_str::<Value>(&s).ok()).map(|app_cfg| {
-            let provider = app_cfg.get("webSearchProvider").and_then(|v| v.as_str()).unwrap_or("multi");
+            let provider = app_cfg.get("webSearchProvider").and_then(|v| v.as_str()).unwrap_or("duckduckgo");
             let endpoint = app_cfg.get("webSearchEndpoint").and_then(|v| v.as_str()).unwrap_or("");
             let api_key = app_cfg.get("webSearchApiKey").and_then(|v| v.as_str()).unwrap_or("");
             serde_json::json!({ "provider": provider, "endpoint": endpoint, "api_key": api_key })

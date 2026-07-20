@@ -398,11 +398,19 @@ export const useApp = create<AppStore>((set, get) => ({
       if (raw) savedSettings = JSON.parse(raw) as Partial<AppSettings>;
     } catch { /* ignore */ }
     const current = { ...DEFAULT_APP_SETTINGS, ...savedSettings };
-    if (current.webSearchProvider === "multi" && !current.webSearchEndpoint && !current.webSearchApiKey) {
+    // Retired providers map to DuckDuckGo — see loadAppSettings().
+    const norm = (p: unknown) =>
+      p === "multi" || p === "marginalia" || p == null ? "duckduckgo" : String(p);
+    const unconfigured =
+      norm(current.webSearchProvider) === "duckduckgo" &&
+      !current.webSearchEndpoint &&
+      !current.webSearchApiKey;
+    if (unconfigured) {
       const firstWs = (JSON.parse(zonesWithWs[0].toolConfig) as Record<string, any>)?.web_search ?? {};
-      if (firstWs.provider !== "multi" || firstWs.endpoint || firstWs.api_key) {
+      // Only promote a zone config that actually says something we'd lose.
+      if (norm(firstWs.provider) !== "duckduckgo" || firstWs.endpoint || firstWs.api_key) {
         await get().setAppSettings({
-          webSearchProvider: firstWs.provider ?? "multi",
+          webSearchProvider: norm(firstWs.provider),
           webSearchEndpoint: firstWs.endpoint ?? "",
           webSearchApiKey: firstWs.api_key ?? "",
         });
@@ -925,6 +933,12 @@ export const useApp = create<AppStore>((set, get) => ({
         // Migrate legacy string fontSize values
         if (typeof merged.fontSize === "string") {
           merged.fontSize = LEGACY_FONT_SIZE[merged.fontSize as string] ?? 14;
+        }
+        // The DDG+Marginalia fan-out ("multi") and the standalone Marginalia
+        // engine were removed; both had no API key, so DuckDuckGo is the
+        // like-for-like replacement.
+        if (merged.webSearchProvider === "multi" || merged.webSearchProvider === "marginalia") {
+          merged.webSearchProvider = "duckduckgo";
         }
         set({ appSettings: merged });
         applyAppSettingsToDom(merged);

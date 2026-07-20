@@ -2146,7 +2146,7 @@ function SearchTab() {
   const appSettings = useApp((s) => s.appSettings);
   const setAppSettings = useApp((s) => s.setAppSettings);
 
-  const provider = appSettings.webSearchProvider ?? "multi";
+  const provider = appSettings.webSearchProvider ?? "duckduckgo";
   const endpoint = appSettings.webSearchEndpoint ?? "";
   const apiKey = appSettings.webSearchApiKey ?? "";
 
@@ -2161,9 +2161,7 @@ function SearchTab() {
           value={provider}
           onChange={(v) => setAppSettings({ webSearchProvider: v, webSearchEndpoint: "", webSearchApiKey: "" })}
         >
-          <option value="multi">multi — DDG + Marginalia, no key (recommended)</option>
-          <option value="duckduckgo">duckduckgo — DDG Lite only, no key</option>
-          <option value="marginalia">marginalia — independent index, no key</option>
+          <option value="duckduckgo">duckduckgo — no key required (default)</option>
           <option value="searxng">searxng — self-hosted (needs endpoint URL)</option>
           <option value="brave">brave — Brave Search API (needs key)</option>
           <option value="tavily">tavily — Tavily API (needs key)</option>
@@ -2196,7 +2194,7 @@ function SearchTab() {
         </section>
       )}
 
-      {["multi", "duckduckgo", "marginalia"].includes(provider) && (
+      {provider === "duckduckgo" && (
         <p className="text-xs text-[var(--color-text-muted)]">
           No API key required — results are fetched directly.
         </p>

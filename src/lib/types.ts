@@ -444,7 +444,9 @@ export interface AppSettings {
   perspectiveLayout: "stacked" | "columns";
   /**
    * Web search provider used by all zones.
-   * "multi" = DDG + Marginalia (default, no key required).
+   * "duckduckgo" (default, no key required) | "searxng" (self-hosted) |
+   * "brave" | "tavily" | "serper" (all key-based).
+   * Legacy "multi"/"marginalia" values are migrated to "duckduckgo" on load.
    */
   webSearchProvider: string;
   /** SearXNG instance URL — only used when webSearchProvider is "searxng". */
@@ -574,7 +576,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   pdfMode: "images",
   perspectiveMode: "sequential",
   perspectiveLayout: "stacked",
-  webSearchProvider: "multi",
+  webSearchProvider: "duckduckgo",
   webSearchEndpoint: "",
   webSearchApiKey: "",
   baseZoneId: null,

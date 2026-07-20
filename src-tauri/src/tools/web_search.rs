@@ -59,13 +59,13 @@ pub fn definition() -> Tool {
 /// ```json
 /// {
 ///   "web_search": {
-///     "provider": "multi" | "duckduckgo" | "marginalia" | "searxng" | "brave" | "tavily" | "serper",
+///     "provider": "duckduckgo" | "searxng" | "brave" | "tavily" | "serper",
 ///     "endpoint": "https://...",   // SearXNG only
 ///     "api_key": "..."             // Brave / Tavily / Serper only
 ///   }
 /// }
 /// ```
-/// Recommended default: `"provider": "multi"` — no API key required.
+/// Default: `"provider": "duckduckgo"` — no API key required.
 /// For SearXNG, use a public instance like `https://searx.be` or your own.
 pub async fn run(args: &Value, zone_config: &Value, http: &reqwest::Client) -> AppResult<String> {
     let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("").trim();
@@ -80,14 +80,18 @@ pub async fn run(args: &Value, zone_config: &Value, http: &reqwest::Client) -> A
     }
 
     let cfg = zone_config.get("web_search").cloned().unwrap_or(Value::Null);
-    let provider = cfg.get("provider").and_then(|v| v.as_str()).unwrap_or("multi");
+    // Legacy configs may still say "multi" (the old DDG+Marginalia fan-out) or
+    // "marginalia"; both engines are gone, so they fall back to DuckDuckGo
+    // rather than erroring out on an existing user's saved zone config.
+    let provider = match cfg.get("provider").and_then(|v| v.as_str()).unwrap_or("duckduckgo") {
+        "multi" | "marginalia" => "duckduckgo",
+        other => other,
+    };
     let endpoint = cfg.get("endpoint").and_then(|v| v.as_str()).unwrap_or("");
     let api_key = cfg.get("api_key").and_then(|v| v.as_str()).unwrap_or("");
 
     let hits = match provider {
-        "multi" => search_multi(http, query, n).await,
-        "duckduckgo" => search_duckduckgo(http, query, n).await.map_err(|e| e),
-        "marginalia" => search_marginalia(http, query, n).await.map_err(|e| e),
+        "duckduckgo" => search_duckduckgo(http, query, n).await,
         "searxng" => search_searxng(http, query, n, endpoint).await,
         "brave" => search_brave(http, query, n, api_key).await,
         "tavily" => search_tavily(http, query, n, api_key).await,
@@ -95,8 +99,8 @@ pub async fn run(args: &Value, zone_config: &Value, http: &reqwest::Client) -> A
         other => {
             return Ok(json!({
                 "error": format!(
-                    "Unknown provider '{}'. Valid options: multi (default, no key), \
-                     duckduckgo, marginalia, searxng, brave, tavily, serper.",
+                    "Unknown provider '{}'. Valid options: duckduckgo (default, no key), \
+                     searxng, brave, tavily, serper.",
                     other
                 )
             })
@@ -134,61 +138,6 @@ pub async fn run(args: &Value, zone_config: &Value, http: &reqwest::Client) -> A
         }
         Err(e) => Ok(json!({ "error": format!("Search failed: {e}") }).to_string()),
     }
-}
-
-// ── Multi-engine fan-out ──────────────────────────────────────────────────────
-//
-// Queries DDG Lite (Bing-derived, broad coverage) and Marginalia (independent
-// crawler, different index) in parallel, then interleaves results and
-// deduplicates by registered domain so the model gets genuinely diverse hits.
-
-async fn search_multi(
-    http: &reqwest::Client,
-    query: &str,
-    n: usize,
-) -> Result<Vec<SearchHit>, String> {
-    let per_engine = (n + 1).max(10);
-    let (ddg_res, mg_res) = tokio::join!(
-        search_duckduckgo(http, query, per_engine),
-        search_marginalia(http, query, per_engine),
-    );
-    // Surface errors if both engines fail so the model can report it.
-    if let (Err(e1), Err(e2)) = (&ddg_res, &mg_res) {
-        return Err(format!("DuckDuckGo: {e1} | Marginalia: {e2}"));
-    }
-    let ddg = ddg_res.unwrap_or_default();
-    let mg = mg_res.unwrap_or_default();
-
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut hits: Vec<SearchHit> = Vec::new();
-
-    // Interleave: one DDG result, one Marginalia result, repeat.
-    let max_pairs = ddg.len().max(mg.len());
-    for i in 0..max_pairs {
-        for h in [ddg.get(i), mg.get(i)].into_iter().flatten() {
-            let domain = registered_domain(&h.url);
-            if seen.insert(domain) {
-                hits.push(h.clone());
-                if hits.len() >= n {
-                    return Ok(hits);
-                }
-            }
-        }
-    }
-    Ok(hits)
-}
-
-/// Extract the registered domain (e.g. "rust-lang.org") for deduplication.
-fn registered_domain(url: &str) -> String {
-    let host = url
-        .trim_start_matches("https://")
-        .trim_start_matches("http://")
-        .split('/')
-        .next()
-        .unwrap_or(url)
-        .to_lowercase();
-    // Drop "www." prefix
-    host.strip_prefix("www.").unwrap_or(&host).to_string()
 }
 
 // ── DuckDuckGo Lite ───────────────────────────────────────────────────────────
@@ -287,25 +236,6 @@ fn decode_ddg_url(href: &str) -> String {
     }
 }
 
-/// Percent-encode a string for use as a URL path segment.
-fn percent_encode_path(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() * 2);
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char);
-            }
-            b' ' => out.push('+'),
-            _ => {
-                out.push('%');
-                out.push(char::from_digit((b >> 4) as u32, 16).unwrap().to_ascii_uppercase());
-                out.push(char::from_digit((b & 0xf) as u32, 16).unwrap().to_ascii_uppercase());
-            }
-        }
-    }
-    out
-}
-
 /// Minimal percent-decoder (handles the subset DDG actually uses).
 fn percent_decode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -329,60 +259,6 @@ fn percent_decode(s: &str) -> String {
         i += 1;
     }
     out
-}
-
-// ── Marginalia Search ─────────────────────────────────────────────────────────
-//
-// Independent search engine with its own crawler — completely different index
-// from Bing/Google. JSON API, no key required. Excellent for technical,
-// programming, and non-commercial content. https://search.marginalia.nu
-
-async fn search_marginalia(
-    http: &reqwest::Client,
-    query: &str,
-    n: usize,
-) -> Result<Vec<SearchHit>, String> {
-    let ua = pick_ua(query);
-    // Marginalia takes the query as a URL path segment.
-    let encoded = percent_encode_path(query);
-    let url = format!("https://api.marginalia.nu/api/v1/search/{encoded}?count={n}");
-    let resp = http
-        .get(&url)
-        .header("User-Agent", ua)
-        .header("Accept", "application/json")
-        .timeout(std::time::Duration::from_secs(15))
-        .send()
-        .await
-        .map_err(|e| format!("Marginalia request failed: {e}"))?;
-
-    let body = resp
-        .text()
-        .await
-        .map_err(|e| format!("Marginalia read failed: {e}"))?;
-    warn!(
-        "Marginalia response: {} bytes, starts with: {:?}",
-        body.len(),
-        &body.chars().take(120).collect::<String>()
-    );
-    let data: Value = serde_json::from_str(&body)
-        .map_err(|e| format!("Marginalia parse failed: {e}"))?;
-
-    let mut hits = Vec::new();
-    if let Some(results) = data.get("results").and_then(|v| v.as_array()) {
-        for r in results.iter().take(n) {
-            let url = r.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let title = r.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let snippet = r
-                .get("description")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            if !url.is_empty() {
-                hits.push(SearchHit { title, url, snippet });
-            }
-        }
-    }
-    Ok(hits)
 }
 
 // ── API-key providers (unchanged from before) ─────────────────────────────────
@@ -449,8 +325,8 @@ async fn search_searxng(
                         "SearXNG returned no results because its upstream engines did not \
                          respond: {}. This almost always means those engines are rate-limiting \
                          your instance's IP — not SearXNG limiting you. Wait a minute, enable \
-                         more/different engines in SearXNG, or use the 'multi' provider which \
-                         queries DuckDuckGo + Marginalia directly.",
+                         more/different engines in SearXNG, or switch to the 'duckduckgo' provider, which \
+                         queries DuckDuckGo directly.",
                         reasons.join(", ")
                     ));
                 }

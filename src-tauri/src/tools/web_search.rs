@@ -148,13 +148,22 @@ pub async fn run(args: &Value, zone_config: &Value, http: &reqwest::Client) -> A
 
 /// Minimum spacing between DuckDuckGo requests.
 ///
-/// Measured against the live endpoint: a burst is challenged after ~2 rapid
-/// requests, and the resulting block is IP-wide (it spans lite. and html.) and
-/// lasts minutes -- far longer than any in-turn retry could absorb. Avoiding the
-/// block is therefore the only workable strategy, so queries are spaced out
-/// rather than backed off after the fact. An agentic loop pays a small serial
-/// delay; a human-paced chat never notices, because the interval has usually
-/// already elapsed.
+/// Measured against the live endpoint (July 2026):
+///   * The challenge trips almost immediately -- the *second* request of a
+///     back-to-back burst (~1s apart) is already challenged.
+///   * It is not IP-reputation-permanent and not header-dependent: an ordinary
+///     browser on the same IP kept working throughout, and the identical
+///     minimal request succeeded again later.
+///   * Polling every 30s while blocked never recovered across 4 minutes,
+///     whereas going quiet for ~10 minutes did. Requests issued *during* a
+///     block appear to sustain it, so retrying is actively counterproductive.
+///
+/// Hence: space queries out to avoid tripping it, and never retry into a block.
+///
+/// NOTE: this interval is a conservative guess, not a measured safe threshold --
+/// the burst that tripped the challenge was ~1s apart, and the minimum safe
+/// spacing has not been established. Worth measuring before relying on it for
+/// heavy agentic search.
 const DDG_MIN_INTERVAL: std::time::Duration = std::time::Duration::from_millis(2500);
 
 static DDG_LAST_REQUEST: tokio::sync::Mutex<Option<std::time::Instant>> =
@@ -209,15 +218,17 @@ async fn search_duckduckgo(
     // 200) carrying an anti-bot challenge page, which `is_success()` happily
     // accepts and the parser then finds zero results in — so a rate limit used
     // to reach the model as "No results found.", i.e. a confident false
-    // negative rather than a visible failure. Measured empirically: a burst
-    // starts getting challenged after only ~2 rapid requests.
+    // negative rather than a visible failure. That is the important fix here:
+    // the challenge is transient and recovers on its own, but silently
+    // reporting it as an empty web is a wrong answer, not merely a slow one.
     if is_ddg_challenge(status.as_u16(), &html) {
         return Err(
             "DuckDuckGo is rate-limiting this IP (anti-bot challenge, not a real \
-             empty result set). Measured: the block is IP-wide across DDG \
-             endpoints and persists for several minutes, so an immediate retry \
-             will not help. Prefer reading the pages you already have over \
-             issuing more queries. This is NOT evidence that no results exist."
+             empty result set). It is temporary, but repeated requests while \
+             blocked appear to prolong it -- do NOT retry this query. Prefer \
+             reading pages you already have, or answer from what you have and \
+             say that search was unavailable. This is NOT evidence that no \
+             results exist for the query."
                 .to_string(),
         );
     }

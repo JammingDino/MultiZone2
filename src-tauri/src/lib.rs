@@ -6,6 +6,7 @@ mod llm;
 mod mcp;
 mod ocr;
 mod tools;
+mod util;
 mod commands;
 mod state;
 mod error;

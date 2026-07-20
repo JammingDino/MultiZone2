@@ -375,6 +375,54 @@ impl Manager {
         }
     }
 
+    /// Resolve a bare program name to a concrete executable on Windows.
+    ///
+    /// `CreateProcess` (what `Command::new` ends up calling) does not do the
+    /// PATHEXT lookup a shell does, so `Command::new("npx")` fails with "program
+    /// not found" even when npx is installed — the real file is `npx.cmd`, a
+    /// batch shim, and only a literal `npx.exe` would ever be found. Node-based
+    /// MCP servers (`npx @playwright/mcp@latest`, `npx -y …`) hit this every
+    /// time. We walk PATH × PATHEXT ourselves and hand back the full path.
+    ///
+    /// Returns `None` when nothing matches, so the caller can fall through to
+    /// the original name and produce the normal spawn error.
+    #[cfg(windows)]
+    fn resolve_program_windows(program: &str) -> Option<std::path::PathBuf> {
+        use std::path::Path;
+
+        // An explicit path or an already-extensioned name needs no lookup.
+        if program.contains('/') || program.contains('\\') {
+            let p = Path::new(program);
+            return p.is_file().then(|| p.to_path_buf());
+        }
+
+        let exts: Vec<String> = std::env::var("PATHEXT")
+            .unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into())
+            .split(';')
+            .map(|e| e.trim().to_ascii_lowercase())
+            .filter(|e| !e.is_empty())
+            .collect();
+
+        if Path::new(program).extension().is_some() {
+            for dir in std::env::split_paths(&std::env::var_os("PATH")?) {
+                let cand = dir.join(program);
+                if cand.is_file() {
+                    return Some(cand);
+                }
+            }
+        }
+
+        for dir in std::env::split_paths(&std::env::var_os("PATH")?) {
+            for ext in &exts {
+                let cand = dir.join(format!("{program}{ext}"));
+                if cand.is_file() {
+                    return Some(cand);
+                }
+            }
+        }
+        None
+    }
+
     fn open_stdio(&self, server: &McpServer) -> AppResult<Connection> {
         let command = server
             .command
@@ -387,7 +435,35 @@ impl Manager {
             .split_first()
             .ok_or_else(|| AppError::Invalid("empty MCP command".into()))?;
 
+        // On Windows resolve through PATHEXT, then route batch shims (.cmd/.bat,
+        // which is what npx/npm/yarn actually are) through cmd.exe — CreateProcess
+        // cannot execute a batch file directly.
+        #[cfg(windows)]
+        let mut cmd = {
+            match Self::resolve_program_windows(program) {
+                Some(path) => {
+                    let is_batch = path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .map(|e| {
+                            let e = e.to_ascii_lowercase();
+                            e == "cmd" || e == "bat"
+                        })
+                        .unwrap_or(false);
+                    if is_batch {
+                        let mut c = tokio::process::Command::new("cmd.exe");
+                        c.arg("/C").arg(&path);
+                        c
+                    } else {
+                        tokio::process::Command::new(&path)
+                    }
+                }
+                None => tokio::process::Command::new(program),
+            }
+        };
+        #[cfg(not(windows))]
         let mut cmd = tokio::process::Command::new(program);
+
         cmd.args(args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
@@ -414,7 +490,16 @@ impl Manager {
         }
 
         let mut child = cmd.spawn().map_err(|e| {
-            AppError::Other(format!("failed to start MCP server '{program}': {e}"))
+            if e.kind() == std::io::ErrorKind::NotFound {
+                AppError::Other(format!(
+                    "failed to start MCP server '{program}': program not found. \
+                     Check it is installed and on PATH — the app inherits the PATH \
+                     it was launched with, so a freshly installed tool may need a \
+                     restart of the app (or of your session) to be visible."
+                ))
+            } else {
+                AppError::Other(format!("failed to start MCP server '{program}': {e}"))
+            }
         })?;
         let stdin = child
             .stdin

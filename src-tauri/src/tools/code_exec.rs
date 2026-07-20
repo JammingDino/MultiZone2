@@ -3,7 +3,7 @@ use crate::llm::types::{Tool, ToolFunction};
 use serde_json::{json, Value};
 use std::process::Stdio;
 use tokio::io::AsyncWriteExt;
-use tokio::process::{Child, Command};
+use tokio::process::Child;
 use tokio::time::{timeout, Duration};
 
 pub fn definition() -> Tool {
@@ -91,7 +91,9 @@ pub async fn run(args: &Value, zone_config: &Value) -> AppResult<String> {
     let mut used_program: Option<&str> = None;
     let mut last_error: Option<String> = None;
     for candidate in candidates {
-        let mut cmd = Command::new(candidate);
+        // Via util::program so .bat/.cmd shims (pyenv-win, nvm4w and similar
+        // version managers) resolve the way they would in a shell.
+        let mut cmd = crate::util::program::command(candidate);
         cmd.args(&prog_args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

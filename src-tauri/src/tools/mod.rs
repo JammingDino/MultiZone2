@@ -78,12 +78,17 @@ impl ThemePalette {
 #[derive(Debug, Clone)]
 pub struct ToolContext {
     pub theme: ThemePalette,
+    /// The chat's working directory, when it has one. The file tools name it in
+    /// their descriptions so the model writes a path that resolves on the first
+    /// try instead of learning the shape from a scope error.
+    pub project_dir: Option<String>,
 }
 
 impl Default for ToolContext {
     fn default() -> Self {
         Self {
             theme: ThemePalette::dark("#4f9cf9".to_string()),
+            project_dir: None,
         }
     }
 }
@@ -187,7 +192,7 @@ impl ToolId {
             Self::WebSearch => vec![web_search::definition()],
             Self::Extract => vec![extract::definition()],
             Self::CodeExec => vec![code_exec::definition()],
-            Self::FileSystem => filesystem::definitions(),
+            Self::FileSystem => filesystem::definitions(ctx.project_dir.as_deref()),
             Self::RenderGraph => render_graph::definitions(ctx),
             Self::AskUser => vec![ask_user::definition()],
             Self::ManageTags => vec![tags::definition()],
@@ -203,9 +208,9 @@ impl ToolId {
                 defs
             }
             Self::Subchat => subchat::definitions(),
-            Self::PresentFile => filesystem::present_file_definitions(),
-            Self::FileManage => filesystem::manage_definitions(),
-            Self::FileSearch => filesystem::search_definitions(),
+            Self::PresentFile => filesystem::present_file_definitions(ctx.project_dir.as_deref()),
+            Self::FileManage => filesystem::manage_definitions(ctx.project_dir.as_deref()),
+            Self::FileSearch => filesystem::search_definitions(ctx.project_dir.as_deref()),
             Self::Plan => vec![plan::definition()],
             Self::HttpRequest => vec![http::definition()],
             Self::Compact => vec![compact::definition()],

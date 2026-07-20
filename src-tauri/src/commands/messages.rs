@@ -1088,7 +1088,7 @@ async fn run_participant_turn(
         allow_zone_switch,
     } = participant;
     let persp = persp_zone_id.as_deref();
-    let tool_ctx = load_tool_context(&ctx.db).await;
+    let tool_ctx = load_tool_context(&ctx.db, Some(chat_id)).await;
 
     // The chat's stored primary zone, tracked so the `change_zone` tool can
     // switch zones mid-turn. Only the primary in plain Zone mode can switch.
@@ -1173,38 +1173,10 @@ async fn run_participant_turn(
         }
     }
 
-    // The project directory scopes the filesystem tools. If no project directory
-    // is set, fall back to the app-level default directory from settings.
-    let project_dir: Option<String> = {
-        let from_project: Option<String> = sqlx::query_scalar(
-            "SELECT p.directory FROM projects p
-             JOIN chats c ON c.project_id = p.id
-             WHERE c.id = ?1",
-        )
-        .bind(chat_id)
-        .fetch_optional(&ctx.db)
-        .await?
-        .flatten();
-
-        if from_project.is_some() {
-            from_project
-        } else {
-            // Fall back to the default directory stored in app_settings JSON
-            let raw: Option<String> = sqlx::query_scalar(
-                "SELECT value FROM settings WHERE key = 'app_settings'",
-            )
-            .fetch_optional(&ctx.db)
-            .await?
-            .flatten();
-            raw.and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-                .and_then(|v| {
-                    v.get("defaultDirectory")
-                        .and_then(|d| d.as_str())
-                        .filter(|s| !s.trim().is_empty())
-                        .map(String::from)
-                })
-        }
-    };
+    // The directory that scopes the filesystem tools. Resolved with the tool
+    // context above, so the descriptions the model sees and the roots the tools
+    // enforce can't disagree about which directory a path resolves against.
+    let project_dir: Option<String> = tool_ctx.project_dir.clone();
 
     // Build initial messages array (full history)
     let mut api_messages = build_message_history(&ctx.db, chat_id, &zone).await?;
@@ -2303,7 +2275,7 @@ pub struct ToolFunctionInfo {
 
 #[tauri::command]
 pub async fn list_tool_functions(state: State<'_, AppState>) -> AppResult<Vec<ToolFunctionInfo>> {
-    let ctx = load_tool_context(&state.db).await;
+    let ctx = load_tool_context(&state.db, None).await;
     let mut out = Vec::new();
     for id in crate::tools::ALL_TOOL_IDS {
         for def in id.definitions(&ctx) {
@@ -2332,7 +2304,7 @@ fn parse_tool_result_content(result: &str) -> (Vec<ContentPart>, MessageContent)
     (vec![part], MessageContent::Text(result.to_string()))
 }
 
-async fn load_tool_context(db: &SqlitePool) -> ToolContext {
+async fn load_tool_context(db: &SqlitePool, chat_id: Option<&str>) -> ToolContext {
     let row: Option<(String,)> = sqlx::query_as("SELECT value FROM settings WHERE key = ?1")
         .bind("theme")
         .fetch_optional(db)
@@ -2340,5 +2312,43 @@ async fn load_tool_context(db: &SqlitePool) -> ToolContext {
         .ok()
         .flatten();
     let theme = ThemePalette::from_settings_json(row.as_ref().map(|(v,)| v.as_str()));
-    ToolContext { theme }
+    let project_dir = match chat_id {
+        Some(id) => resolve_working_dir(db, id).await.unwrap_or(None),
+        None => None,
+    };
+    ToolContext { theme, project_dir }
+}
+
+/// The directory the file tools are scoped to: the chat's project directory, or
+/// the app-level default when the chat has no project. Resolved once per turn
+/// and used twice — to execute the file tools, and to tell the model in each
+/// tool's description which directory its paths resolve against.
+async fn resolve_working_dir(db: &SqlitePool, chat_id: &str) -> AppResult<Option<String>> {
+    let from_project: Option<String> = sqlx::query_scalar(
+        "SELECT p.directory FROM projects p
+         JOIN chats c ON c.project_id = p.id
+         WHERE c.id = ?1",
+    )
+    .bind(chat_id)
+    .fetch_optional(db)
+    .await?
+    .flatten();
+
+    if from_project.is_some() {
+        return Ok(from_project);
+    }
+
+    let raw: Option<String> =
+        sqlx::query_scalar("SELECT value FROM settings WHERE key = 'app_settings'")
+            .fetch_optional(db)
+            .await?
+            .flatten();
+    Ok(raw
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| {
+            v.get("defaultDirectory")
+                .and_then(|d| d.as_str())
+                .filter(|s| !s.trim().is_empty())
+                .map(String::from)
+        }))
 }

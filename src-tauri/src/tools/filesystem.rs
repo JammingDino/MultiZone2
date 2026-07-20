@@ -22,27 +22,31 @@ fn image_mime(path: &Path) -> Option<&'static str> {
     }
 }
 
-pub fn definitions() -> Vec<Tool> {
+/// The read/write `file_system` group. Takes the chat's working directory so
+/// every description can name it and show a path that actually resolves —
+/// a tool whose `path` argument is described only in the abstract gets the
+/// argument wrong, and the model has no other way to learn the right shape.
+pub fn definitions(project_dir: Option<&str>) -> Vec<Tool> {
+    let hint = path_syntax_hint(project_dir);
     vec![
         Tool {
             tool_type: "function".into(),
             function: ToolFunction {
                 name: "read_file".into(),
-                description:
-                    "Read a file from disk. Relative paths resolve against the project's \
-                     directory (if the chat belongs to a project with one set). Access is restricted \
-                     to the project directory and the zone's allowed root paths.\n\n\
+                description: format!(
+                    "Read a file from disk. Access is restricted to the working directory and the \
+                     zone's allowed root paths.\n\n\
                      For text files, returns the content as a string (invalid bytes are replaced).\n\
                      For PDF files (.pdf), extracts and returns the text content from all pages.\n\
                      For image files (png, jpg, gif, webp, bmp), set `as_image: true` to load the \
-                     image directly into the model's visual context."
-                        .into(),
+                     image directly into the model's visual context.\n\n{hint}"
+                ),
                 parameters: json!({
                     "type": "object",
                     "properties": {
                         "path": {
                             "type": "string",
-                            "description": "Absolute path, or a path relative to the project directory."
+                            "description": hint.clone()
                         },
                         "as_image": {
                             "type": "boolean",
@@ -58,18 +62,17 @@ pub fn definitions() -> Vec<Tool> {
             tool_type: "function".into(),
             function: ToolFunction {
                 name: "list_directory".into(),
-                description:
+                description: format!(
                     "List a directory as a nested JSON object. Files appear as their extension \
                      string (e.g. \"rs\", \"toml\", \"\" for no extension); directories appear \
-                     as nested objects. Relative paths resolve against the project directory; \
-                     use \".\" for the project root."
-                        .into(),
+                     as nested objects. Use \".\" for the working directory itself.\n\n{hint}"
+                ),
                 parameters: json!({
                     "type": "object",
                     "properties": {
                         "path": {
                             "type": "string",
-                            "description": "Absolute path, or a path relative to the project directory. Use \".\" for the project root."
+                            "description": format!("Directory to list. Use \".\" for the working directory itself. {hint}")
                         },
                         "depth": {
                             "type": "integer",
@@ -85,18 +88,17 @@ pub fn definitions() -> Vec<Tool> {
             tool_type: "function".into(),
             function: ToolFunction {
                 name: "create_file".into(),
-                description:
+                description: format!(
                     "Create a new file (or overwrite an existing one) with the given content. \
-                     Parent directories are created automatically. \
-                     Relative paths resolve against the project directory. \
-                     Access is restricted to the project directory and allowed roots."
-                        .into(),
+                     Parent directories are created automatically, so a nested path such as \
+                     `docs/notes/summary.md` works without creating the folders first.\n\n{hint}"
+                ),
                 parameters: json!({
                     "type": "object",
                     "properties": {
                         "path": {
                             "type": "string",
-                            "description": "Path to the file to create or overwrite."
+                            "description": format!("File to create or overwrite. {hint}")
                         },
                         "content": {
                             "type": "string",
@@ -111,19 +113,18 @@ pub fn definitions() -> Vec<Tool> {
             tool_type: "function".into(),
             function: ToolFunction {
                 name: "edit_file".into(),
-                description:
+                description: format!(
                     "Edit a file by replacing an exact block of text with new text (like a targeted diff). \
                      `old_text` must match exactly (including whitespace/newlines). \
                      If `old_text` appears more than once, only the first occurrence is replaced. \
-                     Use `read_file` first to get the current content before editing. \
-                     Relative paths resolve against the project directory."
-                        .into(),
+                     Use `read_file` first to get the current content before editing.\n\n{hint}"
+                ),
                 parameters: json!({
                     "type": "object",
                     "properties": {
                         "path": {
                             "type": "string",
-                            "description": "Path to the file to edit."
+                            "description": format!("File to edit. {hint}")
                         },
                         "old_text": {
                             "type": "string",
@@ -145,25 +146,25 @@ pub fn definitions() -> Vec<Tool> {
 /// read/write/edit `file_system` group so a presentation-focused zone (e.g. the
 /// HTML report writer) can offer file presentation without full filesystem
 /// access.
-pub fn present_file_definitions() -> Vec<Tool> {
+pub fn present_file_definitions(project_dir: Option<&str>) -> Vec<Tool> {
+    let hint = path_syntax_hint(project_dir);
     vec![Tool {
         tool_type: "function".into(),
         function: ToolFunction {
             name: "present_file".into(),
-            description:
+            description: format!(
                 "Present a file that already exists on disk to the user, inline in the chat. \
                  Pair this with create_file / edit_file / read_file: produce or edit the file in one \
                  call, then present it in another — no need to repeat its contents in the chat. \
                  HTML files (.html) render as a live preview with an \"open in browser\" button; other \
-                 files show a card that opens them in their default app. Relative paths resolve against \
-                 the working directory."
-                    .into(),
+                 files show a card that opens them in their default app.\n\n{hint}"
+            ),
             parameters: json!({
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Path to the existing file. Absolute, or relative to the working directory."
+                        "description": format!("The existing file to present. {hint}")
                     },
                     "format": {
                         "type": "string",
@@ -181,24 +182,24 @@ pub fn present_file_definitions() -> Vec<Tool> {
 /// create folder. Split from the read/write `file_system` group so a zone can be
 /// given the ability to produce files without the ability to destroy them —
 /// `delete_file` is classed dangerous and always prompts for approval.
-pub fn manage_definitions() -> Vec<Tool> {
+pub fn manage_definitions(project_dir: Option<&str>) -> Vec<Tool> {
+    let hint = path_syntax_hint(project_dir);
     vec![
         Tool {
             tool_type: "function".into(),
             function: ToolFunction {
                 name: "move_file".into(),
-                description:
+                description: format!(
                     "Move or rename a file or folder. To rename in place, keep the same parent \
                      directory and change only the final path segment. Missing parent directories \
                      of the destination are created. Fails if the destination already exists \
-                     unless `overwrite` is true. Both paths must be inside the project directory \
-                     or the zone's allowed roots."
-                        .into(),
+                     unless `overwrite` is true. Both paths are scope-checked.\n\n{hint}"
+                ),
                 parameters: json!({
                     "type": "object",
                     "properties": {
-                        "from": { "type": "string", "description": "Existing path. Absolute, or relative to the project directory." },
-                        "to":   { "type": "string", "description": "Destination path, including the new filename when renaming." },
+                        "from": { "type": "string", "description": format!("Existing path. {hint}") },
+                        "to":   { "type": "string", "description": format!("Destination path, including the new filename when renaming. {hint}") },
                         "overwrite": { "type": "boolean", "description": "Replace the destination if it already exists.", "default": false }
                     },
                     "required": ["from", "to"]
@@ -209,16 +210,16 @@ pub fn manage_definitions() -> Vec<Tool> {
             tool_type: "function".into(),
             function: ToolFunction {
                 name: "copy_file".into(),
-                description:
+                description: format!(
                     "Copy a file to a new path. Missing parent directories are created. Fails if \
                      the destination exists unless `overwrite` is true. Copies a single file, not \
-                     a directory."
-                        .into(),
+                     a directory.\n\n{hint}"
+                ),
                 parameters: json!({
                     "type": "object",
                     "properties": {
-                        "from": { "type": "string", "description": "Path of the file to copy." },
-                        "to":   { "type": "string", "description": "Destination path for the copy." },
+                        "from": { "type": "string", "description": format!("File to copy. {hint}") },
+                        "to":   { "type": "string", "description": format!("Destination path for the copy. {hint}") },
                         "overwrite": { "type": "boolean", "description": "Replace the destination if it already exists.", "default": false }
                     },
                     "required": ["from", "to"]
@@ -229,16 +230,16 @@ pub fn manage_definitions() -> Vec<Tool> {
             tool_type: "function".into(),
             function: ToolFunction {
                 name: "delete_file".into(),
-                description:
+                description: format!(
                     "Delete a file. This is destructive and cannot be undone — the user is asked \
                      to approve every call. To delete a directory you must pass `recursive: true`, \
                      which removes the directory and everything inside it; without it, a directory \
-                     path is refused."
-                        .into(),
+                     path is refused.\n\n{hint}"
+                ),
                 parameters: json!({
                     "type": "object",
                     "properties": {
-                        "path": { "type": "string", "description": "Path of the file (or directory, with `recursive`) to delete." },
+                        "path": { "type": "string", "description": format!("File (or directory, with `recursive`) to delete. {hint}") },
                         "recursive": {
                             "type": "boolean",
                             "description": "Required to delete a directory and all of its contents. Has no effect on a file.",
@@ -253,14 +254,14 @@ pub fn manage_definitions() -> Vec<Tool> {
             tool_type: "function".into(),
             function: ToolFunction {
                 name: "create_folder".into(),
-                description:
+                description: format!(
                     "Create a directory, including any missing parent directories. Succeeds \
-                     quietly if it already exists."
-                        .into(),
+                     quietly if it already exists.\n\n{hint}"
+                ),
                 parameters: json!({
                     "type": "object",
                     "properties": {
-                        "path": { "type": "string", "description": "Directory path to create." }
+                        "path": { "type": "string", "description": format!("Directory to create. {hint}") }
                     },
                     "required": ["path"]
                 }),
@@ -272,7 +273,8 @@ pub fn manage_definitions() -> Vec<Tool> {
 /// Definitions for the `file_search` group (0.9.1): exact/pattern search over
 /// files. Read-only (safety 0). Complements semantic search (`search_local_files`):
 /// embeddings answer "what is this about", these answer "where is this string".
-pub fn search_definitions() -> Vec<Tool> {
+pub fn search_definitions(project_dir: Option<&str>) -> Vec<Tool> {
+    let hint = path_syntax_hint(project_dir);
     vec![
         Tool {
             tool_type: "function".into(),
@@ -288,7 +290,7 @@ pub fn search_definitions() -> Vec<Tool> {
                     "type": "object",
                     "properties": {
                         "pattern": { "type": "string", "description": "Glob pattern matched against the file path, e.g. \"**/*.rs\" or \"*test*\"." },
-                        "path": { "type": "string", "description": "Directory to search under. Defaults to the project directory." },
+                        "path": { "type": "string", "description": format!("Directory to search under. Defaults to the working directory. {hint}") },
                         "max_results": { "type": "integer", "description": "Cap on paths returned (default 100).", "default": 100 }
                     },
                     "required": ["pattern"]
@@ -312,7 +314,7 @@ pub fn search_definitions() -> Vec<Tool> {
                         "literal": { "type": "boolean", "description": "Match `query` as plain text rather than a regex.", "default": false },
                         "case_sensitive": { "type": "boolean", "description": "Match case exactly.", "default": false },
                         "glob": { "type": "string", "description": "Only search files whose path matches this glob, e.g. \"**/*.rs\"." },
-                        "path": { "type": "string", "description": "Directory to search under. Defaults to the project directory." },
+                        "path": { "type": "string", "description": format!("Directory to search under. Defaults to the working directory. {hint}") },
                         "max_results": { "type": "integer", "description": "Cap on matching lines returned (default 50).", "default": 50 }
                     },
                     "required": ["query"]
@@ -348,13 +350,134 @@ fn allowed_roots(zone_config: &Value, project_dir: Option<&str>) -> Vec<PathBuf>
 }
 
 fn resolve_path(path: &str, project_dir: Option<&str>) -> PathBuf {
-    let p = PathBuf::from(path);
+    let p = PathBuf::from(path.trim());
     if p.is_absolute() {
         return p;
     }
     match project_dir {
-        Some(dir) if !dir.trim().is_empty() => PathBuf::from(dir).join(p),
+        Some(dir) if !dir.trim().is_empty() => PathBuf::from(dir.trim()).join(p),
         _ => p,
+    }
+}
+
+/// One plausible reading of a model-supplied path. `guess` marks a reading that
+/// is genuinely ambiguous: it is taken only when it points at something that
+/// exists and the literal reading does not, so a guess can never quietly put a
+/// file somewhere the caller didn't name.
+struct Candidate {
+    path: PathBuf,
+    guess: bool,
+}
+
+/// Every plausible reading of a model-supplied path, best first.
+///
+/// The literal reading is what the tools always did, and it stays authoritative
+/// wherever it is unambiguous. The rest recover the forms models reach for
+/// constantly and that used to come straight back as a scope error:
+///   - `~/notes.md` — home-relative in the model's head, project-relative here.
+///     Tried *before* the literal reading: joining a `~` on gives a directory
+///     literally named `~`, which is never what was meant.
+///   - `/docs/notes.md` — rooted but with no drive. On Windows `Path::join`
+///     discards the project directory entirely when given one of these, which
+///     is where most "outside the project directory" errors came from.
+///   - `MultiZone2/docs/notes.md` — repeats the project folder's own name.
+///     Ambiguous, since the project may really contain a folder of that name,
+///     so it is a `guess`: it wins only when the file it names exists and the
+///     literal nested path does not.
+///
+/// Every candidate is still scope-checked against the allowed roots, so this
+/// widens what the model may *say*, never what it may reach.
+fn path_candidates(path: &str, project_dir: Option<&str>) -> Vec<Candidate> {
+    let raw = path.trim();
+    let literal = Candidate { path: resolve_path(raw, project_dir), guess: false };
+    let base = match project_dir.map(str::trim).filter(|d| !d.is_empty()) {
+        Some(dir) => PathBuf::from(dir),
+        None => return vec![literal],
+    };
+    let rel = |rest: &str| Candidate { path: base.join(rest), guess: false };
+
+    let mut out = Vec::new();
+
+    if let Some(rest) = raw.strip_prefix('~') {
+        let rest = rest.trim_start_matches(['/', '\\']);
+        if !rest.is_empty() {
+            out.push(rel(rest));
+        }
+    }
+
+    // Guesses are ordered ahead of the literal reading; each is gated on the
+    // literal not existing, so ordering only decides which recovery wins.
+    if let Some(name) = base.file_name().and_then(|n| n.to_str()) {
+        let stripped = raw.trim_start_matches(['/', '\\']);
+        if let Some(rest) = stripped.strip_prefix(name) {
+            let rest = rest.trim_start_matches(['/', '\\']);
+            if !rest.is_empty() {
+                out.push(Candidate { path: base.join(rest), guess: true });
+            }
+        }
+    }
+
+    out.push(literal);
+
+    if raw.starts_with('/') || raw.starts_with('\\') {
+        let rest = raw.trim_start_matches(['/', '\\']);
+        if !rest.is_empty() {
+            out.push(rel(rest));
+        }
+    }
+
+    out
+}
+
+/// Resolve a model-supplied path and accept the first reading that lands inside
+/// the allowed roots. `Err` is the JSON error string the tools return verbatim:
+/// it names what was tried, what the roots are, and how to write the path —
+/// that string is the model's only way to recover from a bad path.
+fn resolve_in_roots(
+    path: &str,
+    roots: &[PathBuf],
+    project_dir: Option<&str>,
+) -> Result<PathBuf, String> {
+    let candidates = path_candidates(path, project_dir);
+    let literal_exists = resolve_path(path, project_dir).exists();
+    let hit = candidates.iter().find(|c| {
+        (!c.guess || (!literal_exists && c.path.exists())) && is_within_roots(&c.path, roots)
+    });
+    if let Some(c) = hit {
+        return Ok(c.path.clone());
+    }
+    Err(json!({
+        "error": format!("path is outside the project directory and allowed_roots: {path:?}"),
+        "resolved_to": resolve_path(path, project_dir).to_string_lossy(),
+        "allowed_roots": roots
+            .iter()
+            .map(|r| r.to_string_lossy().to_string())
+            .collect::<Vec<_>>(),
+        "how_to_write_the_path": path_syntax_hint(project_dir),
+    })
+    .to_string())
+}
+
+/// The single place that says how a path argument must be written. It goes into
+/// the tool descriptions (so the model gets it right the first time) *and* into
+/// the scope error (so it can fix a wrong one without guessing).
+fn path_syntax_hint(project_dir: Option<&str>) -> String {
+    match project_dir.map(str::trim).filter(|d| !d.is_empty()) {
+        Some(dir) => {
+            let dir = dir.trim_end_matches(['/', '\\']);
+            let sep = if dir.contains('\\') { '\\' } else { '/' };
+            format!(
+                "PATH SYNTAX: the working directory is `{dir}`. Write `path` relative to it — \
+                 `notes.md`, `docs{sep}notes.md`. An absolute path is accepted only when it is \
+                 inside that directory, i.e. it starts with `{dir}{sep}`. A leading slash \
+                 (`/docs/notes.md`) or `~` is read as project-relative, not as a filesystem \
+                 root; anywhere else on disk is refused."
+            )
+        }
+        None => "PATH SYNTAX: write `path` relative to the working directory (`notes.md`, \
+                 `docs/notes.md`), or as an absolute path inside one of the zone's allowed \
+                 roots."
+            .to_string(),
     }
 }
 
@@ -410,14 +533,10 @@ pub async fn read_file(
 ) -> AppResult<String> {
     let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
     let as_image = args.get("as_image").and_then(|v| v.as_bool()).unwrap_or(false);
-    let roots = allowed_roots(zone_config, project_dir);
-    if roots.is_empty() {
-        return Ok(json!({ "error": "no project directory or allowed_roots configured for file_system tool" }).to_string());
-    }
-    let p = resolve_path(path, project_dir);
-    if !is_within_roots(&p, &roots) {
-        return Ok(json!({ "error": "path is outside the project directory and allowed_roots" }).to_string());
-    }
+    let p = match checked_path(path, zone_config, project_dir) {
+        Ok(p) => p,
+        Err(e) => return Ok(e),
+    };
 
     if as_image {
         let mime = match image_mime(&p) {
@@ -511,13 +630,10 @@ pub async fn list_directory(
     let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
     let max_depth = args.get("depth").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
     let roots = allowed_roots(zone_config, project_dir);
-    if roots.is_empty() {
-        return Ok(json!({ "error": "no project directory or allowed_roots configured for file_system tool" }).to_string());
-    }
-    let p = resolve_path(path, project_dir);
-    if !is_within_roots(&p, &roots) {
-        return Ok(json!({ "error": "path is outside the project directory and allowed_roots" }).to_string());
-    }
+    let p = match checked_path(path, zone_config, project_dir) {
+        Ok(p) => p,
+        Err(e) => return Ok(e),
+    };
     match dir_tree(&p, 0, max_depth, &roots).await {
         Ok(tree) => Ok(tree.to_string()),
         Err(e) => Ok(json!({ "error": e.to_string() }).to_string()),
@@ -595,14 +711,10 @@ pub async fn create_file(
 ) -> AppResult<String> {
     let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
     let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
-    let roots = allowed_roots(zone_config, project_dir);
-    if roots.is_empty() {
-        return Ok(json!({ "error": "no project directory or allowed_roots configured for file_system tool" }).to_string());
-    }
-    let p = resolve_path(path, project_dir);
-    if !is_within_roots(&p, &roots) {
-        return Ok(json!({ "error": "path is outside the project directory and allowed_roots" }).to_string());
-    }
+    let p = match checked_path(path, zone_config, project_dir) {
+        Ok(p) => p,
+        Err(e) => return Ok(e),
+    };
     // Create parent directories if needed
     if let Some(parent) = p.parent() {
         if let Err(e) = tokio::fs::create_dir_all(parent).await {
@@ -630,13 +742,23 @@ pub async fn present_file(args: &Value, project_dir: Option<&str>) -> AppResult<
         return Ok(json!({ "error": "present_file requires a 'path'" }).to_string());
     }
 
-    let p = resolve_path(path, project_dir);
-    if !p.is_file() {
-        return Ok(json!({
-            "error": format!("file does not exist: {}", p.to_string_lossy())
-        })
-        .to_string());
-    }
+    let p = match path_candidates(path, project_dir)
+        .into_iter()
+        .map(|c| c.path)
+        .find(|c| c.is_file())
+    {
+        Some(p) => p,
+        None => {
+            return Ok(json!({
+                "error": format!(
+                    "file does not exist: {}",
+                    resolve_path(path, project_dir).to_string_lossy()
+                ),
+                "how_to_write_the_path": path_syntax_hint(project_dir),
+            })
+            .to_string());
+        }
+    };
 
     // Format: explicit override, else inferred from the extension. Normalize the
     // html alias so the frontend keys on a single value.
@@ -685,14 +807,7 @@ fn checked_path(
     if path.trim().is_empty() {
         return Err(json!({ "error": "a 'path' is required" }).to_string());
     }
-    let p = resolve_path(path, project_dir);
-    if !is_within_roots(&p, &roots) {
-        return Err(
-            json!({ "error": "path is outside the project directory and allowed_roots" })
-                .to_string(),
-        );
-    }
-    Ok(p)
+    resolve_in_roots(path, &roots, project_dir)
 }
 
 /// `move_file` — move or rename a file/folder within the allowed roots. Both
@@ -1133,14 +1248,10 @@ pub async fn edit_file(
     let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
     let old_text = args.get("old_text").and_then(|v| v.as_str()).unwrap_or("");
     let new_text = args.get("new_text").and_then(|v| v.as_str()).unwrap_or("");
-    let roots = allowed_roots(zone_config, project_dir);
-    if roots.is_empty() {
-        return Ok(json!({ "error": "no project directory or allowed_roots configured for file_system tool" }).to_string());
-    }
-    let p = resolve_path(path, project_dir);
-    if !is_within_roots(&p, &roots) {
-        return Ok(json!({ "error": "path is outside the project directory and allowed_roots" }).to_string());
-    }
+    let p = match checked_path(path, zone_config, project_dir) {
+        Ok(p) => p,
+        Err(e) => return Ok(e),
+    };
     let bytes = match tokio::fs::read(&p).await {
         Ok(b) => b,
         Err(e) => return Ok(json!({ "error": format!("failed to read file: {e}") }).to_string()),
@@ -1376,5 +1487,94 @@ mod tests {
         .unwrap();
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["count"], 1);
+    }
+
+    /// The forms models actually emit. Each of these used to come back as
+    /// "path is outside the project directory and allowed_roots".
+    #[tokio::test]
+    async fn create_file_accepts_the_path_shapes_models_reach_for() {
+        let sb = Sandbox::new("path_shapes");
+        let folder = sb.root.file_name().unwrap().to_string_lossy().to_string();
+
+        for (given, expected_rel) in [
+            ("notes.md", "notes.md"),
+            ("docs/nested/deep.md", "docs/nested/deep.md"),
+            ("/docs/rooted.md", "docs/rooted.md"),
+            ("~/home.md", "home.md"),
+            ("./dotted.md", "dotted.md"),
+        ] {
+            let out = create_file(
+                &json!({ "path": given, "content": given }),
+                &sb.zone_config(),
+                sb.dir(),
+            )
+            .await
+            .unwrap();
+            let v: Value = serde_json::from_str(&out).unwrap();
+            assert_eq!(v["ok"], true, "{given} was refused: {v}");
+            assert_eq!(
+                std::fs::read_to_string(sb.root.join(expected_rel)).unwrap(),
+                given,
+                "{given} did not land at {expected_rel}"
+            );
+        }
+
+        // A path that repeats the project folder's own name resolves to the file
+        // under it, but only because that file already exists by now.
+        let out = create_file(
+            &json!({ "path": format!("{folder}/notes.md"), "content": "rewritten" }),
+            &sb.zone_config(),
+            sb.dir(),
+        )
+        .await
+        .unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["ok"], true, "{v}");
+        assert_eq!(
+            std::fs::read_to_string(sb.root.join("notes.md")).unwrap(),
+            "rewritten"
+        );
+    }
+
+    /// A real escape is still refused — and the refusal now carries everything
+    /// the model needs to write the path correctly on its next attempt.
+    #[tokio::test]
+    async fn create_file_refusal_explains_the_path_syntax() {
+        let sb = Sandbox::new("path_refusal");
+
+        let out = create_file(
+            &json!({ "path": "../escaped.md", "content": "nope" }),
+            &sb.zone_config(),
+            sb.dir(),
+        )
+        .await
+        .unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+
+        assert!(v["error"].as_str().unwrap().contains("outside"));
+        assert!(v["resolved_to"].is_string(), "{v}");
+        assert!(!v["allowed_roots"].as_array().unwrap().is_empty(), "{v}");
+        let hint = v["how_to_write_the_path"].as_str().unwrap();
+        assert!(hint.contains(sb.dir().unwrap()), "hint must name the directory: {hint}");
+        assert!(!sb.root.parent().unwrap().join("escaped.md").exists());
+    }
+
+    /// The descriptions the model reads must name the real working directory —
+    /// that is what stops the bad path being written in the first place.
+    #[test]
+    fn tool_descriptions_name_the_working_directory() {
+        let defs = definitions(Some("F:\\Development\\MultiZone2"));
+        let create = defs.iter().find(|t| t.function.name == "create_file").unwrap();
+        assert!(create.function.description.contains("F:\\Development\\MultiZone2"));
+
+        let path_desc = create.function.parameters["properties"]["path"]["description"]
+            .as_str()
+            .unwrap();
+        assert!(path_desc.contains("F:\\Development\\MultiZone2"), "{path_desc}");
+
+        // With no working directory set, the wording must not claim one.
+        let defs = definitions(None);
+        let create = defs.iter().find(|t| t.function.name == "create_file").unwrap();
+        assert!(create.function.description.contains("allowed roots"));
     }
 }

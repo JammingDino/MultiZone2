@@ -31,7 +31,7 @@ Semantic versioning. Each release is tagged `vMAJOR.MINOR.PATCH`.
 | **0.6.x** | Multizone Mode | Planned |
 | **0.7.x** | Settings rework, UI/UX polish, DB/Markdown toggle | Planned |
 | **0.8.x** | Voice I/O — STT dictation, TTS, hands-free mode | Planned |
-| **0.9.x** | Tool Improvements — naming clarity, file management, self-authored skills | In progress |
+| **0.9.x** | Tool Improvements — naming clarity, file management, self-authored skills, reliability pass | In progress |
 | **1.0.0** | Hardening & Public Release | Planned |
 | **Post-1.0** | Code interface, Diffusion LLM, Mobile | Backlog |
 
@@ -109,7 +109,9 @@ The toolset gets a pass of its own, having grown organically across eight releas
 
 The release closes with the tools the current set is simply missing. A plan tool gives a model somewhere to hold a multi-step task, which the Multizone leader has never had. `http_request` lets a zone call an API rather than only read a page. Context compaction lets a model summarize its own older turns, so a long chat degrades gracefully instead of silently shedding its beginning. And two knobs for the user: tool descriptions become editable per zone — the description is the whole of what a model knows about when to call a tool, and the wording that works for a frontier model is often not the wording that works for a 7B local one — while per-zone usage counters show which tools a zone actually reaches for, so a bloated toolset that is taxing every turn can be pruned on evidence rather than guesswork.
 
-**Done when:** a new user can read the zone editor's tool list and understand every entry without guessing; a model can rename and move files as fluently as it creates them; a model can find an exact string in a project without an embedding round-trip; a zone can write a skill that measurably improves its own later runs; and a long conversation stays coherent past the context window instead of quietly forgetting how it began.
+The release then closes on a reliability pass that wasn't planned — it came out of using the app. A tool that fails is recoverable; a tool that fails *quietly* is not, and web search had exactly that shape: DuckDuckGo answers a throttle with a challenge page, not an error code, so a rate limit reached the model as "No results found" and zones confidently told users a well-covered topic had no information. The same theme runs through the rest of it — `wsl_exec` gives Windows users a Linux escape hatch that can actually hold state across steps rather than resetting cwd and environment on every call, Node-based MCP servers stop failing with "program not found" on machines where they're plainly installed, and inline citations put their markers next to the claim they support instead of drifting into the model's trailing link list, can cite one source more than once, and keep earlier turns' sources available to later answers.
+
+**Done when:** a new user can read the zone editor's tool list and understand every entry without guessing; a model can rename and move files as fluently as it creates them; a model can find an exact string in a project without an embedding round-trip; a zone can write a skill that measurably improves its own later runs; a long conversation stays coherent past the context window instead of quietly forgetting how it began; and no tool reports a failure as an ordinary empty result.
 
 ---
 

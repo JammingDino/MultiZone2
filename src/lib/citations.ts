@@ -3,7 +3,7 @@
 // The list drives both the inline `[n]` markers (see remarkCitations) and the
 // collapsible source list at the bottom of the message.
 
-import type { ContentPart } from "./types";
+import type { ContentPart, Message, ToolCall } from "./types";
 import type { TurnBlock } from "./grouping";
 
 export interface Citation {
@@ -70,45 +70,107 @@ function hostname(url: string): string {
  * URL / filename so a source cited from two searches appears once.
  */
 export function collectCitations(blocks: TurnBlock[], fileSources: FileSource[] = []): Citation[] {
-  const out: Citation[] = [];
-  const seen = new Set<string>();
-  const push = (c: Omit<Citation, "index" | "refIndex">) => {
-    const n = out.length + 1;
-    out.push({ index: n, refIndex: n, ...c });
-  };
-
-  // Add a knowledge/file citation for a local file path (search_knowledge hits
-  // and read_file reads), de-duplicated by path.
-  const pushPath = (path: string, title?: string) => {
-    if (!path) return;
-    const key = `kb:${path}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    push({ kind: "knowledge", title: title || basename(path), path, fileName: basename(path) });
-  };
+  const sink = new CitationSink();
 
   for (const b of blocks) {
     if (b.kind !== "step" || b.step.kind !== "tool" || !b.step.toolResult) continue;
-    const name = b.step.toolCall.function.name;
+    sink.absorbToolResult(b.step.toolCall.function.name, b.step.toolResult.content);
+  }
+  for (const f of fileSources) sink.pushFile(f);
+
+  return sink.list;
+}
+
+/**
+ * Citations from *earlier* turns of the same chat (0.9.4). A follow-up answer
+ * routinely leans on a search the model ran a turn or two ago — the tool result
+ * lives in that earlier turn's blocks, so a turn-scoped collector sees nothing
+ * and the answer renders with no sources at all. Scanning the messages that
+ * precede this turn keeps those sources referenceable for the rest of the chat.
+ *
+ * These are *candidates only*: unlike the current turn's sources they are never
+ * listed as "retrieved" — a carried source surfaces only if the answer actually
+ * cites it (see `matchedCitations`), so a chat with a big search behind it
+ * doesn't drag thirty stale URLs through every later turn.
+ */
+export function collectCarriedCitations(
+  messages: Message[],
+  firstTurnMsgId: string | undefined,
+): Citation[] {
+  const sink = new CitationSink();
+  // Tool results carry only a `toolCallId`, so the tool's *name* has to come
+  // from the assistant message that requested it.
+  const nameByCallId = new Map<string, string>();
+
+  for (const m of messages) {
+    if (firstTurnMsgId && m.id === firstTurnMsgId) break;
+    if (m.role === "assistant") {
+      for (const tc of parseToolCalls(m.toolCalls)) nameByCallId.set(tc.id, tc.function.name);
+    } else if (m.role === "tool" && m.toolCallId) {
+      const name = nameByCallId.get(m.toolCallId);
+      if (name) sink.absorbToolResult(name, m.content);
+    }
+  }
+
+  return sink.list;
+}
+
+function parseToolCalls(json: string | null): ToolCall[] {
+  if (!json) return [];
+  try {
+    const arr = JSON.parse(json);
+    if (Array.isArray(arr)) return arr;
+  } catch {}
+  return [];
+}
+
+/** Accumulates de-duplicated, contiguously numbered citations from tool results. */
+class CitationSink {
+  readonly list: Citation[] = [];
+  private readonly seen = new Set<string>();
+
+  private push(c: Omit<Citation, "index" | "refIndex">) {
+    const n = this.list.length + 1;
+    this.list.push({ index: n, refIndex: n, ...c });
+  }
+
+  /** A knowledge/file citation for a local path (local-search hits and
+   *  `read_file` reads), de-duplicated by path. */
+  private pushPath(path: string, title?: string) {
+    if (!path) return;
+    const key = `kb:${path}`;
+    if (this.seen.has(key)) return;
+    this.seen.add(key);
+    this.push({ kind: "knowledge", title: title || basename(path), path, fileName: basename(path) });
+  }
+
+  pushFile(f: FileSource) {
+    const key = `file:${f.fileName}`;
+    if (this.seen.has(key)) return;
+    this.seen.add(key);
+    this.push({ kind: "file", title: f.fileName, fileName: f.fileName, pages: f.pages });
+  }
+
+  absorbToolResult(name: string, rawContent: string) {
     // `search_knowledge` is the pre-0.9.0 name for `search_local_files`; stored
     // history from before the rename still carries it.
     const isLocalSearch = name === "search_local_files" || name === "search_knowledge";
-    if (name !== "web_search" && !isLocalSearch && name !== "read_file") continue;
+    if (name !== "web_search" && !isLocalSearch && name !== "read_file") return;
 
     let data: any;
     try {
-      data = JSON.parse(toolResultText(b.step.toolResult.content));
+      data = JSON.parse(toolResultText(rawContent));
     } catch {
-      continue;
+      return;
     }
 
     if (name === "web_search") {
       const results = Array.isArray(data?.results) ? data.results : [];
       for (const r of results) {
         const url = typeof r?.url === "string" ? r.url : "";
-        if (!url || seen.has(url)) continue;
-        seen.add(url);
-        push({
+        if (!url || this.seen.has(url)) continue;
+        this.seen.add(url);
+        this.push({
           kind: "web",
           url,
           title: (typeof r?.title === "string" && r.title.trim()) || hostname(url),
@@ -119,23 +181,17 @@ export function collectCitations(blocks: TurnBlock[], fileSources: FileSource[] 
       // One citation per source file (chunks of the same file collapse).
       const results = Array.isArray(data?.results) ? data.results : [];
       for (const r of results) {
-        pushPath(typeof r?.source === "string" ? r.source : "", typeof r?.title === "string" ? r.title.trim() : undefined);
+        this.pushPath(
+          typeof r?.source === "string" ? r.source : "",
+          typeof r?.title === "string" ? r.title.trim() : undefined,
+        );
       }
     } else {
       // read_file — the file the model read (skipped for image/error results,
       // which don't carry a source path).
-      pushPath(typeof data?.source === "string" ? data.source : "");
+      this.pushPath(typeof data?.source === "string" ? data.source : "");
     }
   }
-
-  for (const f of fileSources) {
-    const key = `file:${f.fileName}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    push({ kind: "file", title: f.fileName, fileName: f.fileName, pages: f.pages });
-  }
-
-  return out;
 }
 
 function basename(path: string): string {
@@ -165,6 +221,44 @@ function usedMarkers(answer: string): Set<number> {
   let m: RegExpExecArray | null;
   while ((m = re.exec(answer)) !== null) used.add(Number(m[1]));
   return used;
+}
+
+/** A URL, or a bare hostname with a recognisable public suffix. */
+const URLISH =
+  /(?:https?:\/\/\S+|\b[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.(?:com|org|net|io|ai|dev|co|online|app|gov|edu|xyz|sh|me|info|blog)\b)/i;
+
+/**
+ * True for a line that is a bare *reference entry* rather than prose — a short
+ * label plus a link, as models like to append in a trailing source list:
+ *
+ *     Official site: ornith.online
+ *     - Technical blog: https://deep-reinforce.com/…
+ *
+ * Anchoring an inline marker inside one of these is what used to yank markers
+ * out of the body and pile them up at the bottom of the answer (often stacked,
+ * `ornith.online[2][8]`, when several results shared a host). Both the anchor
+ * search here and the insertion pass in remarkCitations skip them, so a marker
+ * lands next to the claim it supports or not at all.
+ */
+export function isReferenceLine(text: string): boolean {
+  const t = text.trim().replace(/^[-*+]\s+/, "");
+  if (!t || !URLISH.test(t)) return false;
+  const words = t
+    .replace(/https?:\/\/\S+/gi, " ")
+    .replace(/[^\w'-]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  return words.length <= 8;
+}
+
+/** The answer with its trailing/inline reference entries removed — the region an
+ *  inline marker may legitimately anchor into. */
+function proseText(answer: string): string {
+  return answer
+    .split("\n")
+    .filter((line) => !isReferenceLine(line))
+    .join("\n");
 }
 
 const STOPWORDS = new Set(
@@ -202,34 +296,57 @@ function distinctiveTokens(text: string): Set<string> {
  *     The old "≥3 shared words" path is gone, so generic overlap no longer
  *     sprinkles a marker for every search result.
  * Kept sources are renumbered contiguously.
+ *
+ * `carried` holds sources retrieved in *earlier* turns of the chat (0.9.4).
+ * They go through the same matching, but are appended after this turn's own
+ * candidates and only survive if the answer genuinely references them.
  */
-export function matchedCitations(candidates: Citation[], blocks: TurnBlock[]): Citation[] {
-  if (candidates.length === 0) return [];
+export function matchedCitations(
+  candidates: Citation[],
+  blocks: TurnBlock[],
+  carried: Citation[] = [],
+): Citation[] {
+  // Carried sources already present in this turn's own results would otherwise
+  // be matched (and numbered) twice.
+  const ownKeys = new Set(candidates.map(citationKey));
+  const pool = [...candidates, ...carried.filter((c) => !ownKeys.has(citationKey(c)))];
+  if (pool.length === 0) return [];
+
   const answer = answerText(blocks);
-  const lowerAnswer = answer.toLowerCase();
   const markers = usedMarkers(answer);
 
-  // 1. Model-driven: trust explicit markers, no heuristic insertion.
+  // 1. Model-driven: trust explicit markers, no heuristic insertion. Only this
+  // turn's candidates are numbered from the model's point of view, so a carried
+  // source can never be what a bare `[n]` meant.
   if (markers.size > 0) {
     return candidates
       .filter((c) => markers.has(c.refIndex))
       .map((c, i) => ({ ...c, index: i + 1, anchor: undefined }));
   }
 
-  // 2. Tight heuristic. Document frequency of each distinctive token across ALL
-  // candidates lets us find words unique to a single source.
-  const answerTokens = distinctiveTokens(answer);
+  // 2. Tight heuristic, run over the prose only — never the trailing reference
+  // list (see isReferenceLine).
+  const prose = proseText(answer);
+  const lowerProse = prose.toLowerCase();
+  const answerTokens = distinctiveTokens(prose);
   const ownTokens = new Map<Citation, Set<string>>();
   const df = new Map<string, number>();
-  for (const c of candidates) {
+  // Hosts are shared far more often than distinctive words (several results
+  // from one site), so a host only anchors when it belongs to a single source.
+  const hostDf = new Map<string, number>();
+  for (const c of pool) {
     const toks = distinctiveTokens(`${c.title ?? ""} ${c.snippet ?? ""}`);
     ownTokens.set(c, toks);
     for (const t of toks) df.set(t, (df.get(t) ?? 0) + 1);
+    if (c.kind === "web" && c.url) {
+      const h = hostname(c.url).toLowerCase();
+      hostDf.set(h, (hostDf.get(h) ?? 0) + 1);
+    }
   }
 
   const kept: { c: Citation; anchor: string }[] = [];
-  for (const c of candidates) {
-    const anchor = tightAnchor(c, lowerAnswer, answerTokens, ownTokens.get(c)!, df);
+  for (const c of pool) {
+    const anchor = tightAnchor(c, lowerProse, answerTokens, ownTokens.get(c)!, df, hostDf);
     if (anchor) kept.push({ c, anchor });
   }
 
@@ -245,11 +362,13 @@ function tightAnchor(
   answerTokens: Set<string>,
   ownTokens: Set<string>,
   df: Map<string, number>,
+  hostDf: Map<string, number>,
 ): string | undefined {
   if (c.kind === "web") {
     const host = c.url ? hostname(c.url).toLowerCase() : "";
-    // Literal host mention (contains a dot → matched as a substring downstream).
-    if (host && lowerAnswer.includes(host)) return host;
+    // Literal host mention (contains a dot → matched as a substring downstream),
+    // but only when this is the sole source from that host.
+    if (host && (hostDf.get(host) ?? 0) === 1 && lowerAnswer.includes(host)) return host;
     // Otherwise the longest distinctive word that (a) appears in the answer and
     // (b) is unique to this single source across every candidate.
     let best: string | undefined;

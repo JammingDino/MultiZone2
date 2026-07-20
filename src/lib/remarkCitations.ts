@@ -8,7 +8,7 @@
 // Operates only on text nodes, so markers inside code/inline-code are untouched.
 
 import { visit, SKIP } from "unist-util-visit";
-import type { Citation } from "./citations";
+import { isReferenceLine, type Citation } from "./citations";
 
 const MARKER = /\[(\d+)\]/g;
 
@@ -16,14 +16,53 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** First index of a needle in `lower`; word-boundary for plain word tokens,
- *  literal substring for filenames (which contain dots/slashes). */
-function findAnchor(lower: string, needle: string): number {
+/** Every index at which a needle occurs in `lower`; word-boundary for plain word
+ *  tokens, literal substring for filenames (which contain dots/slashes). */
+function findAnchors(lower: string, needle: string): number[] {
+  const out: number[] = [];
   if (/^[a-z0-9]+$/.test(needle)) {
-    const m = new RegExp(`\\b${escapeRegExp(needle)}\\b`).exec(lower);
-    return m ? m.index : -1;
+    const re = new RegExp(`\\b${escapeRegExp(needle)}\\b`, "g");
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(lower)) !== null) out.push(m.index);
+    return out;
   }
-  return lower.indexOf(needle);
+  let from = 0;
+  for (;;) {
+    const at = lower.indexOf(needle, from);
+    if (at < 0) return out;
+    out.push(at);
+    from = at + needle.length;
+  }
+}
+
+/** Flat text of a node for line reconstruction. Link URLs are included so an
+ *  autolinked reference entry still reads as one. */
+function nodeText(node: any): string {
+  if (node.type === "text" || node.type === "inlineCode") return node.value ?? "";
+  if (node.type === "break") return "\n";
+  const inner = Array.isArray(node.children) ? node.children.map(nodeText).join("") : "";
+  return node.type === "link" ? `${inner} ${node.url ?? ""}` : inner;
+}
+
+/**
+ * The source line surrounding an offset, reconstructed across a parent's
+ * children so a soft-wrapped reference list ("Official site: x.online" on its
+ * own line inside a larger paragraph) is judged line by line rather than as one
+ * blob. Returns null when there's no parent context to work from.
+ */
+function lineAround(parent: any, childIndex: number, offsetInChild: number): string | null {
+  if (!parent || !Array.isArray(parent.children)) return null;
+  let before = "";
+  for (let i = 0; i < childIndex; i++) before += nodeText(parent.children[i]);
+  const own = nodeText(parent.children[childIndex]);
+  let after = "";
+  for (let i = childIndex + 1; i < parent.children.length; i++) after += nodeText(parent.children[i]);
+
+  const full = before + own + after;
+  const at = before.length + offsetInChild;
+  const start = full.lastIndexOf("\n", at - 1) + 1;
+  const endRel = full.indexOf("\n", at);
+  return full.slice(start, endRel < 0 ? full.length : endRel);
 }
 
 function linkNode(cite: Citation) {
@@ -73,9 +112,9 @@ export function citationPlugin(citations: Citation[]) {
   return function () {
     return function transform(tree: any) {
       if (citations.length === 0) return;
-      // Fresh per parse — each source is placed at most once per run (but on
-      // every run), so re-renders don't lose markers.
-      const placed = new Set<number>();
+      // Marked nodes are skipped after insertion, so a source can legitimately
+      // be referenced as many times as the answer mentions it — no once-per-run
+      // suppression here. Re-parses rebuild the same markers from the same text.
 
       visit(tree, (node: any, index: number | undefined, parent: any) => {
         if (!parent || index === undefined) return;
@@ -85,13 +124,10 @@ export function citationPlugin(citations: Citation[]) {
         if (node.type === "inlineCode") {
           const v = (node.value ?? "").toLowerCase();
           const hits = anchored.filter(
-            (a) => !placed.has(a.cite.index) && isFileNeedle(a.needle) && v.includes(a.needle.toLowerCase()),
+            (a) => isFileNeedle(a.needle) && v.includes(a.needle.toLowerCase()),
           );
           if (hits.length === 0) return;
-          const links = hits.map((h) => {
-            placed.add(h.cite.index);
-            return linkNode(h.cite);
-          });
+          const links = hits.map((h) => linkNode(h.cite));
           parent.children.splice(index + 1, 0, ...links);
           return [SKIP, index + 1 + links.length];
         }
@@ -104,23 +140,27 @@ export function citationPlugin(citations: Citation[]) {
         const ops: Op[] = [];
 
         // 1. Explicit `[k]` markers the model emitted → replace with a link.
+        //    Every occurrence is replaced, so repeating `[2]` across the answer
+        //    repeats the reference rather than dropping all but the first.
         MARKER.lastIndex = 0;
         let m: RegExpExecArray | null;
         while ((m = MARKER.exec(value)) !== null) {
           const cite = byRef.get(Number(m[1]));
           if (!cite) continue;
           ops.push({ pos: m.index, endPos: m.index + m[0].length, cite, replace: true });
-          placed.add(cite.index);
         }
 
-        // 2. Auto-insert a marker after each unplaced source's anchor.
+        // 2. Auto-insert a marker after every occurrence of a source's anchor —
+        //    except inside a reference entry, where the marker would read as
+        //    part of the model's own trailing link list instead of citing a
+        //    claim.
         for (const a of anchored) {
-          if (placed.has(a.cite.index)) continue;
-          const at = findAnchor(lower, a.needle.toLowerCase());
-          if (at < 0) continue;
-          const insertPos = at + a.needle.length;
-          ops.push({ pos: insertPos, endPos: insertPos, cite: a.cite, replace: false });
-          placed.add(a.cite.index);
+          for (const at of findAnchors(lower, a.needle.toLowerCase())) {
+            const line = lineAround(parent, index, at);
+            if (line !== null && isReferenceLine(line)) continue;
+            const insertPos = at + a.needle.length;
+            ops.push({ pos: insertPos, endPos: insertPos, cite: a.cite, replace: false });
+          }
         }
 
         if (ops.length === 0) return;

@@ -7,7 +7,14 @@ import { MessageActions } from "./MessageActions";
 import { CitationSources } from "./CitationSources";
 import { StackTrace, spawnedSubchatIdsFromBlocks } from "./StackTrace";
 import type { BotTurn, PerspectiveTurn, TurnBlock } from "@/lib/grouping";
-import { collectCitations, matchedCitations, type Citation, type FileSource } from "@/lib/citations";
+import {
+  citationKey,
+  collectCarriedCitations,
+  collectCitations,
+  matchedCitations,
+  type Citation,
+  type FileSource,
+} from "@/lib/citations";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { getZoneIcon } from "@/lib/zoneIcons";
@@ -487,6 +494,17 @@ function AssistantEditor({
   );
 }
 
+/**
+ * The turn's own retrieved sources, plus any earlier-turn source the answer
+ * actually cited. Feeds the Sources list, so carried sources appear under
+ * "Used" without dragging the whole of an earlier search into "All retrieved".
+ */
+function withCitedCarried(turnCitations: Citation[], used: Citation[]): Citation[] {
+  const own = new Set(turnCitations.map(citationKey));
+  const extra = used.filter((c) => !own.has(citationKey(c)));
+  return extra.length > 0 ? [...turnCitations, ...extra] : turnCitations;
+}
+
 /** Index of the last text block in a turn (the final answer), or -1 if none. */
 function lastTextBlockIndex(blocks: TurnBlock[]): number {
   let idx = -1;
@@ -521,13 +539,25 @@ function BotTurnViewImpl({ turn, isLatest = false }: { turn: BotTurn; isLatest?:
     () => deriveFileSources(messages ?? [], turn.messageIds[0]),
     [messages, turn.messageIds],
   );
-  const allCitations = useMemo(
+  // Sources retrieved in earlier turns stay citable for the rest of the chat —
+  // a follow-up answer often leans on the search that ran two turns ago.
+  const carriedCitations = useMemo(
+    () => collectCarriedCitations(messages ?? [], turn.messageIds[0]),
+    [messages, turn.messageIds],
+  );
+  const turnCitations = useMemo(
     () => collectCitations(turn.blocks, fileSources),
     [turn.blocks, fileSources],
   );
   const citations = useMemo(
-    () => matchedCitations(allCitations, turn.blocks),
-    [allCitations, turn.blocks],
+    () => matchedCitations(turnCitations, turn.blocks, carriedCitations),
+    [turnCitations, turn.blocks, carriedCitations],
+  );
+  // A carried source is listed only when it was actually cited, so old search
+  // results don't pile up under "retrieved" on every later turn.
+  const allCitations = useMemo(
+    () => withCitedCarried(turnCitations, citations),
+    [turnCitations, citations],
   );
   // Sub-agents this leader turn spawned (0.6.1 stack tracer). Empty for ordinary
   // turns, so the trace block renders nothing.
@@ -585,6 +615,7 @@ function BotTurnViewImpl({ turn, isLatest = false }: { turn: BotTurn; isLatest?:
             layout={layout}
             branchFromMessageId={lastMessageId}
             fileSources={fileSources}
+            carriedCitations={carriedCitations}
           />
           {turn.perspectives.map((p) => (
             <ParticipantCard
@@ -601,6 +632,7 @@ function BotTurnViewImpl({ turn, isLatest = false }: { turn: BotTurn; isLatest?:
               layout={layout}
               branchFromMessageId={p.messageId}
               fileSources={fileSources}
+              carriedCitations={carriedCitations}
             />
           ))}
         </div>
@@ -745,6 +777,7 @@ function ParticipantCard({
   layout,
   branchFromMessageId,
   fileSources,
+  carriedCitations,
 }: {
   zoneId: string | null;
   fallbackName: string;
@@ -758,14 +791,19 @@ function ParticipantCard({
   layout: "stacked" | "columns";
   branchFromMessageId?: string;
   fileSources?: FileSource[];
+  carriedCitations?: Citation[];
 }) {
-  const allCitations = useMemo(
+  const turnCitations = useMemo(
     () => collectCitations(blocks, fileSources ?? []),
     [blocks, fileSources],
   );
   const citations = useMemo(
-    () => matchedCitations(allCitations, blocks),
-    [allCitations, blocks],
+    () => matchedCitations(turnCitations, blocks, carriedCitations ?? []),
+    [turnCitations, blocks, carriedCitations],
+  );
+  const allCitations = useMemo(
+    () => withCitedCarried(turnCitations, citations),
+    [turnCitations, citations],
   );
   const [collapsed, setCollapsed] = useState(false);
   const [editing, setEditing] = useState(false);

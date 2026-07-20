@@ -181,7 +181,9 @@ interface AppStore {
   setChatTitle: (chatId: string, title: string) => void;
   setChatZone: (chatId: string, zoneId: string | null) => Promise<void>;
   setChatSmart: (chatId: string, smart: boolean) => Promise<void>;
-  regenerateTitle: (chatId: string) => Promise<void>;
+  /** Re-title a chat. `wholeConversation` (a user-forced regenerate) titles the
+   *  chat as it now stands rather than from its opening message alone. */
+  regenerateTitle: (chatId: string, wholeConversation?: boolean) => Promise<void>;
   respondApproval: (chatId: string, zoneId: string | undefined, approved: boolean) => Promise<void>;
 
   openSettings: () => void;
@@ -245,6 +247,33 @@ function dropApproval(
   zoneId: string | undefined,
 ): PendingApproval[] {
   return (list ?? []).filter((a) => a.zoneId !== zoneId);
+}
+
+type PendingTool = { index: number; name: string; args: string };
+
+/**
+ * Open (or re-label) the pending tool block for a stream index. A start can
+ * arrive before the function name is known — providers differ — so a later
+ * start fills the name in; an empty name never overwrites a known one.
+ */
+function upsertToolStart(pending: PendingTool[], index: number, name: string): PendingTool[] {
+  if (pending.some((t) => t.index === index)) {
+    return pending.map((t) => (t.index === index && name ? { ...t, name } : t));
+  }
+  return [...pending, { index, name, args: "" }];
+}
+
+/**
+ * Append streamed argument text to a pending tool block, creating the block if
+ * no start was seen for this index. Dropping unmatched deltas used to make the
+ * whole argument build-up invisible whenever a provider's opening delta didn't
+ * carry a name — the tool call then appeared out of nowhere, fully formed.
+ */
+function appendToolArgs(pending: PendingTool[], index: number, delta: string): PendingTool[] {
+  if (!pending.some((t) => t.index === index)) {
+    return [...pending, { index, name: "", args: delta }];
+  }
+  return pending.map((t) => (t.index === index ? { ...t, args: t.args + delta } : t));
 }
 
 function freshStreaming(messageId: string): StreamingState {
@@ -505,15 +534,10 @@ export const useApp = create<AppStore>((set, get) => ({
             break;
           case "tool_call_start":
             if (current) {
-              const exists = current.pendingTools.some((t) => t.index === event.index);
               chatPersp[perspectiveZoneId] = {
                 ...current,
                 phase: "tool_calling",
-                pendingTools: exists
-                  ? current.pendingTools.map((t) =>
-                      t.index === event.index ? { ...t, name: event.name } : t,
-                    )
-                  : [...current.pendingTools, { index: event.index, name: event.name, args: "" }],
+                pendingTools: upsertToolStart(current.pendingTools, event.index, event.name),
               };
             }
             break;
@@ -522,9 +546,7 @@ export const useApp = create<AppStore>((set, get) => ({
               chatPersp[perspectiveZoneId] = {
                 ...current,
                 phase: "tool_calling",
-                pendingTools: current.pendingTools.map((t) =>
-                  t.index === event.index ? { ...t, args: t.args + event.delta } : t,
-                ),
+                pendingTools: appendToolArgs(current.pendingTools, event.index, event.delta),
               };
             }
             break;
@@ -683,18 +705,10 @@ export const useApp = create<AppStore>((set, get) => ({
 
         case "tool_call_start":
           if (current) {
-            const exists = current.pendingTools.some((t) => t.index === event.index);
             streaming[chatId] = {
               ...current,
               phase: "tool_calling",
-              pendingTools: exists
-                ? current.pendingTools.map((t) =>
-                    t.index === event.index ? { ...t, name: event.name } : t,
-                  )
-                : [
-                    ...current.pendingTools,
-                    { index: event.index, name: event.name, args: "" },
-                  ],
+              pendingTools: upsertToolStart(current.pendingTools, event.index, event.name),
             };
           }
           break;
@@ -704,9 +718,7 @@ export const useApp = create<AppStore>((set, get) => ({
             streaming[chatId] = {
               ...current,
               phase: "tool_calling",
-              pendingTools: current.pendingTools.map((t) =>
-                t.index === event.index ? { ...t, args: t.args + event.delta } : t,
-              ),
+              pendingTools: appendToolArgs(current.pendingTools, event.index, event.delta),
             };
             const tca = turnByChat[chatId];
             if (tca) {
@@ -820,13 +832,18 @@ export const useApp = create<AppStore>((set, get) => ({
       };
     });
 
-    // After the first assistant response completes, set the chat title.
-    if (event.type === "done") {
+    // Title the chat off its opening message. This fires on `user_message_saved`
+    // rather than on `done`, so the title request goes out *alongside* the
+    // answer's request instead of queueing behind the whole first response — two
+    // concurrent calls to the same endpoint with the same model. The title
+    // usually lands while the answer is still streaming.
+    if (event.type === "user_message_saved") {
       const msgs = get().messagesByChat[chatId] ?? [];
-      // Count only primary answers — perspective zones add their own assistant
-      // messages, which must not throw off the "first response" detection.
+      // Only the chat's very first turn: one user message, nothing answered yet.
+      // A branched chat starts with history, so this correctly skips it.
+      const userCount = msgs.filter((m) => m.role === "user").length;
       const assistantCount = msgs.filter((m) => m.role === "assistant" && !m.zoneId).length;
-      if (assistantCount === 1 && !get().regeneratingTitles.has(chatId)) {
+      if (userCount === 1 && assistantCount === 0 && !get().regeneratingTitles.has(chatId)) {
         if (get().appSettings.autoTitle) {
           get().regenerateTitle(chatId).catch(console.error);
         } else {
@@ -873,14 +890,14 @@ export const useApp = create<AppStore>((set, get) => ({
       ),
     }));
   },
-  async regenerateTitle(chatId) {
+  async regenerateTitle(chatId, wholeConversation = false) {
     set((s) => {
       const next = new Set(s.regeneratingTitles);
       next.add(chatId);
       return { regeneratingTitles: next };
     });
     try {
-      const title = await api.generateTitle(chatId);
+      const title = await api.generateTitle(chatId, wholeConversation);
       get().setChatTitle(chatId, title);
     } finally {
       set((s) => {

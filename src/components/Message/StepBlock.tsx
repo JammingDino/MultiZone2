@@ -128,7 +128,10 @@ function ToolStepView({
       setOpen(false); // collapse when done
     }
   }, [pending, !!toolResult]);
-  const name = toolCall.function.name;
+  // A pending block can open before the provider has named the function (some
+  // stream the arguments first), so the header needs something to show until
+  // the name lands.
+  const name = toolCall.function.name || (pending ? "…" : "unknown tool");
 
   const resultText = toolResult ? extractToolResultText(toolResult.content) : null;
   const parsedResult: any = (() => {

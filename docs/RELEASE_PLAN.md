@@ -512,8 +512,9 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [ ] Installer: Windows (NSIS or WiX), macOS (DMG), Linux (AppImage)
 - [ ] Auto-updater: Tauri updater plugin wired to GitHub releases
 - [ ] Cross-platform smoke tests on Windows 11, macOS, and Linux
-- [ ] Write REQUIREMENTS.md for contributor onboarding
-- [x] In-app keyboard shortcut reference — `?` (outside text fields) or the new keyboard icon in the sidebar opens a shortcuts modal cataloguing every shortcut currently wired up in the app
+- [x] Write REQUIREMENTS.md for contributor onboarding — full doc (personas, user stories, functional/non-functional requirements, out-of-scope) grounded in the roadmap principles and the 0.1–0.9 feature set ([REQUIREMENTS.md](REQUIREMENTS.md))
+- [x] In-app keyboard shortcut reference — `?` (outside text fields) or the keyboard icon in the sidebar opens a shortcuts modal cataloguing every shortcut wired up in the app
+- [x] App-wide keyboard control — a central handler ([useGlobalShortcuts.ts](../src/lib/useGlobalShortcuts.ts)) driven by a single shortcut definition list ([shortcuts.ts](../src/lib/shortcuts.ts), shared with the help modal so the reference can't drift). Ctrl/Cmd+N new chat, Ctrl/Cmd+, settings, Ctrl/Cmd+B toggle sidebar, Ctrl/Cmd+L zone library, Ctrl/Cmd+Shift+P projects, Ctrl/Cmd+K focus the composer, Alt+↑/↓ prev/next chat, Ctrl/Cmd+/ or `?` the reference. Modifier shortcuts fire even mid-typing; the plain `?` is suppressed in text fields. Sidebar open/closed moved into the store (same `ui.sidebarOpen` persistence key) so a shortcut can toggle it; composer focus signalled via a store nonce
 - [ ] Clean uninstall: no orphaned files or registry entries
 
 ---

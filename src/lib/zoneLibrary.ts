@@ -1,3 +1,4 @@
+import { saveTextFile } from "@/lib/saveFile";
 /**
  * Zone library helpers. The library itself is a folder of JSON files on disk
  * (see commands/library.rs); these helpers handle the app-side logic: seeding
@@ -71,8 +72,8 @@ export async function seedCuratedLibrary(): Promise<void> {
   } catch { /* ignore */ }
 }
 
-/** Export a live zone as a downloadable JSON file (re-importable via Add zones). */
-export function exportZoneJson(zone: Zone): void {
+/** Export a live zone as a JSON file to a user-chosen path (re-importable via Add zones). */
+export async function exportZoneJson(zone: Zone): Promise<void> {
   const data = {
     name: zone.name,
     icon: zone.icon,
@@ -89,15 +90,9 @@ export function exportZoneJson(zone: Zone): void {
     isLeader: zone.isLeader,
   };
   const slug = zone.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "zone";
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${slug}.json`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+  await saveTextFile(`${slug}.json`, JSON.stringify(data, null, 2), [
+    { name: "JSON", extensions: ["json"] },
+  ]);
 }
 
 /** Pick a zone name not already taken, suffixing " (2)", " (3)", … if needed. */

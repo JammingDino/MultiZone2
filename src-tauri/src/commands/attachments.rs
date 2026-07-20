@@ -217,3 +217,24 @@ fn guess_image_mime(path: &str) -> &'static str {
         "image/jpeg"
     }
 }
+
+/// Write text to a user-chosen path from an export flow.
+///
+/// The fs plugin scopes writes to a small set of app dirs, so a path returned by
+/// the native save dialog is rejected there. Exports are always an explicit user
+/// action against a path the user just picked in the OS dialog, so we write it
+/// directly here rather than widening the plugin scope to the whole disk.
+#[tauri::command]
+pub async fn write_export_file(path: String, contents: String) -> AppResult<()> {
+    let p = PathBuf::from(&path);
+    if let Some(parent) = p.parent() {
+        if !parent.exists() {
+            return Err(AppError::Invalid(format!(
+                "folder does not exist: {}",
+                parent.display()
+            )));
+        }
+    }
+    std::fs::write(&p, contents.as_bytes())?;
+    Ok(())
+}

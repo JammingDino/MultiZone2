@@ -8,6 +8,8 @@ import * as api from "@/lib/tauri";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
 import { VisionOverrideSelect } from "@/components/common/VisionOverrideSelect";
 import { Modal, ModalTitle } from "@/components/common/Modal";
+import { saveTextFile } from "@/lib/saveFile";
+import { type SkillSeed, serializeSkill, parseSkill } from "@/lib/skillFile";
 import type { DbStats, GlobalKbView, IndexSummary, KbDocument, McpServerView, McpTool, Provider, Skill } from "@/lib/types";
 
 type Tab = "providers" | "appearance" | "chat" | "voice" | "speech" | "search" | "skills" | "mcp" | "knowledge" | "memory" | "api" | "data";
@@ -1237,15 +1239,16 @@ function SkillsTab() {
   const refreshSkills = useApp((s) => s.refreshSkills);
   const fileRef = useRef<HTMLInputElement>(null);
   const [editing, setEditing] = useState<Skill | null>(null);
-  const [creating, setCreating] = useState<{ name: string; content: string } | null>(null);
+  const [creating, setCreating] = useState<SkillSeed | null>(null);
 
   useEffect(() => { refreshSkills().catch(console.error); }, [refreshSkills]);
 
   async function importFile(file: File) {
-    const content = await file.text();
-    const name = file.name.replace(/\.(md|markdown|txt)$/i, "");
+    const raw = await file.text();
+    const fallbackName = file.name.replace(/\.(md|markdown|txt)$/i, "");
+    const parsed = parseSkill(raw, fallbackName);
     setEditing(null);
-    setCreating({ name, content });
+    setCreating(parsed);
   }
 
   async function toggle(s: Skill) {
@@ -1292,7 +1295,7 @@ function SkillsTab() {
 
       <div className="flex gap-2">
         <button
-          onClick={() => { setEditing(null); setCreating({ name: "", content: "" }); }}
+          onClick={() => { setEditing(null); setCreating({ name: "", description: "", content: "" }); }}
           className="flex items-center gap-1.5 rounded border border-dashed border-[var(--color-border)] px-3 py-1.5 text-xs transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
         >
           <Plus size={12} /> New skill
@@ -1390,12 +1393,12 @@ function SkillEditor({
   onCancel,
 }: {
   skill: Skill | null;
-  seed: { name: string; content: string } | null;
+  seed: SkillSeed | null;
   onDone: () => void;
   onCancel: () => void;
 }) {
   const [name, setName] = useState(skill?.name ?? seed?.name ?? "");
-  const [description, setDescription] = useState(skill?.description ?? "");
+  const [description, setDescription] = useState(skill?.description ?? seed?.description ?? "");
   const [content, setContent] = useState(skill?.content ?? seed?.content ?? "");
   const [enabled, setEnabled] = useState(skill?.enabled ?? true);
   const [saving, setSaving] = useState(false);
@@ -1409,17 +1412,14 @@ function SkillEditor({
     } finally { setSaving(false); }
   }
 
-  function onExport() {
+  async function onExport() {
     const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "skill";
-    const blob = new Blob([content], { type: "text/markdown" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${slug}.md`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+    // Emit name/description as YAML frontmatter so a skill exported here
+    // round-trips intact through importFile() on another machine — previously
+    // only `content` was written and the description was lost on import.
+    await saveTextFile(`${slug}.md`, serializeSkill(name, description, content), [
+      { name: "Markdown", extensions: ["md"] },
+    ]);
   }
 
   return (

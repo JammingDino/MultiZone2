@@ -173,6 +173,7 @@ pub fn run() {
             commands::mirror::import_chat_from_markdown,
             commands::attachments::upload_attachment,
             commands::attachments::save_pdf_attachment,
+            commands::attachments::write_export_file,
             commands::attachments::get_attachment_images,
             commands::api::apply_api_settings,
             commands::api::generate_api_token,

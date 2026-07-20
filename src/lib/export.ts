@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Chat, ContentPart, Message } from "@/lib/types";
+import { saveTextFile } from "@/lib/saveFile";
 
 /**
  * Chat export (0.7.1). Two formats off the same resolved snapshot:
@@ -148,18 +149,11 @@ export function buildChatMarkdown(data: ExportChatData): string {
   return fm.join("\n") + body.join("\n").trimEnd() + "\n";
 }
 
-/** Download the chat as a `.md` file via a Blob (no extra fs permissions). */
-export function exportChatMarkdown(data: ExportChatData): void {
-  const md = buildChatMarkdown(data);
-  const blob = new Blob([md], { type: "text/markdown" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${slugify(data.chat.title)}.md`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+/** Save the chat as a `.md` file, letting the user pick the destination. */
+export async function exportChatMarkdown(data: ExportChatData): Promise<void> {
+  await saveTextFile(`${slugify(data.chat.title)}.md`, buildChatMarkdown(data), [
+    { name: "Markdown", extensions: ["md"] },
+  ]);
 }
 
 // ─── PDF (themed print document) ─────────────────────────────────────────────

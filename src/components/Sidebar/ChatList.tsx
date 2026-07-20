@@ -99,7 +99,9 @@ export function ChatList({ chats, activeId, onSelect, projectId }: Props) {
 
   async function onRegenerate(chatId: string) {
     setMenu(null);
-    try { await regenerateTitle(chatId); } catch (e) { console.error(e); }
+    // A user asking for a new title is judging the chat as it stands, so this
+    // reads the whole conversation rather than just the opening message.
+    try { await regenerateTitle(chatId, true); } catch (e) { console.error(e); }
   }
 
   async function onMoveToProject(chatId: string, targetProjectId: string | null) {

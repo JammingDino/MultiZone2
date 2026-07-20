@@ -308,7 +308,7 @@ async fn ocr_language(db: &SqlitePool) -> String {
 /// Look up the user's manual vision override for a model, from the
 /// `visionOverrides` map in app settings: `Some("on")` = always send images,
 /// `Some("off")` = always OCR to text, `None` = auto (use the name heuristic).
-async fn vision_override(db: &SqlitePool, model: &str) -> Option<String> {
+pub(crate) async fn vision_override(db: &SqlitePool, model: &str) -> Option<String> {
     let raw: Option<Option<String>> = sqlx::query_scalar(
         "SELECT value FROM settings WHERE key = 'app_settings'",
     )

@@ -209,8 +209,13 @@ export const getMessages = (chatId: string) =>
 /** Replace a message's text content in place and flag it as user-edited. */
 export const updateMessage = (chatId: string, messageId: string, text: string) =>
   invoke<Message>("update_message", { chatId, messageId, text });
-export const generateTitle = (chatId: string) =>
-  invoke<string>("generate_title", { chatId });
+/**
+ * Name the chat. `wholeConversation` titles the chat as it now stands (a forced
+ * regenerate); the default only reads the opening message, which is all that
+ * exists when the automatic first-turn pass fires.
+ */
+export const generateTitle = (chatId: string, wholeConversation = false) =>
+  invoke<string>("generate_title", { chatId, wholeConversation });
 
 // Messages
 /**

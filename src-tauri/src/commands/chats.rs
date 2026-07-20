@@ -668,7 +668,11 @@ pub async fn generate_title(
     app: AppHandle,
     state: State<'_, AppState>,
     chat_id: String,
+    // Forced regenerations title the conversation as it now stands; the
+    // automatic first-turn pass only has the opening message to go on.
+    whole_conversation: Option<bool>,
 ) -> AppResult<String> {
+    let whole_conversation = whole_conversation.unwrap_or(false);
     sqlx::query_as::<_, Chat>(&format!(
         "SELECT {CHAT_COLS} FROM chats WHERE id = ?1"
     ))
@@ -681,30 +685,33 @@ pub async fn generate_title(
     let (zone, provider) =
         crate::commands::messages::effective_zone_and_provider(&state.db, &chat_id).await?;
 
-    let first_user = sqlx::query_as::<_, Message>(
-        "SELECT id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at
-         FROM messages WHERE chat_id = ?1 AND role = 'user' ORDER BY created_at ASC LIMIT 1",
-    )
-    .bind(&chat_id)
-    .fetch_optional(&state.db)
-    .await?
-    .ok_or_else(|| AppError::Invalid("no user message yet".into()))?;
+    let convo = build_title_context(&state.db, &zone, &chat_id, whole_conversation).await?;
+    if convo.is_empty() {
+        return Err(AppError::Invalid("no user message yet".into()));
+    }
 
-    let user_text = extract_text_from_content_json(&first_user.content);
+    let instruction = if whole_conversation {
+        "Generate a very short title (3 to 6 words, no quotes, no period) summarizing the conversation above. Weigh what the conversation actually turned out to be about, not only how it opened. Respond with ONLY the title text — no preamble, no explanation, no thinking out loud."
+    } else {
+        "Generate a very short title (3 to 6 words, no quotes, no period) summarizing the message above, including any attached images. Respond with ONLY the title text — no preamble, no explanation, no thinking out loud."
+    };
 
-    let prompt = format!(
-        "Generate a very short title (3 to 6 words, no quotes, no period) summarizing this chat based on the user's first message. Respond with ONLY the title text — no preamble, no explanation, no thinking out loud.\n\nUser message:\n{user_text}"
-    );
+    // The conversation goes in as real messages — same shape the model sees on
+    // an ordinary turn, images and all — with the instruction appended last.
+    // Deliberately omitted: the system prompt, memories, skills and tools. A
+    // title needs the content, not the zone's whole operating context.
+    let mut messages = convo;
+    messages.push(ChatMessage {
+        role: "user".into(),
+        content: Some(MessageContent::Text(instruction.to_string())),
+        tool_calls: None,
+        tool_call_id: None,
+        name: None,
+    });
 
     let req = ChatRequest {
         model: zone.model.clone(),
-        messages: vec![ChatMessage {
-            role: "user".into(),
-            content: Some(MessageContent::Text(prompt)),
-            tool_calls: None,
-            tool_call_id: None,
-            name: None,
-        }],
+        messages,
         temperature: Some(0.4),
         max_tokens: Some(2048),
         top_p: None,
@@ -764,6 +771,137 @@ pub async fn generate_title(
     Ok(title)
 }
 
+/// Per-message text budget for title context — enough to characterise a turn,
+/// short of resending an entire long answer just to name the chat.
+const TITLE_TEXT_BUDGET: usize = 2000;
+/// Images are the expensive part of the request; a title needs a couple for
+/// context, not every screenshot in a long conversation.
+const TITLE_MAX_IMAGES: usize = 4;
+
+/// Builds the conversation the title model sees.
+///
+/// Images are *kept* (0.9.5) — an "what is this?" turn that is a photo and three
+/// words of text used to reach the titler as three words, since the content was
+/// flattened to its text parts. They are sent at low detail, and only when the
+/// model can actually accept image input; otherwise they are named as
+/// attachments so the model at least knows they were there.
+///
+/// Tool traffic is dropped entirely: tool calls, tool results, and the
+/// assistant messages that carry nothing but a tool call. What a chat is
+/// *about* lives in the prose.
+async fn build_title_context(
+    db: &sqlx::SqlitePool,
+    zone: &crate::db::models::Zone,
+    chat_id: &str,
+    whole_conversation: bool,
+) -> AppResult<Vec<ChatMessage>> {
+    let rows = if whole_conversation {
+        sqlx::query_as::<_, Message>(
+            "SELECT id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at
+             FROM messages
+             WHERE chat_id = ?1 AND zone_id IS NULL AND role IN ('user', 'assistant')
+             ORDER BY created_at ASC",
+        )
+        .bind(chat_id)
+        .fetch_all(db)
+        .await?
+    } else {
+        sqlx::query_as::<_, Message>(
+            "SELECT id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at
+             FROM messages WHERE chat_id = ?1 AND role = 'user' ORDER BY created_at ASC LIMIT 1",
+        )
+        .bind(chat_id)
+        .fetch_optional(db)
+        .await?
+        .into_iter()
+        .collect()
+    };
+
+    // Same resolution order as an ordinary turn: the user's per-model override
+    // beats the name heuristic, so a model they've marked vision-capable keeps
+    // its images here too.
+    let vision_capable =
+        match crate::commands::messages::vision_override(db, &zone.model).await.as_deref() {
+            Some("on") => true,
+            Some("off") => false,
+            _ => crate::ocr::is_vision_capable(&zone.model),
+        };
+
+    let mut out: Vec<ChatMessage> = Vec::new();
+    let mut images_used = 0usize;
+
+    for m in rows {
+        let stored: Vec<crate::llm::types::ContentPart> =
+            serde_json::from_str(&m.content).unwrap_or_default();
+
+        let mut parts: Vec<crate::llm::types::ContentPart> = Vec::new();
+        let mut text_len = 0usize;
+        for p in stored {
+            match p {
+                crate::llm::types::ContentPart::Text { text }
+                | crate::llm::types::ContentPart::HiddenText { text } => {
+                    let text = if m.role == "assistant" {
+                        strip_thinking_blocks(&text)
+                    } else {
+                        text
+                    };
+                    let text = text.trim().to_string();
+                    if text.is_empty() || text_len >= TITLE_TEXT_BUDGET {
+                        continue;
+                    }
+                    let text = truncate_chars(&text, TITLE_TEXT_BUDGET - text_len);
+                    text_len += text.chars().count();
+                    parts.push(crate::llm::types::ContentPart::Text { text });
+                }
+                crate::llm::types::ContentPart::ImageUrl { mut image_url }
+                | crate::llm::types::ContentPart::HiddenImage { mut image_url } => {
+                    if !vision_capable {
+                        parts.push(crate::llm::types::ContentPart::Text {
+                            text: "[image attachment]".to_string(),
+                        });
+                    } else if images_used < TITLE_MAX_IMAGES {
+                        images_used += 1;
+                        image_url.detail = Some("low".to_string());
+                        parts.push(crate::llm::types::ContentPart::ImageUrl { image_url });
+                    }
+                }
+            }
+        }
+
+        if parts.is_empty() {
+            continue;
+        }
+        let content = if parts.len() == 1 {
+            match &parts[0] {
+                crate::llm::types::ContentPart::Text { text } => {
+                    Some(MessageContent::Text(text.clone()))
+                }
+                _ => Some(MessageContent::Parts(parts)),
+            }
+        } else {
+            Some(MessageContent::Parts(parts))
+        };
+        out.push(ChatMessage {
+            role: m.role,
+            content,
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        });
+    }
+
+    Ok(out)
+}
+
+/// Truncate on a character boundary (byte slicing panics on multi-byte input).
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    s.chars().take(max).collect::<String>() + "…"
+}
+
+#[allow(dead_code)]
 fn extract_text_from_content_json(content_json: &str) -> String {
     if let Ok(parts) = serde_json::from_str::<Vec<serde_json::Value>>(content_json) {
         let mut buf = String::new();

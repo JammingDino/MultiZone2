@@ -146,49 +146,19 @@ pub async fn run(args: &Value, zone_config: &Value, http: &reqwest::Client) -> A
 // HTML, stable selectors, no JS required. POST as a form submission so it looks
 // exactly like a human clicking the search button.
 
-/// Minimum spacing between DuckDuckGo requests.
-///
-/// Measured against the live endpoint (July 2026):
-///   * The challenge trips almost immediately -- the *second* request of a
-///     back-to-back burst (~1s apart) is already challenged.
-///   * It is not IP-reputation-permanent and not header-dependent: an ordinary
-///     browser on the same IP kept working throughout, and the identical
-///     minimal request succeeded again later.
-///   * Polling every 30s while blocked never recovered across 4 minutes,
-///     whereas going quiet for ~10 minutes did. Requests issued *during* a
-///     block appear to sustain it, so retrying is actively counterproductive.
-///
-/// Hence: space queries out to avoid tripping it, and never retry into a block.
-///
-/// NOTE: this interval is a conservative guess, not a measured safe threshold --
-/// the burst that tripped the challenge was ~1s apart, and the minimum safe
-/// spacing has not been established. Worth measuring before relying on it for
-/// heavy agentic search.
-const DDG_MIN_INTERVAL: std::time::Duration = std::time::Duration::from_millis(2500);
-
-static DDG_LAST_REQUEST: tokio::sync::Mutex<Option<std::time::Instant>> =
-    tokio::sync::Mutex::const_new(None);
-
-/// Sleep as needed so this request lands at least `DDG_MIN_INTERVAL` after the
-/// previous one. The lock is held across the sleep so concurrent searches
-/// (parallel sub-agents) queue instead of all firing at once.
-async fn ddg_rate_gate() {
-    let mut last = DDG_LAST_REQUEST.lock().await;
-    if let Some(prev) = *last {
-        let elapsed = prev.elapsed();
-        if elapsed < DDG_MIN_INTERVAL {
-            tokio::time::sleep(DDG_MIN_INTERVAL - elapsed).await;
-        }
-    }
-    *last = Some(std::time::Instant::now());
-}
+// NOTE: a 2.5s inter-query gate was tried here and removed -- measurement showed
+// the challenge still tripping on the *second* request of a shared client at
+// that spacing, so it cost latency without preventing anything. The challenge
+// appears to key on the client/connection rather than on request rate: an
+// ordinary browser on the same IP is unaffected, while curl and reqwest are
+// both challenged. Detection below is the honest mitigation; a real fix likely
+// needs cookie/session handling, or a different provider for heavy use.
 
 async fn search_duckduckgo(
     http: &reqwest::Client,
     query: &str,
     n: usize,
 ) -> Result<Vec<SearchHit>, String> {
-    ddg_rate_gate().await;
     let ua = pick_ua(query);
     // html.duckduckgo.com/html/ is server-rendered and uses stable double-underscore
     // class names (result__a, result__snippet). Do NOT set Accept-Encoding —

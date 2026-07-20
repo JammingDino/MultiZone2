@@ -15,6 +15,7 @@ pub mod subchat;
 pub mod plan;
 pub mod http;
 pub mod compact;
+pub mod wsl;
 
 use crate::commands::messages::{EngineCtx, StreamSink};
 use crate::error::AppResult;
@@ -114,6 +115,9 @@ pub enum ToolId {
     HttpRequest,
     /// 0.9.3 — the model summarizes its own older turns when a chat grows long.
     Compact,
+    /// 0.9.5 — run Linux commands in WSL, optionally in a shell that persists
+    /// across calls so multi-step work can build up state.
+    Wsl,
 }
 
 impl ToolId {
@@ -141,6 +145,7 @@ impl ToolId {
             "plan" => Some(Self::Plan),
             "http_request" => Some(Self::HttpRequest),
             "compact" => Some(Self::Compact),
+            "wsl_exec" => Some(Self::Wsl),
             // `save_output` is the legacy id for this group (briefly shipped as a
             // write+present tool); it now maps to the present-only tool.
             "present_file" | "save_output" => Some(Self::PresentFile),
@@ -169,6 +174,7 @@ impl ToolId {
             Self::Plan => "plan",
             Self::HttpRequest => "http_request",
             Self::Compact => "compact",
+            Self::Wsl => "wsl_exec",
         }
     }
 
@@ -187,6 +193,7 @@ impl ToolId {
             Self::ManageTags => vec![tags::definition()],
             Self::SwitchZone => zone::definitions(),
             Self::Shell => vec![shell::definition()],
+            Self::Wsl => vec![wsl::definition()],
             Self::Memory => memory::definitions(),
             // The skills group is load + author: `load_skill` reads the catalog,
             // `create_skill` / `update_skill` write to it (0.9.2).
@@ -228,7 +235,7 @@ impl ToolId {
             // moderate while every delete prompts.
             // HttpRequest can send data off the machine and mutate remote state;
             // the approval prompt is its security boundary (see http.rs).
-            Self::CodeExec | Self::Shell | Self::FileManage | Self::HttpRequest => 2,
+            Self::CodeExec | Self::Shell | Self::FileManage | Self::HttpRequest | Self::Wsl => 2,
         }
     }
 }
@@ -356,6 +363,7 @@ pub async fn dispatch(
         "list_zones" => zone::list_zones(db).await,
         "change_zone" => zone::change_zone(&args, db, chat_id).await,
         "run_command" => shell::run(&args, zone_config, project_dir).await,
+        "wsl_exec" => wsl::run(&args, chat_id).await,
         "save_memory" => memory::save(&args, db, chat_id).await,
         "read_memory" => memory::read(&args, db, chat_id).await,
         "delete_memory" => memory::delete(&args, db).await,

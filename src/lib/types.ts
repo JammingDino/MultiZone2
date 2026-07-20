@@ -701,4 +701,5 @@ export const ALL_TOOLS: ToolInfo[] = [
   { id: "manage_tags",  label: "Tag this chat",            category: "System", safety: 0, description: "Create tags and apply them to this chat so it is easier to find later." },
   { id: "code_exec",    label: "Run code",                 category: "System", safety: 2, description: "Run a code snippet in a sandboxed subprocess (Python, Node, Bash, PowerShell)." },
   { id: "shell_exec",   label: "Run terminal commands",    category: "System", safety: 2, description: "Run any shell command in the chat's working directory. The most powerful and most dangerous tool here." },
+  { id: "wsl_exec",     label: "Run Linux commands (WSL)", category: "System", safety: 2, description: "Run Linux commands in WSL. Each call is independent by default; the assistant can opt into a shell that persists for this chat, so working directory, environment and virtualenvs carry across steps. Requires WSL to be installed." },
 ];

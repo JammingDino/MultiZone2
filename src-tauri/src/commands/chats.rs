@@ -642,6 +642,9 @@ pub async fn delete_chat(state: State<'_, AppState>, id: String) -> AppResult<()
         .await?;
     // Remove the chat's mirrored markdown file too (0.7.2).
     crate::commands::mirror::unmirror_chat_best_effort(&state.db, &id).await;
+    // Tear down any persistent WSL shell owned by this chat, so deleting a chat
+    // does not leave an orphaned `bash` running until the idle reaper notices.
+    crate::tools::wsl::close_session(&id).await;
     Ok(())
 }
 

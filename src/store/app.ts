@@ -2,6 +2,22 @@ import { create } from "zustand";
 import { DEFAULT_APP_SETTINGS, type AppSettings, type Chat, type ChatTagEntry, type ChatTagLink, type ChatZone, type McpServerView, type Memory, type Message, type Project, type Provider, type Skill, type Tag, type Zone } from "@/lib/types";
 import * as api from "@/lib/tauri";
 
+// Sidebar open/closed persists across sessions under the same `ui.sidebarOpen`
+// localStorage key the sidebar used before this moved into the store, so an
+// existing install keeps its layout.
+const SIDEBAR_KEY = "ui.sidebarOpen";
+function readSidebarOpen(): boolean {
+  try {
+    const raw = localStorage.getItem(SIDEBAR_KEY);
+    return raw === null ? true : raw === "true";
+  } catch {
+    return true;
+  }
+}
+function writeSidebarOpen(open: boolean) {
+  try { localStorage.setItem(SIDEBAR_KEY, String(open)); } catch { /* ignore */ }
+}
+
 export type StreamPhase =
   | "thinking"
   | "answering"
@@ -146,6 +162,10 @@ interface AppStore {
   zoneLibraryOpen: boolean;
   defaultZoneId: string | null;
   shortcutsHelpOpen: boolean;
+  /** Whether the sidebar is expanded. Persisted across sessions (ui.sidebarOpen). */
+  sidebarOpen: boolean;
+  /** Bumped to ask whichever composer is mounted (InputBar / HomeScreen) to focus. */
+  focusComposerNonce: number;
 
   // actions
   refreshProviders: () => Promise<void>;
@@ -176,6 +196,10 @@ interface AppStore {
   loadDefaultZone: () => Promise<void>;
   openShortcutsHelp: () => void;
   closeShortcutsHelp: () => void;
+  setSidebarOpen: (open: boolean) => void;
+  toggleSidebar: () => void;
+  /** Signal the active composer to take keyboard focus. */
+  focusComposer: () => void;
 
   projectsPanelOpen: boolean;
   projectsPanelInitId: string | null;
@@ -344,6 +368,8 @@ export const useApp = create<AppStore>((set, get) => ({
   zoneLibraryOpen: false,
   defaultZoneId: null,
   shortcutsHelpOpen: false,
+  sidebarOpen: readSidebarOpen(),
+  focusComposerNonce: 0,
   projectsPanelOpen: false,
   projectsPanelInitId: null,
   newChatProjectId: null,
@@ -910,7 +936,24 @@ export const useApp = create<AppStore>((set, get) => ({
     }
   },
   async setAppSettings(partial) {
-    const next = { ...get().appSettings, ...partial };
+    // Merge against what is actually on disk, not against in-memory state.
+    // Before loadAppSettings() resolves, `appSettings` is still DEFAULT_APP_SETTINGS,
+    // so an early partial write (e.g. the web_search migration in refreshZones) used
+    // to persist those defaults over every saved field — silently wiping maps like
+    // `visionOverrides`, which made vision-capable models fall back to the name
+    // heuristic until the user toggled the override off and on again.
+    let saved: Partial<AppSettings> = {};
+    try {
+      const raw = await api.getSetting("app_settings");
+      if (raw) saved = JSON.parse(raw) as Partial<AppSettings>;
+    } catch (e) {
+      console.warn("failed to re-read app settings before write", e);
+      saved = get().appSettings;
+    }
+    // Only layer in-memory state on top once it genuinely reflects the load;
+    // pre-load it is just DEFAULT_APP_SETTINGS and would re-clobber `saved`.
+    const inMemory = get().appSettingsLoaded ? get().appSettings : {};
+    const next = { ...DEFAULT_APP_SETTINGS, ...saved, ...inMemory, ...partial };
     set({ appSettings: next });
     applyAppSettingsToDom(next);
     try {
@@ -973,6 +1016,16 @@ export const useApp = create<AppStore>((set, get) => ({
   closeZoneLibrary: () => set({ zoneLibraryOpen: false }),
   openShortcutsHelp: () => set({ shortcutsHelpOpen: true }),
   closeShortcutsHelp: () => set({ shortcutsHelpOpen: false }),
+  setSidebarOpen: (open) => {
+    writeSidebarOpen(open);
+    set({ sidebarOpen: open });
+  },
+  toggleSidebar: () => {
+    const next = !get().sidebarOpen;
+    writeSidebarOpen(next);
+    set({ sidebarOpen: next });
+  },
+  focusComposer: () => set((s) => ({ focusComposerNonce: s.focusComposerNonce + 1 })),
   async setDefaultZone(id) {
     set({ defaultZoneId: id });
     try {

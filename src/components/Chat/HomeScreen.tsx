@@ -56,6 +56,10 @@ export function HomeScreen() {
   const quickAvailable = !!(baseZone ?? quickModel);
 
   const [mode, setMode] = useState<Mode>(() => {
+    // Mount path for "new chat" started from a project: honour its default zone.
+    const proj = newChatProjectId ? projects.find((p) => p.id === newChatProjectId) : null;
+    const projZone = proj?.defaultZoneId;
+    if (projZone && zones.some((z) => z.id === projZone)) return { type: "zone", id: projZone };
     if (quickAvailable) return { type: "quick" };
     if (zones[0]) return { type: "zone", id: zones[0].id };
     return { type: "quick" };
@@ -87,6 +91,11 @@ export function HomeScreen() {
   // Dictation (0.8.0) for the new-chat composer — same mic behavior as the
   // in-chat InputBar. Splices the transcript into the draft text.
   const dictation = useDictation({ taRef, setText });
+  // Focus-the-composer shortcut (Ctrl/Cmd+K).
+  const focusComposerNonce = useApp((s) => s.focusComposerNonce);
+  useEffect(() => {
+    if (focusComposerNonce > 0) taRef.current?.focus();
+  }, [focusComposerNonce]);
   const isFirstNewChatTick = useRef(true);
   const visionOverrides = useApp((s) => s.appSettings.visionOverrides);
   const dragDepth = useRef(0);
@@ -100,6 +109,13 @@ export function HomeScreen() {
   useEffect(() => {
     if (isFirstNewChatTick.current) { isFirstNewChatTick.current = false; return; }
     setSelectedProjectId(newChatProjectId);
+    // A project's own default zone wins over the global Quick Chat default when
+    // the new chat was started from that project.
+    const proj = newChatProjectId ? projects.find((p) => p.id === newChatProjectId) : null;
+    const projZone = proj?.defaultZoneId;
+    setMode(projZone && zones.some((z) => z.id === projZone)
+      ? { type: "zone", id: projZone }
+      : quickAvailable ? { type: "quick" } : zones[0] ? { type: "zone", id: zones[0].id } : { type: "quick" });
     setSelectedTagIds(new Set());
     setSelectedPerspectiveIds(new Set());
     setSelectedSubagentIds(new Set());

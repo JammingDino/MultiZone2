@@ -425,6 +425,17 @@ export interface AppSettings {
    */
   autoApproveLevel: "none" | "safe" | "safe_moderate" | "all";
   /**
+   * How many tool steps one turn may take before the model is forced to give a
+   * final answer (0.9.6). A step is one assistant message, which can carry
+   * several parallel tool calls — so this is far more than N tool calls.
+   *
+   * The last two steps of the budget are spent finishing: the model is warned
+   * it is running out, then called once with tools switched off. Raising this
+   * lets longer tasks complete in a single turn; lowering it caps how long a
+   * runaway model can churn before it has to report back. Clamped to 4–200.
+   */
+  maxToolSteps: number;
+  /**
    * How PDF files are processed when attached in the input bar.
    * "images" — render each page to a JPEG and send visually (default)
    * "text"   — extract text content from pages and send as text
@@ -573,6 +584,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   apiPort: 8765,
   apiToken: "",
   autoApproveLevel: "all",
+  maxToolSteps: 30,
   pdfMode: "images",
   perspectiveMode: "sequential",
   perspectiveLayout: "stacked",

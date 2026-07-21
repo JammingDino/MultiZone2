@@ -518,6 +518,33 @@ function ChatTab() {
       </section>
 
       <section>
+        <h3 className="mb-1 text-sm font-medium">Task length</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          How many tool steps one response may take before the model has to stop and answer.
+          A step is one model message and can contain several tool calls at once, so 30 steps
+          is well over 30 tool calls. The last two steps always go to writing the answer, so a
+          long task ends with a summary rather than trailing off after a tool result. Raise it
+          for long research or refactoring runs; lower it to keep a model on a short leash.
+        </p>
+        <div className="flex items-center gap-3">
+          <input
+            type="number"
+            min={4}
+            max={200}
+            value={appSettings.maxToolSteps}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              if (Number.isFinite(n)) {
+                setAppSettings({ maxToolSteps: Math.min(200, Math.max(4, Math.round(n))) });
+              }
+            }}
+            className="w-24 rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1.5 text-sm"
+          />
+          <span className="text-xs text-[var(--color-text-muted)]">steps per response (4–200)</span>
+        </div>
+      </section>
+
+      <section>
         <h3 className="mb-1 text-sm font-medium">Tool auto-approval</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
           Controls which tool safety classes run automatically. Dangerous tools include code

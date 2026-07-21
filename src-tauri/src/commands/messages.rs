@@ -8,6 +8,7 @@ use crate::llm::types::{
     ChatMessage, ChatRequest, ContentPart, ImageUrl, MessageContent, Tool, ToolCall,
 };
 use crate::state::AppState;
+use crate::llm::continuity::{self, Stall};
 use crate::llm::thinking::strip_thinking_blocks;
 use crate::tools::{self, ThemePalette, ToolContext, ToolId};
 use serde::{Deserialize, Serialize};
@@ -18,7 +19,22 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::{mpsc, oneshot, RwLock};
 
-const MAX_TOOL_ITERATIONS: usize = 8;
+/// Per-turn tool-step budget, from the user's `maxToolSteps` setting. Falls back
+/// to the default when unset, and is clamped to the supported range either way.
+async fn max_tool_steps(db: &SqlitePool) -> usize {
+    let raw: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key = 'app_settings'")
+        .fetch_optional(db)
+        .await
+        .ok()
+        .flatten()
+        .flatten();
+    let configured = raw
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| v.get("maxToolSteps").and_then(|n| n.as_u64()))
+        .map(|n| n as usize)
+        .unwrap_or(continuity::DEFAULT_MAX_STEPS);
+    continuity::clamp_steps(configured)
+}
 
 /// One-shot overrides for a single send, chosen from the input bar's advanced
 /// menu. They affect only the turn they're passed to — the chat's stored zone
@@ -1071,6 +1087,26 @@ async fn run_agentic_loop(
     run_participant_turn(ctx, sink, chat_id, participant, cancel).await
 }
 
+/// Appends an out-of-band instruction (step budget, stall recovery) to the
+/// request being built for this step.
+///
+/// Sent as `user` rather than `system` on purpose. A mid-conversation system
+/// message is fine on the big hosted APIs but is rejected outright by the strict
+/// chat templates some local servers apply (Gemma's, notably, allows a system
+/// turn only as the very first message) — and a note the model never receives is
+/// worse than a slightly odd-looking role. Nothing here is persisted: these live
+/// only in this turn's request body, so the stored conversation is untouched and
+/// the next turn rebuilds cleanly from the database.
+fn push_system_note(api_messages: &mut Vec<ChatMessage>, text: String) {
+    api_messages.push(ChatMessage {
+        role: "user".into(),
+        content: Some(MessageContent::Text(text)),
+        tool_calls: None,
+        tool_call_id: None,
+        name: None,
+    });
+}
+
 /// The shared agentic loop run by both the primary zone and each perspective
 /// zone. Streams tokens/tools, executes tool calls (with per-participant
 /// approval), and persists messages tagged for the right participant.
@@ -1184,11 +1220,33 @@ async fn run_participant_turn(
     let mut client =
         LlmClient::new(&ctx.http, &provider.base_url, provider.api_key.as_deref());
 
-    // Agentic loop
-    for _iteration in 0..MAX_TOOL_ITERATIONS {
+    // Agentic loop. The budget is a user setting rather than a constant, and its
+    // last two steps are spent finishing: one warned step, then a final step with
+    // tools switched off so the turn always ends in an answer instead of falling
+    // silently off the end of a tool result (see `llm::continuity`).
+    let max_steps = max_tool_steps(&ctx.db).await;
+    // Stall recovery state, tracked across the whole turn.
+    let mut used_tools_this_turn = false;
+    let mut nudges_used = 0usize;
+
+    for step in 0..max_steps {
         if cancel.load(Ordering::Relaxed) {
             sink.emit_for(chat_id, persp, StreamPayload::Cancelled);
             return Ok(());
+        }
+
+        // Budget signalling. The wrap-up warning lands one step before the end so
+        // the model can choose what to spend its last call on; the final step
+        // both warns and withholds the tools, which is what actually guarantees
+        // prose comes back.
+        let final_step = continuity::is_final_step(step, max_steps);
+        if final_step {
+            push_system_note(&mut api_messages, continuity::final_step_nudge(max_steps));
+        } else if continuity::is_wrapup_step(step, max_steps) {
+            push_system_note(
+                &mut api_messages,
+                continuity::wrapup_nudge(max_steps - step, max_steps),
+            );
         }
 
         let assistant_msg_id = new_id();
@@ -1216,7 +1274,9 @@ async fn run_participant_turn(
             temperature: Some(zone.temperature),
             max_tokens: zone.max_tokens,
             top_p: zone.top_p,
-            tools: if tools.is_empty() { None } else { Some(tools.clone()) },
+            // Tools are withheld on the final step so the model has no option
+            // but to answer. Every other step offers the full set.
+            tools: if tools.is_empty() || final_step { None } else { Some(tools.clone()) },
             reasoning_effort,
             stream: true,
         };
@@ -1261,6 +1321,30 @@ async fn run_participant_turn(
         })
         .await?;
 
+        // Did this step end the turn, or did the model just stall? A step with
+        // no tool calls used to end the turn unconditionally, which is how a
+        // long run of file reads ended in an empty bubble and how "now opening
+        // the six opportunities" ended without opening anything. Cancellation
+        // and the final step are real endings and are never second-guessed.
+        let stall = if agg.cancelled || final_step || !agg.tool_calls.is_empty() {
+            Stall::None
+        } else if nudges_used >= continuity::MAX_NUDGES_PER_TURN {
+            // A model that keeps stalling is stuck on something re-asking won't
+            // fix; let the turn end rather than burn the rest of the budget.
+            Stall::None
+        } else {
+            continuity::classify_stall(&strip_thinking_blocks(&agg.content), used_tools_this_turn)
+        };
+
+        // A step that produced literally nothing is never written to the chat.
+        // It used to be, which is where the empty assistant bubble at the end of
+        // a long tool run came from. Not conditional on the stall verdict: an
+        // empty bubble is noise whether or not we go on to retry. Anything the
+        // model did produce — even reasoning alone — is still saved.
+        let skip_persist = agg.content.trim().is_empty()
+            && agg.reasoning.trim().is_empty()
+            && agg.tool_calls.is_empty();
+
         // Persist whatever the model produced before cancellation.
         let assistant_content_json = if agg.content.is_empty() {
             "[]".to_string()
@@ -1279,38 +1363,41 @@ async fn run_participant_turn(
         } else {
             Some(agg.reasoning.clone())
         };
-        let now = now_ts();
-        // Primary turns record the answering zone in `active_zone_id` (zone_id
-        // stays NULL); perspective turns record it in `zone_id` so they're
-        // filtered out of the primary conversation and grouped per-zone.
-        let active_zone_col: Option<&str> = if persp.is_some() { None } else { Some(zone.id.as_str()) };
-        sqlx::query(
-            "INSERT INTO messages (id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, created_at)
-             VALUES (?1, ?2, 'assistant', ?3, ?4, NULL, ?5, ?6, ?7, ?8)",
-        )
-        .bind(&assistant_msg_id)
-        .bind(chat_id)
-        .bind(&assistant_content_json)
-        .bind(&tool_calls_json)
-        .bind(&reasoning_save)
-        .bind(persp)
-        .bind(active_zone_col)
-        .bind(now)
-        .execute(&ctx.db)
-        .await?;
-        sqlx::query("UPDATE chats SET updated_at = ?1 WHERE id = ?2")
-            .bind(now)
+        if !skip_persist {
+            let now = now_ts();
+            // Primary turns record the answering zone in `active_zone_id` (zone_id
+            // stays NULL); perspective turns record it in `zone_id` so they're
+            // filtered out of the primary conversation and grouped per-zone.
+            let active_zone_col: Option<&str> =
+                if persp.is_some() { None } else { Some(zone.id.as_str()) };
+            sqlx::query(
+                "INSERT INTO messages (id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, created_at)
+                 VALUES (?1, ?2, 'assistant', ?3, ?4, NULL, ?5, ?6, ?7, ?8)",
+            )
+            .bind(&assistant_msg_id)
             .bind(chat_id)
+            .bind(&assistant_content_json)
+            .bind(&tool_calls_json)
+            .bind(&reasoning_save)
+            .bind(persp)
+            .bind(active_zone_col)
+            .bind(now)
             .execute(&ctx.db)
             .await?;
+            sqlx::query("UPDATE chats SET updated_at = ?1 WHERE id = ?2")
+                .bind(now)
+                .bind(chat_id)
+                .execute(&ctx.db)
+                .await?;
 
-        let saved = sqlx::query_as::<_, Message>(&format!(
-            "SELECT {MSG_COLS} FROM messages WHERE id = ?1"
-        ))
-        .bind(&assistant_msg_id)
-        .fetch_one(&ctx.db)
-        .await?;
-        sink.emit_for(chat_id, persp, StreamPayload::AssistantSaved { message: &saved });
+            let saved = sqlx::query_as::<_, Message>(&format!(
+                "SELECT {MSG_COLS} FROM messages WHERE id = ?1"
+            ))
+            .bind(&assistant_msg_id)
+            .fetch_one(&ctx.db)
+            .await?;
+            sink.emit_for(chat_id, persp, StreamPayload::AssistantSaved { message: &saved });
+        }
 
         if agg.cancelled {
             sink.emit_for(chat_id, persp, StreamPayload::Cancelled);
@@ -1340,21 +1427,39 @@ async fn run_participant_turn(
                 Some(MessageContent::Text(stripped))
             }
         };
-        api_messages.push(ChatMessage {
-            role: "assistant".into(),
-            content: outgoing_content,
-            tool_calls: if agg.tool_calls.is_empty() {
-                None
-            } else {
-                Some(agg.tool_calls.clone())
-            },
-            tool_call_id: None,
-            name: None,
-        });
+        // A blank step is left out of the history entirely. An assistant message
+        // with neither content nor tool calls is rejected outright by some
+        // OpenAI-compatible providers, and replaying "the model said nothing"
+        // teaches it that saying nothing is an acceptable move.
+        if !skip_persist {
+            api_messages.push(ChatMessage {
+                role: "assistant".into(),
+                content: outgoing_content,
+                tool_calls: if agg.tool_calls.is_empty() {
+                    None
+                } else {
+                    Some(agg.tool_calls.clone())
+                },
+                tool_call_id: None,
+                name: None,
+            });
+        }
 
         if agg.tool_calls.is_empty() {
-            break;
+            // Genuinely finished — the turn ends here.
+            if stall == Stall::None {
+                break;
+            }
+            // Stalled. Ask again rather than ending a half-done task on a
+            // progress note or an empty bubble.
+            nudges_used += 1;
+            tracing::debug!(
+                "turn stalled ({stall:?}) at step {step}/{max_steps}; nudge {nudges_used}"
+            );
+            push_system_note(&mut api_messages, continuity::stall_nudge(stall).to_string());
+            continue;
         }
+        used_tools_this_turn = true;
 
         // If the model called ask_user, execute it (it just echoes the question),
         // emit its result so the UI can render the widget, then hand control back
@@ -1711,6 +1816,17 @@ async fn build_message_history(
 
     if let Some(sys) = &zone.system_prompt {
         if !sys.trim().is_empty() { snippets.push(sys.clone()); }
+    }
+
+    // How the agentic loop works (0.9.6). A model that doesn't know it will be
+    // called again after a tool result has every reason to stop and wait for the
+    // user — which is exactly what stalls a long task halfway through. Only
+    // zones that actually have tools get this; for the rest it's noise.
+    if !zone_tool_ids.is_empty() {
+        snippets.push(crate::llm::continuity::multi_step_preamble(
+            max_tool_steps(db).await,
+            zone_tool_ids.iter().any(|t| t == "plan"),
+        ));
     }
 
     // Response Leader orchestration preamble (0.6.0): when this zone coordinates

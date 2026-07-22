@@ -7,12 +7,27 @@ A desktop LLM chat application built with Tauri + React + Rust. Supports multipl
 | Tool | Version |
 |------|---------|
 | [Node.js](https://nodejs.org/) | 18+ |
-| [Rust](https://rustup.rs/) | 1.77+ |
+| [Rust](https://rustup.rs/) | 1.85+ |
+| [CMake](https://cmake.org/download/) | 3.x |
+| [NASM](https://www.nasm.us/) | 2.15+ |
 | [Tauri CLI prerequisites](https://tauri.app/start/prerequisites/) | — |
 
 On Windows, Tauri also requires the [WebView2 runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) (pre-installed on Windows 10/11) and the MSVC build tools (via Visual Studio Build Tools or Visual Studio).
 
-Voice dictation (0.8.0+) adds **no extra build dependencies**: microphone capture (`cpal`) and WAV encoding (`hound`) are pure Rust, and transcription is done by a user-configured provider's OpenAI-compatible `/audio/transcriptions` endpoint at runtime (Settings → Voice). On-device transcription is available by pointing that provider at a local server (e.g. LM Studio serving a whisper model), so there is no embedded speech engine and no C/C++/`libclang`/CMake toolchain to install.
+### Native build dependencies (0.9.7+)
+
+**CMake and NASM must be installed and on `PATH`.** The smart web tools use [`wreq`](https://crates.io/crates/wreq), a browser-impersonating HTTP client that links BoringSSL, which is compiled from C and assembly at build time. Without NASM the build fails in `boring-sys2` with:
+
+```
+CMake Error at CMakeLists.txt:50 (enable_language):
+  No CMAKE_ASM_NASM_COMPILER could be found.
+```
+
+On Windows: `choco install nasm` (in an **elevated** shell) or [download it](https://www.nasm.us/) and add the install directory to `PATH`. A C/C++ compiler is also required — on Windows the MSVC build tools above cover it. Upstream additionally lists Perl and pkg-config as prerequisites on some platforms (not needed for a Windows/MSVC build).
+
+This is the one place the project accepts a native toolchain dependency, and it is a deliberate trade: keyless search engines fingerprint an ordinary Rust HTTP client's TLS as "not a browser" and answer it with an anti-bot challenge, so without a real browser fingerprint the web tools return nothing. It buys search that actually works, without shipping a headless browser. `wreq` also raised the minimum Rust version to 1.85.
+
+Voice dictation (0.8.0+) adds **no** build dependencies of its own: microphone capture (`cpal`) and WAV encoding (`hound`) are pure Rust, and transcription is done by a user-configured provider's OpenAI-compatible `/audio/transcriptions` endpoint at runtime (Settings → Voice). On-device transcription is available by pointing that provider at a local server (e.g. LM Studio serving a whisper model), so there is no embedded speech engine.
 
 ## Dev
 
@@ -23,7 +38,7 @@ npm run tauri dev
 
 This starts the Vite dev server on `http://localhost:1420` and launches the Tauri window. Hot-reload is active for the frontend; the Rust backend recompiles and relaunches automatically on file changes.
 
-First run compiles all Rust dependencies — expect 2–5 minutes. Subsequent runs are faster.
+First run compiles all Rust dependencies, including BoringSSL from source — expect 3–8 minutes. Subsequent runs are much faster (BoringSSL is cached and only rebuilds if you clean the target directory).
 
 ## Build
 
@@ -48,23 +63,27 @@ GitHub Actions will build the MSI and NSIS installers, publish a GitHub Release 
 
 On first launch, go to **Settings** to add a provider (any OpenAI-compatible API endpoint + key), then create a **Zone** pointing at that provider and choosing a model.
 
-### Web search tool
+### Web tools
 
-The `web_search` tool is available per-zone and works out of the box with no API key. In the zone editor, enable the tool and optionally configure the provider via `tool_config`:
+Web research works out of the box with **no API key and no third-party search service**. Three tools (0.9.7+), based on [Hound](https://github.com/dondai1234/master-fetch):
 
-```json
-{
-  "web_search": {
-    "provider": "multi"
-  }
-}
-```
+| Tool | What it does |
+|------|--------------|
+| `smart_search` | Searches **seven keyless engines in parallel** — DuckDuckGo, Bing, Brave, Yandex, Ecosia, Yahoo, Wikipedia — and merges them with Reciprocal Rank Fusion, so a page several engines agree on ranks highest. If one engine is blocked or rate-limited the others still answer, and the result reports which engines contributed and which failed. |
+| `smart_fetch` | Reads one or more pages **or PDFs** in full as clean markdown, boilerplate stripped, with an optional relevance query to trim a long page to what matters. |
+| `smart_crawl` | Follows links within one site and reads several pages in a single call, visiting the most relevant first. |
+
+All three run entirely from your machine, through a browser-emulating HTTP client that carries a real Chrome TLS/HTTP-2 fingerprint (see [native build dependencies](#native-build-dependencies-097) above). There is **no headless browser**, so pages that render entirely via JavaScript — or that sit behind an interactive bot challenge — are reported as such rather than returned blank.
+
+Enable them per-zone in the zone editor; they are on by default in the curated research zones.
+
+#### Legacy `web_search` / `extract_url`
+
+The original single-engine tools are still available, mainly for the key-based providers. Configure under **Settings → Web search provider** (applies to every zone with the tool enabled):
 
 | Provider | Requires | Notes |
 |----------|----------|-------|
-| `multi` | nothing | **Default.** DDG Lite + Marginalia in parallel, deduped by domain. |
-| `duckduckgo` | nothing | DDG Lite HTML scraping (Bing-derived index). |
-| `marginalia` | nothing | [Marginalia](https://search.marginalia.nu/) JSON API — independent crawler, great for technical content. |
+| `duckduckgo` | nothing | **Default.** Single-engine HTML scraping — prone to anti-bot challenges; prefer `smart_search`. |
 | `searxng` | `endpoint` | Self-hosted SearXNG instance URL. |
 | `brave` | `api_key` | [Brave Search API](https://api.search.brave.com/). |
 | `tavily` | `api_key` | [Tavily](https://tavily.com/). |
@@ -130,7 +149,7 @@ src-tauri/
     commands/           Tauri IPC command handlers
     db/                 SQLite models and migrations
     llm/                LLM client, streaming, thinking blocks
-    tools/              Tool implementations (web_search, code_exec, ...)
+    tools/              Tool implementations (smart_search/fetch/crawl, code_exec, ...)
 docs/
   ROADMAP.md            Vision, principles, and release themes
   RELEASE_PLAN.md       Detailed per-release work items
@@ -143,4 +162,5 @@ docs/
 - **Desktop**: Tauri 2 (Rust)
 - **State**: Zustand
 - **Database**: SQLite via sqlx
+- **HTTP**: reqwest (rustls) app-wide; [wreq](https://crates.io/crates/wreq) (BoringSSL, browser TLS/HTTP-2 fingerprint) for the smart web tools
 - **Rendering**: react-markdown, KaTeX, Mermaid, PDF.js

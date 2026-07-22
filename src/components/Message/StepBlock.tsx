@@ -13,8 +13,8 @@ import {
 } from "lucide-react";
 import type { Step, ToolStep, ThinkingStep } from "@/lib/grouping";
 import type { ContentPart, InputPart } from "@/lib/types";
-import { MathPlotBlock, type MathPlotData } from "@/components/Renderers/MathPlotBlock";
-import { MermaidBlock } from "@/components/Renderers/MermaidBlock";
+import { MathPlotBlock, toMathPlotData } from "@/components/Renderers/MathPlotBlock";
+import { MermaidBlock, type MermaidAutoFix } from "@/components/Renderers/MermaidBlock";
 import { HtmlReportBlock } from "@/components/Renderers/HtmlReportBlock";
 import { SavedFileChip } from "@/components/Renderers/SavedFileChip";
 import { PlanBlock, toPlanData } from "@/components/Renderers/PlanBlock";
@@ -157,7 +157,11 @@ function ToolStepView({
 
   const args = parseArgs(toolCall.function.arguments);
   const renderedView = toolResult
-    ? renderToolOutput(name, args, resultText, chatId, () => setMermaidFailed(true))
+    ? renderToolOutput(name, args, resultText, chatId, () => setMermaidFailed(true), {
+        chatId,
+        messageId: step.messageId,
+        toolCallId: toolCall.id,
+      })
     : null;
 
   let status: "running" | "done" | "error" | "warning" | "pending";
@@ -330,6 +334,7 @@ function renderToolOutput(
   resultText: string | null,
   _chatId: string,
   onMermaidError?: () => void,
+  mermaidAutoFix?: MermaidAutoFix,
 ): React.ReactNode {
   if (!resultText) return null;
   let parsed: any;
@@ -379,7 +384,7 @@ function renderToolOutput(
     if (!source) return null;
     return (
       <>
-        <MermaidBlock source={source} onRenderError={onMermaidError} />
+        <MermaidBlock source={source} onRenderError={onMermaidError} autoFix={mermaidAutoFix} />
         {parsed.caption && (
           <div className="mt-1 text-center text-xs text-[var(--color-text-muted)]">
             {parsed.caption}
@@ -568,28 +573,3 @@ export function AskUserCard({
   );
 }
 
-function toMathPlotData(raw: any): MathPlotData | null {
-  if (!raw || typeof raw !== "object") return null;
-  const xRange = raw.x_range ?? raw.xRange;
-  const yRange = raw.y_range ?? raw.yRange;
-  const fns = raw.functions;
-  if (!Array.isArray(xRange) || xRange.length !== 2) return null;
-  if (!Array.isArray(yRange) || yRange.length !== 2) return null;
-  if (!Array.isArray(fns) || fns.length === 0) return null;
-  return {
-    title: raw.title,
-    xRange: [Number(xRange[0]), Number(xRange[1])],
-    yRange: [Number(yRange[0]), Number(yRange[1])],
-    xLabel: raw.x_label ?? raw.xLabel,
-    yLabel: raw.y_label ?? raw.yLabel,
-    functions: fns
-      .map((f: any) =>
-        typeof f === "string"
-          ? { fn: f }
-          : f && typeof f === "object" && typeof f.fn === "string"
-            ? { fn: f.fn, color: f.color }
-            : null,
-      )
-      .filter((f: any) => f !== null) as { fn: string; color?: string }[],
-  };
-}

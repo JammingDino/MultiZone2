@@ -15,6 +15,8 @@ export interface ToolStep {
   kind: "tool";
   /** Stable identity for React keys: assistant message id + tool_call id. */
   key: string;
+  /** Assistant message that issued the call — needed to write a fix back to it. */
+  messageId: string;
   toolCall: ToolCall;
   toolResult: Message | null;
   /** True while the tool is being constructed by streaming deltas. */
@@ -113,7 +115,14 @@ function buildBlocks(msgs: Message[]): { blocks: TurnBlock[]; messageIds: string
       for (const tc of parseToolCalls(m.toolCalls)) {
         blocks.push({
           kind: "step",
-          step: { kind: "tool", key: `${m.id}:${tc.id}`, toolCall: tc, toolResult: null, pending: false },
+          step: {
+            kind: "tool",
+            key: `${m.id}:${tc.id}`,
+            messageId: m.id,
+            toolCall: tc,
+            toolResult: null,
+            pending: false,
+          },
         });
       }
     } else if (m.role === "tool") {
@@ -157,6 +166,7 @@ function appendStreamingBlocks(blocks: TurnBlock[], streaming: StreamingState): 
       step: {
         kind: "tool",
         key: `streaming:${streaming.messageId}:${pt.index}`,
+        messageId: streaming.messageId,
         toolCall: {
           id: `pending-${pt.index}`,
           callType: "function",

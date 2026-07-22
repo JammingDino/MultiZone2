@@ -2,6 +2,7 @@ pub mod api;
 pub mod providers;
 pub mod zones;
 pub mod chats;
+pub mod diagram;
 pub mod messages;
 pub mod attachments;
 pub mod settings;

@@ -13,6 +13,16 @@ const ZOOM_STEP = 1.2;
 const svgCache = new Map<string, string>();
 
 /**
+ * Broken source → the repaired source the model returned for it. Remounts and
+ * re-groups reuse the known fix instead of paying for another repair request,
+ * and it keeps a persisted fix applied while the store still holds stale
+ * messages.
+ */
+const fixCache = new Map<string, string>();
+/** Sources whose repair failed. One attempt each — never loop on a bad diagram. */
+const fixFailed = new Set<string>();
+
+/**
  * Reads the current theme variables from CSS so Mermaid follows whatever
  * scheme the app is in (dark / light / custom accent).
  */
@@ -73,13 +83,79 @@ function ensureInitialized() {
   }
 }
 
-export function MermaidBlock({ source, onRenderError }: { source: string; onRenderError?: () => void }) {
+/**
+ * Render Mermaid source to a standalone SVG string outside React — used by the
+ * PDF export so diagrams appear in the document as diagrams rather than as a
+ * blob of source. Shares the component's cache and theme initialization, and
+ * returns null instead of throwing when the source doesn't parse.
+ */
+export async function renderMermaidSvg(source: string): Promise<string | null> {
+  const clean = source.trim();
+  if (!clean) return null;
+  const cached = svgCache.get(clean);
+  if (cached) return cached;
+  ensureInitialized();
+  const id = "mermaid-export-" + Math.random().toString(36).slice(2, 10);
+  try {
+    const { svg } = await mermaid.render(id, clean);
+    const cleaned = svg
+      .replace(/(<svg[^>]*?)\s+style="[^"]*background[^"]*"/i, "$1")
+      .replace(/background-color:\s*[^;"]+;?/gi, "");
+    svgCache.set(clean, cleaned);
+    return cleaned;
+  } catch {
+    return null;
+  } finally {
+    document.querySelectorAll(`[id^="d${id}"]`).forEach((n) => n.remove());
+  }
+}
+
+/**
+ * Identifies the stored `draw_diagram` call behind this block, enabling the
+ * hidden auto-repair path (0.9.8). Absent for diagrams from fenced code blocks,
+ * which have no tool call to correct — those fall back to the manual button.
+ */
+export interface MermaidAutoFix {
+  chatId: string;
+  messageId?: string | null;
+  toolCallId?: string | null;
+}
+
+export function MermaidBlock({
+  source,
+  onRenderError,
+  autoFix,
+}: {
+  source: string;
+  onRenderError?: () => void;
+  autoFix?: MermaidAutoFix;
+}) {
   const reactId = useId();
   const renderId = "mermaid-" + reactId.replace(/[^a-zA-Z0-9]/g, "");
   const [svg, setSvg] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const cleanSource = source.trim();
+  const originalSource = source.trim();
+  // A repair already known for this source is applied before the first render,
+  // so a remount never shows the broken diagram or re-asks the model.
+  const [repaired, setRepaired] = useState<string | null>(
+    () => fixCache.get(originalSource) ?? null,
+  );
+  const [repairing, setRepairing] = useState(false);
+  const cleanSource = repaired ?? originalSource;
+  // Whether this block has already spent its one repair attempt.
+  const attemptedRef = useRef(false);
+  // Held in a ref so a fresh object identity from the parent doesn't re-run the
+  // render effect (and re-trigger a repair) on every re-render.
+  const autoFixRef = useRef(autoFix);
+  autoFixRef.current = autoFix;
+
+  // A new diagram in the same slot starts over from whatever is known about it.
+  useEffect(() => {
+    attemptedRef.current = false;
+    setRepairing(false);
+    setRepaired(fixCache.get(originalSource) ?? null);
+  }, [originalSource]);
 
   useEffect(() => {
     if (!cleanSource) {
@@ -91,6 +167,7 @@ export function MermaidBlock({ source, onRenderError }: { source: string; onRend
     const cached = svgCache.get(cleanSource);
     if (cached) {
       setSvg(cached);
+      setError(null);
       setLoading(false);
       return;
     }
@@ -111,24 +188,67 @@ export function MermaidBlock({ source, onRenderError }: { source: string; onRend
           setLoading(false);
         }
       } catch (e: any) {
-        if (!cancelled) {
-          setError(String(e?.message || e));
-          setLoading(false);
-          onRenderError?.();
-        }
+        const message = String(e?.message || e);
         document.querySelectorAll(`[id^="d${renderId}"]`).forEach((n) => n.remove());
+        if (cancelled) return;
+
+        // One silent repair attempt before the user is told anything: the model
+        // gets this source and this error, nothing else, and the block shows a
+        // progress bar until it comes back.
+        const target = autoFixRef.current;
+        const canRepair =
+          !!target &&
+          !attemptedRef.current &&
+          !fixFailed.has(originalSource) &&
+          cleanSource === originalSource;
+        if (canRepair && target) {
+          attemptedRef.current = true;
+          setRepairing(true);
+          setLoading(false);
+          try {
+            const fix = await api.fixDiagram({
+              chatId: target.chatId,
+              messageId: target.messageId ?? null,
+              toolCallId: target.toolCallId ?? null,
+              source: originalSource,
+              error: message,
+            });
+            fixCache.set(originalSource, fix.source);
+            if (!cancelled) {
+              setRepairing(false);
+              setRepaired(fix.source);
+            }
+            return;
+          } catch (fixError) {
+            // The repair failed — fall through and surface the original error
+            // rather than leaving the user staring at a stalled bar.
+            console.error("diagram auto-repair failed", fixError);
+            fixFailed.add(originalSource);
+            if (cancelled) return;
+            setRepairing(false);
+          }
+        }
+
+        setError(message);
+        setLoading(false);
+        onRenderError?.();
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [cleanSource, renderId]);
+  }, [cleanSource, originalSource, renderId]);
+
+  if (repairing) {
+    return <MermaidRepairingView />;
+  }
 
   if (error) {
     return (
       <MermaidErrorView
         error={error}
         source={cleanSource}
+        repairAttempted={attemptedRef.current}
       />
     );
   }
@@ -398,7 +518,45 @@ function distance(a: { x: number; y: number }, b: { x: number; y: number }): num
   return Math.sqrt(dx * dx + dy * dy);
 }
 
-function MermaidErrorView({ error, source }: { error: string; source: string }) {
+/**
+ * Shown in place of the diagram while the hidden repair request is in flight.
+ * The failure itself is not surfaced yet — if the repair lands, the user only
+ * ever sees a brief progress bar and then the working diagram.
+ */
+function MermaidRepairingView() {
+  return (
+    <div className="my-2 rounded border border-[var(--color-border)] bg-[var(--color-panel)] p-4">
+      <div className="flex items-center gap-3 text-xs">
+        <div className="relative flex h-9 w-9 items-center justify-center">
+          <GitBranch size={16} className="absolute text-[var(--color-text-muted)] opacity-60" />
+          <Wand2
+            size={12}
+            className="absolute -bottom-0.5 -right-0.5 animate-pulse text-[var(--color-accent)]"
+          />
+        </div>
+        <div>
+          <div className="font-medium text-[var(--color-text)]">Tidying up the diagram…</div>
+          <div className="text-[var(--color-text-muted)]">
+            The syntax needed a correction. This takes a moment.
+          </div>
+        </div>
+      </div>
+      <div className="mt-3 h-1 w-full overflow-hidden rounded-full bg-[var(--color-border)]">
+        <div className="mz-indeterminate h-full w-1/3 rounded-full bg-[var(--color-accent)]" />
+      </div>
+    </div>
+  );
+}
+
+function MermaidErrorView({
+  error,
+  source,
+  repairAttempted,
+}: {
+  error: string;
+  source: string;
+  repairAttempted?: boolean;
+}) {
   const chatId = useApp((s) => s.activeChatId);
   const isStreaming = useApp((s) =>
     chatId ? Boolean(s.streamingByChat[chatId]) : false,
@@ -441,6 +599,13 @@ function MermaidErrorView({ error, source }: { error: string; source: string }) 
           </button>
         )}
       </div>
+      {repairAttempted && (
+        <div className="mb-1.5 text-[var(--color-text-muted)]">
+          An automatic repair was attempted in the background and didn't work.
+          Sending the error back into the conversation gives the model the full
+          context to try again.
+        </div>
+      )}
       <pre className="whitespace-pre-wrap text-[var(--color-text-muted)]">
         {error}
       </pre>

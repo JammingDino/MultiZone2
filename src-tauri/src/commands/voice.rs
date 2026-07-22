@@ -480,6 +480,7 @@ Respond with ONLY the spoken summary — no preamble, no markdown.\n\nResponse:\
         max_tokens: Some(1024),
         top_p: None,
         tools: None,
+        tool_choice: None,
         reasoning_effort: None,
         stream: false,
     };

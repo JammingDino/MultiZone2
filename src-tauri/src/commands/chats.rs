@@ -716,6 +716,7 @@ pub async fn generate_title(
         max_tokens: Some(2048),
         top_p: None,
         tools: None,
+        tool_choice: None,
         reasoning_effort: None,
         stream: false,
     };

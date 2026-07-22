@@ -544,3 +544,17 @@ html.shadows [class*="shadow-lg"] {
 html.shadows [class*="shadow-xl"] {
   box-shadow: 0 16px 40px rgba(0,0,0,0.55);
 }
+
+/* ===== Indeterminate progress ===== */
+/* Used by the Mermaid auto-repair bar (0.9.8): a sweep across the track while a
+   background request runs, with no completion percentage to fake. */
+@keyframes mz-indeterminate {
+  0%   { transform: translateX(-110%); }
+  100% { transform: translateX(410%); }
+}
+.mz-indeterminate {
+  animation: mz-indeterminate 1.2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mz-indeterminate { animation-duration: 2.4s; }
+}

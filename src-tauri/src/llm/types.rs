@@ -95,6 +95,11 @@ pub struct ChatRequest {
     pub top_p: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<Tool>>,
+    /// Raw OpenAI `tool_choice` value, e.g. `{"type":"function","function":{"name":"x"}}`
+    /// to force one specific call. Left unset on ordinary turns so the model
+    /// decides for itself.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
     pub stream: bool,

@@ -45,8 +45,10 @@ export function ExportMenu({ chatId }: { chatId: string }) {
     try {
       const data = await gather();
       if (!data) return;
-      if (kind === "md") exportChatMarkdown(data);
-      else exportChatPdf(data, { mode: theme.mode, accent: theme.accent, fontFamily });
+      if (kind === "md") await exportChatMarkdown(data);
+      // Awaited: the PDF renders every diagram and plot before the print dialog
+      // opens, so the button stays busy for as long as that takes.
+      else await exportChatPdf(data, { mode: theme.mode, accent: theme.accent, fontFamily });
     } catch (e) {
       console.error("chat export failed", e);
     } finally {
@@ -87,7 +89,9 @@ export function ExportMenu({ chatId }: { chatId: string }) {
               Export as PDF
             </button>
             <div className="px-3 pb-1 pt-1.5 text-[10px] leading-snug text-[var(--color-text-muted)]">
-              PDF opens your print dialog — choose “Save as PDF”. For a single continuous page, set Margins to “None”.
+              The PDF includes the full trace — tool calls, plans, diagrams and
+              timings. It opens your print dialog: choose “Save as PDF”, and set
+              Margins to “None” for a single continuous page.
             </div>
           </div>
         </>

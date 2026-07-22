@@ -217,6 +217,26 @@ export const updateMessage = (chatId: string, messageId: string, text: string) =
 export const generateTitle = (chatId: string, wholeConversation = false) =>
   invoke<string>("generate_title", { chatId, wholeConversation });
 
+/** Corrected Mermaid source from a background repair request (0.9.8). */
+export interface DiagramFix {
+  source: string;
+  /** True when the fix was written back over the stored tool call. */
+  persisted: boolean;
+}
+/**
+ * Repair one broken Mermaid diagram out of band. The model sees only the source
+ * and the parser error — nothing is added to the conversation. Rejects if the
+ * model can't produce a corrected diagram, so the caller can surface the
+ * original error instead of pretending nothing happened.
+ */
+export const fixDiagram = (args: {
+  chatId: string;
+  messageId?: string | null;
+  toolCallId?: string | null;
+  source: string;
+  error: string;
+}) => invoke<DiagramFix>("fix_diagram", args);
+
 // Messages
 /**
  * Send a message. `override` applies to this turn only (the chat's stored zone

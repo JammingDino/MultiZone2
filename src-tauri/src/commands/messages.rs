@@ -871,6 +871,7 @@ async fn route_zone_id(
         max_tokens: Some(2048),
         top_p: None,
         tools: None,
+        tool_choice: None,
         reasoning_effort: None,
         stream: false,
     };
@@ -1277,6 +1278,7 @@ async fn run_participant_turn(
             // Tools are withheld on the final step so the model has no option
             // but to answer. Every other step offers the full set.
             tools: if tools.is_empty() || final_step { None } else { Some(tools.clone()) },
+            tool_choice: None,
             reasoning_effort,
             stream: true,
         };

@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import type { Chat, ContentPart, Message } from "@/lib/types";
 import { saveTextFile } from "@/lib/saveFile";
+import { chatContextEstimate, estimateTokens } from "@/lib/tokens";
 import {
   buildTrace,
   describeTool,
@@ -362,25 +363,37 @@ function renderFileVisual(body: any, accent: string): string {
     </div>`;
 }
 
-/** Search hits, as a numbered list of what was actually found. */
+/** Hostname only, for a compact source label — full URLs are too wide for a
+ *  one-line hit. */
+function hostOf(url: string): string | null {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return null;
+  }
+}
+
+const SEARCH_HITS_SHOWN = 5;
+
+/** Search hits, as a compact numbered list of what was actually found — one
+ *  line per hit so a search step reads as a small step, not a wall of text. */
 function renderSearchVisual(body: any, accent: string): string {
-  const results = Array.isArray(body?.results) ? body.results.slice(0, 8) : [];
+  const results = Array.isArray(body?.results) ? body.results.slice(0, SEARCH_HITS_SHOWN) : [];
   if (results.length === 0) return "";
   const rows = results
     .map((r: any, i: number) => {
       const title = typeof r?.title === "string" && r.title.trim() ? r.title : `Result ${i + 1}`;
       const url = typeof r?.url === "string" ? r.url : typeof r?.path === "string" ? r.path : null;
+      const source = url ? (hostOf(url) ?? url) : null;
       return `<li>
         <span class="hitn" style="color:${accent}">${i + 1}</span>
-        <span class="hittext">
-          <span class="hittitle">${escapeHtml(title)}</span>
-          ${url ? `<span class="hiturl">${escapeHtml(url)}</span>` : ""}
-        </span>
+        <span class="hittitle">${escapeHtml(title)}</span>
+        ${source ? `<span class="hitdomain">${escapeHtml(source)}</span>` : ""}
       </li>`;
     })
     .join("");
-  const more = Array.isArray(body?.results) && body.results.length > 8
-    ? `<li class="hitmore">+ ${body.results.length - 8} more</li>`
+  const more = Array.isArray(body?.results) && body.results.length > SEARCH_HITS_SHOWN
+    ? `<li class="hitmore">+ ${body.results.length - SEARCH_HITS_SHOWN} more</li>`
     : "";
   return `<ul class="hits">${rows}${more}</ul>`;
 }
@@ -504,10 +517,14 @@ function renderToolCard(
 type Palette = (typeof PALETTE)["dark"];
 
 function renderThinking(item: TraceThinkingItem): string {
+  const tokens = estimateTokens(item.characters).toLocaleString();
+  const label = item.durationMs !== null
+    ? `Reasoning ${formatDuration(item.durationMs)} · ~${tokens} tks`
+    : `Reasoning · ~${tokens} tks`;
   return `
     <div class="think">
       <span class="thinkico">${icon("brain")}</span>
-      <span>Reasoned privately — ${item.characters.toLocaleString()} characters, not shown</span>
+      <span>${escapeHtml(label)}</span>
       <span class="tmeta">${escapeHtml(fmtTime(item.timestamp))}</span>
     </div>`;
 }
@@ -563,14 +580,23 @@ function renderUnit(
     </div>`;
 }
 
+/** Compact token count: 1234 → "1.2k", 1_200_000 → "1.2M". */
+function formatTokenCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
+
 /** The numbers strip under the header: what happened, before you read any of it. */
-function renderOverview(stats: TraceStats, accent: string): string {
+function renderOverview(stats: TraceStats, tokens: { input: number; output: number }, accent: string): string {
   const elapsed =
     stats.firstAt !== null && stats.lastAt !== null && stats.lastAt > stats.firstAt
       ? formatDuration(stats.lastAt - stats.firstAt)
       : null;
 
   const cells: [string, string][] = [
+    [`~${formatTokenCount(tokens.input)}`, "input tokens"],
+    [`~${formatTokenCount(tokens.output)}`, "output tokens"],
     [String(stats.userTurns), stats.userTurns === 1 ? "message sent" : "messages sent"],
     [String(stats.assistantTurns), stats.assistantTurns === 1 ? "response" : "responses"],
   ];
@@ -636,6 +662,7 @@ export async function buildChatPrintHtml(
 
   const units = buildTrace(data.messages);
   const stats = traceStats(units);
+  const ctx = chatContextEstimate(data.messages);
   const visuals = await renderVisuals(units);
   const body = units.map((u) => renderUnit(u, data, visuals, { accent, p })).join("");
 
@@ -737,13 +764,15 @@ export async function buildChatPrintHtml(
     border: 1px solid; border-radius: 999px; padding: 1px 7px; }
 
   /* ── Search hits ── */
-  .hits { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-  .hits li { display: flex; gap: 7px; font-size: 10px; }
-  .hitn { font-weight: 700; font-size: 9px; min-width: 12px; }
-  .hittext { display: flex; flex-direction: column; min-width: 0; }
-  .hittitle { font-weight: 500; }
-  .hiturl { font-family: ${mono}; font-size: 9px; color: ${p.muted}; word-break: break-all; }
-  .hitmore { color: ${p.muted}; font-style: italic; }
+  .hits { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  .hits li { display: flex; align-items: baseline; gap: 6px; font-size: 9.5px;
+    white-space: nowrap; overflow: hidden; }
+  .hitn { font-weight: 700; font-size: 8.5px; flex: 0 0 auto; min-width: 10px; }
+  .hittitle { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    flex: 1 1 auto; min-width: 0; }
+  .hitdomain { font-family: ${mono}; font-size: 8.5px; color: ${p.muted}; flex: 0 0 auto;
+    max-width: 34%; overflow: hidden; text-overflow: ellipsis; }
+  .hitmore { color: ${p.muted}; font-style: italic; font-size: 9px; }
 
   /* ── Diagrams & plots ── */
   .diagram, .plot { margin-top: 8px; padding: 8px; border: 1px solid ${p.border};
@@ -787,7 +816,7 @@ export async function buildChatPrintHtml(
     <span class="htitle">${escapeHtml(data.chat.title || "Untitled chat")}</span>
     <span class="hmeta">${meta.join(" · ")}</span>
   </div>
-  ${renderOverview(stats, accent)}
+  ${renderOverview(stats, { input: ctx.inputTokens, output: ctx.outputTokens }, accent)}
   ${body}
 </body>
 </html>`;

@@ -26,6 +26,9 @@ export interface TraceThinkingItem {
   kind: "thinking";
   characters: number;
   timestamp: number;
+  /** Wall time since the previous checkpoint (prior message/tool result), a
+   *  proxy for how long the model spent reasoning. Null when implausible. */
+  durationMs: number | null;
 }
 
 export interface TraceImagesItem {
@@ -124,9 +127,14 @@ export function buildTrace(messages: Message[]): TraceUnit[] {
   /** tool_call_id → the item awaiting its result. */
   const awaiting = new Map<string, TraceToolItem>();
   let current: TraceUnit | null = null;
+  /** createdAt of the previous message, the anchor for a reasoning block's
+   *  elapsed-time estimate. */
+  let lastTs: number | null = null;
 
   for (const m of messages) {
     if (m.role === "system") continue;
+    const anchorTs = lastTs;
+    lastTs = m.createdAt;
 
     if (m.role === "user") {
       current = null;
@@ -157,10 +165,13 @@ export function buildTrace(messages: Message[]): TraceUnit[] {
     }
 
     if (m.reasoning && m.reasoning.trim()) {
+      const elapsed = anchorTs !== null ? m.createdAt - anchorTs : null;
       current.items.push({
         kind: "thinking",
         characters: m.reasoning.trim().length,
         timestamp: m.createdAt,
+        // Clock skew and resumed sessions produce nonsense; only report a plausible one.
+        durationMs: elapsed !== null && elapsed >= 0 && elapsed < 60 * 60 * 1000 ? elapsed : null,
       });
     }
     const text = visibleText(m);

@@ -694,6 +694,10 @@ export const ALL_TOOLS: ToolInfo[] = [
   // Web
   { id: "web_search",   label: "Search the web",      category: "Web", safety: 1, description: "Search the web through your configured search provider and read the result snippets." },
   { id: "extract",      label: "Read a web page",     category: "Web", safety: 1, description: "Open one or more web pages and read them in full, not just the search snippet." },
+  // Hound-based searching tools — https://github.com/dondai1234/master-fetch
+  { id: "smart_search", label: "Smart web search (multi-engine)", category: "Web", safety: 1, description: "Search several independent engines at once (DuckDuckGo, Mojeek, Bing) and merge the results, so one engine being rate-limited doesn't come back empty. Keyless — no API key. Based on Hound (github.com/dondai1234/master-fetch)." },
+  { id: "smart_fetch",  label: "Fetch a page or PDF", category: "Web", safety: 1, description: "Read one or more web pages or PDFs in full as clean markdown. Handles PDFs, and can focus a long page on a relevance query. HTTP-only — honest when a page needs JavaScript instead of returning it blank." },
+  { id: "smart_crawl",  label: "Crawl a site",        category: "Web", safety: 1, description: "Follow links within one site and read several pages at once, visiting the most relevant first. Good for pulling a topic off a documentation site in a single call." },
   { id: "http_request", label: "Call an API",         category: "Web", safety: 2, description: "Make an HTTP request to any URL and get back the raw status, headers, and body — for talking to an API rather than reading a page. You approve each request, and can see the method, URL, and body first." },
 
   // Knowledge

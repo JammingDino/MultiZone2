@@ -1,6 +1,11 @@
 pub mod datetime;
 pub mod web_search;
 pub mod extract;
+// Hound-based searching tools — https://github.com/dondai1234/master-fetch
+pub mod web_util;
+pub mod smart_search;
+pub mod smart_fetch;
+pub mod smart_crawl;
 pub mod code_exec;
 pub mod filesystem;
 pub mod render_graph;
@@ -99,6 +104,12 @@ pub enum ToolId {
     DateTime,
     WebSearch,
     Extract,
+    /// Hound-based multi-engine keyless search (https://github.com/dondai1234/master-fetch).
+    SmartSearch,
+    /// Hound-based HTTP-first page/PDF reader.
+    SmartFetch,
+    /// Hound-based shallow same-site crawl.
+    SmartCrawl,
     CodeExec,
     FileSystem,
     RenderGraph,
@@ -135,6 +146,9 @@ impl ToolId {
             "date_time" => Some(Self::DateTime),
             "web_search" => Some(Self::WebSearch),
             "extract" => Some(Self::Extract),
+            "smart_search" => Some(Self::SmartSearch),
+            "smart_fetch" => Some(Self::SmartFetch),
+            "smart_crawl" => Some(Self::SmartCrawl),
             "code_exec" => Some(Self::CodeExec),
             "file_system" => Some(Self::FileSystem),
             "render_graph" => Some(Self::RenderGraph),
@@ -163,6 +177,9 @@ impl ToolId {
             Self::DateTime => "date_time",
             Self::WebSearch => "web_search",
             Self::Extract => "extract",
+            Self::SmartSearch => "smart_search",
+            Self::SmartFetch => "smart_fetch",
+            Self::SmartCrawl => "smart_crawl",
             Self::CodeExec => "code_exec",
             Self::FileSystem => "file_system",
             Self::RenderGraph => "render_graph",
@@ -191,6 +208,9 @@ impl ToolId {
             Self::DateTime => vec![datetime::definition()],
             Self::WebSearch => vec![web_search::definition()],
             Self::Extract => vec![extract::definition()],
+            Self::SmartSearch => vec![smart_search::definition()],
+            Self::SmartFetch => vec![smart_fetch::definition()],
+            Self::SmartCrawl => vec![smart_crawl::definition()],
             Self::CodeExec => vec![code_exec::definition()],
             Self::FileSystem => filesystem::definitions(ctx.project_dir.as_deref()),
             Self::RenderGraph => render_graph::definitions(ctx),
@@ -233,7 +253,11 @@ impl ToolId {
             // contents, so it is gated like the other file reads rather than as safe.
             // Compact is a lossy rewrite of what the model can see, so the user
             // approves it rather than having it happen behind their back.
-            Self::WebSearch | Self::Extract | Self::FileSystem | Self::FileSearch
+            // The smart_* web tools read the network like web_search/extract do —
+            // moderate, so they're not in the safe default set but need no per-call
+            // approval once a zone enables them.
+            Self::WebSearch | Self::Extract | Self::SmartSearch | Self::SmartFetch
+            | Self::SmartCrawl | Self::FileSystem | Self::FileSearch
             | Self::SwitchZone | Self::Subchat | Self::Compact => 1,
             // FileManage contains `delete_file`; the group is dangerous so it never
             // lands in a default toolset, and per-call gating keeps move/copy at
@@ -248,10 +272,13 @@ impl ToolId {
 /// Every built-in tool group. The single source of truth for enumerating tools
 /// (e.g. `list_tool_functions`, which flattens each group into the functions the
 /// model actually sees). Keep in step with the `ToolId` variants.
-pub const ALL_TOOL_IDS: [ToolId; 19] = [
+pub const ALL_TOOL_IDS: [ToolId; 22] = [
     ToolId::DateTime,
     ToolId::WebSearch,
     ToolId::Extract,
+    ToolId::SmartSearch,
+    ToolId::SmartFetch,
+    ToolId::SmartCrawl,
     ToolId::HttpRequest,
     ToolId::CodeExec,
     ToolId::FileSystem,
@@ -311,7 +338,9 @@ pub fn tool_safety_by_name(name: &str) -> u8 {
         // `search_knowledge` is the pre-0.9.0 name for `search_local_files`;
         // stored tool-call history still carries it.
         | "search_local_files" | "search_knowledge" => 0,
-        "web_search" | "extract_url" | "read_file" | "list_directory"
+        "web_search" | "extract_url"
+        | "smart_search" | "smart_fetch" | "smart_crawl"
+        | "read_file" | "list_directory"
         | "create_file" | "edit_file" | "list_zones" | "change_zone"
         | "spawn_subagent" | "send_subchat_message"
         | "update_skill"
@@ -355,6 +384,9 @@ pub async fn dispatch(
         "get_current_datetime" => datetime::run(&args).await,
         "web_search" => web_search::run(&args, zone_config, http).await,
         "extract_url" => extract::run(&args, http).await,
+        "smart_search" => smart_search::run(&args).await,
+        "smart_fetch" => smart_fetch::run(&args).await,
+        "smart_crawl" => smart_crawl::run(&args).await,
         "execute_code" => code_exec::run(&args, zone_config).await,
         "read_file" => filesystem::read_file(&args, zone_config, project_dir).await,
         "list_directory" => filesystem::list_directory(&args, zone_config, project_dir).await,

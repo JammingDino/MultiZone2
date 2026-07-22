@@ -1,10 +1,11 @@
 [package]
 name = "multizone"
-version = "0.9.6"
+version = "0.9.7"
 description = "MultiZone — LLM interface"
 authors = ["MultiZone"]
 edition = "2021"
-rust-version = "1.77"
+# Bumped from 1.77 for wreq (browser-impersonating HTTP client) which requires 1.85.
+rust-version = "1.85"
 
 [lib]
 name = "multizone_lib"
@@ -78,6 +79,18 @@ anyhow = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
+
+# Browser-impersonating HTTP client for the "smart" web tools (smart_search /
+# smart_fetch / smart_crawl). Keyless search engines block reqwest's non-browser
+# TLS fingerprint; wreq emulates a real Chrome's JA3/JA4 + HTTP/2 fingerprint so
+# the host-driven scraping actually returns results. This is the HTTP layer of
+# Hound's approach (which uses Python's `primp`), without a headless browser:
+# https://github.com/dondai1234/master-fetch
+# NOTE: wreq links BoringSSL — building requires cmake, perl, and NASM (Windows)
+# plus a C/C++ compiler, and raised the workspace MSRV to 1.85. Everything else
+# in the app stays on reqwest/rustls; wreq is used only by the smart web tools.
+wreq = "5.3.0"
+wreq-util = "2.2.6"
 
 [features]
 default = ["custom-protocol"]

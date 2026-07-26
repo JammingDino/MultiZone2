@@ -155,7 +155,10 @@ class CitationSink {
     // `search_knowledge` is the pre-0.9.0 name for `search_local_files`; stored
     // history from before the rename still carries it.
     const isLocalSearch = name === "search_local_files" || name === "search_knowledge";
-    if (name !== "web_search" && !isLocalSearch && name !== "read_file") return;
+    // `smart_search` returns the same `{ results: [{ ref, url, title, snippet }] }`
+    // shape as `web_search`, so it feeds the citation list identically.
+    const isWebSearch = name === "web_search" || name === "smart_search";
+    if (!isWebSearch && !isLocalSearch && name !== "read_file") return;
 
     let data: any;
     try {
@@ -164,7 +167,7 @@ class CitationSink {
       return;
     }
 
-    if (name === "web_search") {
+    if (isWebSearch) {
       const results = Array.isArray(data?.results) ? data.results : [];
       for (const r of results) {
         const url = typeof r?.url === "string" ? r.url : "";

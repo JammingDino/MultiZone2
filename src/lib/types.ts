@@ -676,6 +676,9 @@ export interface ToolInfo {
   description: string;
   safety: ToolSafety;
   category: ToolCategory;
+  /** Deprecated tools kept only so existing zones/history still resolve their
+   *  label. Hidden from the tool picker; never offered on new or edited zones. */
+  hidden?: boolean;
 }
 
 /**
@@ -692,10 +695,13 @@ export const ALL_TOOLS: ToolInfo[] = [
   { id: "present_file", label: "Show a file in the chat",        category: "Files", safety: 0, description: "Display a file the assistant has produced, inline in the conversation — HTML reports get a live preview with an open-in-browser button; other files get a card that opens them." },
 
   // Web
-  { id: "web_search",   label: "Search the web",      category: "Web", safety: 1, description: "Search the web through your configured search provider and read the result snippets." },
+  // `web_search` is superseded by `smart_search` — kept (hidden) only so zones
+  // and chat history that still reference it resolve a label. Connect a search
+  // MCP (e.g. Tavily) if you want a paid provider instead.
+  { id: "web_search",   label: "Search the web (legacy)", category: "Web", safety: 1, hidden: true, description: "Legacy single-provider web search, replaced by the built-in multi-engine search. For a paid provider, connect a search MCP instead." },
   { id: "extract",      label: "Read a web page",     category: "Web", safety: 1, description: "Open one or more web pages and read them in full, not just the search snippet." },
   // Hound-based searching tools — https://github.com/dondai1234/master-fetch
-  { id: "smart_search", label: "Smart web search (multi-engine)", category: "Web", safety: 1, description: "Search several independent engines at once (DuckDuckGo, Mojeek, Bing) and merge the results, so one engine being rate-limited doesn't come back empty. Keyless — no API key. Based on Hound (github.com/dondai1234/master-fetch)." },
+  { id: "smart_search", label: "Search the web",      category: "Web", safety: 1, description: "Search several independent engines at once (DuckDuckGo, Bing, Brave, Yandex, Ecosia, Yahoo, Wikipedia) and merge the results, so one engine being rate-limited doesn't come back empty. Keyless — no API key or paid service. For a paid provider like Tavily, connect a search MCP." },
   { id: "smart_fetch",  label: "Fetch a page or PDF", category: "Web", safety: 1, description: "Read one or more web pages or PDFs in full as clean markdown. Handles PDFs, and can focus a long page on a relevance query. HTTP-only — honest when a page needs JavaScript instead of returning it blank." },
   { id: "smart_crawl",  label: "Crawl a site",        category: "Web", safety: 1, description: "Follow links within one site and read several pages at once, visiting the most relevant first. Good for pulling a topic off a documentation site in a single call." },
   { id: "http_request", label: "Call an API",         category: "Web", safety: 2, description: "Make an HTTP request to any URL and get back the raw status, headers, and body — for talking to an API rather than reading a page. You approve each request, and can see the method, URL, and body first." },

@@ -93,7 +93,7 @@ export const PROMPT_TEMPLATES: PromptTemplate[] = [
     id: "study_guide",
     label: "Study Guide (Socratic)",
     description: "Guides students to answers through questions and visuals — never gives the answer directly.",
-    suggestedTools: ["ask_user", "render_graph", "code_exec", "web_search"],
+    suggestedTools: ["ask_user", "render_graph", "code_exec", "smart_search"],
     prompt: `You are an encouraging study guide for engineering and mathematics. Your single most important rule: never give the student a final answer directly. Always guide them to find it themselves — and reach for your tools constantly to make that guidance visual, interactive, and verifiable.
 
 ## Core Rules
@@ -116,7 +116,7 @@ Default to using tools rather than describing things in prose. A visual hint alm
 - **draw_diagram**: For concepts, processes, decision points, free-body diagrams, flowcharts of strategy (not answers).
 - **ask_user**: Your primary Socratic instrument. Offer 2–4 plausible options so the student actively chooses the next step. Surface common misconceptions as options to be rejected.
 - **code_exec**: Verify arithmetic *after* the student has set up the problem — never solve from scratch.
-- **web_search**: Canonical constants, material properties, or a similar-but-different worked example to point at.
+- **smart_search**: Canonical constants, material properties, or a similar-but-different worked example to point at.
 
 ## Workflow
 
@@ -192,13 +192,13 @@ Warm, precise, and patient. Reframe confusion as a normal part of learning, neve
     id: "research_assistant",
     label: "Research Assistant",
     description: "Explains topics deeply with sources, draws concept maps, and surfaces nuance.",
-    suggestedTools: ["web_search", "render_graph", "ask_user"],
+    suggestedTools: ["smart_search", "render_graph", "ask_user"],
     prompt: `You are a rigorous research assistant. You help users understand topics deeply — not just surface-level summaries. You cite sources, surface nuance, and use diagrams to build mental models.
 
 ## How You Work
 
 1. **Clarify scope first.** Use \`ask_user\` to confirm what depth, audience, and angle the user wants before diving in.
-2. **Search before summarising.** Use \`web_search\` to find current, authoritative sources rather than relying on training data for facts that change.
+2. **Search before summarising.** Use \`smart_search\` to find current, authoritative sources rather than relying on training data for facts that change.
 3. **Visualise structure.** Use \`draw_diagram\` to show concept hierarchies, timelines, cause-and-effect chains, or comparisons — wherever a picture clarifies more than prose.
 4. **Distinguish certainty levels.** Clearly separate established consensus, active debate, and your own synthesis.
 5. **Cite specifically.** Quote or paraphrase with source attribution. Don't cite sources you haven't verified exist.
@@ -217,7 +217,7 @@ Academic but accessible. Precise vocabulary, short sentences. Assume an intellig
     id: "debate_partner",
     label: "Debate Partner",
     description: "Steelmans all sides of an argument and challenges the user's reasoning rigorously.",
-    suggestedTools: ["ask_user", "web_search"],
+    suggestedTools: ["ask_user", "smart_search"],
     prompt: `You are an intellectual debate partner. Your job is to stress-test arguments, steelman opposing views, and help the user think more clearly — not to validate them.
 
 ## Rules of Engagement
@@ -478,7 +478,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
   // connected MCP server, so "all" really means all of what this zone can see.
   const allToolIds = useMemo(
     () => [
-      ...ALL_TOOLS.map((t) => t.id),
+      ...ALL_TOOLS.filter((t) => !t.hidden).map((t) => t.id),
       ...mcpServers
         .filter((s) => s.enabled)
         .flatMap((s) => s.tools.map((t) => mcpToolEnableId(s.id, t.name))),
@@ -797,7 +797,9 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
             </div>
 
             {TOOL_CATEGORIES.map((category) => {
-              const inCategory = ALL_TOOLS.filter((t) => t.category === category);
+              // Hidden tools (e.g. legacy web_search) never appear in the picker;
+              // a zone that still has one enabled keeps it, it's just not offered.
+              const inCategory = ALL_TOOLS.filter((t) => t.category === category && !t.hidden);
               if (inCategory.length === 0) return null;
               const ids = inCategory.map((t) => t.id);
               const on = ids.filter((id) => tools.includes(id)).length;

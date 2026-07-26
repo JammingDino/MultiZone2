@@ -7,6 +7,7 @@ import type { Components } from "react-markdown";
 import { CodeBlock } from "./CodeBlock";
 import type { Citation } from "@/lib/citations";
 import { citationPlugin } from "@/lib/remarkCitations";
+import { normalizeMath } from "@/lib/normalizeMath";
 import { openPath } from "@/lib/tauri";
 
 /** http(s) links can't navigate inside the Tauri webview — route them through
@@ -71,6 +72,11 @@ export function Markdown({ source, citations }: { source: string; citations?: Ci
     [citations],
   );
 
+  // Normalize \[…\] / \(…\) and inline $$…$$ into the delimiter forms remark-math
+  // renders correctly, so display equations become centered blocks instead of
+  // being squeezed inline. Memoized so streaming re-renders don't repeat the work.
+  const normalized = useMemo(() => normalizeMath(source), [source]);
+
   return (
     <div className="markdown" style={{ fontSize: "var(--font-size-message, 14px)" }}>
       <ReactMarkdown
@@ -78,7 +84,7 @@ export function Markdown({ source, citations }: { source: string; citations?: Ci
         rehypePlugins={REHYPE_PLUGINS}
         components={MD_COMPONENTS}
       >
-        {source}
+        {normalized}
       </ReactMarkdown>
     </div>
   );

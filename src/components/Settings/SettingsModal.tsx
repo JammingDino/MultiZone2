@@ -2180,21 +2180,40 @@ function SearchTab() {
   return (
     <div className="flex flex-col gap-6">
       <section>
-        <h3 className="mb-1 text-sm font-medium">Web search provider</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Applied to all zones that have the web search tool enabled.
+        <h3 className="mb-1 text-sm font-medium">Web search</h3>
+        <p className="mb-2 text-xs text-[var(--color-text-muted)]">
+          The built-in <strong>Search the web</strong> tool queries several independent engines at
+          once (DuckDuckGo, Bing, Brave, Yandex, Ecosia, Yahoo, Wikipedia) and merges the results —
+          keyless, with nothing to configure here. If one engine is rate-limited, the others still
+          answer, so you rarely get a false “no results”. Enable it per zone in the zone editor.
         </p>
-        <SettingSelect
-          value={provider}
-          onChange={(v) => setAppSettings({ webSearchProvider: v, webSearchEndpoint: "", webSearchApiKey: "" })}
-        >
-          <option value="duckduckgo">duckduckgo — no key required (default)</option>
-          <option value="searxng">searxng — self-hosted (needs endpoint URL)</option>
-          <option value="brave">brave — Brave Search API (needs key)</option>
-          <option value="tavily">tavily — Tavily API (needs key)</option>
-          <option value="serper">serper — Google via Serper API (needs key)</option>
-        </SettingSelect>
+        <p className="text-xs text-[var(--color-text-muted)]">
+          Want a paid provider like <strong>Tavily</strong>, Brave, or Serper? Connect their MCP
+          server in the <strong>MCP</strong> tab and its search tool becomes available to your zones —
+          no key handling here, and you manage it alongside your other integrations.
+        </p>
       </section>
+
+      <details className="rounded border border-[var(--color-border)] px-3 py-2">
+        <summary className="cursor-pointer text-xs text-[var(--color-text-muted)]">
+          Legacy search provider (deprecated)
+        </summary>
+        <div className="mt-3 flex flex-col gap-4">
+          <p className="text-xs text-[var(--color-text-muted)]">
+            Only affects zones that still have the old single-provider <code>web_search</code> tool
+            enabled. New zones use the built-in multi-engine search above; prefer a search MCP for a
+            paid provider.
+          </p>
+          <SettingSelect
+            value={provider}
+            onChange={(v) => setAppSettings({ webSearchProvider: v, webSearchEndpoint: "", webSearchApiKey: "" })}
+          >
+            <option value="duckduckgo">duckduckgo — no key required (default)</option>
+            <option value="searxng">searxng — self-hosted (needs endpoint URL)</option>
+            <option value="brave">brave — Brave Search API (needs key)</option>
+            <option value="tavily">tavily — Tavily API (needs key)</option>
+            <option value="serper">serper — Google via Serper API (needs key)</option>
+          </SettingSelect>
 
       {provider === "searxng" && (
         <section>
@@ -2221,11 +2240,13 @@ function SearchTab() {
         </section>
       )}
 
-      {provider === "duckduckgo" && (
-        <p className="text-xs text-[var(--color-text-muted)]">
-          No API key required — results are fetched directly.
-        </p>
-      )}
+          {provider === "duckduckgo" && (
+            <p className="text-xs text-[var(--color-text-muted)]">
+              No API key required — results are fetched directly.
+            </p>
+          )}
+        </div>
+      </details>
     </div>
   );
 }

@@ -317,6 +317,13 @@ input[type="color"]:hover { border-color: var(--color-accent); }
 .markdown {
   line-height: 1.55;
   font-size: 14px;
+  /* KaTeX's own equation-number counter is reset only on `body` (see
+   * katex.css), which never re-renders in this SPA — so without this it climbs
+   * across every message in the session instead of resetting per message.
+   * normalizeMath() suppresses numbering for the environments that trigger it,
+   * this is the belt-and-suspenders backstop for anything that slips through
+   * (e.g. an explicit \tag{}). */
+  counter-reset: katexEqnNo mmlEqnNo;
 }
 
 /* Inline citation markers (0.4.1): small superscript chips linking to sources. */

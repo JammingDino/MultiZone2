@@ -8,8 +8,17 @@ import * as api from "@/lib/tauri";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
 import { VisionOverrideSelect } from "@/components/common/VisionOverrideSelect";
 import { Modal, ModalTitle } from "@/components/common/Modal";
+import { getVersion } from "@tauri-apps/api/app";
 import { saveTextFile } from "@/lib/saveFile";
 import { resolveBaseProvider } from "@/lib/baseZone";
+import {
+  type SettingsBundle,
+  applySettingsBundle,
+  buildSettingsBundle,
+  bundleCounts,
+  parseSettingsBundle,
+  serializeSettingsBundle,
+} from "@/lib/settingsBundle";
 import { type SkillSeed, serializeSkill, parseSkill } from "@/lib/skillFile";
 import type { DbStats, GlobalKbView, IndexSummary, KbDocument, McpServerView, McpTool, Provider, Skill } from "@/lib/types";
 
@@ -2521,7 +2530,8 @@ function DataTab() {
           Keep every chat as a real <span className="font-mono">.md</span> file you can read, edit, and version
           outside the app. The database stays the source of truth, but the files sync both ways: chats are written
           out as you go, and edits you make to a file on disk (message text, title) are pulled back in. Zone configs
-          are written as JSON in a <span className="font-mono">zones/</span> subfolder alongside.
+          are written as JSON in a <span className="font-mono">zones/</span> subfolder alongside. The folder starts
+          in your Downloads; change it below if you'd rather keep chats elsewhere.
         </p>
 
         <ToggleRow
@@ -2578,6 +2588,8 @@ function DataTab() {
         </div>
       </section>
 
+      <SettingsTransferSection />
+
       {/* Reset */}
       <section>
         <h3 className="mb-1 text-sm font-medium">Reset</h3>
@@ -2630,6 +2642,178 @@ function DataTab() {
         )}
       </section>
     </div>
+  );
+}
+
+// ─── Settings transfer (export / import) ──────────────────────────────────────
+
+/**
+ * Move a whole MultiZone setup between installs (0.9.9): providers (with keys,
+ * optionally), zones, skills, MCP servers, preferences and theme, as one JSON
+ * file. Chats stay out of it — the markdown mirror above is the tool for those.
+ *
+ * Import is two-step on purpose: the file is parsed and its contents summarised
+ * before anything is written, so "this overwrites my providers" is visible while
+ * it's still cancellable.
+ */
+function SettingsTransferSection() {
+  const appSettings = useApp((s) => s.appSettings);
+  const setAppSettings = useApp((s) => s.setAppSettings);
+  const theme = useApp((s) => s.theme);
+  const setTheme = useApp((s) => s.setTheme);
+  const refreshProviders = useApp((s) => s.refreshProviders);
+  const refreshZones = useApp((s) => s.refreshZones);
+  const refreshSkills = useApp((s) => s.refreshSkills);
+  const refreshMcpServers = useApp((s) => s.refreshMcpServers);
+
+  const [includeKeys, setIncludeKeys] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  // A parsed bundle waiting for the user to confirm the overwrite.
+  const [staged, setStaged] = useState<{ bundle: SettingsBundle; name: string } | null>(null);
+
+  async function doExport() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      let version: string | undefined;
+      try { version = await getVersion(); } catch { /* not in the Tauri shell */ }
+      const bundle = await buildSettingsBundle(appSettings, theme, includeKeys, version);
+      const stamp = new Date().toISOString().slice(0, 10);
+      const saved = await saveTextFile(
+        `multizone-settings-${stamp}.json`,
+        serializeSettingsBundle(bundle),
+        [{ name: "MultiZone settings", extensions: ["json"] }],
+      );
+      const c = bundleCounts(bundle);
+      if (saved) {
+        setMsg(
+          `Exported ${c.providers} provider${c.providers === 1 ? "" : "s"}, ${c.zones} zone${c.zones === 1 ? "" : "s"}, ` +
+          `${c.skills} skill${c.skills === 1 ? "" : "s"} and ${c.mcpServers} MCP server${c.mcpServers === 1 ? "" : "s"}.`,
+        );
+      }
+    } catch (e) {
+      console.error(e);
+      setMsg(`Export failed: ${e}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function pickImport() {
+    const selected = await open({
+      multiple: false,
+      filters: [{ name: "MultiZone settings", extensions: ["json"] }],
+    });
+    if (typeof selected !== "string") return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      const raw = await api.readTextFile(selected);
+      const bundle = parseSettingsBundle(raw);
+      setStaged({ bundle, name: selected.split(/[\\/]/).pop() ?? selected });
+    } catch (e) {
+      console.error(e);
+      setMsg(String(e instanceof Error ? e.message : e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmImport() {
+    if (!staged) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await applySettingsBundle(staged.bundle, setAppSettings, setTheme);
+      await Promise.all([refreshProviders(), refreshZones(), refreshSkills(), refreshMcpServers()]);
+      setStaged(null);
+      const base =
+        `Imported ${r.providers} provider${r.providers === 1 ? "" : "s"}, ${r.zones} zone${r.zones === 1 ? "" : "s"}, ` +
+        `${r.skills} skill${r.skills === 1 ? "" : "s"} and ${r.mcpServers} MCP server${r.mcpServers === 1 ? "" : "s"}.`;
+      setMsg(r.failures.length ? `${base} ${r.failures.length} item(s) failed — see console.` : base);
+      if (r.failures.length) console.warn("settings import failures", r.failures);
+    } catch (e) {
+      console.error(e);
+      setMsg(`Import failed: ${e}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const c = staged ? bundleCounts(staged.bundle) : null;
+
+  return (
+    <section>
+      <h3 className="mb-1 text-sm font-medium">Settings backup & transfer</h3>
+      <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+        Save your whole setup — providers, zones, skills, MCP servers, preferences and theme — as a
+        single JSON file, and import it into another install to get an identical MultiZone there.
+        Chats aren't included (use the markdown storage above for those), and neither are
+        machine-specific paths or the local API token, so the other install keeps its own.
+      </p>
+
+      <ToggleRow
+        label="Include provider API keys"
+        description={
+          includeKeys
+            ? "The exported file will contain your API keys in plain text — keep it somewhere safe."
+            : "Keys are left out; you'll re-enter them on the other machine."
+        }
+        checked={includeKeys}
+        onChange={setIncludeKeys}
+      />
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <button
+          onClick={doExport}
+          disabled={busy}
+          className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:border-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {busy ? <Loader2 size={13} className="animate-spin" /> : <FileDown size={13} />}
+          Export settings…
+        </button>
+        <button
+          onClick={pickImport}
+          disabled={busy}
+          className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:border-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {busy ? <Loader2 size={13} className="animate-spin" /> : <FileUp size={13} />}
+          Import settings…
+        </button>
+        {msg && !staged && <span className="text-xs text-[var(--color-text-muted)]">{msg}</span>}
+      </div>
+
+      {staged && c && (
+        <div className="mt-3 rounded border border-[var(--color-accent)] bg-[var(--color-panel-hover)] p-3">
+          <div className="text-sm font-medium">Import {staged.name}?</div>
+          <div className="mt-1 text-xs text-[var(--color-text-muted)]">
+            Brings in {c.providers} provider{c.providers === 1 ? "" : "s"}, {c.zones} zone
+            {c.zones === 1 ? "" : "s"}, {c.skills} skill{c.skills === 1 ? "" : "s"} and{" "}
+            {c.mcpServers} MCP server{c.mcpServers === 1 ? "" : "s"}, plus preferences and theme.
+            Anything with a matching id is overwritten; your chats, projects and local paths are
+            untouched.
+            {!staged.bundle.includesSecrets && " This export carries no API keys — you'll need to add them after."}
+          </div>
+          <div className="mt-3 flex gap-2">
+            <button
+              onClick={() => { setStaged(null); setMsg(null); }}
+              className="rounded border border-[var(--color-border)] px-3 py-1.5 text-xs hover:border-[var(--color-accent)]"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={confirmImport}
+              disabled={busy}
+              className="flex items-center gap-1.5 rounded bg-[var(--color-accent)] px-3 py-1.5 text-xs text-white hover:opacity-90 disabled:opacity-50"
+            >
+              {busy && <Loader2 size={13} className="animate-spin" />}
+              Import
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 

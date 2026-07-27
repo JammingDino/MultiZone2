@@ -499,7 +499,11 @@ export interface AppSettings {
    * configs written as JSON in a `zones/` subdirectory alongside.
    */
   markdownMirrorEnabled: boolean;
-  /** Output directory for the markdown mirror. Empty = unset (mirror is a no-op). */
+  /**
+   * Output directory for the markdown mirror. Defaulted to
+   * `<Downloads>/MultiZone Chats` on first run (see App.tsx) and never carried
+   * in a settings export — it's machine-local. Empty = unset (mirror no-ops).
+   */
   markdownMirrorDir: string;
   /**
    * Per-model manual override for image input (0.7.4), keyed by exact model

@@ -199,6 +199,13 @@ export const deleteLibraryEntry = (id: string) =>
 /** Read a saved output file as text for the inline HTML report preview. */
 export const readOutputFile = (path: string) =>
   invoke<string>("read_output_file", { path });
+/**
+ * Read a text file the user picked in a native dialog (the fs plugin's scope
+ * rejects arbitrary dialog-chosen paths). Shares the bounded reader behind
+ * `readOutputFile` — same size cap, same lossy-UTF-8 handling.
+ */
+export const readTextFile = (path: string) =>
+  invoke<string>("read_output_file", { path });
 /** Open a file or URL in the OS default app / browser (Tauri shell open). */
 export const openPath = (path: string) => invoke<void>("open_path", { path });
 

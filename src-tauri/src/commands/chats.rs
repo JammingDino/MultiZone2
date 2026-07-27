@@ -691,9 +691,9 @@ pub async fn generate_title(
     }
 
     let instruction = if whole_conversation {
-        "Generate a very short title (3 to 6 words, no quotes, no period) summarizing the conversation above. Weigh what the conversation actually turned out to be about, not only how it opened. Respond with ONLY the title text — no preamble, no explanation, no thinking out loud."
+        "Generate a very short title (3 to 6 words, no quotes, no period) summarizing the conversation above. Weigh what the conversation actually turned out to be about, not only how it opened. Do not think or reason about this — answer immediately with ONLY the title text, no preamble and no explanation."
     } else {
-        "Generate a very short title (3 to 6 words, no quotes, no period) summarizing the message above, including any attached images. Respond with ONLY the title text — no preamble, no explanation, no thinking out loud."
+        "Generate a very short title (3 to 6 words, no quotes, no period) summarizing the message above. Do not think or reason about this — answer immediately with ONLY the title text, no preamble and no explanation."
     };
 
     // The conversation goes in as real messages — same shape the model sees on
@@ -709,15 +709,27 @@ pub async fn generate_title(
         name: None,
     });
 
+    // Titling is a background side-task, so it is kept on a short leash: the
+    // lowest reasoning effort the provider offers, and a token budget that only
+    // fits a handful of words. A reasoning model that ignores the instruction
+    // and thinks anyway gets cut off rather than spending a minute (and a real
+    // chunk of tokens) naming a chat — the caller falls back to "New Chat".
+    // Gemma has no `reasoning_effort` param; it thinks inline instead.
+    let reasoning_effort = if zone.model.to_lowercase().contains("gemma") {
+        None
+    } else {
+        Some("low".to_string())
+    };
+
     let req = ChatRequest {
         model: zone.model.clone(),
         messages,
         temperature: Some(0.4),
-        max_tokens: Some(2048),
+        max_tokens: Some(TITLE_MAX_TOKENS),
         top_p: None,
         tools: None,
         tool_choice: None,
-        reasoning_effort: None,
+        reasoning_effort,
         stream: false,
     };
 
@@ -775,17 +787,22 @@ pub async fn generate_title(
 /// Per-message text budget for title context — enough to characterise a turn,
 /// short of resending an entire long answer just to name the chat.
 const TITLE_TEXT_BUDGET: usize = 2000;
-/// Images are the expensive part of the request; a title needs a couple for
-/// context, not every screenshot in a long conversation.
-const TITLE_MAX_IMAGES: usize = 4;
+/// Images are by far the expensive part of the request, and they only ever earn
+/// their place when there is no text to name the chat from — so at most one, and
+/// only from a message that said nothing.
+const TITLE_MAX_IMAGES: usize = 1;
+/// Output ceiling for the title call. A title is a handful of words; anything
+/// beyond this is a model thinking out loud, which is exactly what should be
+/// cut off rather than paid for.
+const TITLE_MAX_TOKENS: i64 = 256;
 
 /// Builds the conversation the title model sees.
 ///
-/// Images are *kept* (0.9.5) — an "what is this?" turn that is a photo and three
-/// words of text used to reach the titler as three words, since the content was
-/// flattened to its text parts. They are sent at low detail, and only when the
-/// model can actually accept image input; otherwise they are named as
-/// attachments so the model at least knows they were there.
+/// Images are the exception, not the rule (0.9.9): a message that carries any
+/// text is titled from that text, and only a wordless turn — a bare screenshot
+/// with nothing said about it — sends its image, at low detail, at most one per
+/// request, and only to a model that accepts image input. Everything else names
+/// the attachment in a line of text so the model knows the turn wasn't empty.
 ///
 /// Tool traffic is dropped entirely: tool calls, tool results, and the
 /// assistant messages that carry nothing but a tool call. What a chat is
@@ -835,7 +852,11 @@ async fn build_title_context(
         let stored: Vec<crate::llm::types::ContentPart> =
             serde_json::from_str(&m.content).unwrap_or_default();
 
+        // Text first, images second: whether an image is worth sending depends
+        // on whether this message said anything, which isn't known until every
+        // part has been walked.
         let mut parts: Vec<crate::llm::types::ContentPart> = Vec::new();
+        let mut images: Vec<crate::llm::types::ImageUrl> = Vec::new();
         let mut text_len = 0usize;
         for p in stored {
             match p {
@@ -854,18 +875,29 @@ async fn build_title_context(
                     text_len += text.chars().count();
                     parts.push(crate::llm::types::ContentPart::Text { text });
                 }
-                crate::llm::types::ContentPart::ImageUrl { mut image_url }
-                | crate::llm::types::ContentPart::HiddenImage { mut image_url } => {
-                    if !vision_capable {
-                        parts.push(crate::llm::types::ContentPart::Text {
-                            text: "[image attachment]".to_string(),
-                        });
-                    } else if images_used < TITLE_MAX_IMAGES {
-                        images_used += 1;
-                        image_url.detail = Some("low".to_string());
-                        parts.push(crate::llm::types::ContentPart::ImageUrl { image_url });
-                    }
+                crate::llm::types::ContentPart::ImageUrl { image_url }
+                | crate::llm::types::ContentPart::HiddenImage { image_url } => {
+                    images.push(image_url);
                 }
+            }
+        }
+
+        // A message that carries text is titled from that text alone — sending
+        // the screenshot alongside it costs far more than the words it adds.
+        // Only a wordless turn ("<photo>") needs the image, and then just the
+        // first one, once per request.
+        if text_len == 0 && !images.is_empty() {
+            if vision_capable && images_used < TITLE_MAX_IMAGES {
+                images_used += 1;
+                let mut image_url = images.swap_remove(0);
+                image_url.detail = Some("low".to_string());
+                parts.push(crate::llm::types::ContentPart::ImageUrl { image_url });
+            } else {
+                // No vision (or the one image is already spent) — name the
+                // attachment so the model knows the turn wasn't empty.
+                parts.push(crate::llm::types::ContentPart::Text {
+                    text: "[image attachment]".to_string(),
+                });
             }
         }
 

@@ -543,6 +543,18 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+### 0.9.9 — Portable setup & saner defaults
+
+*Two settings answered the same question, titling ran like a full turn, and there was no way to carry a setup to a second machine.*
+
+- [x] Settings export/import ([settingsBundle.ts](../src/lib/settingsBundle.ts), Settings → Data): one JSON file carrying providers (keys optional), zones, skills, MCP servers, preferences and theme; ids preserved so cross-references survive and a re-import updates in place. Machine-local values (paths, mic, API token) and the seeding flags are excluded; import is two-step with a summary before anything is written
+- [x] "Default provider" removed — the base zone (Settings → Chat, renamed from "Quick Chat base zone") is the single default assistant, and the fallback provider is derived from it ([baseZone.ts](../src/lib/baseZone.ts)); Rust resolves in the same order
+- [x] Perspective zones now run in parallel by default (stacked layout unchanged); sequential stays for local models tight on VRAM
+- [x] Title generation put on a leash: `reasoning_effort: low`, a 256-token ceiling, an instruction not to reason, and images only from a wordless turn — at most one, instead of four
+- [x] Chats folder defaults to `<Downloads>/MultiZone Chats` on first run
+
+---
+
 ## 1.0.0 — Hardening & Public Release
 
 - [ ] Performance: measure and optimize startup time, first message render, large chat (500+ messages) scroll — fixed the main structural cause of wasted re-renders: `Sidebar`/`ChatPanel`/`MessageThread`/`ChatList`/`ZoneEditor`/`ProjectsPanel`/`SettingsModal` subscribed to the whole zustand store unfiltered, so *any* state change anywhere re-rendered all of them; converted to shallow/per-field selectors, and `UserMessage`/`BotTurnView` are now memoized (with a custom comparator for `BotTurnView` since `groupMessages` rebuilds turn objects each call) so a streaming token only re-renders the turn actually generating, not the whole history. Still open: no virtualization for very long (500+) message lists, and no measured before/after startup or first-paint numbers.

@@ -743,8 +743,8 @@ function PerspectiveZonePicker({
   // The toggle has three states: inherit (null) and the two explicit modes.
   const modeOptions: { value: "sequential" | "parallel" | null; label: string }[] = [
     { value: null, label: `Default (${globalMode})` },
-    { value: "sequential", label: "Sequential" },
     { value: "parallel", label: "Parallel" },
+    { value: "sequential", label: "Sequential" },
   ];
 
   return (

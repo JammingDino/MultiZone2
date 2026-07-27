@@ -443,8 +443,9 @@ export interface AppSettings {
   pdfMode: "images" | "text";
   /**
    * Default execution mode for perspective zones (overridable per chat).
-   * "sequential" — run one zone at a time (default; gentler on local model VRAM)
-   * "parallel"   — run all perspective zones at once
+   * "parallel"   — run all perspective zones at once (default; how most people
+   *                use several models — ask once, compare the answers together)
+   * "sequential" — run one zone at a time; gentler on local model VRAM
    */
   perspectiveMode: "sequential" | "parallel";
   /**
@@ -586,7 +587,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   autoApproveLevel: "all",
   maxToolSteps: 30,
   pdfMode: "images",
-  perspectiveMode: "sequential",
+  perspectiveMode: "parallel",
   perspectiveLayout: "stacked",
   webSearchProvider: "duckduckgo",
   webSearchEndpoint: "",

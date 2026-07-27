@@ -1695,7 +1695,7 @@ async fn run_participant_turn(
 }
 
 /// Resolves the effective perspective execution mode for a chat:
-/// per-chat override → global `perspectiveMode` app setting → `"sequential"`.
+/// per-chat override → global `perspectiveMode` app setting → `"parallel"`.
 async fn resolve_perspective_mode(db: &SqlitePool, chat_id: &str) -> String {
     let chat_mode: Option<String> = match sqlx::query_scalar::<_, Option<String>>(
         "SELECT perspective_mode FROM chats WHERE id = ?1",
@@ -1729,9 +1729,12 @@ async fn resolve_perspective_mode(db: &SqlitePool, chat_id: &str) -> String {
             .map(String::from)
     });
 
+    // Parallel is the default (0.9.9): running every zone at once is how a
+    // multi-model chat is normally used. Sequential stays opt-in for local
+    // models that can't hold several loads in VRAM at the same time.
     match global.as_deref() {
-        Some("parallel") => "parallel".to_string(),
-        _ => "sequential".to_string(),
+        Some("sequential") => "sequential".to_string(),
+        _ => "parallel".to_string(),
     }
 }
 

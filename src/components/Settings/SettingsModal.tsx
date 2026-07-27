@@ -649,8 +649,8 @@ function ChatTab() {
         </p>
         <div className="flex gap-2">
           {([
+            ["parallel",   "Parallel",   "Run all perspective zones at once — fastest, best for remote APIs. (Default)"],
             ["sequential", "Sequential", "Run perspective zones one at a time — gentler on local model VRAM."],
-            ["parallel",   "Parallel",   "Run all perspective zones at once — fastest, best for remote APIs."],
           ] as const).map(([val, label, desc]) => (
             <button
               key={val}

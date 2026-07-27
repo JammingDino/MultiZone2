@@ -690,11 +690,20 @@ pub async fn generate_title(
         return Err(AppError::Invalid("no user message yet".into()));
     }
 
-    let instruction = if whole_conversation {
-        "Generate a very short title (3 to 6 words, no quotes, no period) summarizing the conversation above. Weigh what the conversation actually turned out to be about, not only how it opened. Do not think or reason about this — answer immediately with ONLY the title text, no preamble and no explanation."
+    let subject = if whole_conversation {
+        "the conversation above. Weigh what the conversation actually turned out to be about, not only how it opened"
     } else {
-        "Generate a very short title (3 to 6 words, no quotes, no period) summarizing the message above. Do not think or reason about this — answer immediately with ONLY the title text, no preamble and no explanation."
+        "the message above"
     };
+    // Name the topic as a noun phrase: "History of Mechanical Pencils", not
+    // "Researching the History of Mechanical Pencils" — the chat list is a list
+    // of subjects, and a leading verb spends a word restating that it's a chat.
+    let instruction = format!(
+        "Reply with a title for {subject}. Rules: 3 to 6 words; a noun phrase naming the \
+         topic, not a sentence and not starting with a verb; no quotes, no trailing period, \
+         no label like \"Title:\". Do not think, explain, or list options — your entire reply \
+         must be the title itself and nothing else."
+    );
 
     // The conversation goes in as real messages — same shape the model sees on
     // an ordinary turn, images and all — with the instruction appended last.
@@ -703,23 +712,11 @@ pub async fn generate_title(
     let mut messages = convo;
     messages.push(ChatMessage {
         role: "user".into(),
-        content: Some(MessageContent::Text(instruction.to_string())),
+        content: Some(MessageContent::Text(instruction)),
         tool_calls: None,
         tool_call_id: None,
         name: None,
     });
-
-    // Titling is a background side-task, so it is kept on a short leash: the
-    // lowest reasoning effort the provider offers, and a token budget that only
-    // fits a handful of words. A reasoning model that ignores the instruction
-    // and thinks anyway gets cut off rather than spending a minute (and a real
-    // chunk of tokens) naming a chat — the caller falls back to "New Chat".
-    // Gemma has no `reasoning_effort` param; it thinks inline instead.
-    let reasoning_effort = if zone.model.to_lowercase().contains("gemma") {
-        None
-    } else {
-        Some("low".to_string())
-    };
 
     let req = ChatRequest {
         model: zone.model.clone(),
@@ -729,13 +726,14 @@ pub async fn generate_title(
         top_p: None,
         tools: None,
         tool_choice: None,
-        reasoning_effort,
+        reasoning_effort: None,
+        chat_template_kwargs: None,
         stream: false,
     };
 
     let client = LlmClient::new(&state.http, &provider.base_url, provider.api_key.as_deref());
-    let resp = client.chat_completion(&req).await?;
-    let title = resp
+    let resp = request_title(&client, req).await?;
+    let raw = resp
         .choices
         .first()
         .and_then(|c| match &c.message.content {
@@ -753,18 +751,18 @@ pub async fn generate_title(
             }
             None => None,
         })
-        .unwrap_or_else(|| "New Chat".to_string());
+        .unwrap_or_default();
 
-    let title = strip_thinking_blocks(&title);
-    let title = title
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty())
-        .last()
-        .unwrap_or("")
-        .to_string();
-    let title = title.trim().trim_matches('"').trim_matches('\'').to_string();
-    let title = if title.is_empty() { "New Chat".to_string() } else { title };
+    // A model that thought out loud anyway leaves nothing usable behind — a
+    // truncated ramble, or a stray line of its own reasoning. Rather than
+    // hanging that on the chat, fall back to the opening message's own words.
+    let title = match clean_title_candidate(&raw) {
+        Some(t) => t,
+        None => {
+            tracing::debug!("title response wasn't a usable title; falling back to the first message");
+            fallback_title(&state.db, &chat_id).await
+        }
+    };
 
     sqlx::query("UPDATE chats SET title = ?1, updated_at = ?2 WHERE id = ?3")
         .bind(&title)
@@ -791,10 +789,119 @@ const TITLE_TEXT_BUDGET: usize = 2000;
 /// their place when there is no text to name the chat from — so at most one, and
 /// only from a message that said nothing.
 const TITLE_MAX_IMAGES: usize = 1;
-/// Output ceiling for the title call. A title is a handful of words; anything
-/// beyond this is a model thinking out loud, which is exactly what should be
-/// cut off rather than paid for.
+/// Output ceiling for the title call — roughly 200 words. A title is a handful
+/// of words; anything approaching this is a model thinking out loud, which is
+/// cut off rather than paid for. Truncation is safe: what comes back then fails
+/// [`clean_title_candidate`] and the chat is named from its opening message.
 const TITLE_MAX_TOKENS: i64 = 256;
+/// Longest a generated title may be. Past this it isn't a title, it's prose.
+const TITLE_MAX_CHARS: usize = 80;
+/// Most words a generated title may have. The prompt asks for 3–6; this is the
+/// outer bound past which the reply is something other than a title.
+const TITLE_MAX_WORDS: usize = 10;
+
+/// Ask for the title with thinking switched off, falling back to a plain
+/// request if the provider won't take the switches.
+///
+/// There is no portable way to turn a thinking model's reasoning off: local
+/// servers (vLLM, SGLang, llama.cpp, LM Studio) read `chat_template_kwargs`,
+/// newer hosted models read `reasoning_effort: "none"`, and older hosted
+/// reasoning models reject both — OpenAI 400s on an unrecognised field, and on
+/// `"none"` for the o-series. So both go out on the first attempt and a failure
+/// retries clean. Titling is a cheap background call; one wasted round trip
+/// against a provider that refuses is a better trade than leaving reasoning on
+/// for everyone else, which is what produced titles made of thinking output.
+async fn request_title(
+    client: &LlmClient<'_>,
+    plain: ChatRequest,
+) -> AppResult<crate::llm::types::ChatResponse> {
+    let quiet = ChatRequest {
+        reasoning_effort: Some("none".to_string()),
+        chat_template_kwargs: Some(serde_json::json!({ "enable_thinking": false })),
+        ..plain.clone()
+    };
+    match client.chat_completion(&quiet).await {
+        Ok(resp) => Ok(resp),
+        Err(e) => {
+            tracing::debug!("title request refused with thinking disabled ({e}); retrying plain");
+            client.chat_completion(&plain).await
+        }
+    }
+}
+
+/// Pull a usable title out of a model's reply, or `None` if there isn't one.
+///
+/// The reply is supposed to be the title and nothing else, and often isn't:
+/// reasoning models narrate first, some wrap the answer in quotes or a
+/// `Title:` label, and a reply cut off mid-thought carries no answer at all.
+/// Taking the last non-empty line and hoping is what put "Here's a thinking
+/// process:" in the chat list — so the candidate is cleaned, then checked
+/// against what a title can actually look like, and rejected outright if it
+/// doesn't fit.
+fn clean_title_candidate(raw: &str) -> Option<String> {
+    // Tagged reasoning goes first, including an unterminated block (a truncated
+    // response), which takes everything after the opening tag with it.
+    let stripped = strip_thinking_blocks(raw);
+    let line = stripped.lines().map(str::trim).filter(|l| !l.is_empty()).next_back()?;
+
+    // Markdown decoration, a leading list marker, and the label a model reaches
+    // for when it can't just answer.
+    let mut t = line.trim_start_matches(['-', '*', '•', '#', '>']).trim();
+    for label in ["Title:", "title:", "TITLE:", "Final:", "Chat title:", "Output:"] {
+        if let Some(rest) = t.strip_prefix(label) {
+            t = rest.trim();
+        }
+    }
+    let t = t
+        .trim_matches(|c: char| c == '"' || c == '\'' || c == '`' || c == '*' || c == '#')
+        .trim()
+        .trim_end_matches('.')
+        .trim();
+
+    if t.is_empty() || t.chars().count() > TITLE_MAX_CHARS {
+        return None;
+    }
+    // A trailing colon means a heading over something that got cut off; a code
+    // fence or tag means the model is still mid-output.
+    if t.ends_with(':') || t.contains("```") || t.contains('<') {
+        return None;
+    }
+    let words = t.split_whitespace().count();
+    if words == 0 || words > TITLE_MAX_WORDS {
+        return None;
+    }
+    // Must read as a name, not punctuation or a numbered step.
+    if !t.chars().any(|c| c.is_alphanumeric()) {
+        return None;
+    }
+    Some(t.to_string())
+}
+
+/// Name the chat from its own opening message — the same thing the app does
+/// when automatic titling is switched off. Used when the model's reply isn't a
+/// title, which beats hanging "New Chat" (or a line of reasoning) on a chat
+/// whose first message says exactly what it's about.
+async fn fallback_title(db: &sqlx::SqlitePool, chat_id: &str) -> String {
+    let first: Option<(String,)> = sqlx::query_as(
+        "SELECT content FROM messages WHERE chat_id = ?1 AND role = 'user'
+         ORDER BY created_at ASC LIMIT 1",
+    )
+    .bind(chat_id)
+    .fetch_optional(db)
+    .await
+    .ok()
+    .flatten();
+
+    let text = first
+        .map(|(c,)| extract_text_from_content_json(&c))
+        .unwrap_or_default();
+    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if text.is_empty() {
+        return "New Chat".to_string();
+    }
+    let short = truncate_chars(&text, TITLE_MAX_CHARS - 1);
+    short.trim().to_string()
+}
 
 /// Builds the conversation the title model sees.
 ///
@@ -934,7 +1041,7 @@ fn truncate_chars(s: &str, max: usize) -> String {
     s.chars().take(max).collect::<String>() + "…"
 }
 
-#[allow(dead_code)]
+/// Best-effort plain text out of a stored message's JSON content parts.
 fn extract_text_from_content_json(content_json: &str) -> String {
     if let Ok(parts) = serde_json::from_str::<Vec<serde_json::Value>>(content_json) {
         let mut buf = String::new();
@@ -949,4 +1056,72 @@ fn extract_text_from_content_json(content_json: &str) -> String {
         return buf;
     }
     content_json.to_string()
+}
+
+#[cfg(test)]
+mod title_tests {
+    use super::*;
+
+    #[test]
+    fn accepts_a_bare_title() {
+        assert_eq!(
+            clean_title_candidate("History of Mechanical Pencils").as_deref(),
+            Some("History of Mechanical Pencils")
+        );
+    }
+
+    #[test]
+    fn strips_decoration_and_labels() {
+        for raw in [
+            "\"History of Mechanical Pencils\"",
+            "**History of Mechanical Pencils**",
+            "Title: History of Mechanical Pencils",
+            "- History of Mechanical Pencils",
+            "History of Mechanical Pencils.",
+        ] {
+            assert_eq!(
+                clean_title_candidate(raw).as_deref(),
+                Some("History of Mechanical Pencils"),
+                "failed on {raw:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn takes_the_answer_after_tagged_reasoning() {
+        let raw = "<think>Let me consider a few options for this.</think>\nHistory of Mechanical Pencils";
+        assert_eq!(
+            clean_title_candidate(raw).as_deref(),
+            Some("History of Mechanical Pencils")
+        );
+    }
+
+    #[test]
+    fn rejects_reasoning_cut_off_mid_thought() {
+        // An unterminated block leaves nothing behind, so there is no title.
+        let raw = "<think>Here's a thinking process:\n1. Analyze User Input";
+        assert_eq!(clean_title_candidate(raw), None);
+    }
+
+    #[test]
+    fn rejects_untagged_thinking_left_as_the_last_line() {
+        // The failure this guards: reasoning narrated as plain text, truncated
+        // before the model ever wrote a title.
+        for raw in [
+            "Here's a thinking process:",
+            "Brainstorming Titles:",
+            "3. Determine Title Requirements:",
+            "I'll go with the simplest option, which names the topic directly and reads well in a list",
+        ] {
+            assert_eq!(clean_title_candidate(raw), None, "should reject {raw:?}");
+        }
+    }
+
+    #[test]
+    fn rejects_empty_and_junk() {
+        assert_eq!(clean_title_candidate(""), None);
+        assert_eq!(clean_title_candidate("   \n  \n"), None);
+        assert_eq!(clean_title_candidate("---"), None);
+        assert_eq!(clean_title_candidate("```"), None);
+    }
 }

@@ -102,6 +102,12 @@ pub struct ChatRequest {
     pub tool_choice: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
+    /// Extra arguments passed to the server's chat template, e.g.
+    /// `{"enable_thinking": false}` — how vLLM, SGLang, llama.cpp and LM Studio
+    /// turn a thinking model's reasoning off. Hosted APIs reject unknown request
+    /// fields, so anything that sets this must be able to retry without it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chat_template_kwargs: Option<Value>,
     pub stream: bool,
 }
 

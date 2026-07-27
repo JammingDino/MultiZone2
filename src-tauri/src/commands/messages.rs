@@ -852,6 +852,7 @@ async fn route_zone_id(
         tools: None,
         tool_choice: None,
         reasoning_effort: None,
+        chat_template_kwargs: None,
         stream: false,
     };
 
@@ -1259,6 +1260,7 @@ async fn run_participant_turn(
             tools: if tools.is_empty() || final_step { None } else { Some(tools.clone()) },
             tool_choice: None,
             reasoning_effort,
+            chat_template_kwargs: None,
             stream: true,
         };
 

@@ -77,6 +77,7 @@ pub async fn fix_diagram(
             "function": { "name": "draw_diagram" }
         })),
         reasoning_effort: None,
+        chat_template_kwargs: None,
         stream: false,
     };
 

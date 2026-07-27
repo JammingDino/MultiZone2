@@ -8,6 +8,7 @@ import * as api from "@/lib/tauri";
 import type { LibraryEntry, Provider, Zone } from "@/lib/types";
 import { ALL_TOOLS } from "@/lib/types";
 import { getZoneIcon } from "@/lib/zoneIcons";
+import { resolveBaseModel, resolveBaseProvider } from "@/lib/baseZone";
 import { installEntry, saveZoneToLibrary, importEntryFromJson, exportZoneJson } from "@/lib/zoneLibrary";
 import { ZoneForm } from "./ZoneForm";
 import { Modal, ModalTitle } from "@/components/common/Modal";
@@ -36,7 +37,7 @@ export function ZoneLibrary() {
   const closeZoneLibrary = useApp((s) => s.closeZoneLibrary);
   const zones = useApp((s) => s.zones);
   const providers = useApp((s) => s.providers);
-  const defaultProviderId = useApp((s) => s.appSettings.defaultProviderId);
+  const baseZoneId = useApp((s) => s.appSettings.baseZoneId);
   const pageSize = useApp((s) => s.appSettings.zoneLibraryPageSize) || 6;
   const refreshZones = useApp((s) => s.refreshZones);
   const defaultZoneId = useApp((s) => s.defaultZoneId);
@@ -62,8 +63,10 @@ export function ZoneLibrary() {
   const fileRef = useRef<HTMLInputElement>(null);
   const toastTimer = useRef<number | undefined>(undefined);
 
-  const quickProvider = providers.find((p) => p.id === (defaultProviderId ?? providers[0]?.id)) ?? null;
-  const quickModel = quickProvider?.defaultModel?.trim() || "";
+  // Newly installed library zones inherit the base zone's provider + model —
+  // whatever the user already treats as their default assistant.
+  const quickProvider = resolveBaseProvider(providers, zones, baseZoneId);
+  const quickModel = resolveBaseModel(providers, zones, baseZoneId);
   const canInstall = !!quickProvider;
 
   function flash(msg: string) {

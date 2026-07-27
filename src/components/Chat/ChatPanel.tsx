@@ -16,6 +16,7 @@ import { ZoneLibrary } from "@/components/Zones/ZoneLibrary";
 import { ProjectsPanel } from "@/components/Projects/ProjectsPanel";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import { AskUserCard } from "@/components/Message/StepBlock";
+import { resolveBaseModel } from "@/lib/baseZone";
 
 export function ChatPanel() {
   const {
@@ -83,7 +84,7 @@ export function ChatPanel() {
   );
   const globalPerspectiveMode = useApp((s) => s.appSettings.perspectiveMode);
   const providers = useApp((s) => s.providers);
-  const defaultProviderId = useApp((s) => s.appSettings.defaultProviderId);
+  const baseZoneId = useApp((s) => s.appSettings.baseZoneId);
 
   const pendingApprovalByChat = useApp((s) => s.pendingApprovalByChat);
   const routingByChat = useApp((s) => s.routingByChat);
@@ -100,10 +101,9 @@ export function ChatPanel() {
       ? zones.find((z) => z.id === activeChat.initiatedByZoneId) ?? null
       : null;
 
-  // A chat with no zone (Quick) or smart routing enabled needs the quick-chat
-  // provider's default model. Zone chats need their zone to be configured.
-  const quickProvider = providers.find((p) => p.id === (defaultProviderId ?? providers[0]?.id)) ?? null;
-  const quickAvailable = !!quickProvider?.defaultModel?.trim();
+  // A chat with no zone (Quick) or smart routing enabled runs the base zone, or
+  // the first provider's default model. Zone chats need their zone configured.
+  const quickAvailable = !!resolveBaseModel(providers, zones, baseZoneId);
   const isSmartChat = !!activeChat?.smartRouting;
   const isSimpleChat = !!activeChat && activeChat.zoneId == null && !isSmartChat;
   const inputDisabled = isSmartChat || isSimpleChat ? !quickAvailable : !activeZone;

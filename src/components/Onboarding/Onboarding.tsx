@@ -13,7 +13,6 @@ import { seedDefaultZones } from "@/lib/defaultZones";
  */
 export function Onboarding() {
   const refreshProviders = useApp((s) => s.refreshProviders);
-  const setAppSettings = useApp((s) => s.setAppSettings);
   const existingZones = useApp((s) => s.zones);
   const refreshZones = useApp((s) => s.refreshZones);
 
@@ -71,8 +70,6 @@ export function Onboarding() {
         apiKey: apiKey.trim() || null,
         defaultModel: model.trim(),
       });
-      await setAppSettings({ defaultProviderId: providerId });
-
       // Curated zones are no longer auto-created; they're seeded into the Zone
       // Library (by the app-level one-time seeder) for the user to install. The
       // home screen starts on Quick chat, so the user is productive immediately.

@@ -397,11 +397,6 @@ export interface AppSettings {
   fontFamily: string;
   /** Fallback filesystem directory when a chat has no project with a directory set. */
   defaultDirectory: string;
-  /**
-   * Provider used for quick/simple chats that aren't bound to a zone. Its
-   * `defaultModel` is what answers those chats. Null = use the oldest provider.
-   */
-  defaultProviderId: string | null;
   /** Set once the one-time starter-zone seeding has run, so it never repeats. */
   seededStarterZones: boolean;
   /** Set once the curated zone library has been written to disk, so it never repeats. */
@@ -466,8 +461,11 @@ export interface AppSettings {
   /** API key — only used for providers that require one (brave, tavily, serper). */
   webSearchApiKey: string;
   /**
-   * Zone used by Quick Chat as a fallback when no specific zone is chosen.
-   * Null = legacy fallback: use defaultProviderId + its defaultModel.
+   * The zone that answers a Quick Chat — the app-wide default assistant, and
+   * the single answer to "what runs when no zone is chosen?" (0.9.9; the old
+   * `defaultProviderId` setting sat one rung under this asking the same thing).
+   * Null = no zone: the first provider's `defaultModel` answers, with no system
+   * prompt and only the safe tools. See `resolveBaseProvider`.
    */
   baseZoneId: string | null;
   /** Soft cap on memory entries per scope; oldest are trimmed past this. */
@@ -576,7 +574,6 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   fontSize: 14,
   fontFamily: "",
   defaultDirectory: "",
-  defaultProviderId: null,
   seededStarterZones: false,
   seededLibrary: false,
   libraryCuratedVersion: 0,

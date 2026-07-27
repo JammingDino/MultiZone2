@@ -9,6 +9,7 @@ import { ModelCombobox } from "@/components/common/ModelCombobox";
 import { VisionOverrideSelect } from "@/components/common/VisionOverrideSelect";
 import { Modal, ModalTitle } from "@/components/common/Modal";
 import { saveTextFile } from "@/lib/saveFile";
+import { resolveBaseProvider } from "@/lib/baseZone";
 import { type SkillSeed, serializeSkill, parseSkill } from "@/lib/skillFile";
 import type { DbStats, GlobalKbView, IndexSummary, KbDocument, McpServerView, McpTool, Provider, Skill } from "@/lib/types";
 
@@ -90,11 +91,14 @@ function ProvidersTab() {
   const { providers, refreshProviders } = useApp(
     useShallow((s) => ({ providers: s.providers, refreshProviders: s.refreshProviders })),
   );
-  const appSettings = useApp((s) => s.appSettings);
-  const setAppSettings = useApp((s) => s.setAppSettings);
+  const zones = useApp((s) => s.zones);
+  const baseZoneId = useApp((s) => s.appSettings.baseZoneId);
   const [editing, setEditing] = useState<Partial<Provider> | null>(null);
 
-  const quickProviderId = appSettings.defaultProviderId ?? providers[0]?.id ?? "";
+  // There is no separate "default provider" setting (0.9.9) — the base zone in
+  // Settings → Chat names one, and that is the provider everything falls back
+  // to. Shown here so the Providers list still says which one that is.
+  const baseProvider = resolveBaseProvider(providers, zones, baseZoneId);
 
   return (
     <>
@@ -129,23 +133,13 @@ function ProvidersTab() {
         )}
       </div>
 
-      {providers.length > 0 && (
-        <section className="mt-5">
-          <h3 className="mb-1 text-sm font-medium">Default provider</h3>
-          <p className="mb-2 text-xs text-[var(--color-text-muted)]">
-            Fallback provider used when no base zone is configured. Its default model is used.
-          </p>
-          <SettingSelect
-            value={quickProviderId}
-            onChange={(v) => setAppSettings({ defaultProviderId: v || null })}
-          >
-            {providers.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}{p.defaultModel ? ` · ${p.defaultModel}` : " · (no model set)"}
-              </option>
-            ))}
-          </SettingSelect>
-        </section>
+      {baseProvider && (
+        <p className="mt-4 text-xs text-[var(--color-text-muted)]">
+          <span className="font-medium text-[var(--color-text)]">{baseProvider.name}</span> is what
+          MultiZone falls back to — it's the provider behind your base zone (Settings → Chat), or
+          the first provider here when no base zone is set. Change it by pointing your base zone at
+          a different provider.
+        </p>
       )}
 
       {editing && (
@@ -441,6 +435,10 @@ function ChatTab() {
   const appSettings = useApp((s) => s.appSettings);
   const setAppSettings = useApp((s) => s.setAppSettings);
   const zones = useApp((s) => s.zones);
+  const providers = useApp((s) => s.providers);
+
+  // What "— none —" actually resolves to, so the fallback isn't a mystery.
+  const fallbackModel = resolveBaseProvider(providers, zones, null)?.defaultModel?.trim() ?? "";
 
   async function pickDefaultDir() {
     const selected = await open({ directory: true, multiple: false });
@@ -449,15 +447,19 @@ function ChatTab() {
   return (
     <div className="flex flex-col gap-6">
       <section>
-        <h3 className="mb-1 text-sm font-medium">Quick Chat base zone</h3>
+        <h3 className="mb-1 text-sm font-medium">Base zone</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          The zone Quick Chat uses when no specific zone is selected. Defines the model, system prompt, and tools for Quick chats.
+          Your default assistant: the zone that answers a Quick Chat, and the provider everything
+          else falls back to. It sets the model, system prompt, and tools. With no base zone,
+          Quick Chat runs your first provider's default model with no prompt and only safe tools.
         </p>
         <SettingSelect
           value={appSettings.baseZoneId ?? ""}
           onChange={(v) => setAppSettings({ baseZoneId: v || null })}
         >
-          <option value="">— none (use provider default model) —</option>
+          <option value="">
+            — none{fallbackModel ? ` (${fallbackModel}, no prompt or tools)` : ""} —
+          </option>
           {zones.map((z) => (
             <option key={z.id} value={z.id}>
               {z.name} · {z.model}

@@ -10,12 +10,12 @@ import { useGlobalShortcuts } from "./lib/useGlobalShortcuts";
 import { seedCuratedLibrary, CURATED_LIBRARY_VERSION } from "./lib/zoneLibrary";
 import { seedDefaultZones } from "./lib/defaultZones";
 import { seedDefaultSkills } from "./lib/defaultSkills";
+import { resolveBaseProvider } from "./lib/baseZone";
 import * as api from "./lib/tauri";
 
 export default function App() {
   const providersLoaded = useApp((s) => s.providersLoaded);
   const providers = useApp((s) => s.providers);
-  const defaultProviderId = useApp((s) => s.appSettings.defaultProviderId);
   const setAppSettings = useApp((s) => s.setAppSettings);
   const appSettingsLoaded = useApp((s) => s.appSettingsLoaded);
   const libraryCuratedVersion = useApp((s) => s.appSettings.libraryCuratedVersion);
@@ -32,15 +32,6 @@ export default function App() {
   const libRef = useRef(false);
   const zonesRef = useRef(false);
   const skillsRef = useRef(false);
-
-  // Once providers exist, make sure a quick-chat provider is selected. Keeps
-  // existing installs (upgrading past this feature) working without a trip
-  // through onboarding.
-  useEffect(() => {
-    if (providersLoaded && providers.length > 0 && !defaultProviderId) {
-      setAppSettings({ defaultProviderId: providers[0].id });
-    }
-  }, [providersLoaded, providers, defaultProviderId, setAppSettings]);
 
   // Seed the curated zone library onto disk (all curated presets, including the
   // community extras). Re-runs when the shipped set version grows so existing
@@ -65,7 +56,9 @@ export default function App() {
   // the library). Skipped once done; never sets a default zone.
   useEffect(() => {
     if (!providersLoaded || !appSettingsLoaded || seededStarterZones || zonesRef.current) return;
-    const quick = providers.find((p) => p.id === (defaultProviderId ?? providers[0]?.id)) ?? null;
+    // Nothing is seeded yet at this point, so this is just "the first provider"
+    // — the same floor Quick Chat falls back to.
+    const quick = resolveBaseProvider(providers, [], null);
     const model = quick?.defaultModel?.trim();
     if (!quick || !model) return;
     zonesRef.current = true;
@@ -82,7 +75,7 @@ export default function App() {
       }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [providersLoaded, appSettingsLoaded, seededStarterZones, providers, defaultProviderId]);
+  }, [providersLoaded, appSettingsLoaded, seededStarterZones, providers]);
 
   // One-time seed of the built-in skill templates, so the Skills panel starts
   // populated. Only seeds when the user has no skills yet; provider-independent.

@@ -8,6 +8,7 @@ import { useDictation, MicButton } from "@/components/Chat/useDictation";
 import type { InputPart } from "@/lib/types";
 import { renderPdfToJpegs, extractPdfText } from "@/lib/pdf";
 import { resolveVisionCapable } from "@/lib/vision";
+import { resolveBaseModel, resolveBaseProvider } from "@/lib/baseZone";
 
 /** Sentinel zone id meaning "Quick chat (no zone)" for a one-shot override. */
 const SIMPLE_ZONE_ID = "__simple__";
@@ -47,7 +48,7 @@ export function InputBar({ chatId, disabled, ref }: InputBarProps) {
   const chats = useApp((s) => s.chats);
   const zones = useApp((s) => s.zones);
   const providers = useApp((s) => s.providers);
-  const defaultProviderId = useApp((s) => s.appSettings.defaultProviderId);
+  const baseZoneId = useApp((s) => s.appSettings.baseZoneId);
   const visionOverrides = useApp((s) => s.appSettings.visionOverrides);
   const fileRef = useRef<HTMLInputElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -130,7 +131,10 @@ export function InputBar({ chatId, disabled, ref }: InputBarProps) {
   const [ovModels, setOvModels] = useState<string[]>([]);
 
   const chat = chats.find((c) => c.id === chatId) ?? null;
-  const quickProviderId = defaultProviderId ?? providers[0]?.id ?? null;
+  // A Quick turn runs the base zone (Settings → Chat), or the first provider's
+  // default model when none is set — the same order the backend resolves.
+  const quickProviderId = resolveBaseProvider(providers, zones, baseZoneId)?.id ?? null;
+  const quickModel = resolveBaseModel(providers, zones, baseZoneId) || null;
   // Which provider's models the override picker should offer, given the chosen
   // (or default) zone for the turn.
   const ovProviderId = (() => {
@@ -148,9 +152,9 @@ export function InputBar({ chatId, disabled, ref }: InputBarProps) {
     if (ovModel.trim()) return ovModel.trim();
     if (ovZone === SMART_ZONE_ID) return null;
     const useQuick = ovZone === null;
-    if (useQuick) return providers.find((p) => p.id === quickProviderId)?.defaultModel ?? null;
+    if (useQuick) return quickModel;
     const zid = ovZone === undefined ? chat?.zoneId ?? null : ovZone;
-    if (zid === null) return providers.find((p) => p.id === quickProviderId)?.defaultModel ?? null;
+    if (zid === null) return quickModel;
     return zones.find((z) => z.id === zid)?.model ?? null;
   })();
   // True when the chosen model can't see images, so any image/PDF attachment

@@ -13,6 +13,7 @@ import {
 } from "@/components/Chat/InputBar";
 import { useDictation, MicButton } from "@/components/Chat/useDictation";
 import { resolveVisionCapable } from "@/lib/vision";
+import { resolveBaseModel, resolveBaseZone } from "@/lib/baseZone";
 
 type Mode =
   | { type: "quick" }
@@ -31,7 +32,6 @@ export function HomeScreen() {
   const providers = useApp((s) => s.providers);
   const projects = useApp((s) => s.projects);
   const tags = useApp((s) => s.tags);
-  const defaultProviderId = useApp((s) => s.appSettings.defaultProviderId);
   const baseZoneId = useApp((s) => s.appSettings.baseZoneId);
   const sendKey = useApp((s) => s.appSettings.sendKey);
   const pdfMode = useApp((s) => s.appSettings.pdfMode);
@@ -47,13 +47,11 @@ export function HomeScreen() {
   const homeScreenDraft = useApp((s) => s.homeScreenDraft);
   const setHomeScreenDraft = useApp((s) => s.setHomeScreenDraft);
 
-  // The base zone for Quick Chat (if configured), or legacy provider fallback.
-  const baseZone = zones.find((z) => z.id === baseZoneId) ?? null;
-  const quickProvider =
-    providers.find((p) => p.id === (defaultProviderId ?? providers[0]?.id)) ?? null;
-  const quickModel = quickProvider?.defaultModel?.trim() || null;
-  // Quick Chat is available if a base zone is set, or a provider with a default model exists.
-  const quickAvailable = !!(baseZone ?? quickModel);
+  // The base zone for Quick Chat (if configured), else the first provider's
+  // default model with no prompt or tools.
+  const baseZone = resolveBaseZone(zones, baseZoneId);
+  const quickModel = resolveBaseModel(providers, zones, baseZoneId) || null;
+  const quickAvailable = !!quickModel;
 
   const [mode, setMode] = useState<Mode>(() => {
     // Mount path for "new chat" started from a project: honour its default zone.
@@ -158,7 +156,7 @@ export function HomeScreen() {
     mode.type === "smart"
       ? null
       : mode.type === "quick"
-      ? baseZone?.model ?? quickModel
+      ? quickModel
       : mode.type === "multizone"
       ? effectiveLeaderZone?.model ?? null
       : selectedZone?.model ?? null;
@@ -551,8 +549,8 @@ export function HomeScreen() {
                           <div className="text-xs text-[var(--color-text-muted)]">
                             {baseZone
                               ? `Base zone · ${baseZone.name}`
-                              : quickAvailable
-                              ? `Legacy · ${quickModel}`
+                              : quickModel
+                              ? `No base zone · ${quickModel}`
                               : "No base zone set"}
                           </div>
                         </div>

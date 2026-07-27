@@ -6,6 +6,7 @@ import * as api from "@/lib/tauri";
 import { ChatList } from "./ChatList";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import { usePersistentSet } from "@/lib/uiState";
+import { resolveBaseModel } from "@/lib/baseZone";
 import type { Project } from "@/lib/types";
 
 export function Sidebar() {
@@ -60,9 +61,8 @@ export function Sidebar() {
   );
   const triggerNewChat = useApp((s) => s.triggerNewChat);
 
-  const defaultProviderId = useApp((s) => s.appSettings.defaultProviderId);
-  const quickProvider = providers.find((p) => p.id === (defaultProviderId ?? providers[0]?.id)) ?? null;
-  const quickAvailable = !!quickProvider?.defaultModel?.trim();
+  const baseZoneId = useApp((s) => s.appSettings.baseZoneId);
+  const quickAvailable = !!resolveBaseModel(providers, zones, baseZoneId);
   // A new chat is possible if there's a zone to bind, or a usable Quick chat.
   const canNewChat = zones.length > 0 || quickAvailable;
 

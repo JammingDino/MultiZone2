@@ -620,35 +620,14 @@ async fn base_zone_id(db: &SqlitePool) -> Option<String> {
     })
 }
 
-/// Resolve the provider used for simple (no-zone) chats: the one named by the
-/// `defaultProviderId` app setting, falling back to the oldest provider.
+/// Resolve the provider used for simple (no-zone) chats when no base zone is
+/// configured: the oldest provider.
+///
+/// This used to consult a separate `defaultProviderId` app setting, which sat
+/// alongside the base zone answering the same question ("what runs a Quick
+/// chat?") one rung lower. The base zone is now the single answer, and this is
+/// only the floor under it (0.9.9).
 async fn default_provider(db: &SqlitePool) -> AppResult<Provider> {
-    let configured: Option<String> = sqlx::query_scalar::<_, Option<String>>(
-        "SELECT value FROM settings WHERE key = 'app_settings'",
-    )
-    .fetch_optional(db)
-    .await?
-    .flatten()
-    .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-    .and_then(|v| {
-        v.get("defaultProviderId")
-            .and_then(|d| d.as_str())
-            .filter(|s| !s.trim().is_empty())
-            .map(String::from)
-    });
-
-    if let Some(pid) = configured {
-        if let Some(p) = sqlx::query_as::<_, Provider>(
-            "SELECT id, name, base_url, api_key, default_model, created_at FROM providers WHERE id = ?1",
-        )
-        .bind(&pid)
-        .fetch_optional(db)
-        .await?
-        {
-            return Ok(p);
-        }
-    }
-
     sqlx::query_as::<_, Provider>(
         "SELECT id, name, base_url, api_key, default_model, created_at FROM providers ORDER BY created_at ASC LIMIT 1",
     )

@@ -20,7 +20,7 @@ import {
   serializeSettingsBundle,
 } from "@/lib/settingsBundle";
 import { type SkillSeed, serializeSkill, parseSkill } from "@/lib/skillFile";
-import type { DbStats, GlobalKbView, IndexSummary, KbDocument, McpServerView, McpTool, Provider, Skill } from "@/lib/types";
+import type { DbStats, GlobalKbView, IndexSummary, KbDocument, McpServerView, McpTool, Provider, Skill, SkillPack } from "@/lib/types";
 
 type Tab = "providers" | "appearance" | "chat" | "voice" | "speech" | "search" | "skills" | "mcp" | "knowledge" | "memory" | "api" | "data";
 
@@ -513,6 +513,22 @@ function ChatTab() {
           label="Auto-generate titles"
           checked={appSettings.autoTitle}
           onChange={(v) => setAppSettings({ autoTitle: v })}
+        />
+      </section>
+
+      <section>
+        <h3 className="mb-1 text-sm font-medium">Step display</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          Compact mode folds a response's thinking and tool steps into one thin activity
+          rail that names what the model is doing right now, instead of stacking a card per
+          step. Click the rail to open the full step-by-step trace. Plans, diagrams, plots,
+          presented files and questions are never hidden — they render outside the rail
+          either way. Turn this off to see every step laid out as it happens.
+        </p>
+        <ToggleRow
+          label="Compact steps into one activity rail"
+          checked={appSettings.compactSteps}
+          onChange={(v) => setAppSettings({ compactSteps: v })}
         />
       </section>
 
@@ -1421,6 +1437,232 @@ function SkillsTab() {
           ))}
         </div>
       )}
+
+      <SkillPacksSection />
+    </div>
+  );
+}
+
+/**
+ * Folder-backed skills (0.9.9). The ecosystem publishes skills as directories —
+ * `SKILL.md` plus reference pages and scripts — installed by a CLI rather than
+ * pasted in. MultiZone scans for those trees and offers them to agents next to
+ * the skills written above; `load_skill` serves the sub-files, so a zone needs
+ * no filesystem tools to read one.
+ *
+ * Read-only by design: the installer owns the tree and its `update` command
+ * overwrites it, so an edit made here would vanish on the next update.
+ */
+function SkillPacksSection() {
+  const packs = useApp((s) => s.skillPacks);
+  const refreshSkillPacks = useApp((s) => s.refreshSkillPacks);
+  const appSettings = useApp((s) => s.appSettings);
+  const setAppSettings = useApp((s) => s.setAppSettings);
+  const [root, setRoot] = useState("");
+  const [copied, setCopied] = useState<string | null>(null);
+  const [showHelp, setShowHelp] = useState(false);
+
+  const extraDirs = appSettings.skillPackDirs ?? [];
+
+  useEffect(() => {
+    refreshSkillPacks().catch(console.error);
+    api.skillPacksRoot().then(setRoot).catch(console.error);
+  }, [refreshSkillPacks]);
+
+  async function togglePack(pack: SkillPack) {
+    const disabled = appSettings.disabledSkillPacks ?? [];
+    const next = pack.enabled
+      ? [...disabled, pack.name]
+      : disabled.filter((n) => n.toLowerCase() !== pack.name.toLowerCase());
+    await setAppSettings({ disabledSkillPacks: next });
+    await refreshSkillPacks();
+  }
+
+  async function addFolder() {
+    const selected = await open({ directory: true, multiple: false });
+    if (typeof selected !== "string") return;
+    if (extraDirs.some((d) => d === selected)) return;
+    await setAppSettings({ skillPackDirs: [...extraDirs, selected] });
+    await refreshSkillPacks();
+  }
+
+  async function removeFolder(dir: string) {
+    await setAppSettings({ skillPackDirs: extraDirs.filter((d) => d !== dir) });
+    await refreshSkillPacks();
+  }
+
+  function copy(text: string, key: string) {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(key);
+      setTimeout(() => setCopied((c) => (c === key ? null : c)), 1500);
+    });
+  }
+
+  // The install line is the whole point of the help panel, so it carries the
+  // real path rather than a placeholder the user has to substitute.
+  const installTarget = root || "<skills folder>";
+
+  return (
+    <section className="mt-2 border-t border-[var(--color-border)] pt-4">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <h3 className="text-sm font-medium">Installed skill folders</h3>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => refreshSkillPacks().catch(console.error)}
+            className="flex items-center gap-1 rounded px-2 py-1 text-[11px] text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)]"
+            title="Rescan the folders below"
+          >
+            <RefreshCw size={11} /> Rescan
+          </button>
+          <button
+            onClick={() => setShowHelp((v) => !v)}
+            className="rounded px-2 py-1 text-[11px] text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)]"
+          >
+            {showHelp ? "Hide setup" : "How to install"}
+          </button>
+        </div>
+      </div>
+      <p className="text-xs text-[var(--color-text-muted)]">
+        Skills published as a folder — <span className="font-mono">SKILL.md</span> plus reference pages and
+        scripts — installed by their own CLI. They appear in every agent's catalog alongside the skills above,
+        and an agent reads the extra files through <span className="font-mono">load_skill</span>, so no
+        filesystem access is needed. Edit them where they were installed, not here.
+      </p>
+
+      {showHelp && (
+        <div className="mt-3 rounded border border-[var(--color-border)] bg-[var(--color-panel)] p-3 text-xs">
+          <div className="mb-2 text-[var(--color-text-muted)]">
+            Install into MultiZone's skills folder, then hit Rescan. Both of these publish an
+            installer to npm; anything that writes a <span className="font-mono">SKILL.md</span> folder works
+            the same way.
+          </div>
+          <div className="mb-1 font-medium">Impeccable (frontend design)</div>
+          <CopyLine
+            text={`cd "${installTarget}"\nnpx impeccable install -y --providers=claude --scope=project`}
+            copied={copied === "impeccable"}
+            onCopy={() => copy(`cd "${installTarget}"\nnpx impeccable install -y --providers=claude --scope=project`, "impeccable")}
+          />
+          <div className="mb-1 mt-3 font-medium">HyperFrames (video composition)</div>
+          <CopyLine
+            text={`cd "${installTarget}"\nnpx hyperframes skills install`}
+            copied={copied === "hyperframes"}
+            onCopy={() => copy(`cd "${installTarget}"\nnpx hyperframes skills install`, "hyperframes")}
+          />
+          <div className="mt-3 text-[var(--color-text-muted)]">
+            The installers ask which coding tool you use — the answer only decides which folder name they
+            write (<span className="font-mono">.claude/skills/</span>, <span className="font-mono">.agents/skills/</span>, …).
+            MultiZone reads all of them, so pick any. You can also point it at a project you have already
+            installed into with "Add folder" below, instead of installing twice.
+          </div>
+          <div className="mt-2 text-[var(--color-text-muted)]">
+            Some skills shell out to their own scripts. Those steps only run for a zone that has the
+            <span className="font-mono"> Terminal</span> or <span className="font-mono">Code execution</span>{" "}
+            tool and a working Node install; without them an agent gets the instructions but not the scripts.
+          </div>
+        </div>
+      )}
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {root && (
+          <button
+            onClick={() => api.openPath(root).catch(console.error)}
+            className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-3 py-1.5 text-xs transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+            title={root}
+          >
+            <FolderOpen size={12} /> Open skills folder
+          </button>
+        )}
+        <button
+          onClick={addFolder}
+          className="flex items-center gap-1.5 rounded border border-dashed border-[var(--color-border)] px-3 py-1.5 text-xs transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+        >
+          <Plus size={12} /> Add folder
+        </button>
+      </div>
+
+      {extraDirs.length > 0 && (
+        <div className="mt-2 flex flex-col gap-1">
+          {extraDirs.map((dir) => (
+            <div key={dir} className="flex items-center gap-2 text-[11px] text-[var(--color-text-muted)]">
+              <Folder size={11} className="shrink-0" />
+              <span className="truncate font-mono">{dir}</span>
+              <button
+                onClick={() => removeFolder(dir)}
+                className="ml-auto shrink-0 rounded p-1 hover:text-[var(--color-danger)]"
+                title="Stop scanning this folder"
+              >
+                <Trash2 size={11} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {packs.length === 0 ? (
+        <div className="mt-3 rounded border border-dashed border-[var(--color-border)] p-4 text-xs text-[var(--color-text-muted)]">
+          No skill folders found. Install one into the skills folder, or add a folder that already has some.
+        </div>
+      ) : (
+        <div className="mt-3 flex flex-col gap-2">
+          {packs.map((pack) => (
+            <div key={pack.dir} className="rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate text-sm font-medium">{pack.name}</span>
+                    {pack.fileCount !== null && (
+                      <span className="rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]">
+                        {pack.fileCount} {pack.fileCount === 1 ? "file" : "files"}
+                      </span>
+                    )}
+                    {!pack.enabled && (
+                      <span className="rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]">disabled</span>
+                    )}
+                  </div>
+                  {pack.description && (
+                    <div className="mt-0.5 line-clamp-3 text-xs text-[var(--color-text-muted)]">{pack.description}</div>
+                  )}
+                  <div className="mt-1 truncate font-mono text-[10px] text-[var(--color-text-muted)]" title={pack.dir}>
+                    {pack.dir}
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    onClick={() => togglePack(pack)}
+                    title={pack.enabled ? "Enabled — click to remove from the agent catalog" : "Disabled — click to offer to agents"}
+                    className={`relative h-5 w-9 rounded-full transition-colors ${pack.enabled ? "bg-[var(--color-accent)]" : "bg-[var(--color-border)]"}`}
+                  >
+                    <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all duration-200 ${pack.enabled ? "translate-x-4" : ""}`} />
+                  </button>
+                  <button
+                    onClick={() => api.openPath(pack.dir).catch(console.error)}
+                    className="rounded p-1 text-[var(--color-text-muted)] hover:text-[var(--color-accent)]"
+                    title="Open folder"
+                  >
+                    <FolderOpen size={12} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** A copyable shell snippet in the skill-folder setup panel. */
+function CopyLine({ text, copied, onCopy }: { text: string; copied: boolean; onCopy: () => void }) {
+  return (
+    <div className="flex items-start gap-2 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-2">
+      <pre className="min-w-0 flex-1 overflow-x-auto whitespace-pre font-mono text-[11px]">{text}</pre>
+      <button
+        onClick={onCopy}
+        className="shrink-0 rounded p-1 text-[var(--color-text-muted)] hover:text-[var(--color-accent)]"
+        title="Copy"
+      >
+        {copied ? <Check size={12} /> : <Copy size={12} />}
+      </button>
     </div>
   );
 }

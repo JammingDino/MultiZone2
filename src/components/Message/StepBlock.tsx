@@ -12,7 +12,7 @@ import {
   Send,
 } from "lucide-react";
 import type { Step, ToolStep, ThinkingStep } from "@/lib/grouping";
-import type { ContentPart, InputPart } from "@/lib/types";
+import { analyzeToolStep } from "@/lib/stepSummary";
 import { MathPlotBlock, toMathPlotData } from "@/components/Renderers/MathPlotBlock";
 import { MermaidBlock, type MermaidAutoFix } from "@/components/Renderers/MermaidBlock";
 import { HtmlReportBlock } from "@/components/Renderers/HtmlReportBlock";
@@ -29,40 +29,56 @@ function prettyJson(s: string): string {
   }
 }
 
-function extractToolResultText(json: string): string {
-  try {
-    const parts = JSON.parse(json) as ContentPart[];
-    if (Array.isArray(parts)) {
-      return parts
-        .filter((p): p is Extract<ContentPart, { type: "text" }> => p.type === "text")
-        .map((p) => p.text)
-        .join("\n");
-    }
-  } catch {}
-  return json;
-}
-
-function parseArgs(s: string): any {
-  try {
-    return JSON.parse(s);
-  } catch {
-    return null;
-  }
-}
-
 export function StepBlock({
   step,
   index,
   chatId,
+  hideVisual = false,
 }: {
   step: Step;
   index: number;
   chatId: string;
+  /**
+   * Set when the turn already renders this step's visual output on its own
+   * (compact mode lifts plans, diagrams, plots and files out of the rail), so
+   * the expanded card doesn't show a second copy.
+   */
+  hideVisual?: boolean;
 }) {
   if (step.kind === "thinking") {
     return <ThinkingStepView step={step} index={index} />;
   }
-  return <ToolStepView step={step} index={index} chatId={chatId} />;
+  return (
+    <ToolStepView step={step} index={index} chatId={chatId} hideVisual={hideVisual} />
+  );
+}
+
+/**
+ * A tool step's rendered result on its own — the plan, diagram, plot or file
+ * card — with no surrounding step chrome. Compact mode renders these beneath
+ * the activity rail so the things the user asked to see never get collapsed
+ * away with the mechanics that produced them.
+ */
+export function ToolStepVisual({ step, chatId }: { step: ToolStep; chatId: string }) {
+  const [failed, setFailed] = useState(false);
+  const { name, args, resultText } = analyzeToolStep(step);
+  const view = renderToolOutput(name, args, resultText, chatId, () => setFailed(true), {
+    chatId,
+    messageId: step.messageId,
+    toolCallId: step.toolCall.id,
+  });
+  if (!view) return null;
+  return (
+    <div
+      className={
+        failed
+          ? "rounded-md border border-[var(--color-danger)]/40 p-2"
+          : undefined
+      }
+    >
+      {view}
+    </div>
+  );
 }
 
 function ThinkingStepView({ step, index }: { step: ThinkingStep; index: number }) {
@@ -109,10 +125,12 @@ function ToolStepView({
   step,
   index,
   chatId,
+  hideVisual = false,
 }: {
   step: ToolStep;
   index: number;
   chatId: string;
+  hideVisual?: boolean;
 }) {
   // Auto-expand while tool args are streaming so the user can see them build up.
   const [open, setOpen] = useState(step.pending);
@@ -128,48 +146,28 @@ function ToolStepView({
       setOpen(false); // collapse when done
     }
   }, [pending, !!toolResult]);
-  // A pending block can open before the provider has named the function (some
-  // stream the arguments first), so the header needs something to show until
-  // the name lands.
-  const name = toolCall.function.name || (pending ? "…" : "unknown tool");
 
-  const resultText = toolResult ? extractToolResultText(toolResult.content) : null;
-  const parsedResult: any = (() => {
-    if (!resultText) return null;
-    try {
-      return JSON.parse(resultText);
-    } catch {
-      return null;
-    }
-  })();
-  const isError =
-    parsedResult && typeof parsedResult === "object" && "error" in parsedResult;
-  const errorKind: string | null = isError
-    ? (parsedResult.error_kind as string | undefined) ?? null
-    : null;
-  // Environment / configuration / timeout errors aren't the model's fault.
-  // Treat them as warnings so the user reads them as "something on your machine,
-  // not the AI screwed up."
-  const isSetupIssue =
-    errorKind === "environment" ||
-    errorKind === "configuration" ||
-    errorKind === "timeout";
+  const {
+    name,
+    args,
+    resultText,
+    parsed: parsedResult,
+    isError,
+    errorKind,
+    isSetupIssue,
+    status: baseStatus,
+  } = analyzeToolStep(step);
 
-  const args = parseArgs(toolCall.function.arguments);
-  const renderedView = toolResult
-    ? renderToolOutput(name, args, resultText, chatId, () => setMermaidFailed(true), {
-        chatId,
-        messageId: step.messageId,
-        toolCallId: toolCall.id,
-      })
-    : null;
+  const renderedView =
+    toolResult && !hideVisual
+      ? renderToolOutput(name, args, resultText, chatId, () => setMermaidFailed(true), {
+          chatId,
+          messageId: step.messageId,
+          toolCallId: toolCall.id,
+        })
+      : null;
 
-  let status: "running" | "done" | "error" | "warning" | "pending";
-  if (pending) status = "pending";
-  else if (!toolResult) status = "running";
-  else if (isError) status = isSetupIssue ? "warning" : "error";
-  else if (mermaidFailed) status = "error";
-  else status = "done";
+  const status = baseStatus === "done" && mermaidFailed ? "error" : baseStatus;
 
   const statusIcon =
     status === "running" || status === "pending" ? (

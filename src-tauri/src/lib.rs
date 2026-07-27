@@ -5,6 +5,7 @@ mod knowledge;
 mod llm;
 mod mcp;
 mod ocr;
+mod skillpacks;
 mod tools;
 mod util;
 mod commands;
@@ -141,6 +142,8 @@ pub fn run() {
             commands::knowledge::list_global_kb_documents,
             commands::knowledge::clear_global_knowledge,
             commands::skills::list_skills,
+            commands::skills::list_skill_packs,
+            commands::skills::skill_packs_root,
             commands::skills::upsert_skill,
             commands::skills::set_skill_enabled,
             commands::skills::delete_skill,

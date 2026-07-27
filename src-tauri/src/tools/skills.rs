@@ -1,7 +1,9 @@
 use crate::error::AppResult;
 use crate::llm::types::{Tool, ToolFunction};
+use crate::skillpacks;
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
+use std::path::Path;
 
 pub fn definition() -> Tool {
     Tool {
@@ -15,7 +17,11 @@ pub fn definition() -> Tool {
                  in the system prompt under \"Skills\". When a user's request matches a skill's \
                  described use case, call this tool with that skill's name BEFORE doing the work, \
                  then follow the returned instructions. Call with no name (or an unknown name) to \
-                 get the catalog of available skills. If there are any relevant skills, look at them before responding"
+                 get the catalog of available skills. If there are any relevant skills, look at them before responding.\n\n\
+                 Some skills are folders of several files: loading one returns a `files` list \
+                 alongside its instructions. Read any of those with a second call passing the same \
+                 `name` plus `file` — that is how a skill's own instructions tell you to open its \
+                 reference pages. Do not guess at a file's contents; load it."
                     .into(),
             parameters: json!({
                 "type": "object",
@@ -23,6 +29,10 @@ pub fn definition() -> Tool {
                     "name": {
                         "type": "string",
                         "description": "The exact name of the skill to load, as listed in the Skills section of the system prompt."
+                    },
+                    "file": {
+                        "type": "string",
+                        "description": "Optional. Path of one file inside a multi-file skill, relative to the skill's folder (e.g. \"reference/polish.md\"). Only valid together with `name`. Paths written the long way in a skill's own text (e.g. \".claude/skills/impeccable/reference/polish.md\") are accepted too."
                     }
                 }
             }),
@@ -144,6 +154,20 @@ pub async fn create(
         .to_string());
     }
 
+    // A DB skill wins name lookups, so letting one take an installed pack's name
+    // would quietly make that pack unloadable.
+    if let Some(pack) = skillpacks::find_enabled(db, name).await {
+        return Ok(json!({
+            "status": "exists",
+            "note": format!(
+                "An installed skill folder is already named \"{}\". Pick a different name — a skill \
+                 saved under that name would shadow it.",
+                pack.name
+            ),
+        })
+        .to_string());
+    }
+
     let authored: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM skills WHERE authored_by_zone_id IS NOT NULL AND enabled = 0",
     )
@@ -233,39 +257,95 @@ pub async fn update(args: &Value, db: &SqlitePool) -> AppResult<String> {
     Ok(json!({ "status": "updated", "id": id, "name": name }).to_string())
 }
 
+/// How a folder-backed skill tells the model to navigate its own tree. Returned
+/// with the load because these skills are written for harnesses that read their
+/// sub-files off disk — without this the model follows an instruction like
+/// "see reference/polish.md" by inventing the contents.
+const PACK_NOTE: &str = "This skill is a folder of files. Its instructions refer to other files in \
+     that folder — read each one by calling `load_skill` again with this same `name` and the \
+     `file` path, at the point the instructions call for it (not all up front). Paths written \
+     against another tool's layout (e.g. `.claude/skills/<skill>/reference/x.md`) work as-is. \
+     `base_dir` is the folder's real location on disk: if you have `run_command` or \
+     `execute_code`, run any scripts the instructions mention from there; if you do not, say so \
+     rather than pretending a step ran.";
+
 /// Load a skill's full content by name (case-insensitive), or return the catalog
 /// of available skills when the name is missing or unrecognized.
+///
+/// Two sources, in this order: skills the user wrote here (DB rows), then
+/// folder-backed packs installed on disk (see [`crate::skillpacks`]). A DB skill
+/// wins a name collision — it is the one the user can actually see and edit.
 pub async fn run(args: &Value, db: &SqlitePool) -> AppResult<String> {
     let name = args.get("name").and_then(|v| v.as_str()).unwrap_or("").trim();
+    let file = args.get("file").and_then(|v| v.as_str()).unwrap_or("").trim();
 
     if !name.is_empty() {
-        let row: Option<(String, Option<String>, String)> = sqlx::query_as(
-            "SELECT name, description, content FROM skills
-             WHERE enabled = 1 AND lower(name) = lower(?1) LIMIT 1",
-        )
-        .bind(name)
-        .fetch_optional(db)
-        .await?;
-        if let Some((skill_name, description, content)) = row {
+        // A `file` request only makes sense against a pack, so skip the DB row
+        // (a single-blob skill has no files to read).
+        if file.is_empty() {
+            let row: Option<(String, Option<String>, String)> = sqlx::query_as(
+                "SELECT name, description, content FROM skills
+                 WHERE enabled = 1 AND lower(name) = lower(?1) LIMIT 1",
+            )
+            .bind(name)
+            .fetch_optional(db)
+            .await?;
+            if let Some((skill_name, description, content)) = row {
+                return Ok(json!({
+                    "status": "loaded",
+                    "name": skill_name,
+                    "description": description,
+                    "instructions": content,
+                })
+                .to_string());
+            }
+        }
+
+        if let Some(pack) = skillpacks::find_enabled(db, name).await {
+            let dir = Path::new(&pack.dir);
+
+            if !file.is_empty() {
+                return Ok(match skillpacks::read_file(dir, file) {
+                    Ok(content) => json!({
+                        "status": "file",
+                        "name": pack.name,
+                        "file": file,
+                        "content": content,
+                    }),
+                    Err(e) => json!({
+                        "error": e.to_string(),
+                        "name": pack.name,
+                        "available_files": skillpacks::list_files(dir),
+                    }),
+                }
+                .to_string());
+            }
+
             return Ok(json!({
                 "status": "loaded",
-                "name": skill_name,
-                "description": description,
-                "instructions": content,
+                "name": pack.name,
+                "description": pack.description,
+                "instructions": skillpacks::instructions(dir)?,
+                "base_dir": pack.dir,
+                "files": skillpacks::list_files(dir),
+                "note": PACK_NOTE,
+            })
+            .to_string());
+        }
+
+        if !file.is_empty() {
+            return Ok(json!({
+                "error": format!("No multi-file skill named \"{name}\" is installed, so there is no file to read."),
             })
             .to_string());
         }
     }
 
     // No name, or no match — return the catalog so the model can pick one.
-    let catalog: Vec<(String, Option<String>)> = sqlx::query_as(
-        "SELECT name, description FROM skills WHERE enabled = 1 ORDER BY name",
-    )
-    .fetch_all(db)
-    .await?;
-    let available: Vec<Value> = catalog
+    let available: Vec<Value> = catalog_entries(db)
+        .await
         .into_iter()
-        .map(|(n, d)| json!({ "name": n, "description": d }))
+        .map(|(n, d, multi_file)| json!({ "name": n, "description": d, "multi_file": multi_file }))
         .collect();
     let note = if name.is_empty() {
         "No skill name given — here are the available skills."
@@ -275,16 +355,34 @@ pub async fn run(args: &Value, db: &SqlitePool) -> AppResult<String> {
     Ok(json!({ "status": "catalog", "note": note, "available_skills": available }).to_string())
 }
 
+/// Every skill offered to agents: DB rows first, then folder packs whose name
+/// isn't already taken. The third element marks a skill that has more files to
+/// read past its entry instructions.
+async fn catalog_entries(db: &SqlitePool) -> Vec<(String, String, bool)> {
+    let rows: Vec<(String, Option<String>)> =
+        sqlx::query_as("SELECT name, description FROM skills WHERE enabled = 1 ORDER BY name")
+            .fetch_all(db)
+            .await
+            .unwrap_or_default();
+    let mut out: Vec<(String, String, bool)> = rows
+        .into_iter()
+        .map(|(n, d)| (n, d.unwrap_or_default(), false))
+        .collect();
+
+    for pack in skillpacks::discover(db).await {
+        if !pack.enabled || out.iter().any(|(n, _, _)| n.eq_ignore_ascii_case(&pack.name)) {
+            continue;
+        }
+        out.push((pack.name, pack.description, pack.multi_file));
+    }
+    out
+}
+
 /// Build the "Skills" catalog block injected into the system prompt: one line per
 /// enabled skill (name + description) plus instructions on how to load one.
 /// Returns `None` when there are no enabled skills.
 pub async fn build_catalog(db: &SqlitePool) -> AppResult<Option<String>> {
-    let rows: Vec<(String, Option<String>)> = sqlx::query_as(
-        "SELECT name, description FROM skills WHERE enabled = 1 ORDER BY name",
-    )
-    .fetch_all(db)
-    .await
-    .unwrap_or_default();
+    let rows = catalog_entries(db).await;
     if rows.is_empty() {
         return Ok(None);
     }
@@ -293,14 +391,165 @@ pub async fn build_catalog(db: &SqlitePool) -> AppResult<Option<String>> {
          request matches one of the use cases below, call the `load_skill` tool with the \
          skill's name to get its full instructions, then follow them.\n",
     );
-    for (name, description) in rows {
+    for (name, description, multi_file) in rows {
         out.push_str("\n- **");
         out.push_str(&name);
         out.push_str("**");
-        if let Some(d) = description.filter(|d| !d.trim().is_empty()) {
+        if !description.trim().is_empty() {
             out.push_str(" — ");
-            out.push_str(d.trim());
+            out.push_str(description.trim());
+        }
+        // Flag the multi-file ones so the model expects to keep reading rather
+        // than treating the first load as the whole skill.
+        if multi_file {
+            out.push_str(
+                " _(a multi-file skill — loading it returns a list of further files to read as its instructions direct)_",
+            );
         }
     }
     Ok(Some(out))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+    use std::path::PathBuf;
+
+    /// A DB with the real schema, plus a temp folder registered as the managed
+    /// skills root and one pack installed into it in the `.claude` layout an
+    /// installer would produce.
+    async fn fixture() -> (SqlitePool, PathBuf) {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+
+        let root = std::env::temp_dir().join(format!(
+            "mz-load-skill-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let pack = root.join(".claude/skills/impeccable");
+        std::fs::create_dir_all(pack.join("reference")).unwrap();
+        std::fs::write(
+            pack.join("SKILL.md"),
+            "---\nname: impeccable\ndescription: Design help.\n---\n\nRead .claude/skills/impeccable/reference/polish.md\n",
+        )
+        .unwrap();
+        std::fs::write(pack.join("reference/polish.md"), "the polish pass").unwrap();
+
+        // The folder is reachable as a user-added root, so this test does not
+        // depend on the process-wide managed root.
+        write_settings(&pool, &root, &[]).await;
+        (pool, root)
+    }
+
+    /// Persist the app_settings blob the way the frontend does, with `root`
+    /// registered as an extra scanned folder.
+    async fn write_settings(pool: &SqlitePool, root: &Path, disabled: &[&str]) {
+        let value = json!({
+            "skillPackDirs": [root.to_string_lossy()],
+            "disabledSkillPacks": disabled,
+        })
+        .to_string();
+        sqlx::query(
+            "INSERT INTO settings (key, value) VALUES ('app_settings', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        )
+        .bind(value)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn catalog_and_prompt_list_installed_packs() {
+        let (db, root) = fixture().await;
+
+        let catalog: Value = serde_json::from_str(&run(&json!({}), &db).await.unwrap()).unwrap();
+        let names: Vec<&str> = catalog["available_skills"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["name"].as_str().unwrap())
+            .collect();
+        assert!(names.contains(&"impeccable"), "{names:?}");
+
+        let prompt = build_catalog(&db).await.unwrap().unwrap();
+        assert!(prompt.contains("**impeccable**"), "{prompt}");
+        assert!(prompt.contains("Design help."), "{prompt}");
+        assert!(prompt.contains("multi-file skill"), "{prompt}");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn loads_a_pack_and_then_one_of_its_files() {
+        let (db, root) = fixture().await;
+
+        let loaded: Value =
+            serde_json::from_str(&run(&json!({ "name": "impeccable" }), &db).await.unwrap()).unwrap();
+        assert_eq!(loaded["status"], "loaded");
+        // Frontmatter is stripped; the body survives.
+        assert!(loaded["instructions"].as_str().unwrap().contains("Read .claude"));
+        assert!(!loaded["instructions"].as_str().unwrap().contains("name: impeccable"));
+        assert!(loaded["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f == "reference/polish.md"));
+
+        // The follow-up call the instructions provoke, using the long path form
+        // the SKILL.md itself writes.
+        let file: Value = serde_json::from_str(
+            &run(
+                &json!({ "name": "impeccable", "file": ".claude/skills/impeccable/reference/polish.md" }),
+                &db,
+            )
+            .await
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(file["status"], "file");
+        assert_eq!(file["content"], "the polish pass");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn a_disabled_pack_is_not_offered_or_loadable() {
+        let (db, root) = fixture().await;
+        write_settings(&db, &root, &["impeccable"]).await;
+
+        assert!(build_catalog(&db).await.unwrap().is_none());
+        let res: Value =
+            serde_json::from_str(&run(&json!({ "name": "impeccable" }), &db).await.unwrap()).unwrap();
+        assert_eq!(res["status"], "catalog", "a disabled pack must not load");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn a_missing_file_reports_what_is_available() {
+        let (db, root) = fixture().await;
+        let res: Value = serde_json::from_str(
+            &run(&json!({ "name": "impeccable", "file": "reference/nope.md" }), &db)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(res["error"].is_string());
+        assert!(res["available_files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f == "reference/polish.md"));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
 }

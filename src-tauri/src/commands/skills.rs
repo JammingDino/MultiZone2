@@ -18,6 +18,27 @@ pub async fn list_skills(state: State<'_, AppState>) -> AppResult<Vec<Skill>> {
     Ok(rows)
 }
 
+/// Folder-backed skills found on disk (impeccable, HyperFrames, any Agent
+/// Skills tree). Discovered fresh on every call — an installer can add or remove
+/// one between calls and Settings should reflect that without a restart.
+#[tauri::command]
+pub async fn list_skill_packs(state: State<'_, AppState>) -> AppResult<Vec<crate::skillpacks::SkillPack>> {
+    let packs = crate::skillpacks::discover(&state.db).await;
+    // The counts cost a full walk per pack, so they are filled here (Settings is
+    // open) and never on the per-message catalog path.
+    Ok(tokio::task::spawn_blocking(move || crate::skillpacks::with_file_counts(packs))
+        .await
+        .unwrap_or_default())
+}
+
+/// The managed skills folder — where the app tells the user to install packs.
+#[tauri::command]
+pub async fn skill_packs_root() -> AppResult<String> {
+    Ok(crate::skillpacks::managed_root()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default())
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillInput {

@@ -48,6 +48,10 @@ impl AppState {
         std::fs::create_dir_all(&ocr_models_dir)?;
         crate::ocr::set_models_dir(ocr_models_dir);
 
+        // The managed skills folder: where `npx impeccable install` and friends
+        // are told to write, and the first root scanned for folder-backed skills.
+        crate::skillpacks::set_managed_root(app_data_dir.join("skills"));
+
         let db = db::init(&app_data_dir).await?;
 
         // The settings backup lives a level up from the bundle-identifier app

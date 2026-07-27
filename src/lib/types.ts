@@ -240,6 +240,32 @@ export interface Skill {
   updatedAt: number;
 }
 
+/**
+ * A folder-backed skill discovered on disk (0.9.9) — the multi-file format the
+ * wider agent-skill ecosystem publishes in (Anthropic Agent Skills, impeccable,
+ * HyperFrames): a directory with `SKILL.md` plus reference pages and scripts.
+ *
+ * Unlike a {@link Skill}, this is not a DB row and is not editable here: the
+ * installer owns the tree and its own `update` command overwrites it. All the
+ * app stores is whether it is switched on (`disabledSkillPacks` in settings).
+ */
+export interface SkillPack {
+  name: string;
+  description: string;
+  /** Absolute path of the skill's own folder (the one holding SKILL.md). */
+  dir: string;
+  /** The scanned root it was found under. */
+  root: string;
+  /** Whether the folder holds more than SKILL.md. */
+  multiFile: boolean;
+  /**
+   * Files in the tree. Only filled by `listSkillPacks` (counting means walking
+   * the folder, which is skipped on the per-message catalog path).
+   */
+  fileCount: number | null;
+  enabled: boolean;
+}
+
 /** A registered MCP (Model Context Protocol) server. */
 export interface McpServer {
   id: string;
@@ -391,6 +417,16 @@ export interface AppSettings {
   autoTitle: boolean;
   /** Start thinking/reasoning blocks expanded instead of collapsed. */
   expandThinkingByDefault: boolean;
+  /**
+   * Collapse a turn's thinking and tool steps into a single compact activity
+   * rail instead of stacking one card per step. The rail names whatever the
+   * model is doing right now ("Reading file · notes.md") and expands to the
+   * full per-step cards on click. Results people actually asked for — plans,
+   * diagrams, plots, presented files, questions — are lifted out of the rail
+   * and stay visible either way. On by default: the step-by-step trace is a
+   * power-user view, not the answer.
+   */
+  compactSteps: boolean;
   /** Base font size for message text (px). */
   fontSize: number;
   /** Font family for message text. Empty string = Inter (default). */
@@ -476,6 +512,20 @@ export interface AppSettings {
   memoryScopeLimit: number;
   /** Set once the built-in skill templates have been seeded, so it never repeats. */
   seededSkills: boolean;
+  /**
+   * Extra folders scanned for folder-backed skills, on top of the app's managed
+   * skills folder (0.9.9). Point one at a repo that already ran an installer
+   * (`npx impeccable install`) and its packs are picked up in place — each root
+   * is checked for `<name>/SKILL.md`, `skills/<name>/SKILL.md`, and the harness
+   * layouts (`.claude/skills/<name>/`, `.agents/skills/<name>/`, …).
+   */
+  skillPackDirs: string[];
+  /**
+   * Names of discovered skill packs the user has switched off. Packs default to
+   * enabled — installing one into a scanned folder is the deliberate act, so a
+   * second opt-in would just be a step to forget.
+   */
+  disabledSkillPacks: string[];
   /**
    * OCR language hint used when falling back to text extraction for
    * vision-incapable models (0.4.0). Tesseract-style 3-letter code, e.g. "eng".
@@ -575,6 +625,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   sendKey: "enter",
   autoTitle: true,
   expandThinkingByDefault: false,
+  compactSteps: true,
   fontSize: 14,
   fontFamily: "",
   defaultDirectory: "",
@@ -596,6 +647,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   baseZoneId: null,
   memoryScopeLimit: 50,
   seededSkills: false,
+  skillPackDirs: [],
+  disabledSkillPacks: [],
   ocrLanguage: "eng",
   autoReindex: true,
   knowledgeDefaultEnabled: false,
@@ -709,7 +762,7 @@ export const ALL_TOOLS: ToolInfo[] = [
   { id: "http_request", label: "Call an API",         category: "Web", safety: 2, description: "Make an HTTP request to any URL and get back the raw status, headers, and body — for talking to an API rather than reading a page. You approve each request, and can see the method, URL, and body first." },
 
   // Knowledge
-  { id: "skills",       label: "Skills",              category: "Knowledge", safety: 0, description: "Load a set of instructions from your Skills catalog when a task calls for it — and write a new skill when the assistant works out a procedure worth keeping (saved disabled for your review)." },
+  { id: "skills",       label: "Skills",              category: "Knowledge", safety: 0, description: "Load a set of instructions from your Skills catalog when a task calls for it, including the reference files of installed multi-file skills — and write a new skill when the assistant works out a procedure worth keeping (saved disabled for your review)." },
   { id: "memory",       label: "Remember things",     category: "Knowledge", safety: 0, description: "Save, read, and delete facts that persist across turns — scoped to this chat, this project, or everywhere." },
   { id: "compact",      label: "Condense a long chat", category: "Knowledge", safety: 1, description: "When a conversation grows long, let the assistant summarize the earlier turns so it keeps its thread instead of quietly losing the oldest messages. You still see the whole conversation — only what the model re-reads is condensed." },
 

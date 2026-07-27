@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, Wrench, Cog, Brain, ArrowDown } from "lucide-react";
+import { ArrowDown } from "lucide-react";
 import { useApp, type StreamingState } from "@/store/app";
 import { useTts, zoneVoice } from "@/store/tts";
 import type { Message } from "@/lib/types";
 import { UserMessage, BotTurnView } from "@/components/Message/Message";
 import { groupMessages } from "@/lib/grouping";
-import { formatTokens } from "@/lib/format";
 
 const PIN_THRESHOLD_PX = 60;
 
@@ -263,12 +262,9 @@ export function MessageThread({ chatId }: { chatId: string }) {
               </div>
             );
           })}
-          <div className={columnsMode ? "mx-auto w-full max-w-3xl" : "contents"}>
-            {streaming && <StatusBanner streaming={streaming} chatId={chatId} />}
-            {Object.entries(perspectiveStreams).map(([zoneId, ps]) => (
-              <PerspectiveStatusBanner key={zoneId} streaming={ps} zoneId={zoneId} chatId={chatId} />
-            ))}
-          </div>
+          {/* Each participant's live status renders inside its own response
+              block (see `Message.tsx`), so in a side-by-side turn the numbers
+              sit in the column of the zone they describe. */}
           <div ref={endRef} />
         </div>
       </div>
@@ -285,164 +281,4 @@ export function MessageThread({ chatId }: { chatId: string }) {
       )}
     </div>
   );
-}
-
-function StatusBanner({
-  streaming,
-  chatId,
-}: {
-  streaming: StreamingState;
-  chatId: string;
-}) {
-  // Read the turn-level aggregate so timer + token count survive across
-  // iterations of the agentic loop. If for some reason it's missing (e.g. a
-  // race on first paint), fall back to the per-iteration streaming state.
-  const turn = useApp((s) => s.turnByChat[chatId]);
-  const firstTokenAt = turn?.firstTokenAt ?? streaming.firstTokenAt;
-  const contentChars = turn?.contentChars ?? streaming.content.length;
-  const reasoningChars = turn?.reasoningChars ?? streaming.reasoning.length;
-  const toolCallChars = turn?.toolCallChars ?? 0;
-  const toolMs = turn?.toolMs ?? 0;
-  const toolStartedAt = turn?.toolStartedAt ?? null;
-  const elapsed = useLiveElapsed(firstTokenAt);
-
-  // In a multi-zone chat, prefix the primary's status with its zone dot + name
-  // so it reads symmetrically with the perspective banners below it.
-  const hasPerspectives = useApp((s) => (s.chatZonesByChat[chatId] ?? []).length > 0);
-  const chatZoneId = useApp((s) => s.chats.find((c) => c.id === chatId)?.zoneId ?? null);
-  const routing = useApp((s) => s.routingByChat[chatId]);
-  const resolvedZoneId =
-    (routing && routing.status === "done" ? routing.zoneId : null) ?? chatZoneId;
-  const zone = useApp((s) => s.zones.find((z) => z.id === resolvedZoneId));
-  const zoneColor = zone?.accentColor ?? "var(--color-accent)";
-
-  let icon = <Loader2 size={12} className="animate-spin" />;
-  let label = "Generating…";
-  if (firstTokenAt === null) {
-    icon = <Loader2 size={12} className="animate-spin" />;
-    label = "Waiting for first token…";
-  } else if (streaming.phase === "thinking") {
-    icon = <Brain size={12} className="animate-pulse text-violet-400" />;
-    label = "Thinking…";
-  } else if (streaming.phase === "answering") {
-    icon = <Loader2 size={12} className="animate-spin" />;
-    label = "Writing answer…";
-  } else if (streaming.phase === "tool_calling") {
-    const tools = streaming.pendingTools;
-    const t = tools[tools.length - 1];
-    // Tool requests stream in (args build up char by char) — pulse the wrench in
-    // the accent color so it's obvious a tool call is actively being assembled.
-    icon = <Wrench size={12} className="animate-pulse text-[var(--color-accent)]" />;
-    const extra = tools.length > 1 ? ` (+${tools.length - 1} more)` : "";
-    label = t?.name ? `Requesting tool ${t.name}…${extra}` : "Requesting tool…";
-  } else if (streaming.phase === "tool_running") {
-    icon = <Cog size={12} className="animate-spin" />;
-    label = streaming.runningTool
-      ? `Running tool ${streaming.runningTool}…`
-      : "Running tool…";
-  }
-  const liveTokens = estimateTokens(contentChars + reasoningChars + toolCallChars);
-  // Generation time excludes tool execution: completed tool runs (toolMs) plus
-  // the tool currently running (reconstructed from the same live clock, since
-  // now = firstTokenAt + elapsed). While a tool runs this grows in lock-step
-  // with elapsed, so genElapsed — and thus tok/s — holds steady, while the
-  // overall timer keeps ticking.
-  const activeToolMs =
-    toolStartedAt !== null && firstTokenAt !== null
-      ? Math.max(0, firstTokenAt + elapsed - toolStartedAt)
-      : 0;
-  const genElapsed = Math.max(0, elapsed - toolMs - activeToolMs);
-  // Live throughput: tokens produced so far over generation time. Needs a little
-  // elapsed time before it's meaningful, so we hold off under ~300 ms.
-  const liveTps =
-    genElapsed > 300 && liveTokens > 0 ? liveTokens / (genElapsed / 1000) : null;
-  return (
-    <div className="ml-10 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-      {hasPerspectives && zone && (
-        <>
-          <span
-            className="h-2.5 w-2.5 shrink-0 rounded-full animate-pulse"
-            style={{ background: zoneColor }}
-          />
-          <span style={{ color: zoneColor }}>{zone.name}</span>
-        </>
-      )}
-      {icon}
-      <span>{label}</span>
-      {firstTokenAt !== null && (
-        <>
-          <span className="font-mono tabular-nums">{formatElapsed(elapsed)}</span>
-          <span className="text-[var(--color-text-muted)]/70">·</span>
-          <span className="font-mono tabular-nums">~{formatTokens(liveTokens)} tok</span>
-          {liveTps !== null && (
-            <>
-              <span className="text-[var(--color-text-muted)]/70">·</span>
-              <span className="font-mono tabular-nums">{liveTps.toFixed(1)} tok/s</span>
-            </>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
-
-function PerspectiveStatusBanner({
-  streaming,
-  zoneId,
-  chatId,
-}: {
-  streaming: StreamingState;
-  zoneId: string;
-  chatId: string;
-}) {
-  const zone = useApp((s) => s.zones.find((z) => z.id === zoneId));
-  const elapsed = useLiveElapsed(streaming.firstTokenAt);
-  const color = zone?.accentColor ?? "var(--color-accent)";
-
-  let label = "Waiting…";
-  if (streaming.firstTokenAt !== null) {
-    if (streaming.phase === "thinking") label = "Thinking…";
-    else label = "Writing…";
-  }
-
-  return (
-    <div className="ml-10 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-      <span
-        className="h-2.5 w-2.5 shrink-0 rounded-full animate-pulse"
-        style={{ background: color }}
-      />
-      <span style={{ color }}>{zone?.name ?? "Perspective"}</span>
-      <span>{label}</span>
-      {streaming.firstTokenAt !== null && (
-        <span className="font-mono tabular-nums">{formatElapsed(elapsed)}</span>
-      )}
-    </div>
-  );
-}
-
-/**
- * Returns elapsed ms from `origin` (or 0 while origin is null). Re-renders on
- * a coarse 250 ms interval so the timer is readable without saturating React.
- */
-function useLiveElapsed(origin: number | null): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (origin === null) return;
-    const id = window.setInterval(() => setNow(Date.now()), 250);
-    return () => window.clearInterval(id);
-  }, [origin]);
-  if (origin === null) return 0;
-  return Math.max(0, now - origin);
-}
-
-function estimateTokens(chars: number): number {
-  return Math.max(0, Math.round(chars / 4));
-}
-
-function formatElapsed(ms: number): string {
-  const s = ms / 1000;
-  if (s < 60) return `${s.toFixed(1)}s`;
-  const m = Math.floor(s / 60);
-  const rem = Math.floor(s - m * 60);
-  return `${m}m ${rem.toString().padStart(2, "0")}s`;
 }

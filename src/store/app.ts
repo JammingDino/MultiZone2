@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { DEFAULT_APP_SETTINGS, type AppSettings, type Chat, type ChatTagEntry, type ChatTagLink, type ChatZone, type McpServerView, type Memory, type Message, type Project, type Provider, type Skill, type Tag, type Zone } from "@/lib/types";
+import { DEFAULT_APP_SETTINGS, type AppSettings, type Chat, type ChatTagEntry, type ChatTagLink, type ChatZone, type McpServerView, type Memory, type Message, type Project, type Provider, type Skill, type SkillPack, type Tag, type Zone } from "@/lib/types";
 import * as api from "@/lib/tauri";
 
 // Sidebar open/closed persists across sessions under the same `ui.sidebarOpen`
@@ -82,6 +82,93 @@ export interface TurnAggregate {
   toolStartedAt: number | null;
 }
 
+export function freshTurn(startedAt = Date.now()): TurnAggregate {
+  return {
+    startedAt,
+    firstTokenAt: null,
+    contentChars: 0,
+    reasoningChars: 0,
+    toolCallChars: 0,
+    toolMs: 0,
+    toolStartedAt: null,
+  };
+}
+
+/**
+ * Folds one stream event into a turn's running totals. The primary turn and
+ * every perspective zone run the same agentic loop and are accounted the same
+ * way — they share this reducer so a zone's live banner and its saved stats
+ * can't drift from the primary's, which is exactly what happened when the two
+ * kept separate copies of this arithmetic.
+ */
+function applyTurnEvent(
+  turn: TurnAggregate | undefined,
+  event: import("@/lib/types").StreamEvent,
+  now: number,
+): TurnAggregate | undefined {
+  if (!turn) return turn;
+  switch (event.type) {
+    case "token":
+      return {
+        ...turn,
+        firstTokenAt: turn.firstTokenAt ?? now,
+        contentChars: turn.contentChars + event.delta.length,
+      };
+    case "thinking_token":
+      return {
+        ...turn,
+        firstTokenAt: turn.firstTokenAt ?? now,
+        reasoningChars: turn.reasoningChars + event.delta.length,
+      };
+    case "tool_call_args_delta":
+      // Tool arguments are generated tokens too — they cost the model time, so
+      // they count toward the turn's output and throughput.
+      return { ...turn, toolCallChars: turn.toolCallChars + event.delta.length };
+    case "tool_call_executing":
+      // Mark when execution began so its wall-clock can be excluded from tok/s
+      // (the model isn't generating while a tool runs).
+      return { ...turn, toolStartedAt: now };
+    case "tool_call_result":
+      if (turn.toolStartedAt === null) return turn;
+      return {
+        ...turn,
+        toolMs: turn.toolMs + (now - turn.toolStartedAt),
+        toolStartedAt: null,
+      };
+    default:
+      return turn;
+  }
+}
+
+/**
+ * The per-message stats readout for a finished assistant message, computed from
+ * the turn aggregate rather than the last loop iteration — otherwise a
+ * multi-step turn reports only its final step's tokens and time.
+ */
+function statsFromTurn(
+  turn: TurnAggregate | undefined,
+  fallback: StreamingState,
+  now: number,
+): MessageStats {
+  const turnStart = turn?.startedAt ?? fallback.startedAt;
+  const firstTokenAt = turn?.firstTokenAt ?? fallback.firstTokenAt;
+  // Duration measures generation time, not network wait. With no streamed
+  // tokens at all, fall back to total time so this never shows 0.
+  const start = firstTokenAt ?? turnStart;
+  return {
+    durationMs: now - start,
+    timeToFirstTokenMs: firstTokenAt !== null ? firstTokenAt - turnStart : null,
+    contentChars: turn ? turn.contentChars : fallback.content.length,
+    reasoningChars: turn ? turn.reasoningChars : fallback.reasoning.length,
+    toolCallChars: turn
+      ? turn.toolCallChars
+      : fallback.pendingTools.reduce((n, t) => n + t.args.length, 0),
+    // Any tool still marked running shouldn't normally happen at save time,
+    // but count it rather than under-reporting tool time.
+    toolMs: (turn?.toolMs ?? 0) + (turn?.toolStartedAt != null ? now - turn.toolStartedAt : 0),
+  };
+}
+
 export interface PendingApproval {
   index: number;
   name: string;
@@ -101,6 +188,8 @@ interface AppStore {
   tags: Tag[];
   /** Global skill catalog — managed in Settings → Skills. */
   skills: Skill[];
+  /** Folder-backed skills found on disk, offered alongside `skills`. */
+  skillPacks: SkillPack[];
   /** Registered MCP servers (+ their tools and live status) — Settings → MCP. */
   mcpServers: McpServerView[];
   /** All memory entries across scopes — backs the settings viewer. */
@@ -119,6 +208,10 @@ interface AppStore {
   perspectiveStreamsByChat: Record<string, Record<string, StreamingState>>;
   /** Running stats for the current user turn (survives multi-step loops). */
   turnByChat: Record<string, TurnAggregate>;
+  /** The same running stats for each perspective zone: chatId → { zoneId → totals }.
+   *  Kept per zone so every participant's banner reports its own generation,
+   *  not the primary's and not a single loop iteration's. */
+  perspectiveTurnByChat: Record<string, Record<string, TurnAggregate>>;
   /** Chat IDs whose title is currently being regenerated. */
   regeneratingTitles: Set<string>;
   /** Pending tool approvals per chat: chatId → one entry per participant (primary
@@ -220,6 +313,7 @@ interface AppStore {
   refreshProjects: () => Promise<void>;
   refreshTags: () => Promise<void>;
   refreshSkills: () => Promise<void>;
+  refreshSkillPacks: () => Promise<void>;
   refreshMcpServers: () => Promise<void>;
   refreshMemories: () => Promise<void>;
   refreshChatTagLinks: () => Promise<void>;
@@ -365,6 +459,7 @@ export const useApp = create<AppStore>((set, get) => ({
   projects: [],
   tags: [],
   skills: [],
+  skillPacks: [],
   mcpServers: [],
   memories: [],
   tagsByChat: {},
@@ -376,6 +471,7 @@ export const useApp = create<AppStore>((set, get) => ({
   streamingByChat: {},
   perspectiveStreamsByChat: {},
   turnByChat: {},
+  perspectiveTurnByChat: {},
   regeneratingTitles: new Set(),
   pendingApprovalByChat: {},
   routingByChat: {},
@@ -500,13 +596,33 @@ export const useApp = create<AppStore>((set, get) => ({
     // primary branch but scoped to this zone's stream.
     if (perspectiveZoneId) {
       set((s) => {
+        const now = Date.now();
         const chatPersp = { ...(s.perspectiveStreamsByChat[chatId] ?? {}) };
         const perspectiveStreamsByChat = { ...s.perspectiveStreamsByChat };
+        const chatTurns = { ...(s.perspectiveTurnByChat[chatId] ?? {}) };
+        const perspectiveTurnByChat = { ...s.perspectiveTurnByChat };
         const messagesByChat = { ...s.messagesByChat };
         const statsByMessage = { ...s.statsByMessage };
         const pendingApprovalByChat = { ...s.pendingApprovalByChat };
         const msgs = messagesByChat[chatId] ?? [];
         const current = chatPersp[perspectiveZoneId];
+
+        // A perspective never sees `user_message_saved` (that's the primary's
+        // event), so its turn opens at the first event of its stream and is
+        // cleared when the stream ends.
+        const terminal =
+          event.type === "done" || event.type === "cancelled" || event.type === "error";
+        if (!chatTurns[perspectiveZoneId] && !terminal) {
+          chatTurns[perspectiveZoneId] = freshTurn(now);
+        }
+        // Totals span the whole turn, so they're folded in before the
+        // per-iteration switch and survive `assistant_saved` clearing the
+        // stream — a perspective's timer and token count must not restart on
+        // every step of its agentic loop.
+        {
+          const next = applyTurnEvent(chatTurns[perspectiveZoneId], event, now);
+          if (next) chatTurns[perspectiveZoneId] = next;
+        }
 
         switch (event.type) {
           case "assistant_start":
@@ -518,7 +634,7 @@ export const useApp = create<AppStore>((set, get) => ({
                 ...current,
                 phase: "answering",
                 content: current.content + event.delta,
-                firstTokenAt: current.firstTokenAt ?? Date.now(),
+                firstTokenAt: current.firstTokenAt ?? now,
               };
             }
             break;
@@ -528,7 +644,7 @@ export const useApp = create<AppStore>((set, get) => ({
                 ...current,
                 phase: "thinking",
                 reasoning: current.reasoning + event.delta,
-                firstTokenAt: current.firstTokenAt ?? Date.now(),
+                firstTokenAt: current.firstTokenAt ?? now,
               };
             }
             break;
@@ -574,24 +690,14 @@ export const useApp = create<AppStore>((set, get) => ({
           case "assistant_saved":
             messagesByChat[chatId] = [...msgs, event.message];
             // Record generation stats for this perspective response so its block
-            // shows the same timing/token readout as the primary answer.
+            // shows the same timing/token readout as the primary answer — read
+            // off this zone's turn aggregate, not the last loop iteration.
             if (current) {
-              const now = Date.now();
-              const start = current.firstTokenAt ?? current.startedAt;
-              statsByMessage[event.message.id] = {
-                durationMs: now - start,
-                timeToFirstTokenMs:
-                  current.firstTokenAt !== null
-                    ? current.firstTokenAt - current.startedAt
-                    : null,
-                contentChars: current.content.length,
-                reasoningChars: current.reasoning.length,
-                // Perspective streams don't track a turn aggregate, so tool-call
-                // args aren't summed separately here.
-                toolCallChars: current.pendingTools.reduce((n, t) => n + t.args.length, 0),
-                // Perspective streams don't track tool execution time separately.
-                toolMs: 0,
-              };
+              statsByMessage[event.message.id] = statsFromTurn(
+                chatTurns[perspectiveZoneId],
+                current,
+                now,
+              );
             }
             delete chatPersp[perspectiveZoneId];
             break;
@@ -599,25 +705,42 @@ export const useApp = create<AppStore>((set, get) => ({
           case "cancelled":
           case "error":
             delete chatPersp[perspectiveZoneId];
+            delete chatTurns[perspectiveZoneId];
             pendingApprovalByChat[chatId] = dropApproval(pendingApprovalByChat[chatId], perspectiveZoneId);
             break;
         }
 
         perspectiveStreamsByChat[chatId] = chatPersp;
-        return { perspectiveStreamsByChat, messagesByChat, statsByMessage, pendingApprovalByChat };
+        perspectiveTurnByChat[chatId] = chatTurns;
+        return {
+          perspectiveStreamsByChat,
+          perspectiveTurnByChat,
+          messagesByChat,
+          statsByMessage,
+          pendingApprovalByChat,
+        };
       });
       return;
     }
 
     set((s) => {
+      const now = Date.now();
       const msgs = s.messagesByChat[chatId] ?? [];
       const streaming = { ...s.streamingByChat };
       const messagesByChat = { ...s.messagesByChat };
       const statsByMessage = { ...s.statsByMessage };
       const turnByChat = { ...s.turnByChat };
+      const perspectiveTurnByChat = { ...s.perspectiveTurnByChat };
       const pendingApprovalByChat = { ...s.pendingApprovalByChat };
       const routingByChat = { ...s.routingByChat };
       const current = streaming[chatId];
+
+      // Turn totals span every iteration of the agentic loop — same reducer the
+      // perspective branch uses, so the two can't drift apart.
+      {
+        const next = applyTurnEvent(turnByChat[chatId], event, now);
+        if (next) turnByChat[chatId] = next;
+      }
 
       switch (event.type) {
         case "routing_started":
@@ -633,16 +756,12 @@ export const useApp = create<AppStore>((set, get) => ({
           // Clear any previous routing indicator — new turn is starting.
           routingByChat[chatId] = null;
           // The user just kicked off a new turn — reset turn-level totals so
-          // the live banner starts at zero, not from the previous turn.
-          turnByChat[chatId] = {
-            startedAt: Date.now(),
-            firstTokenAt: null,
-            contentChars: 0,
-            reasoningChars: 0,
-            toolCallChars: 0,
-            toolMs: 0,
-            toolStartedAt: null,
-          };
+          // the live banner starts at zero, not from the previous turn. The
+          // perspective zones' totals go with it: they're cleared when each
+          // stream ends, but a stream that died without a final event would
+          // otherwise carry its numbers into this turn.
+          turnByChat[chatId] = freshTurn(now);
+          delete perspectiveTurnByChat[chatId];
           break;
 
         case "assistant_start":
@@ -650,56 +769,28 @@ export const useApp = create<AppStore>((set, get) => ({
           // Fall-back: if a regenerate flow kicked off without a preceding
           // user_message_saved event, seed the turn aggregate here so the
           // banner still has something to display.
-          if (!turnByChat[chatId]) {
-            turnByChat[chatId] = {
-              startedAt: Date.now(),
-              firstTokenAt: null,
-              contentChars: 0,
-              reasoningChars: 0,
-              toolCallChars: 0,
-              toolMs: 0,
-              toolStartedAt: null,
-            };
-          }
+          if (!turnByChat[chatId]) turnByChat[chatId] = freshTurn(now);
           break;
 
         case "token":
           if (current) {
-            const now = Date.now();
             streaming[chatId] = {
               ...current,
               phase: "answering",
               content: current.content + event.delta,
               firstTokenAt: current.firstTokenAt ?? now,
             };
-            const t = turnByChat[chatId];
-            if (t) {
-              turnByChat[chatId] = {
-                ...t,
-                firstTokenAt: t.firstTokenAt ?? now,
-                contentChars: t.contentChars + event.delta.length,
-              };
-            }
           }
           break;
 
         case "thinking_token":
           if (current) {
-            const now = Date.now();
             streaming[chatId] = {
               ...current,
               phase: "thinking",
               reasoning: current.reasoning + event.delta,
               firstTokenAt: current.firstTokenAt ?? now,
             };
-            const t = turnByChat[chatId];
-            if (t) {
-              turnByChat[chatId] = {
-                ...t,
-                firstTokenAt: t.firstTokenAt ?? now,
-                reasoningChars: t.reasoningChars + event.delta.length,
-              };
-            }
           }
           break;
 
@@ -720,13 +811,6 @@ export const useApp = create<AppStore>((set, get) => ({
               phase: "tool_calling",
               pendingTools: appendToolArgs(current.pendingTools, event.index, event.delta),
             };
-            const tca = turnByChat[chatId];
-            if (tca) {
-              turnByChat[chatId] = {
-                ...tca,
-                toolCallChars: tca.toolCallChars + event.delta.length,
-              };
-            }
           }
           break;
 
@@ -745,12 +829,6 @@ export const useApp = create<AppStore>((set, get) => ({
               runningTool: event.name,
             };
           }
-          // Mark when this tool's execution began so its wall-clock can be
-          // excluded from tok/s (the model isn't generating while it runs).
-          {
-            const te = turnByChat[chatId];
-            if (te) turnByChat[chatId] = { ...te, toolStartedAt: Date.now() };
-          }
           // Clear the primary's approval banner — the tool is now executing.
           pendingApprovalByChat[chatId] = dropApproval(pendingApprovalByChat[chatId], undefined);
           break;
@@ -758,17 +836,6 @@ export const useApp = create<AppStore>((set, get) => ({
         case "tool_call_result":
           if (current) {
             streaming[chatId] = { ...current, runningTool: null };
-          }
-          // Fold the just-finished tool's execution time into the turn total.
-          {
-            const tr = turnByChat[chatId];
-            if (tr && tr.toolStartedAt !== null) {
-              turnByChat[chatId] = {
-                ...tr,
-                toolMs: tr.toolMs + (Date.now() - tr.toolStartedAt),
-                toolStartedAt: null,
-              };
-            }
           }
           // Also clear any lingering approval state (e.g. denied tool).
           pendingApprovalByChat[chatId] = dropApproval(pendingApprovalByChat[chatId], undefined);
@@ -780,34 +847,11 @@ export const useApp = create<AppStore>((set, get) => ({
 
         case "assistant_saved":
           messagesByChat[chatId] = [...msgs, event.message];
+          // Stats come from the turn aggregate (which spans every iteration of
+          // the agentic loop), not just this last assistant message —
+          // otherwise a multi-step turn only counts the final step.
           if (current) {
-            const now = Date.now();
-            // Stats are read from the turn aggregate (which spans every
-            // iteration of the agentic loop), not just this last assistant
-            // message — otherwise a multi-step turn only counts the final
-            // step's content/thinking tokens. Fall back to the per-iteration
-            // streaming state if the aggregate is somehow missing.
-            const turn = turnByChat[chatId];
-            const turnStart = turn?.startedAt ?? current.startedAt;
-            const firstTokenAt = turn?.firstTokenAt ?? current.firstTokenAt;
-            // Duration measures generation time, not network wait. If we
-            // somehow saved without a first-token event (no streaming
-            // tokens at all), fall back to total time so we don't show 0.
-            const start = firstTokenAt ?? turnStart;
-            // Total tool-execution time this turn, plus any tool still marked
-            // running (shouldn't normally happen at save time, but be safe).
-            const toolMs =
-              (turn?.toolMs ?? 0) +
-              (turn?.toolStartedAt != null ? now - turn.toolStartedAt : 0);
-            statsByMessage[event.message.id] = {
-              durationMs: now - start,
-              timeToFirstTokenMs:
-                firstTokenAt !== null ? firstTokenAt - turnStart : null,
-              contentChars: turn ? turn.contentChars : current.content.length,
-              reasoningChars: turn ? turn.reasoningChars : current.reasoning.length,
-              toolCallChars: turn ? turn.toolCallChars : 0,
-              toolMs,
-            };
+            statsByMessage[event.message.id] = statsFromTurn(turnByChat[chatId], current, now);
           }
           delete streaming[chatId];
           break;
@@ -827,6 +871,7 @@ export const useApp = create<AppStore>((set, get) => ({
         streamingByChat: streaming,
         statsByMessage,
         turnByChat,
+        perspectiveTurnByChat,
         pendingApprovalByChat,
         routingByChat,
       };
@@ -1094,6 +1139,15 @@ export const useApp = create<AppStore>((set, get) => ({
   async refreshSkills() {
     const skills = await api.listSkills();
     set({ skills });
+  },
+  async refreshSkillPacks() {
+    try {
+      set({ skillPacks: await api.listSkillPacks() });
+    } catch (e) {
+      // A missing or unreadable root is not an error worth blocking Settings on.
+      console.warn("failed to scan skill folders", e);
+      set({ skillPacks: [] });
+    }
   },
   async refreshMcpServers() {
     const mcpServers = await api.listMcpServers();

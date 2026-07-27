@@ -110,8 +110,11 @@ function buildBlocks(msgs: Message[]): { blocks: TurnBlock[]; messageIds: string
           step: { kind: "thinking", key: `${m.id}:thinking`, text: m.reasoning, streaming: false },
         });
       }
+      // Models routinely emit a couple of newlines alongside a tool call. That
+      // renders as nothing, but as a block it would split the turn's steps into
+      // two activity rails around an empty gap — so only real prose counts.
       const text = extractText(m.content);
-      if (text) blocks.push({ kind: "text", text });
+      if (text.trim()) blocks.push({ kind: "text", text });
       for (const tc of parseToolCalls(m.toolCalls)) {
         blocks.push({
           kind: "step",
@@ -157,7 +160,7 @@ function appendStreamingBlocks(blocks: TurnBlock[], streaming: StreamingState): 
       },
     });
   }
-  if (streaming.content) {
+  if (streaming.content.trim()) {
     blocks.push({ kind: "text", text: streaming.content, streaming: true });
   }
   for (const pt of streaming.pendingTools) {

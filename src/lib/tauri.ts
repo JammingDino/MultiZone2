@@ -20,6 +20,7 @@ import type {
   Project,
   Provider,
   Skill,
+  SkillPack,
   StreamEnvelope,
   SubchatNode,
   Tag,
@@ -161,6 +162,11 @@ export const upsertSkill = (skill: Partial<Skill> & { name: string }) =>
 export const setSkillEnabled = (id: string, enabled: boolean) =>
   invoke<void>("set_skill_enabled", { id, enabled });
 export const deleteSkill = (id: string) => invoke<void>("delete_skill", { id });
+
+// Folder-backed skills installed on disk. Read-only here — an installer owns
+// the tree; the app only discovers it and remembers which ones are switched on.
+export const listSkillPacks = () => invoke<SkillPack[]>("list_skill_packs");
+export const skillPacksRoot = () => invoke<string>("skill_packs_root");
 
 // MCP (Model Context Protocol) servers + tools
 export const listMcpServers = () => invoke<McpServerView[]>("list_mcp_servers");

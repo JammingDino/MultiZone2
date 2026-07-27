@@ -3,10 +3,12 @@ import type { ContentPart, Message, InputPart } from "@/lib/types";
 import { Markdown } from "@/components/Renderers/Markdown";
 import { User, Check, X, FileType, ZoomIn } from "lucide-react";
 import { StepBlock } from "./StepBlock";
+import { ActivityRail } from "./ActivityRail";
+import { PerspectiveStatusLine, PrimaryStatusLine } from "./StatusLine";
 import { MessageActions } from "./MessageActions";
 import { CitationSources } from "./CitationSources";
 import { StackTrace, spawnedSubchatIdsFromBlocks } from "./StackTrace";
-import type { BotTurn, PerspectiveTurn, TurnBlock } from "@/lib/grouping";
+import type { BotTurn, PerspectiveTurn, Step, TurnBlock } from "@/lib/grouping";
 import {
   citationKey,
   collectCarriedCitations,
@@ -397,21 +399,55 @@ function TurnBody({
   chatId: string;
   citations?: Citation[];
 }) {
+  // Compact mode folds each unbroken stretch of thinking/tool steps into one
+  // activity rail; a text block ends the stretch, so the model's prose always
+  // sits at the top level of the turn rather than inside a collapsed block.
+  const compact = useApp((s) => s.appSettings.compactSteps);
+  const blockElements: React.ReactNode[] = [];
   let stepIdx = 0;
-  const blockElements = blocks.map((block, i) => {
-    if (block.kind === "text") {
-      return (
-        <TextBlockView
-          key={`text-${i}`}
-          text={block.text}
-          streaming={!!block.streaming}
-          citations={citations}
-        />
+  let run: Step[] = [];
+  let runStart = 1;
+
+  const flushRun = () => {
+    if (run.length === 0) return;
+    if (compact) {
+      blockElements.push(
+        <ActivityRail
+          key={`rail-${run[0].key}`}
+          steps={run}
+          startIndex={runStart}
+          chatId={chatId}
+        />,
       );
+    } else {
+      for (const [i, step] of run.entries()) {
+        blockElements.push(
+          <StepBlock key={step.key} step={step} index={runStart + i} chatId={chatId} />,
+        );
+      }
     }
-    stepIdx += 1;
-    return <StepBlock key={block.step.key} step={block.step} index={stepIdx} chatId={chatId} />;
+    run = [];
+  };
+
+  blocks.forEach((block, i) => {
+    if (block.kind === "step") {
+      if (run.length === 0) runStart = stepIdx + 1;
+      stepIdx += 1;
+      run.push(block.step);
+      return;
+    }
+    flushRun();
+    blockElements.push(
+      <TextBlockView
+        key={`text-${i}`}
+        text={block.text}
+        streaming={!!block.streaming}
+        citations={citations}
+      />,
+    );
   });
+  flushRun();
+
   return (
     <>
       {blockElements.length > 0 && <div className="flex flex-col gap-2">{blockElements}</div>}
@@ -616,6 +652,15 @@ function BotTurnViewImpl({ turn, isLatest = false }: { turn: BotTurn; isLatest?:
             branchFromMessageId={lastMessageId}
             fileSources={fileSources}
             carriedCitations={carriedCitations}
+            statusLine={
+              turn.streaming ? (
+                <PrimaryStatusLine
+                  streaming={turn.streaming}
+                  chatId={chatId}
+                  zoneId={resolvedZoneId}
+                />
+              ) : null
+            }
           />
           {turn.perspectives.map((p) => (
             <ParticipantCard
@@ -633,6 +678,15 @@ function BotTurnViewImpl({ turn, isLatest = false }: { turn: BotTurn; isLatest?:
               branchFromMessageId={p.messageId}
               fileSources={fileSources}
               carriedCitations={carriedCitations}
+              statusLine={
+                p.streaming ? (
+                  <PerspectiveStatusLine
+                    streaming={p.streaming}
+                    chatId={chatId}
+                    zoneId={p.zoneId}
+                  />
+                ) : null
+              }
             />
           ))}
         </div>
@@ -695,6 +749,13 @@ function BotTurnViewImpl({ turn, isLatest = false }: { turn: BotTurn; isLatest?:
                 chatId={chatId}
                 citations={citations}
               />
+              {turn.streaming && (
+                <PrimaryStatusLine
+                  streaming={turn.streaming}
+                  chatId={chatId}
+                  zoneId={resolvedZoneId}
+                />
+              )}
               {!isStreaming && <CitationSources used={citations} all={allCitations} />}
               {!isStreaming && (
                 <StackTrace
@@ -778,6 +839,7 @@ function ParticipantCard({
   branchFromMessageId,
   fileSources,
   carriedCitations,
+  statusLine,
 }: {
   zoneId: string | null;
   fallbackName: string;
@@ -792,6 +854,8 @@ function ParticipantCard({
   branchFromMessageId?: string;
   fileSources?: FileSource[];
   carriedCitations?: Citation[];
+  /** This zone's live status/stats while it generates — rendered in its own column. */
+  statusLine?: React.ReactNode;
 }) {
   const turnCitations = useMemo(
     () => collectCitations(blocks, fileSources ?? []),
@@ -860,9 +924,6 @@ function ParticipantCard({
               {zone?.model && (
                 <span className="truncate text-[var(--color-text-muted)]">{zone.model}</span>
               )}
-              {isStreaming && (
-                <span className="animate-pulse text-[var(--color-text-muted)]">generating…</span>
-              )}
             </div>
 
             {showCollapsed ? (
@@ -904,6 +965,7 @@ function ParticipantCard({
                   chatId={chatId}
                   citations={citations}
                 />
+                {statusLine}
                 {!isStreaming && <CitationSources used={citations} all={allCitations} />}
               </>
             ) : (

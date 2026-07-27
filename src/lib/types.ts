@@ -395,7 +395,11 @@ export interface AppSettings {
   fontSize: number;
   /** Font family for message text. Empty string = Inter (default). */
   fontFamily: string;
-  /** Fallback filesystem directory when a chat has no project with a directory set. */
+  /**
+   * Fallback filesystem directory when a chat has no project with a directory
+   * set. Defaulted to the OS Downloads folder on first run (see App.tsx) so the
+   * file tools work out of the box; machine-local, so never exported.
+   */
   defaultDirectory: string;
   /** Set once the one-time starter-zone seeding has run, so it never repeats. */
   seededStarterZones: boolean;
@@ -499,11 +503,7 @@ export interface AppSettings {
    * configs written as JSON in a `zones/` subdirectory alongside.
    */
   markdownMirrorEnabled: boolean;
-  /**
-   * Output directory for the markdown mirror. Defaulted to
-   * `<Downloads>/MultiZone Chats` on first run (see App.tsx) and never carried
-   * in a settings export — it's machine-local. Empty = unset (mirror no-ops).
-   */
+  /** Output directory for the markdown mirror. Empty = unset (mirror is a no-op). */
   markdownMirrorDir: string;
   /**
    * Per-model manual override for image input (0.7.4), keyed by exact model

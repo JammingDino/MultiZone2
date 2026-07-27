@@ -551,7 +551,7 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [x] "Default provider" removed — the base zone (Settings → Chat, renamed from "Quick Chat base zone") is the single default assistant, and the fallback provider is derived from it ([baseZone.ts](../src/lib/baseZone.ts)); Rust resolves in the same order
 - [x] Perspective zones now run in parallel by default (stacked layout unchanged); sequential stays for local models tight on VRAM
 - [x] Title generation put on a leash: `reasoning_effort: low`, a 256-token ceiling, an instruction not to reason, and images only from a wordless turn — at most one, instead of four
-- [x] Chats folder defaults to `<Downloads>/MultiZone Chats` on first run
+- [x] Default file directory (the file-tools fallback root) defaults to the OS Downloads folder on first run, so file tools work outside a project without setup; the markdown chats folder is unchanged (unset, chats stay in the app's own storage)
 
 ---
 

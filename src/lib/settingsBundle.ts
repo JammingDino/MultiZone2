@@ -27,14 +27,14 @@ export const BUNDLE_KIND = "multizone.settings";
 export const BUNDLE_VERSION = 1;
 
 /**
- * App-settings keys deliberately dropped on export. Paths are machine-local
- * (the chats folder defaults to Downloads on each install anyway), the seeding
- * flags describe what *this* install has already done for itself, and the API
- * token is a local secret that should be regenerated per machine.
+ * App-settings keys deliberately dropped on export. Paths are machine-local and
+ * may not even exist on the other side, the seeding flags describe what *this*
+ * install has already done for itself, and the API token is a local secret that
+ * should be regenerated per machine.
  */
 const LOCAL_ONLY_SETTINGS = [
-  "defaultDirectory",      // filesystem path
-  "markdownMirrorDir",     // filesystem path — defaults to Downloads per machine
+  "defaultDirectory",      // filesystem path — each install defaults it to Downloads
+  "markdownMirrorDir",     // filesystem path
   "sttInputDevice",        // a microphone that exists on this machine
   "apiToken",              // local secret; regenerate on the other machine
   "seededStarterZones",    // one-time seeding bookkeeping

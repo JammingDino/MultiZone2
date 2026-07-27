@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { downloadDir, join } from "@tauri-apps/api/path";
+import { downloadDir } from "@tauri-apps/api/path";
 import { Sidebar } from "./components/Sidebar/Sidebar";
 import { ChatPanel } from "./components/Chat/ChatPanel";
 import { BackgroundEffect } from "./components/BackgroundEffect";
@@ -22,7 +22,7 @@ export default function App() {
   const libraryCuratedVersion = useApp((s) => s.appSettings.libraryCuratedVersion);
   const seededStarterZones = useApp((s) => s.appSettings.seededStarterZones);
   const seededSkills = useApp((s) => s.appSettings.seededSkills);
-  const markdownMirrorDir = useApp((s) => s.appSettings.markdownMirrorDir);
+  const defaultDirectory = useApp((s) => s.appSettings.defaultDirectory);
   const refreshZones = useApp((s) => s.refreshZones);
   const refreshSkills = useApp((s) => s.refreshSkills);
   const shortcutsHelpOpen = useApp((s) => s.shortcutsHelpOpen);
@@ -34,28 +34,28 @@ export default function App() {
   const libRef = useRef(false);
   const zonesRef = useRef(false);
   const skillsRef = useRef(false);
-  const chatsDirRef = useRef(false);
+  const defaultDirRef = useRef(false);
 
-  // Give the chats folder a sensible default the first time (0.9.9): Downloads,
-  // which exists on every desktop and is somewhere the user already looks for
-  // files the app produced. Only fills a blank — a folder the user picked is
-  // never moved — and it's deliberately left out of settings exports, so each
-  // install resolves its own.
+  // Give the file tools a working directory the first time (0.9.9): Downloads,
+  // which exists on every desktop and is where a user already looks for files
+  // an app produced. Without it, a chat outside a project has nowhere to read
+  // or write and every file tool fails until the user picks a folder. Only
+  // fills a blank — a directory the user chose is never moved — and it stays
+  // out of settings exports, so each install resolves its own.
   useEffect(() => {
-    if (!appSettingsLoaded || markdownMirrorDir?.trim() || chatsDirRef.current) return;
-    chatsDirRef.current = true;
+    if (!appSettingsLoaded || defaultDirectory?.trim() || defaultDirRef.current) return;
+    defaultDirRef.current = true;
     (async () => {
       try {
-        const dir = await join(await downloadDir(), "MultiZone Chats");
-        await setAppSettings({ markdownMirrorDir: dir });
+        await setAppSettings({ defaultDirectory: await downloadDir() });
       } catch (e) {
         // No Downloads folder (or not running in the Tauri shell) — leave it
         // blank and let the user pick one.
-        console.warn("could not default the chats folder", e);
+        console.warn("could not default the file directory", e);
       }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appSettingsLoaded, markdownMirrorDir]);
+  }, [appSettingsLoaded, defaultDirectory]);
 
   // Seed the curated zone library onto disk (all curated presets, including the
   // community extras). Re-runs when the shipped set version grows so existing

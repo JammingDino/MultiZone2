@@ -628,6 +628,7 @@ function ChatTab() {
         <h3 className="mb-1 text-sm font-medium">Default file directory</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
           Fallback directory for file system tools when a chat isn't in a project (or the project has no directory set).
+          Starts as your Downloads folder — point it somewhere else to change what the file tools can reach.
         </p>
         <div className="flex items-center gap-2">
           <button
@@ -2530,8 +2531,7 @@ function DataTab() {
           Keep every chat as a real <span className="font-mono">.md</span> file you can read, edit, and version
           outside the app. The database stays the source of truth, but the files sync both ways: chats are written
           out as you go, and edits you make to a file on disk (message text, title) are pulled back in. Zone configs
-          are written as JSON in a <span className="font-mono">zones/</span> subfolder alongside. The folder starts
-          in your Downloads; change it below if you'd rather keep chats elsewhere.
+          are written as JSON in a <span className="font-mono">zones/</span> subfolder alongside.
         </p>
 
         <ToggleRow

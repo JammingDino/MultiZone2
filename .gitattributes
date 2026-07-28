@@ -1,0 +1,38 @@
+# Line endings are part of this project's ABI.
+#
+# `sqlx::migrate!` hashes the RAW BYTES of every file in src-tauri/migrations at
+# compile time and writes that hash into the `_sqlx_migrations` table the first
+# time a migration runs. Git's `core.autocrlf` (set to `true` system-wide by the
+# Git for Windows installer) means two machines can check the same commit out
+# with different line endings, so their binaries embed different hashes for
+# byte-identical SQL. Each build then refuses to open a database created by the
+# other:
+#
+#     Migrate(VersionMismatch(1))  ->  panic during setup(), window flashes and closes
+#
+# Pinning the working tree to LF everywhere makes every build machine — laptop,
+# desktop, CI — produce identical bytes and therefore identical checksums.
+# Rust, Node, and MSVC all handle LF sources fine on Windows.
+* text=auto eol=lf
+
+# Belt and braces for the files that are actually checksummed.
+*.sql text eol=lf
+
+# Files git must never rewrite.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.icns binary
+*.pdf  binary
+*.rten binary
+*.woff  binary
+*.woff2 binary
+*.ttf  binary
+*.otf  binary
+*.wav  binary
+*.mp3  binary
+*.dll  binary
+*.exe  binary
+*.msi  binary

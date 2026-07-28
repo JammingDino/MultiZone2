@@ -6,7 +6,9 @@ dist/
 # Tauri
 src-tauri/target/
 src-tauri/gen/
-src-tauri/Cargo.lock
+# src-tauri/Cargo.lock is deliberately tracked: MultiZone ships as a binary, so
+# the lockfile is what makes a given commit build the same dependency versions
+# on every machine and in CI.
 
 # IDE
 .idea/
@@ -17,3 +19,6 @@ videos/
 .agents/
 .claude/
 skills-lock.json
+
+# Built installers collected for cross-machine debugging.
+artifacts/

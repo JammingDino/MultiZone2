@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { DEFAULT_APP_SETTINGS, type AppSettings, type Chat, type ChatTagEntry, type ChatTagLink, type ChatZone, type McpServerView, type Memory, type Message, type Project, type Provider, type Skill, type SkillPack, type Tag, type Zone } from "@/lib/types";
 import * as api from "@/lib/tauri";
+import type { SettingsBundle } from "@/lib/settingsBundle";
 
 // Sidebar open/closed persists across sessions under the same `ui.sidebarOpen`
 // localStorage key the sidebar used before this moved into the store, so an
@@ -177,6 +178,30 @@ export interface PendingApproval {
   zoneId?: string;
 }
 
+/**
+ * A turn that ended in failure rather than an answer (1.0).
+ *
+ * The backend has always emitted `error` for a failed provider call — bad key,
+ * rate limit, unreachable host, model that doesn't exist — but the frontend used
+ * to treat it purely as a signal to tear the stream down. Since no assistant
+ * message is ever saved on that path, the whole turn then rendered as nothing at
+ * all: the user's message sat there and the app looked like it had simply
+ * stopped caring. Holding the message here lets the thread say what went wrong.
+ */
+export interface ChatError {
+  message: string;
+  at: number;
+  /** Set when the failure was a perspective zone's rather than the primary's. */
+  zoneId?: string;
+}
+
+/** A settings bundle staged for import, raised from Settings, onboarding or a file drop. */
+export interface PendingImport {
+  bundle: SettingsBundle;
+  /** File name or short description of where it came from, for the dialog. */
+  source: string;
+}
+
 interface AppStore {
   // collections
   providers: Provider[];
@@ -219,6 +244,19 @@ interface AppStore {
   pendingApprovalByChat: Record<string, PendingApproval[]>;
   /** Smart routing state per chat. null = idle, "routing" = LLM call in progress, done = zone was resolved. */
   routingByChat: Record<string, { status: "routing" } | { status: "done"; zoneId: string; zoneName: string } | null>;
+  /**
+   * Failures from the last turn, per chat — one entry for the primary plus one
+   * per perspective zone that failed. Cleared when the next turn starts, so the
+   * thread shows the current state rather than an archive of past outages.
+   */
+  errorsByChat: Record<string, ChatError[]>;
+  dismissChatErrors: (chatId: string) => void;
+
+  /** A settings bundle waiting on the user's confirmation. Null = no import in flight. */
+  pendingImport: PendingImport | null;
+  /** Stage a parsed bundle for confirmation (Settings, onboarding, or a dropped file). */
+  stageImport: (pending: PendingImport) => void;
+  clearImport: () => void;
   /** Per-message generation stats, keyed by message id. */
   statsByMessage: Record<string, MessageStats>;
   /** Current visual theme. Persisted via the backend settings table. */
@@ -475,6 +513,8 @@ export const useApp = create<AppStore>((set, get) => ({
   regeneratingTitles: new Set(),
   pendingApprovalByChat: {},
   routingByChat: {},
+  errorsByChat: {},
+  pendingImport: null,
   statsByMessage: {},
   theme: DEFAULT_THEME,
   appSettings: DEFAULT_APP_SETTINGS,
@@ -500,6 +540,22 @@ export const useApp = create<AppStore>((set, get) => ({
   newChatProjectId: null,
   newChatTimestamp: 0,
   homeScreenDraft: "",
+
+  dismissChatErrors(chatId) {
+    set((s) => {
+      if (!s.errorsByChat[chatId]) return {};
+      const errorsByChat = { ...s.errorsByChat };
+      delete errorsByChat[chatId];
+      return { errorsByChat };
+    });
+  },
+
+  stageImport(pending) {
+    set({ pendingImport: pending });
+  },
+  clearImport() {
+    set({ pendingImport: null });
+  },
 
   async refreshProviders() {
     const providers = await api.listProviders();
@@ -604,6 +660,7 @@ export const useApp = create<AppStore>((set, get) => ({
         const messagesByChat = { ...s.messagesByChat };
         const statsByMessage = { ...s.statsByMessage };
         const pendingApprovalByChat = { ...s.pendingApprovalByChat };
+        const errorsByChat = { ...s.errorsByChat };
         const msgs = messagesByChat[chatId] ?? [];
         const current = chatPersp[perspectiveZoneId];
 
@@ -701,9 +758,19 @@ export const useApp = create<AppStore>((set, get) => ({
             }
             delete chatPersp[perspectiveZoneId];
             break;
+          case "error":
+            // Record before tearing down: this zone produced no message, so the
+            // error text is the only thing left to show for its half of the turn.
+            errorsByChat[chatId] = [
+              ...(errorsByChat[chatId] ?? []).filter((e) => e.zoneId !== perspectiveZoneId),
+              { message: event.message, at: now, zoneId: perspectiveZoneId },
+            ];
+            delete chatPersp[perspectiveZoneId];
+            delete chatTurns[perspectiveZoneId];
+            pendingApprovalByChat[chatId] = dropApproval(pendingApprovalByChat[chatId], perspectiveZoneId);
+            break;
           case "done":
           case "cancelled":
-          case "error":
             delete chatPersp[perspectiveZoneId];
             delete chatTurns[perspectiveZoneId];
             pendingApprovalByChat[chatId] = dropApproval(pendingApprovalByChat[chatId], perspectiveZoneId);
@@ -718,6 +785,7 @@ export const useApp = create<AppStore>((set, get) => ({
           messagesByChat,
           statsByMessage,
           pendingApprovalByChat,
+          errorsByChat,
         };
       });
       return;
@@ -733,6 +801,7 @@ export const useApp = create<AppStore>((set, get) => ({
       const perspectiveTurnByChat = { ...s.perspectiveTurnByChat };
       const pendingApprovalByChat = { ...s.pendingApprovalByChat };
       const routingByChat = { ...s.routingByChat };
+      const errorsByChat = { ...s.errorsByChat };
       const current = streaming[chatId];
 
       // Turn totals span every iteration of the agentic loop — same reducer the
@@ -762,6 +831,8 @@ export const useApp = create<AppStore>((set, get) => ({
           // otherwise carry its numbers into this turn.
           turnByChat[chatId] = freshTurn(now);
           delete perspectiveTurnByChat[chatId];
+          // Last turn's failures belong to last turn.
+          delete errorsByChat[chatId];
           break;
 
         case "assistant_start":
@@ -856,9 +927,21 @@ export const useApp = create<AppStore>((set, get) => ({
           delete streaming[chatId];
           break;
 
+        case "error":
+          // The turn failed before an assistant message was ever saved, so
+          // without this the whole exchange would render as empty space.
+          errorsByChat[chatId] = [
+            ...(errorsByChat[chatId] ?? []).filter((e) => e.zoneId !== undefined),
+            { message: event.message, at: now },
+          ];
+          delete streaming[chatId];
+          delete turnByChat[chatId];
+          routingByChat[chatId] = null;
+          pendingApprovalByChat[chatId] = dropApproval(pendingApprovalByChat[chatId], undefined);
+          break;
+
         case "done":
         case "cancelled":
-        case "error":
           delete streaming[chatId];
           delete turnByChat[chatId];
           // Only clear the primary's approval; perspective zones may still be
@@ -874,6 +957,7 @@ export const useApp = create<AppStore>((set, get) => ({
         perspectiveTurnByChat,
         pendingApprovalByChat,
         routingByChat,
+        errorsByChat,
       };
     });
 

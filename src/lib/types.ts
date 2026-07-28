@@ -619,6 +619,17 @@ export interface AppSettings {
    * STT → send → TTS → STT into a continuous loop.
    */
   voiceConversationEnabled: boolean;
+  /**
+   * Set when the user dismisses first-run setup without configuring a provider
+   * (1.0). Onboarding is a helpful default, not a toll gate — someone who wants
+   * to look around first, or who is about to drop in a settings export, gets to.
+   * A standing banner offers both routes back until a provider exists, so the
+   * app can't quietly sit in a state where nothing will ever send.
+   *
+   * Machine-local: it describes this install's first run, not a preference worth
+   * carrying to another machine.
+   */
+  onboardingSkipped: boolean;
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -656,6 +667,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   markdownMirrorEnabled: false,
   markdownMirrorDir: "",
   visionOverrides: {},
+  onboardingSkipped: false,
   sttProviderId: null,
   sttModel: "",
   sttLanguage: "",

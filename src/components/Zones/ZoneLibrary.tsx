@@ -152,11 +152,18 @@ export function ZoneLibrary() {
     if (!quickProvider || busy) return;
     setBusy(true);
     try {
-      await installEntry(e, quickProvider.id, quickModel, zones.map((z) => z.name));
+      const { modelFallback } = await installEntry(
+        e, quickProvider.id, quickModel, zones.map((z) => z.name),
+      );
       await refreshZones();
-      flash(`Installed “${e.name}”`);
+      flash(
+        modelFallback
+          ? `Installed “${e.name}” using ${modelFallback.used} — ${quickProvider.name} doesn't offer ${modelFallback.wanted}`
+          : `Installed “${e.name}”`,
+      );
     } catch (err) {
       console.error(err);
+      flash(`Couldn't install “${e.name}”: ${(err as Error).message ?? err}`);
     } finally {
       setBusy(false);
     }

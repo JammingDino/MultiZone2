@@ -106,21 +106,52 @@ export function uniqueZoneName(name: string, existingNames: string[]): string {
   return `${name} ${Date.now()}`;
 }
 
+/** What `installEntry` did with the entry's saved model, so the UI can say so. */
+export interface InstallResult {
+  zone: Zone;
+  /** Set when the entry named a model the target provider doesn't offer. */
+  modelFallback: { wanted: string; used: string } | null;
+}
+
 /**
  * Install a library entry as a live zone, bound to the given provider + model.
- * The entry's own model is preferred when set (a user snapshot), otherwise the
- * caller's resolved default model is used. Name collisions are de-duplicated.
+ *
+ * A zone's model and the provider serving it are one setting, not two. Entries
+ * shared between installs carry a model name but no provider (ids don't travel),
+ * so taking the saved model at face value would bind, say, `gpt-4o` to whichever
+ * provider happens to be local — a zone that looks configured and fails at send
+ * time. So an entry's model is only honoured when the target provider actually
+ * lists it; otherwise the provider's own default wins and the caller is told.
+ *
+ * The model list is best-effort: if the provider can't be reached we trust the
+ * entry rather than overriding a model the user may well have meant.
  */
 export async function installEntry(
   entry: LibraryEntry,
   providerId: string,
   model: string,
   existingNames: string[],
-): Promise<Zone> {
-  return api.upsertZone({
+): Promise<InstallResult> {
+  const wanted = entry.model?.trim() || "";
+  let resolved = wanted || model;
+  let modelFallback: InstallResult["modelFallback"] = null;
+
+  if (wanted && model && wanted !== model) {
+    try {
+      const available = await api.fetchModels(providerId);
+      if (available.length > 0 && !available.includes(wanted)) {
+        resolved = model;
+        modelFallback = { wanted, used: model };
+      }
+    } catch {
+      // Provider unreachable — keep the entry's model rather than guessing.
+    }
+  }
+
+  const zone = await api.upsertZone({
     name: uniqueZoneName(entry.name, existingNames),
     providerId,
-    model: entry.model?.trim() || model,
+    model: resolved,
     systemPrompt: entry.systemPrompt,
     temperature: entry.temperature,
     maxTokens: entry.maxTokens,
@@ -133,6 +164,8 @@ export async function installEntry(
     icon: entry.icon,
     accentColor: entry.accentColor,
   });
+
+  return { zone, modelFallback };
 }
 
 /** Snapshot a live zone into the library as a user (non-curated) entry. */

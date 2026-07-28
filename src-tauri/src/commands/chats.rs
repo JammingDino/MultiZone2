@@ -466,21 +466,28 @@ pub async fn branch_chat(
         .fetch_optional(&state.db)
         .await?
         .flatten();
-        let next_user: Option<i64> = match round_start {
-            Some(start) => sqlx::query_scalar(
-                "SELECT MIN(created_at) FROM messages
-                 WHERE chat_id = ?1 AND role = 'user' AND created_at > ?2",
-            )
-            .bind(&chat_id)
-            .bind(start)
-            .fetch_optional(&state.db)
-            .await?
-            .flatten(),
-            None => None,
-        };
-        // Timestamps are milliseconds; stopping one short of the next user
-        // message keeps the bound inclusive like the pivot case.
-        next_user.map(|t| t - 1).unwrap_or(i64::MAX)
+        match round_start {
+            Some(start) => {
+                let next_user: Option<i64> = sqlx::query_scalar(
+                    "SELECT MIN(created_at) FROM messages
+                     WHERE chat_id = ?1 AND role = 'user' AND created_at > ?2",
+                )
+                .bind(&chat_id)
+                .bind(start)
+                .fetch_optional(&state.db)
+                .await?
+                .flatten();
+                // Timestamps are milliseconds; stopping one short of the next
+                // user message keeps the bound inclusive like the pivot case.
+                // No later user message means this is the last round, so the
+                // rest of the chat is exactly that round.
+                next_user.map(|t| t - 1).unwrap_or(i64::MAX)
+            }
+            // An assistant message with no user message before it shouldn't
+            // happen, but if it does there's no round to complete — cut at the
+            // pivot rather than sweeping in every later round too.
+            None => pivot_ts,
+        }
     };
 
     let source = sqlx::query_as::<_, Chat>(&format!(

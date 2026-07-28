@@ -40,17 +40,21 @@ export function ActivityRail({
       : `Worked through ${steps.length} steps`;
 
   /**
-   * One failed tool out of twenty-seven is not a failed run — the model
-   * usually reads the error and carries on, and painting the whole strip red
-   * reports a working turn as a broken one. So the alarm is reserved for a run
-   * where every tool failed; anything short of that is a count against the
-   * total, and the strip stays neutral.
+   * One failed step out of twenty-seven is not a failed run — the model usually
+   * reads the error and carries on, and painting the whole strip red reports a
+   * working turn as a broken one. So the alarm is reserved for a run where every
+   * tool failed; anything short of that is a count against the run's total
+   * steps, and the strip stays neutral.
+   *
+   * The count is out of *steps*, matching the "N steps" the strip already
+   * reports, rather than out of tool calls alone — two denominators for the same
+   * strip would just invite the reader to work out why they disagree.
    */
   const allFailed = toolCount > 0 && errors === toolCount;
   const issueText =
     errors > 0
-      ? `${errors}/${toolCount} tools failed`
-      : `${warnings}/${toolCount} tools needed setup`;
+      ? `${errors}/${steps.length} steps failed`
+      : `${warnings}/${steps.length} steps needed setup`;
 
   const icon = active ? (
     <Loader2 size={12} className="animate-spin text-[var(--color-accent)]" />
@@ -86,7 +90,9 @@ export function ActivityRail({
             {issueText}
           </span>
         )}
-        {steps.length > 1 && (
+        {/* The issue count already names the total, so a second "N steps" here
+            would just repeat it. */}
+        {issues === 0 && steps.length > 1 && (
           <span className="flex-shrink-0 tabular-nums">{steps.length} steps</span>
         )}
         <span className="flex-shrink-0">

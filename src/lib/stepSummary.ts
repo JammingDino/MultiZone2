@@ -207,8 +207,10 @@ export interface RunSummary {
   /** Steps that hit a host/setup problem. */
   warnings: number;
   /**
-   * Tool steps in the run, successful or not — the denominator for "1 of 27
-   * tools failed". Thinking steps aren't counted; they can't fail.
+   * Tool steps in the run, successful or not. Only used to decide whether
+   * *everything* failed (which is what turns the rail red) — the count the rail
+   * displays is out of total steps, so it agrees with the step number shown
+   * alongside it. Thinking steps aren't counted here; they can't fail.
    */
   toolCount: number;
   /** True while any step in the run is still pending or running. */

@@ -206,6 +206,11 @@ export interface RunSummary {
   errors: number;
   /** Steps that hit a host/setup problem. */
   warnings: number;
+  /**
+   * Tool steps in the run, successful or not — the denominator for "1 of 27
+   * tools failed". Thinking steps aren't counted; they can't fail.
+   */
+  toolCount: number;
   /** True while any step in the run is still pending or running. */
   active: boolean;
   /** Steps whose output is lifted out of the rail and always shown. */
@@ -215,6 +220,7 @@ export interface RunSummary {
 export function summarizeRun(steps: Step[]): RunSummary {
   let errors = 0;
   let warnings = 0;
+  let toolCount = 0;
   let active = false;
   let current: Step = steps[steps.length - 1];
   const visualSteps: ToolStep[] = [];
@@ -227,6 +233,7 @@ export function summarizeRun(steps: Step[]): RunSummary {
       }
       continue;
     }
+    toolCount++;
     const a = analyzeToolStep(step);
     if (a.status === "error") errors++;
     else if (a.status === "warning") warnings++;
@@ -251,5 +258,5 @@ export function summarizeRun(steps: Step[]): RunSummary {
           (s, i) => s.toolCall.function.name !== "update_plan" || i === lastPlanIdx,
         );
 
-  return { current, errors, warnings, active, visualSteps: deduped };
+  return { current, errors, warnings, toolCount, active, visualSteps: deduped };
 }

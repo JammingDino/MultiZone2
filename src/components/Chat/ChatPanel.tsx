@@ -88,6 +88,7 @@ export function ChatPanel() {
 
   const pendingApprovalByChat = useApp((s) => s.pendingApprovalByChat);
   const routingByChat = useApp((s) => s.routingByChat);
+  const stageImport = useApp((s) => s.stageImport);
   const pendingApprovals = activeChatId ? (pendingApprovalByChat[activeChatId] ?? []) : [];
 
   const activeChat = chats.find((c) => c.id === activeChatId) ?? null;
@@ -166,9 +167,14 @@ export function ChatPanel() {
     e.preventDefault();
     dragDepth.current = 0;
     setIsDragOver(false);
-    if (e.dataTransfer.files.length > 0) {
-      inputRef.current?.addFiles(e.dataTransfer.files);
-    }
+    // Copy out of the event before awaiting — `dataTransfer` is cleared once
+    // the handler returns.
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length === 0) return;
+    // A dropped settings export is an import, not an attachment.
+    void claimSettingsDrop(files, stageImport).then((claimed) => {
+      if (!claimed) inputRef.current?.addFiles(files);
+    });
   }
 
   // Mirror the latest store actions in refs so the listener-setup effect below
@@ -387,6 +393,7 @@ export function ChatPanel() {
 }
 
 import type { ChatTagEntry, ChatZone, Project, Tag, Zone } from "@/lib/types";
+import { claimSettingsDrop } from "@/lib/importSettings";
 
 /** Read-only footer shown in place of the composer for subchats — these are
  *  driven by their owning zone, so the user observes but can't send. */

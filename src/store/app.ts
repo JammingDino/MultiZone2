@@ -304,7 +304,12 @@ interface AppStore {
   refreshChats: () => Promise<void>;
   setActiveChat: (id: string | null) => Promise<void>;
   /** Fork a chat at a message into a new chat and switch to it. */
-  branchFromMessage: (chatId: string, messageId: string) => Promise<void>;
+  branchFromMessage: (
+    chatId: string,
+    messageId: string,
+    solo?: boolean,
+    zoneId?: string | null,
+  ) => Promise<void>;
   /** Hand-edit an assistant message's text in place (persists + flags edited). */
   editMessage: (chatId: string, messageId: string, text: string) => Promise<void>;
   loadMessages: (chatId: string) => Promise<void>;
@@ -631,8 +636,8 @@ export const useApp = create<AppStore>((set, get) => ({
       await get().loadChatZones(id);
     }
   },
-  async branchFromMessage(chatId, messageId) {
-    const branch = await api.branchChat(chatId, messageId);
+  async branchFromMessage(chatId, messageId, solo = false, zoneId = null) {
+    const branch = await api.branchChat(chatId, messageId, solo, zoneId);
     await get().refreshChats();
     await get().setActiveChat(branch.id);
   },

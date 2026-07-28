@@ -406,26 +406,81 @@ pub async fn get_subchat_tree(
     Ok(rows)
 }
 
-/// Forks a chat at `message_id` into a brand-new chat containing a copy of all
-/// history up to and including that message. The source chat is untouched. The
-/// new chat inherits the source's zone, project, tags and perspective zones, and
-/// is linked back to the source via `parent_chat_id` / `branched_from_message_id`
+/// Forks a chat at `message_id` into a brand-new chat containing a copy of the
+/// history up to that point. The source chat is untouched. The new chat is
+/// linked back to the source via `parent_chat_id` / `branched_from_message_id`
 /// so the sidebar can nest it under its parent. Returns the new chat.
+///
+/// `solo` picks up one participant's thread out of a multi-responder chat:
+/// the branch answers with a single zone from here on (`zone_id`, or the
+/// source's own primary zone when that's None) and inherits no perspective
+/// roster. Branching from a user message leaves `solo` false, which keeps the
+/// full roster — that's a "re-ask this", not a "follow this one answer".
+///
+/// Two cuts are involved, and they are not the same:
+///
+/// - Where the *history* ends. Branching from an assistant message copies its
+///   whole round, siblings included, not just the rows that happen to predate
+///   the clicked one. Participants finish at their own wall-clock times, so a
+///   plain `created_at <= pivot` silently dropped whichever zones were still
+///   thinking when the clicked one landed — you'd branch off the fast model and
+///   lose the primary's answer from the last round.
+/// - Where the *conversation* continues from. That's the pivot, unchanged.
+///
+/// Branching from a user message still cuts at the message itself, so the
+/// answers to it are left behind and the branch re-asks.
 #[tauri::command]
 pub async fn branch_chat(
     state: State<'_, AppState>,
     chat_id: String,
     message_id: String,
+    solo: Option<bool>,
+    zone_id: Option<String>,
 ) -> AppResult<Chat> {
-    // Resolve the pivot's timestamp — history is copied up to and including it.
-    let pivot_ts: Option<i64> =
-        sqlx::query_scalar("SELECT created_at FROM messages WHERE id = ?1 AND chat_id = ?2")
+    let solo = solo.unwrap_or(false);
+
+    // Resolve the pivot's timestamp and role — the role decides how far the copy
+    // reaches past it.
+    let pivot: Option<(i64, String)> =
+        sqlx::query_as("SELECT created_at, role FROM messages WHERE id = ?1 AND chat_id = ?2")
             .bind(&message_id)
             .bind(&chat_id)
             .fetch_optional(&state.db)
             .await?;
-    let Some(pivot_ts) = pivot_ts else {
+    let Some((pivot_ts, pivot_role)) = pivot else {
         return Err(AppError::NotFound(format!("message {message_id}")));
+    };
+
+    // For an assistant pivot, extend the copy to the end of its round — up to
+    // (but not including) the next user message — so every participant's answer
+    // to the same question comes along.
+    let copy_through_ts: i64 = if pivot_role == "user" {
+        pivot_ts
+    } else {
+        let round_start: Option<i64> = sqlx::query_scalar(
+            "SELECT MAX(created_at) FROM messages
+             WHERE chat_id = ?1 AND role = 'user' AND created_at <= ?2",
+        )
+        .bind(&chat_id)
+        .bind(pivot_ts)
+        .fetch_optional(&state.db)
+        .await?
+        .flatten();
+        let next_user: Option<i64> = match round_start {
+            Some(start) => sqlx::query_scalar(
+                "SELECT MIN(created_at) FROM messages
+                 WHERE chat_id = ?1 AND role = 'user' AND created_at > ?2",
+            )
+            .bind(&chat_id)
+            .bind(start)
+            .fetch_optional(&state.db)
+            .await?
+            .flatten(),
+            None => None,
+        };
+        // Timestamps are milliseconds; stopping one short of the next user
+        // message keeps the bound inclusive like the pivot case.
+        next_user.map(|t| t - 1).unwrap_or(i64::MAX)
     };
 
     let source = sqlx::query_as::<_, Chat>(&format!(
@@ -440,6 +495,17 @@ pub async fn branch_chat(
     let now = now_ts();
     let new_title = format!("{} (branch)", source.title);
 
+    // Soloing pins the branch to one zone: the clicked perspective, or the
+    // source's own primary zone when the primary card was the one clicked
+    // (which may be None — a Quick chat stays a Quick chat). Pinning a zone also
+    // switches smart routing off, since the zone is no longer up for debate.
+    let branch_zone_id = if solo {
+        zone_id.clone().or_else(|| source.zone_id.clone())
+    } else {
+        source.zone_id.clone()
+    };
+    let branch_smart_routing = source.smart_routing && !(solo && zone_id.is_some());
+
     // Create the branch, inheriting the source's chat-level settings and linking
     // it back to the parent at the pivot message.
     sqlx::query(
@@ -450,12 +516,12 @@ pub async fn branch_chat(
     )
     .bind(&new_id)
     .bind(&new_title)
-    .bind(&source.zone_id)
+    .bind(&branch_zone_id)
     .bind(&source.project_id)
     .bind(source.project_context_enabled)
     .bind(source.knowledge_enabled)
     .bind(&source.perspective_mode)
-    .bind(source.smart_routing)
+    .bind(branch_smart_routing)
     .bind(&chat_id)
     .bind(&message_id)
     .bind(now)
@@ -470,7 +536,7 @@ pub async fn branch_chat(
          FROM messages WHERE chat_id = ?1 AND created_at <= ?2 ORDER BY created_at ASC",
     )
     .bind(&chat_id)
-    .bind(pivot_ts)
+    .bind(copy_through_ts)
     .fetch_all(&state.db)
     .await?;
 
@@ -504,7 +570,7 @@ pub async fn branch_chat(
          FROM attachments WHERE chat_id = ?1 AND created_at <= ?2",
     )
     .bind(&chat_id)
-    .bind(pivot_ts)
+    .bind(copy_through_ts)
     .fetch_all(&state.db)
     .await?;
     for a in &attachments {
@@ -544,15 +610,20 @@ pub async fn branch_chat(
     .execute(&state.db)
     .await?;
 
-    // Inherit perspective zones.
-    sqlx::query(
-        "INSERT INTO chat_zones (chat_id, zone_id)
-         SELECT ?1, zone_id FROM chat_zones WHERE chat_id = ?2",
-    )
-    .bind(&new_id)
-    .bind(&chat_id)
-    .execute(&state.db)
-    .await?;
+    // Inherit perspective zones — unless this branch is following one
+    // participant, in which case an empty roster is the whole point: the copied
+    // history still shows every zone's answers, but only the chosen one speaks
+    // from here.
+    if !solo {
+        sqlx::query(
+            "INSERT INTO chat_zones (chat_id, zone_id)
+             SELECT ?1, zone_id FROM chat_zones WHERE chat_id = ?2",
+        )
+        .bind(&new_id)
+        .bind(&chat_id)
+        .execute(&state.db)
+        .await?;
+    }
 
     let chat = sqlx::query_as::<_, Chat>(&format!(
         "SELECT {CHAT_COLS} FROM chats WHERE id = ?1"

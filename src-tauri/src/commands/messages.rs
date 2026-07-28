@@ -1209,6 +1209,11 @@ async fn run_participant_turn(
     // Stall recovery state, tracked across the whole turn.
     let mut used_tools_this_turn = false;
     let mut nudges_used = 0usize;
+    // Did any step of this turn yield something the user can see? Drives the
+    // empty-response check after the loop.
+    let mut produced_output = false;
+    // A turn the user stopped is an empty result on purpose, not a failure.
+    let mut cancelled_turn = false;
 
     for step in 0..max_steps {
         if cancel.load(Ordering::Relaxed) {
@@ -1327,6 +1332,12 @@ async fn run_participant_turn(
         let skip_persist = agg.content.trim().is_empty()
             && agg.reasoning.trim().is_empty()
             && agg.tool_calls.is_empty();
+        if !skip_persist {
+            produced_output = true;
+        }
+        if agg.cancelled {
+            cancelled_turn = true;
+        }
 
         // Persist whatever the model produced before cancellation.
         let assistant_content_json = if agg.content.is_empty() {
@@ -1669,6 +1680,20 @@ async fn run_participant_turn(
             }
         }
         // Loop for follow-up assistant turn
+    }
+
+    // A turn that produced no text, no reasoning and no tool call writes nothing
+    // to the chat (see `skip_persist`), so ending quietly here is indistinguish-
+    // able from the app ignoring the user: message sent, nothing back, nothing
+    // to click. Some providers do this on a bad model name, an empty context, or
+    // a silently truncated response. Report it rather than leaving a blank.
+    if !produced_output && !cancelled_turn {
+        return Err(AppError::Provider(
+            "The model returned an empty response — no text and no tool calls. \
+             This often means the model name is wrong for this provider, or the \
+             request was rejected without an error."
+                .to_string(),
+        ));
     }
 
     sink.emit_for(chat_id, persp, StreamPayload::Done);

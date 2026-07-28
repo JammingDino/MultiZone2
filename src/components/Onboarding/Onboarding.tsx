@@ -1,20 +1,29 @@
 import { useState } from "react";
-import { Layers, Loader2, Server, Sparkles, ArrowRight, Check } from "lucide-react";
+import { Layers, Loader2, Server, Sparkles, ArrowRight, Check, FileUp } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
 import { seedDefaultZones } from "@/lib/defaultZones";
+import { pickBundleFile } from "@/lib/importSettings";
 
 /**
- * First-run gate. Shown full-screen (and non-dismissable) until the user has
- * configured at least one provider *with* a default model — the minimum needed
- * to start a Quick chat. Power-user features (zones, tools, projects) come
- * later; this just gets a model wired up so the app is usable on launch.
+ * First-run setup: connect a provider and pick a default model, the minimum
+ * needed to start a Quick chat. Power-user features (zones, tools, projects)
+ * come later.
+ *
+ * It is deliberately *not* a gate (1.0). Two ways past it besides filling the
+ * form in: import a settings export — someone moving from another install
+ * already has all of this and shouldn't retype it — or skip, and get a standing
+ * banner instead of a locked screen. The old behaviour made connecting to an
+ * OpenAI-compatible endpoint the only way to see the app at all, which is a
+ * poor first impression for anyone still deciding.
  */
 export function Onboarding() {
   const refreshProviders = useApp((s) => s.refreshProviders);
   const existingZones = useApp((s) => s.zones);
   const refreshZones = useApp((s) => s.refreshZones);
+  const setAppSettings = useApp((s) => s.setAppSettings);
+  const stageImport = useApp((s) => s.stageImport);
 
   const [step, setStep] = useState<"provider" | "model">("provider");
   const [name, setName] = useState("Local (Ollama)");
@@ -81,6 +90,29 @@ export function Onboarding() {
       setError(`Failed to finish setup: ${e?.message || String(e)}`);
       setBusy(false);
     }
+  }
+
+  /**
+   * Bring a whole setup over from another install instead of rebuilding it. The
+   * shared confirmation dialog takes it from here; once it writes a provider the
+   * gate clears on its own, so there's nothing to do afterwards.
+   */
+  async function onImport() {
+    setBusy(true);
+    setError(null);
+    try {
+      const picked = await pickBundleFile();
+      if (picked) stageImport(picked);
+    } catch (e: any) {
+      setError(`Couldn't read that file: ${e?.message || String(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Dismiss setup without a provider. The banner in App.tsx takes over. */
+  async function onSkip() {
+    await setAppSettings({ onboardingSkipped: true });
   }
 
   return (
@@ -164,6 +196,25 @@ export function Onboarding() {
             </div>
           </div>
         )}
+
+        {/* Neither route needs the form above, so they sit outside the steps. */}
+        <div className="mt-5 flex items-center justify-between border-t border-[var(--color-border)] pt-3">
+          <button
+            onClick={onImport}
+            disabled={busy}
+            className="flex items-center gap-1.5 text-xs text-[var(--color-accent)] hover:underline disabled:opacity-50"
+          >
+            <FileUp size={13} />
+            Import settings from another install
+          </button>
+          <button
+            onClick={onSkip}
+            disabled={busy}
+            className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)] disabled:opacity-50"
+          >
+            Skip for now
+          </button>
+        </div>
       </div>
       <style>{`.ob-input { width: 100%; border: 1px solid var(--color-border); border-radius: 6px; padding: 7px 10px; background: var(--color-bg); font-size: 13px; } .ob-input:focus { border-color: var(--color-accent); outline: none; }`}</style>
     </div>

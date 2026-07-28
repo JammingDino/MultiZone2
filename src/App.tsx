@@ -5,6 +5,8 @@ import { ChatPanel } from "./components/Chat/ChatPanel";
 import { BackgroundEffect } from "./components/BackgroundEffect";
 import { TitleBar } from "./components/TitleBar";
 import { Onboarding } from "./components/Onboarding/Onboarding";
+import { NoProviderBanner } from "./components/Onboarding/NoProviderBanner";
+import { ImportSettingsDialog } from "./components/Settings/ImportSettingsDialog";
 import { ShortcutsHelpModal } from "./components/common/ShortcutsHelpModal";
 import { useApp } from "./store/app";
 import { useGlobalShortcuts } from "./lib/useGlobalShortcuts";
@@ -23,6 +25,7 @@ export default function App() {
   const seededStarterZones = useApp((s) => s.appSettings.seededStarterZones);
   const seededSkills = useApp((s) => s.appSettings.seededSkills);
   const defaultDirectory = useApp((s) => s.appSettings.defaultDirectory);
+  const onboardingSkipped = useApp((s) => s.appSettings.onboardingSkipped);
   const refreshZones = useApp((s) => s.refreshZones);
   const refreshSkills = useApp((s) => s.refreshSkills);
   const shortcutsHelpOpen = useApp((s) => s.shortcutsHelpOpen);
@@ -121,14 +124,21 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appSettingsLoaded, seededSkills]);
 
-  // Lock the app behind onboarding until at least one provider exists.
-  const showOnboarding = providersLoaded && providers.length === 0;
+  // First-run setup, until a provider exists or the user waves it away. Skipping
+  // swaps the overlay for a banner rather than leaving the state unexplained —
+  // see `onboardingSkipped`. Both wait on appSettingsLoaded so a skip recorded
+  // last session doesn't flash the overlay on the way in.
+  const ready = providersLoaded && appSettingsLoaded;
+  const noProvider = ready && providers.length === 0;
+  const showOnboarding = noProvider && !onboardingSkipped;
+  const showNoProviderBanner = noProvider && onboardingSkipped;
 
   return (
     <div className="h-screen w-screen overflow-hidden text-[var(--color-text)]">
       <BackgroundEffect />
       <div className="relative z-10 flex h-full w-full flex-col">
         <TitleBar />
+        {showNoProviderBanner && <NoProviderBanner />}
         {/* Onboarding overlays only the content area so the title bar stays
             draggable/resizable while it's up. */}
         <div className="relative flex flex-1 overflow-hidden">
@@ -138,6 +148,9 @@ export default function App() {
           {shortcutsHelpOpen && <ShortcutsHelpModal onClose={closeShortcutsHelp} />}
         </div>
       </div>
+      {/* App-wide so the confirmation can sit above onboarding as well as the
+          chat — a settings file may be dropped or picked from either. */}
+      <ImportSettingsDialog />
     </div>
   );
 }

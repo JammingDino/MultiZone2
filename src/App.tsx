@@ -14,6 +14,7 @@ import { seedCuratedLibrary, CURATED_LIBRARY_VERSION } from "./lib/zoneLibrary";
 import { seedDefaultZones } from "./lib/defaultZones";
 import { seedDefaultSkills } from "./lib/defaultSkills";
 import { resolveBaseProvider } from "./lib/baseZone";
+import { applyAccentToWindowIcon } from "./lib/appIcon";
 import * as api from "./lib/tauri";
 
 export default function App() {
@@ -26,6 +27,7 @@ export default function App() {
   const seededSkills = useApp((s) => s.appSettings.seededSkills);
   const defaultDirectory = useApp((s) => s.appSettings.defaultDirectory);
   const onboardingSkipped = useApp((s) => s.appSettings.onboardingSkipped);
+  const accent = useApp((s) => s.theme.accent);
   const refreshZones = useApp((s) => s.refreshZones);
   const refreshSkills = useApp((s) => s.refreshSkills);
   const shortcutsHelpOpen = useApp((s) => s.shortcutsHelpOpen);
@@ -59,6 +61,13 @@ export default function App() {
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appSettingsLoaded, defaultDirectory]);
+
+  // Keep the window icon in step with the accent colour, so the taskbar and
+  // alt-tab match the app the user is actually looking at. The icon compiled
+  // into the binary can't follow a setting; the window's can.
+  useEffect(() => {
+    void applyAccentToWindowIcon(accent);
+  }, [accent]);
 
   // Seed the curated zone library onto disk (all curated presets, including the
   // community extras). Re-runs when the shipped set version grows so existing

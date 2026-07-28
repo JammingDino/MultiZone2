@@ -10,30 +10,32 @@ export interface Citation {
   /** 1-based position shown in the Sources list and inline marker after filtering. */
   index: number;
   /**
-   * The number as the model would have written it (`[refIndex]`) — the tool's
-   * `ref` / collect order. Before filtering this equals `index`; after filtering
-   * to the matched subset the list is renumbered but `refIndex` is preserved so
-   * any inline `[n]` markers a model *does* emit can still be relabelled.
+   * Every number the model may have written for this source — the `ref` field
+   * the citing tool put on each result, which is what its `citation_instructions`
+   * told the model to write. Usually one, but a source can carry several: local
+   * search returns one result per *chunk* and several chunks of the same file
+   * collapse into one citation, so `[1]` and `[2]` can both mean this file.
+   * Falls back to collect order for a tool result that reports no `ref`.
    */
-  refIndex: number;
+  refs: number[];
   kind: "web" | "file" | "knowledge";
   title: string;
   /** Web source URL (absent for file/knowledge citations). */
   url?: string;
   fileName?: string;
-  /** Relative path within the knowledge base (knowledge citations). */
+  /** Path as shown — project-relative for knowledge hits, absolute for reads. */
   path?: string;
+  /**
+   * The same file as an absolute path, when one is known. `path` is what reads
+   * well in the Sources list; this is what the OS needs to reveal the file.
+   * Absent when the project directory has moved or been unset since indexing,
+   * in which case the source is listed but not clickable.
+   */
+  absPath?: string;
   /** Page count for PDF file sources, when known. */
   pages?: number;
-  /** Web result snippet — not displayed; used to detect content reuse in the answer. */
+  /** Web result snippet — carried for the Sources list only. */
   snippet?: string;
-  /**
-   * Lowercased substring in the answer to anchor this source's inline marker to
-   * (a filename for file/knowledge sources, a distinctive word for web). Absent
-   * when no confident, specific anchor was found — the source still appears in
-   * the Sources list, just without an inline marker. Consumed by remarkCitations.
-   */
-  anchor?: string;
 }
 
 /** A file attachment referenced by the turn (from the preceding user message). */
@@ -92,15 +94,22 @@ export function collectCitations(blocks: TurnBlock[], fileSources: FileSource[] 
  * listed as "retrieved" — a carried source surfaces only if the answer actually
  * cites it (see `matchedCitations`), so a chat with a big search behind it
  * doesn't drag thirty stale URLs through every later turn.
+ *
+ * Only the **most recent** citing tool result is carried (0.9.10). Every search
+ * numbers its own results from 1, so folding several earlier searches into one
+ * list makes `[1]` mean two different sources at once — and a marker that
+ * resolves to two sources is not provenance, it's a coin toss. The last search
+ * is the one still shaping the model's answer, so it is the one whose numbering
+ * a bare `[n]` refers to.
  */
 export function collectCarriedCitations(
   messages: Message[],
   firstTurnMsgId: string | undefined,
 ): Citation[] {
-  const sink = new CitationSink();
   // Tool results carry only a `toolCallId`, so the tool's *name* has to come
   // from the assistant message that requested it.
   const nameByCallId = new Map<string, string>();
+  let latest: Citation[] = [];
 
   for (const m of messages) {
     if (firstTurnMsgId && m.id === firstTurnMsgId) break;
@@ -108,11 +117,16 @@ export function collectCarriedCitations(
       for (const tc of parseToolCalls(m.toolCalls)) nameByCallId.set(tc.id, tc.function.name);
     } else if (m.role === "tool" && m.toolCallId) {
       const name = nameByCallId.get(m.toolCallId);
-      if (name) sink.absorbToolResult(name, m.content);
+      if (!name) continue;
+      const sink = new CitationSink();
+      sink.absorbToolResult(name, m.content);
+      // A non-citing tool (or an empty/failed result) leaves the sink empty and
+      // must not wipe the last real search.
+      if (sink.list.length > 0) latest = sink.list;
     }
   }
 
-  return sink.list;
+  return latest;
 }
 
 function parseToolCalls(json: string | null): ToolCall[] {
@@ -124,31 +138,58 @@ function parseToolCalls(json: string | null): ToolCall[] {
   return [];
 }
 
+/** A tool result's own `ref` for a row, when it reports one. */
+function refOf(row: any): number | undefined {
+  const n = typeof row?.ref === "number" ? row.ref : Number(row?.ref);
+  return Number.isInteger(n) && n > 0 ? n : undefined;
+}
+
 /** Accumulates de-duplicated, contiguously numbered citations from tool results. */
 class CitationSink {
   readonly list: Citation[] = [];
-  private readonly seen = new Set<string>();
+  private readonly byKey = new Map<string, Citation>();
 
-  private push(c: Omit<Citation, "index" | "refIndex">) {
+  /** Add a source, or — if it was already collected — record that this `ref`
+   *  also points at it (several local-search chunks of one file, or the same URL
+   *  returned by two searches in the turn). */
+  private push(key: string, ref: number | undefined, c: Omit<Citation, "index" | "refs">) {
+    const existing = this.byKey.get(key);
     const n = this.list.length + 1;
-    this.list.push({ index: n, refIndex: n, ...c });
+    if (existing) {
+      const r = ref ?? n;
+      if (!existing.refs.includes(r)) existing.refs.push(r);
+      return;
+    }
+    const created: Citation = { index: n, refs: [ref ?? n], ...c };
+    this.byKey.set(key, created);
+    this.list.push(created);
   }
 
   /** A knowledge/file citation for a local path (local-search hits and
    *  `read_file` reads), de-duplicated by path. */
-  private pushPath(path: string, title?: string) {
+  private pushPath(
+    path: string,
+    title: string | undefined,
+    ref: number | undefined,
+    absPath?: string,
+  ) {
     if (!path) return;
-    const key = `kb:${path}`;
-    if (this.seen.has(key)) return;
-    this.seen.add(key);
-    this.push({ kind: "knowledge", title: title || basename(path), path, fileName: basename(path) });
+    this.push(`kb:${path}`, ref, {
+      kind: "knowledge",
+      title: title || basename(path),
+      path,
+      absPath,
+      fileName: basename(path),
+    });
   }
 
   pushFile(f: FileSource) {
-    const key = `file:${f.fileName}`;
-    if (this.seen.has(key)) return;
-    this.seen.add(key);
-    this.push({ kind: "file", title: f.fileName, fileName: f.fileName, pages: f.pages });
+    this.push(`file:${f.fileName}`, undefined, {
+      kind: "file",
+      title: f.fileName,
+      fileName: f.fileName,
+      pages: f.pages,
+    });
   }
 
   absorbToolResult(name: string, rawContent: string) {
@@ -171,9 +212,8 @@ class CitationSink {
       const results = Array.isArray(data?.results) ? data.results : [];
       for (const r of results) {
         const url = typeof r?.url === "string" ? r.url : "";
-        if (!url || this.seen.has(url)) continue;
-        this.seen.add(url);
-        this.push({
+        if (!url) continue;
+        this.push(url, refOf(r), {
           kind: "web",
           url,
           title: (typeof r?.title === "string" && r.title.trim()) || hostname(url),
@@ -181,18 +221,24 @@ class CitationSink {
         });
       }
     } else if (isLocalSearch) {
-      // One citation per source file (chunks of the same file collapse).
+      // One citation per source file (chunks of the same file collapse, each
+      // contributing its own `ref` so any of them resolves to the file).
       const results = Array.isArray(data?.results) ? data.results : [];
       for (const r of results) {
         this.pushPath(
           typeof r?.source === "string" ? r.source : "",
           typeof r?.title === "string" ? r.title.trim() : undefined,
+          refOf(r),
+          typeof r?.abs_path === "string" ? r.abs_path : undefined,
         );
       }
     } else {
-      // read_file — the file the model read (skipped for image/error results,
-      // which don't carry a source path).
-      this.pushPath(typeof data?.source === "string" ? data.source : "");
+      // read_file — the file the model read. Carries its own `ref` (renumbered
+      // per turn on the backend), so a read is citable exactly like a search
+      // hit. Image and error results have no source path and are skipped.
+      // read_file's `source` is already absolute, so it is both.
+      const source = typeof data?.source === "string" ? data.source : "";
+      this.pushPath(source, undefined, refOf(data), source || undefined);
     }
   }
 }
@@ -208,6 +254,7 @@ export function citationKey(c: Citation): string {
   return c.url ?? (c.path ? `kb:${c.path}` : `file:${c.fileName ?? c.title}`);
 }
 
+
 /** Joined plain text of a turn's answer (text blocks only). */
 function answerText(blocks: TurnBlock[]): string {
   return blocks
@@ -216,8 +263,7 @@ function answerText(blocks: TurnBlock[]): string {
     .join("\n");
 }
 
-/** All distinct `[n]` marker numbers a model *did* emit in the answer (a bonus
- *  signal layered on top of content matching — most models emit none). */
+/** Every distinct `[n]` marker number the model wrote in the answer. */
 function usedMarkers(answer: string): Set<number> {
   const used = new Set<number>();
   const re = /\[(\d+)\]/g;
@@ -226,171 +272,48 @@ function usedMarkers(answer: string): Set<number> {
   return used;
 }
 
-/** A URL, or a bare hostname with a recognisable public suffix. */
-const URLISH =
-  /(?:https?:\/\/\S+|\b[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.(?:com|org|net|io|ai|dev|co|online|app|gov|edu|xyz|sh|me|info|blog)\b)/i;
-
 /**
- * True for a line that is a bare *reference entry* rather than prose — a short
- * label plus a link, as models like to append in a trailing source list:
+ * The cited subset of the candidate list — the sources the model actually
+ * referenced with an inline `[n]` marker. Drives both the marker rendering and
+ * the "Used" section of the Sources list; the full candidate list is shown
+ * separately as "All retrieved".
  *
- *     Official site: ornith.online
- *     - Technical blog: https://deep-reinforce.com/…
+ * Citation placement is entirely the model's call (0.9.10). Every search tool
+ * numbers its results with a `ref` and tells the model to write `[ref]` after
+ * the claim it supports (see `citation_instructions` in smart_search/web_search),
+ * so a marker means the model asserted that source backs that sentence.
  *
- * Anchoring an inline marker inside one of these is what used to yank markers
- * out of the body and pile them up at the bottom of the answer (often stacked,
- * `ornith.online[2][8]`, when several results shared a host). Both the anchor
- * search here and the insertion pass in remarkCitations skip them, so a marker
- * lands next to the claim it supports or not at all.
- */
-export function isReferenceLine(text: string): boolean {
-  const t = text.trim().replace(/^[-*+]\s+/, "");
-  if (!t || !URLISH.test(t)) return false;
-  const words = t
-    .replace(/https?:\/\/\S+/gi, " ")
-    .replace(/[^\w'-]+/g, " ")
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
-  return words.length <= 8;
-}
-
-/** The answer with its trailing/inline reference entries removed — the region an
- *  inline marker may legitimately anchor into. */
-function proseText(answer: string): string {
-  return answer
-    .split("\n")
-    .filter((line) => !isReferenceLine(line))
-    .join("\n");
-}
-
-const STOPWORDS = new Set(
-  ("the and for that with this from your you are was were has have had not but they their them then \
-    than out about into over more most some such can will just like also been being which who what when \
-    where why how our its his her she him these those there here only very each other into onto upon".split(
-    /\s+/,
-  ))
-);
-
-/** Distinctive lowercased tokens (≥4 chars, non-stopword) — keeps numbers like
- *  "17025" so identifiers survive. */
-function distinctiveTokens(text: string): Set<string> {
-  const out = new Set<string>();
-  for (const tok of text.toLowerCase().split(/[^a-z0-9]+/)) {
-    if (tok.length >= 4 && !STOPWORDS.has(tok)) out.add(tok);
-  }
-  return out;
-}
-
-/**
- * The "Used" / cited subset of the candidate list, with inline-marker anchors.
- * Drives both the inline `[n]` markers and the "Used" section of the Sources
- * list; the full candidate list is shown separately as "All retrieved".
+ * The previous releases layered a heuristic on top: when the model emitted no
+ * markers, a source earned one wherever a distinctive word from its title or
+ * snippet appeared in the answer. That guess had no idea what a sentence was
+ * *claiming* — a preamble like "gathering more detailed information" would
+ * collect a marker because "information" happened to be unique to one result,
+ * attributing a sentence to a source that had nothing to do with it, sometimes
+ * before the search had even run. A wrong citation is worse than no citation:
+ * it launders a guess as provenance. So the heuristic is gone. No markers from
+ * the model means no inline markers — the Sources list still lists everything
+ * retrieved, which is the honest claim we can make.
  *
- * Hybrid strategy (0.6.2), tuned to stop the previous marker-spray:
- *  1. If the model emitted any explicit `[n]` markers, trust them exclusively:
- *     keep only the sources it referenced (by collect order) and do NOT auto-
- *     insert anything — remarkCitations just relabels the model's markers.
- *  2. Otherwise fall back to a *tight* heuristic — a source earns an inline
- *     marker only with a verbatim, specific, UNIQUE anchor in the answer:
- *       - web: the site host appears literally, OR a distinctive word (≥5 chars)
- *         that belongs to exactly one candidate across the whole set, or
- *       - file/knowledge: the filename or path appears verbatim.
- *     The old "≥3 shared words" path is gone, so generic overlap no longer
- *     sprinkles a marker for every search result.
- * Kept sources are renumbered contiguously.
- *
- * `carried` holds sources retrieved in *earlier* turns of the chat (0.9.4).
- * They go through the same matching, but are appended after this turn's own
- * candidates and only survive if the answer genuinely references them.
+ * `carried` holds sources retrieved in *earlier* turns of the chat (0.9.4) — a
+ * follow-up answer routinely leans on a search the model ran a turn or two ago.
+ * They are only consulted when this turn ran no citing tool of its own: then the
+ * most recent search's numbering is the only one in play, so `[1]` is
+ * unambiguous. If this turn *did* search, its own results own the numbering and
+ * a carried source can't be what `[1]` meant, so carried are ignored rather than
+ * guessed at.
  */
 export function matchedCitations(
   candidates: Citation[],
   blocks: TurnBlock[],
   carried: Citation[] = [],
 ): Citation[] {
-  // Carried sources already present in this turn's own results would otherwise
-  // be matched (and numbered) twice.
-  const ownKeys = new Set(candidates.map(citationKey));
-  const pool = [...candidates, ...carried.filter((c) => !ownKeys.has(citationKey(c)))];
+  const pool = candidates.length > 0 ? candidates : carried;
   if (pool.length === 0) return [];
 
-  const answer = answerText(blocks);
-  const markers = usedMarkers(answer);
+  const markers = usedMarkers(answerText(blocks));
+  if (markers.size === 0) return [];
 
-  // 1. Model-driven: trust explicit markers, no heuristic insertion. Only this
-  // turn's candidates are numbered from the model's point of view, so a carried
-  // source can never be what a bare `[n]` meant.
-  if (markers.size > 0) {
-    return candidates
-      .filter((c) => markers.has(c.refIndex))
-      .map((c, i) => ({ ...c, index: i + 1, anchor: undefined }));
-  }
-
-  // 2. Tight heuristic, run over the prose only — never the trailing reference
-  // list (see isReferenceLine).
-  const prose = proseText(answer);
-  const lowerProse = prose.toLowerCase();
-  const answerTokens = distinctiveTokens(prose);
-  const ownTokens = new Map<Citation, Set<string>>();
-  const df = new Map<string, number>();
-  // Hosts are shared far more often than distinctive words (several results
-  // from one site), so a host only anchors when it belongs to a single source.
-  const hostDf = new Map<string, number>();
-  for (const c of pool) {
-    const toks = distinctiveTokens(`${c.title ?? ""} ${c.snippet ?? ""}`);
-    ownTokens.set(c, toks);
-    for (const t of toks) df.set(t, (df.get(t) ?? 0) + 1);
-    if (c.kind === "web" && c.url) {
-      const h = hostname(c.url).toLowerCase();
-      hostDf.set(h, (hostDf.get(h) ?? 0) + 1);
-    }
-  }
-
-  const kept: { c: Citation; anchor: string }[] = [];
-  for (const c of pool) {
-    const anchor = tightAnchor(c, lowerProse, answerTokens, ownTokens.get(c)!, df, hostDf);
-    if (anchor) kept.push({ c, anchor });
-  }
-
-  return kept.map(({ c, anchor }, i) => ({ ...c, index: i + 1, anchor }));
-}
-
-/** A verbatim, specific, unique anchor for a source, or undefined if none.
- *  Web sources anchor on a literal host mention or a distinctive word owned by
- *  exactly one candidate; file/knowledge sources on a literal filename/path. */
-function tightAnchor(
-  c: Citation,
-  lowerAnswer: string,
-  answerTokens: Set<string>,
-  ownTokens: Set<string>,
-  df: Map<string, number>,
-  hostDf: Map<string, number>,
-): string | undefined {
-  if (c.kind === "web") {
-    const host = c.url ? hostname(c.url).toLowerCase() : "";
-    // Literal host mention (contains a dot → matched as a substring downstream),
-    // but only when this is the sole source from that host.
-    if (host && (hostDf.get(host) ?? 0) === 1 && lowerAnswer.includes(host)) return host;
-    // Otherwise the longest distinctive word that (a) appears in the answer and
-    // (b) is unique to this single source across every candidate.
-    let best: string | undefined;
-    let bestLen = 0;
-    for (const t of ownTokens) {
-      if (t.length < 5 || !answerTokens.has(t) || (df.get(t) ?? 0) !== 1) continue;
-      if (t.length > bestLen) {
-        best = t;
-        bestLen = t.length;
-      }
-    }
-    return best;
-  }
-  // file / knowledge — the model typically names the file it drew on.
-  const fname = (c.fileName ?? "").toLowerCase();
-  if (fname && lowerAnswer.includes(fname)) return fname;
-  if (c.path) {
-    const p = c.path.toLowerCase().replace(/\\/g, "/");
-    if (p && lowerAnswer.replace(/\\/g, "/").includes(p)) return p;
-  }
-  return undefined;
+  return pool
+    .filter((c) => c.refs.some((r) => markers.has(r)))
+    .map((c, i) => ({ ...c, index: i + 1 }));
 }

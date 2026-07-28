@@ -347,6 +347,16 @@ input[type="color"]:hover { border-color: var(--color-accent); }
   background: var(--color-panel-hover);
   font-style: normal;
 }
+/* A file marker that resolves to a path on disk: clicking shows it in the OS
+   file manager. Attachments on the user's own message have no path, so they
+   keep the flat non-interactive styling above. */
+.markdown .citation-ref.citation-revealable {
+  cursor: pointer;
+}
+.markdown .citation-ref.citation-revealable:hover {
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
 
 .markdown > *:first-child {
   margin-top: 0;

@@ -14,24 +14,19 @@ pub fn definitions() -> Vec<Tool> {
             function: ToolFunction {
                 name: "save_memory".into(),
                 description:
-                    "Save a short, durable fact to long-term memory so you can recall it in later \
-                     turns and future chats. Use this for stable preferences, decisions, or context \
-                     worth remembering — not for transient details. Keep each entry to one concise \
-                     fact. Choose the narrowest scope that fits: 'chat' (this conversation only), \
-                     'project' (every chat in the current project), or 'global' (every chat). \
-                     Defaults to 'chat'."
+                    "Call this when you learn a stable preference, decision, or piece of context \
+                     worth recalling in later turns and future chats — not for transient details. \
+                     One concise fact per entry. Pick the narrowest scope that fits."
                         .into(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
-                        "content": {
-                            "type": "string",
-                            "description": "The fact to remember, as one concise sentence."
-                        },
+                        "content": { "type": "string", "description": "The fact, as one sentence." },
                         "scope": {
                             "type": "string",
                             "enum": ["chat", "project", "global"],
-                            "description": "Where the memory applies. Defaults to 'chat'. 'project' falls back to 'chat' if this chat has no project."
+                            "default": "chat",
+                            "description": "'chat' = this conversation, 'project' = every chat in it (falls back to 'chat' when there is none), 'global' = everywhere."
                         }
                     },
                     "required": ["content"]
@@ -43,10 +38,8 @@ pub fn definitions() -> Vec<Tool> {
             function: ToolFunction {
                 name: "read_memory".into(),
                 description:
-                    "Read back memories you saved earlier. The most relevant memories are already \
-                     injected into your context each turn, so call this only when you need the full \
-                     list or want to confirm what is stored. Omit 'scope' to get everything that \
-                     applies here (global + this project + this chat), or pass a specific scope."
+                    "Relevant memories are already injected into your context each turn, so call \
+                     this only when you need the full list or want to confirm what is stored."
                         .into(),
                 parameters: json!({
                     "type": "object",
@@ -54,7 +47,7 @@ pub fn definitions() -> Vec<Tool> {
                         "scope": {
                             "type": "string",
                             "enum": ["chat", "project", "global"],
-                            "description": "Optional: restrict to a single scope. Omit for all applicable memories."
+                            "description": "Restrict to one scope. Omit for everything that applies here."
                         }
                     }
                 }),

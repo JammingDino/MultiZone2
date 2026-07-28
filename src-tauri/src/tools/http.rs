@@ -28,39 +28,27 @@ pub fn definition() -> Tool {
         function: ToolFunction {
             name: "http_request".into(),
             description:
-                "Make an HTTP request to a URL and get back the raw status, headers, and body. \
-                 Use this to call an API — fetch JSON from an endpoint, POST to a service, drive a \
-                 local server. To *read a web page* as prose instead, use `extract_url`, which \
-                 strips the navigation and returns clean text.\n\n\
-                 The user is asked to approve every request before it is sent, and can see the \
-                 method, URL, and body. Large responses are truncated."
+                "Call this to hit an API — fetch JSON from an endpoint, POST to a service, drive a \
+                 local server. Returns raw status, headers, and body (large ones truncated). To \
+                 *read a web page* as prose, use `extract_url` instead. The user approves every \
+                 request before it is sent."
                     .into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "url": {
-                        "type": "string",
-                        "description": "Full URL, including the scheme (http:// or https://)."
-                    },
+                    "url": { "type": "string", "description": "Full URL including http:// or https://." },
                     "method": {
                         "type": "string",
                         "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"],
-                        "description": "HTTP method. Defaults to GET.",
                         "default": "GET"
                     },
                     "headers": {
                         "type": "object",
-                        "description": "Request headers as a flat object, e.g. {\"Authorization\": \"Bearer …\"}.",
+                        "description": "Flat object, e.g. {\"Authorization\": \"Bearer …\"}.",
                         "additionalProperties": { "type": "string" }
                     },
-                    "body": {
-                        "type": "string",
-                        "description": "Request body as a string. For JSON, send the serialized JSON and set a Content-Type header."
-                    },
-                    "json": {
-                        "type": "object",
-                        "description": "Convenience alternative to `body`: send this object as a JSON body, with the Content-Type set for you."
-                    }
+                    "body": { "type": "string", "description": "Raw body; set Content-Type yourself." },
+                    "json": { "type": "object", "description": "Send as a JSON body, Content-Type set for you." }
                 },
                 "required": ["url"]
             }),

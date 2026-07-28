@@ -183,6 +183,7 @@ pub fn run() {
             commands::library::delete_library_entry,
             commands::files::read_output_file,
             commands::files::open_path,
+            commands::files::reveal_path,
             commands::messages::list_tool_functions,
             commands::tool_usage::get_tool_usage,
             commands::tool_usage::reset_tool_usage,

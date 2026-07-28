@@ -37,3 +37,20 @@ pub async fn open_path(path: String) -> AppResult<()> {
     opener::open(&path).map_err(|e| AppError::Other(format!("could not open '{path}': {e}")))?;
     Ok(())
 }
+
+/// Show a file in the OS file manager with the item itself selected — Explorer
+/// on Windows, Finder on macOS, the desktop's file manager on Linux.
+///
+/// This is what a *citation* wants (0.9.10). Clicking a web source opens the
+/// page, so the file equivalent looks like it should open the file — but a
+/// citation is a claim about provenance, and the useful answer to "where did
+/// that come from" is the file in its folder, not its contents launched into
+/// whatever application owns the extension. Opening is also the destructive
+/// reading: clicking a `.xlsx` source to check a number should not start Excel,
+/// and a citation pointing at a `.bat` or `.ps1` must never execute it.
+#[tauri::command]
+pub async fn reveal_path(path: String) -> AppResult<()> {
+    opener::reveal(&path)
+        .map_err(|e| AppError::Other(format!("could not reveal '{path}': {e}")))?;
+    Ok(())
+}

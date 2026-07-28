@@ -8,7 +8,7 @@ import { CodeBlock } from "./CodeBlock";
 import type { Citation } from "@/lib/citations";
 import { citationPlugin } from "@/lib/remarkCitations";
 import { normalizeMath } from "@/lib/normalizeMath";
-import { openPath } from "@/lib/tauri";
+import { openPath, revealPath } from "@/lib/tauri";
 
 /** http(s) links can't navigate inside the Tauri webview — route them through
  *  the OS default browser. Other hrefs (in-page anchors) fall through to default. */
@@ -77,8 +77,23 @@ export function Markdown({ source, citations }: { source: string; citations?: Ci
   // being squeezed inline. Memoized so streaming re-renders don't repeat the work.
   const normalized = useMemo(() => normalizeMath(source), [source]);
 
+  // File citation markers carry `data-reveal-path` (see remarkCitations). They
+  // are rendered deep inside remark's output, so the click is delegated from
+  // the container rather than threaded through a component override.
+  function onClick(e: React.MouseEvent<HTMLDivElement>) {
+    const el = (e.target as HTMLElement).closest<HTMLElement>("[data-reveal-path]");
+    const path = el?.dataset.revealPath;
+    if (!path) return;
+    e.preventDefault();
+    revealPath(path).catch((err) => console.error("revealPath failed", err));
+  }
+
   return (
-    <div className="markdown" style={{ fontSize: "var(--font-size-message, 14px)" }}>
+    <div
+      className="markdown"
+      style={{ fontSize: "var(--font-size-message, 14px)" }}
+      onClick={onClick}
+    >
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
         rehypePlugins={REHYPE_PLUGINS}

@@ -26,27 +26,21 @@ pub fn definition() -> Tool {
         tool_type: "function".into(),
         function: ToolFunction {
             name: "search_local_files".into(),
-            description: "Search the user's own local files — the documents in this project's \
-folder, which have been indexed for you — and return the passages most relevant to a query. \
-This is a meaning-based (semantic) search: describe what you are looking for in plain language \
-rather than guessing exact wording. Use it whenever the user's question might be answered by \
-their own files, or to ground your answer in their documents. Returns the most relevant text \
-chunks with the file each came from; cite that file when you use a chunk. To find an exact \
-string or symbol instead of a topic, use `search_file_text`."
+            description: "Call this whenever the user's question might be answered by their own \
+indexed documents, or to ground an answer in them. Semantic search — describe what you want in \
+plain language rather than guessing exact wording; for an exact string or symbol use \
+`search_file_text` instead. Returns passages with the file each came from."
                 .into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "What to look for. A focused natural-language question or topic works best."
-                    },
+                    "query": { "type": "string", "description": "A focused natural-language question or topic." },
                     "max_results": {
                         "type": "integer",
                         "minimum": 1,
                         "maximum": MAX_K,
                         "default": DEFAULT_K,
-                        "description": "How many chunks to return (default 5)."
+                        "description": "How many chunks to return."
                     }
                 },
                 "required": ["query"]
@@ -97,7 +91,12 @@ pub async fn run(
                 .map(|(i, h)| {
                     json!({
                         "ref": i + 1,
+                        // `source` stays project-relative — that is the form
+                        // worth showing a model. `abs_path` is carried for the
+                        // UI, which needs a real path to reveal the file in the
+                        // OS file manager when the citation is clicked.
                         "source": h.path,
+                        "abs_path": h.abs_path,
                         "title": h.title,
                         "chunk": h.ordinal,
                         "score": (h.score * 1000.0).round() / 1000.0,

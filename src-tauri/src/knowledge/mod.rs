@@ -72,7 +72,14 @@ pub struct IndexSummary {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchHit {
+    /// Path relative to the project's indexed directory — what the model is
+    /// shown, and what is stored in `kb_documents`.
     pub path: String,
+    /// The same file as an absolute path (0.9.10). A relative path is the right
+    /// thing to show a model but useless to the OS, and a citation has to be
+    /// openable in the file manager. `None` if the project's directory has been
+    /// unset or moved since indexing.
+    pub abs_path: Option<String>,
     pub title: String,
     pub ordinal: i64,
     pub text: String,
@@ -536,11 +543,23 @@ pub async fn search(
     .fetch_all(db)
     .await?;
 
+    // Stored paths are relative to the project directory; resolve them back to
+    // absolute so a citation can be revealed in the file manager.
+    let root = project
+        .directory
+        .as_deref()
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from);
+
     let mut scored: Vec<SearchHit> = rows
         .into_iter()
         .map(|(path, title, ordinal, text, blob)| {
             let score = cosine(&query_vec, &blob_to_vec(&blob));
-            SearchHit { path, title, ordinal, text, score }
+            let abs_path = root
+                .as_ref()
+                .map(|r| r.join(&path).to_string_lossy().to_string());
+            SearchHit { path, abs_path, title, ordinal, text, score }
         })
         .collect();
     scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));

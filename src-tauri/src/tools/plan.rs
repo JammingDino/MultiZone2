@@ -23,13 +23,10 @@ pub fn definition() -> Tool {
         function: ToolFunction {
             name: "update_plan".into(),
             description:
-                "Keep a visible checklist of the steps in a multi-step task. Call it once at the \
-                 start with the whole plan, then again after each step to mark progress. Each call \
-                 replaces the previous list, so always send every step with its current status.\n\n\
-                 Use it when a task takes several distinct steps or several tool calls — it keeps \
-                 you on track and shows the user what you are doing and what is left. Skip it for \
-                 anything you can answer in one step. Mark exactly one step `in_progress` at a \
-                 time, and finish by marking the last step `done`."
+                "Call this when a task takes several distinct steps or tool calls — once up front \
+                 with the whole plan, then after each step to mark progress. Skip it for anything \
+                 you can answer in one step. Each call replaces the list, so always send every \
+                 step; keep exactly one `in_progress`, and finish by marking the last one `done`."
                     .into(),
             parameters: json!({
                 "type": "object",

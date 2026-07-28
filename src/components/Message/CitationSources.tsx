@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight, Link2, FileType, Database } from "lucide-react";
 import { citationKey, type Citation } from "@/lib/citations";
-import { openPath } from "@/lib/tauri";
+import { openPath, revealPath } from "@/lib/tauri";
 
 function hostname(url: string): string {
   try {
@@ -108,7 +108,28 @@ function SourceRow({ c, numbered = false }: { c: Citation; numbered?: boolean })
           <span className="truncate">{c.title}</span>
           <span className="shrink-0 text-[var(--color-text-muted)]">— {hostname(c.url)}</span>
         </a>
+      ) : c.kind === "knowledge" && c.absPath ? (
+        // A file the model read or matched. Clicking shows it in the OS file
+        // manager with the item selected — the file-source equivalent of a web
+        // source opening its page. Deliberately not `openPath`: a citation is a
+        // provenance claim, and checking it should not launch Excel, a browser,
+        // or in the worst case run a script.
+        <button
+          onClick={() =>
+            revealPath(c.absPath!).catch((err) => console.error("revealPath failed", err))
+          }
+          className="flex min-w-0 items-baseline gap-1 text-left text-[var(--color-accent)] hover:underline"
+          title={`Show in file manager — ${c.absPath}`}
+        >
+          <Database size={11} className="shrink-0 translate-y-0.5" />
+          <span className="truncate">{c.fileName ?? c.title}</span>
+          {c.path && c.path !== c.fileName ? (
+            <span className="min-w-0 shrink truncate text-[var(--color-text-muted)]">— {c.path}</span>
+          ) : null}
+        </button>
       ) : c.kind === "knowledge" ? (
+        // Indexed, but the project directory has moved or been unset — there is
+        // no path left to point at, so list it without pretending it is clickable.
         <span className="flex min-w-0 items-baseline gap-1 text-[var(--color-text)]" title={c.path}>
           <Database size={11} className="shrink-0 translate-y-0.5 text-[var(--color-text-muted)]" />
           <span className="truncate">{c.fileName ?? c.title}</span>
@@ -117,6 +138,8 @@ function SourceRow({ c, numbered = false }: { c: Citation; numbered?: boolean })
           ) : null}
         </span>
       ) : (
+        // An attachment on the user's message — it lives in the conversation,
+        // not on disk, so there is nothing to reveal.
         <span className="flex min-w-0 items-baseline gap-1 text-[var(--color-text)]">
           <FileType size={11} className="shrink-0 translate-y-0.5 text-[var(--color-text-muted)]" />
           <span className="truncate">{c.fileName ?? c.title}</span>

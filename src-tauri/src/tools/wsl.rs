@@ -51,43 +51,31 @@ pub fn definition() -> Tool {
         function: ToolFunction {
             name: "wsl_exec".into(),
             description:
-                "Run a Linux command in WSL (Ubuntu). By default each call is independent: \
-                 a fresh shell, nothing carried over, short timeout. Set persist=true to run \
-                 in a shell that stays alive for this chat, so working directory, environment \
-                 variables, activated virtualenvs and background jobs survive into later \
-                 calls — use it for multi-step work like `cd repo`, then `source .venv/bin/activate`, \
-                 then `pytest`. Once a persistent shell exists, later calls reuse it whether or not \
-                 they pass persist. Windows drives are under /mnt/c, /mnt/f and so on. Raise \
-                 timeout_s for slow work (builds, test suites); set new_session=true to discard \
-                 accumulated state and start clean."
+                "Run a Linux command in WSL (Ubuntu). Each call is independent by default. For \
+                 multi-step work that needs state to carry — `cd repo`, then `source \
+                 .venv/bin/activate`, then `pytest` — set `persist`; later calls then reuse that \
+                 shell whether or not they pass it. Windows drives are under /mnt/c, /mnt/f."
                     .into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "command": {
-                        "type": "string",
-                        "description": "The command to run, as you would type it in bash."
-                    },
+                    "command": { "type": "string", "description": "As you would type it in bash." },
                     "persist": {
                         "type": "boolean",
                         "default": false,
-                        "description": "Run in this chat's long-lived shell so state carries \
-                                        over to later calls. Default false (independent call)."
+                        "description": "Run in this chat's long-lived shell so cwd, env, and jobs survive into later calls."
                     },
                     "timeout_s": {
                         "type": "integer",
                         "minimum": 1,
                         "maximum": MAX_TIMEOUT_SECS,
                         "default": DEFAULT_TIMEOUT_SECS,
-                        "description": "Seconds to wait before giving up. Default 10. In a \
-                                        persistent session a timeout also resets the shell, \
-                                        since the stuck command still owns it."
+                        "description": "Raise for slow work (builds, test suites). A timeout also resets a persistent shell, since the stuck command still owns it."
                     },
                     "new_session": {
                         "type": "boolean",
                         "default": false,
-                        "description": "Discard this chat's existing persistent shell and start \
-                                        a fresh one before running. Use to clear bad state."
+                        "description": "Discard this chat's persistent shell and start clean. Use to clear bad state."
                     }
                 },
                 "required": ["command"]

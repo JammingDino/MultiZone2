@@ -19,6 +19,7 @@ pub mod knowledge;
 pub mod subchat;
 pub mod plan;
 pub mod http;
+pub mod citations;
 pub mod compact;
 pub mod wsl;
 
@@ -352,6 +353,24 @@ pub fn tool_safety_by_name(name: &str) -> u8 {
     }
 }
 
+/// Every tool function the model can be shown, with the JSON size of its
+/// definition. The tool list is rendered before the system prompt and the
+/// conversation on every single request, so it is the one part of the context
+/// the user never sees and always pays for.
+///
+/// Used by the `toolset_is_concise` test below and available to callers that
+/// want to report the cost of a zone's toolset.
+pub fn definition_sizes(ctx: &ToolContext) -> Vec<(&'static str, usize)> {
+    let mut out = Vec::new();
+    for id in ALL_TOOL_IDS {
+        for def in id.definitions(ctx) {
+            let bytes = serde_json::to_string(&def).map(|s| s.len()).unwrap_or(0);
+            out.push((id.as_str(), bytes));
+        }
+    }
+    out
+}
+
 /// Dispatch a tool call by name to the appropriate handler. `db` and `chat_id`
 /// are only used by tools that touch app state (e.g. `tag_chat`). `ctx`, `sink`
 /// and `caller_zone_id` are used by the subchat tools, which run nested turns.
@@ -425,5 +444,96 @@ pub async fn dispatch(
         other => Ok(serde_json::json!({
             "error": format!("unknown tool: {other}")
         }).to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A budget on the size of the tool definitions themselves.
+    ///
+    /// Tool schemas are rendered ahead of the system prompt and the whole
+    /// conversation on every request, so every word in a description is billed
+    /// on every turn, forever, whether or not the tool is used. Descriptions
+    /// still have to earn their length — the guidance that holds up is to say
+    /// *when* to call a tool, not to restate what its own schema already says —
+    /// but "explain it thoroughly" has no natural stopping point, and a
+    /// description only ever grows. This test is the stopping point.
+    ///
+    /// If it fails, first look for prose that repeats the parameter schema, or
+    /// the same paragraph pasted into several tools in a group; that is almost
+    /// always where the growth is. Raising the ceiling is a legitimate outcome —
+    /// deliberately, not by reflex.
+    #[test]
+    fn toolset_is_concise() {
+        // The full built-in surface. No real zone enables all of it at once, so
+        // this is the worst case rather than a typical request. Measured at
+        // 39,165 bytes before the 0.9.10 pass and 30,348 after; the ceiling
+        // leaves a little headroom for a genuinely new tool without leaving
+        // room to quietly re-inflate the descriptions.
+        const BUDGET_BYTES: usize = 31_000;
+
+        let ctx = ToolContext {
+            project_dir: Some(r"C:\Users\me\project".to_string()),
+            ..Default::default()
+        };
+        let sizes = definition_sizes(&ctx);
+        let total: usize = sizes.iter().map(|(_, n)| n).sum();
+
+        let mut report: Vec<_> = sizes.clone();
+        report.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+        let worst: Vec<String> = report
+            .iter()
+            .take(5)
+            .map(|(id, n)| format!("{id}={n}B"))
+            .collect();
+
+        eprintln!(
+            "tool definitions: {total} bytes across {} functions (budget {BUDGET_BYTES}). \
+             Largest: {}",
+            sizes.len(),
+            worst.join(", "),
+        );
+
+        assert!(
+            total <= BUDGET_BYTES,
+            "tool definitions total {total} bytes across {} functions, over the \
+             {BUDGET_BYTES} byte budget. Largest: {}",
+            sizes.len(),
+            worst.join(", "),
+        );
+    }
+
+    /// The filesystem group takes the working directory and names it so the
+    /// model writes a path that resolves first time. That hint used to be
+    /// pasted into both the tool description *and* every `path` parameter, so
+    /// it shipped twice per tool and ~19 times across the four file groups.
+    /// Once per tool is enough to steer the model; more than that is rent.
+    #[test]
+    fn path_hint_appears_once_per_file_tool() {
+        let ctx = ToolContext {
+            project_dir: Some(r"C:\Users\me\project".to_string()),
+            ..Default::default()
+        };
+
+        for group in [
+            ToolId::FileSystem,
+            ToolId::FileManage,
+            ToolId::FileSearch,
+            ToolId::PresentFile,
+        ] {
+            for def in group.definitions(&ctx) {
+                let json = serde_json::to_string(&def).unwrap();
+                // The hint is the only place the working directory is spelled
+                // out, so counting it counts the hint.
+                let occurrences = json.matches("PATHS:").count();
+                assert!(
+                    occurrences <= 1,
+                    "{} repeats the path hint {occurrences} times",
+                    def.function.name,
+                );
+            }
+        }
     }
 }

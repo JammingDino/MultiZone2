@@ -1214,6 +1214,11 @@ async fn run_participant_turn(
     let mut produced_output = false;
     // A turn the user stopped is an empty result on purpose, not a failure.
     let mut cancelled_turn = false;
+    // Citation numbering for this turn. Every citing tool numbers its own
+    // results from 1, so without a shared counter a search and a `read_file` in
+    // the same turn would both tell the model to write `[1]`. See
+    // `tools::citations`.
+    let mut next_citation_ref = 1u32;
 
     for step in 0..max_steps {
         if cancel.load(Ordering::Relaxed) {
@@ -1514,7 +1519,7 @@ async fn run_participant_turn(
                         name: tc.function.name.clone(),
                     },
                 );
-                tools::dispatch(
+                let out = tools::dispatch(
                     &tc.function.name,
                     &tc.function.arguments,
                     &zone_config,
@@ -1529,7 +1534,10 @@ async fn run_participant_turn(
                 .await
                 .unwrap_or_else(|e| {
                     serde_json::json!({ "error": e.to_string() }).to_string()
-                })
+                });
+                // Continue this turn's citation numbering. A no-op for every
+                // tool that doesn't return refs.
+                tools::citations::renumber_refs(out, &mut next_citation_ref)
             } else {
                 serde_json::json!({
                     "error": "Tool execution denied by user.",

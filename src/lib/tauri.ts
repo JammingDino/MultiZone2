@@ -223,6 +223,12 @@ export const readTextFile = (path: string) =>
   invoke<string>("read_output_file", { path });
 /** Open a file or URL in the OS default app / browser (Tauri shell open). */
 export const openPath = (path: string) => invoke<void>("open_path", { path });
+/**
+ * Show a file in the OS file manager with the item selected, rather than
+ * opening it. What a citation wants: "where did this come from" is answered by
+ * the file in its folder, not by launching whatever app owns the extension.
+ */
+export const revealPath = (path: string) => invoke<void>("reveal_path", { path });
 
 export const deleteMessagesFrom = (chatId: string, messageId: string) =>
   invoke<void>("delete_messages_from", { chatId, messageId });

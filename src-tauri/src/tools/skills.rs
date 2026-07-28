@@ -11,28 +11,19 @@ pub fn definition() -> Tool {
         function: ToolFunction {
             name: "load_skill".into(),
             description:
-                "Load the full instructions for one of the available skills. Skills are \
-                 specialized, reusable instruction sets (e.g. a design guide or an output \
-                 format). The names and descriptions of the skills available to you are listed \
-                 in the system prompt under \"Skills\". When a user's request matches a skill's \
-                 described use case, call this tool with that skill's name BEFORE doing the work, \
-                 then follow the returned instructions. Call with no name (or an unknown name) to \
-                 get the catalog of available skills. If there are any relevant skills, look at them before responding.\n\n\
-                 Some skills are folders of several files: loading one returns a `files` list \
-                 alongside its instructions. Read any of those with a second call passing the same \
-                 `name` plus `file` — that is how a skill's own instructions tell you to open its \
-                 reference pages. Do not guess at a file's contents; load it."
+                "Call this BEFORE doing the work whenever a request matches one of the skills \
+                 listed under \"Skills\" in the system prompt, then follow the instructions it \
+                 returns. Call with no name for the catalog.\n\n\
+                 A multi-file skill returns a `files` list; open one with a second call passing the \
+                 same `name` plus `file`. Never guess at a file's contents — load it."
                     .into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "name": {
-                        "type": "string",
-                        "description": "The exact name of the skill to load, as listed in the Skills section of the system prompt."
-                    },
+                    "name": { "type": "string", "description": "Exact skill name, as listed in the system prompt." },
                     "file": {
                         "type": "string",
-                        "description": "Optional. Path of one file inside a multi-file skill, relative to the skill's folder (e.g. \"reference/polish.md\"). Only valid together with `name`. Paths written the long way in a skill's own text (e.g. \".claude/skills/impeccable/reference/polish.md\") are accepted too."
+                        "description": "One file inside a multi-file skill, relative to its folder (e.g. \"reference/polish.md\"). Only valid with `name`; a full path written in the skill's own text is accepted too."
                     }
                 }
             }),

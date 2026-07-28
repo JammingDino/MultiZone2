@@ -22,10 +22,16 @@ fn image_mime(path: &Path) -> Option<&'static str> {
     }
 }
 
-/// The read/write `file_system` group. Takes the chat's working directory so
-/// every description can name it and show a path that actually resolves —
-/// a tool whose `path` argument is described only in the abstract gets the
-/// argument wrong, and the model has no other way to learn the right shape.
+/// The read/write `file_system` group. Takes the chat's working directory so the
+/// path hint can name it and show a path that actually resolves — a tool whose
+/// `path` argument is described only in the abstract gets the argument wrong,
+/// and the model has no other way to learn the right shape.
+///
+/// The hint appears **once per tool**, at the end of the description (0.9.10).
+/// It used to be repeated inside each `path` parameter as well, so the same ~70
+/// tokens shipped twice per tool and ~19 times across the four file groups —
+/// roughly 1.3k tokens of pure duplication on every request from a zone with
+/// file access, before the model had read a single word of the conversation.
 pub fn definitions(project_dir: Option<&str>) -> Vec<Tool> {
     let hint = path_syntax_hint(project_dir);
     vec![
@@ -34,23 +40,17 @@ pub fn definitions(project_dir: Option<&str>) -> Vec<Tool> {
             function: ToolFunction {
                 name: "read_file".into(),
                 description: format!(
-                    "Read a file from disk. Access is restricted to the working directory and the \
-                     zone's allowed root paths.\n\n\
-                     For text files, returns the content as a string (invalid bytes are replaced).\n\
-                     For PDF files (.pdf), extracts and returns the text content from all pages.\n\
-                     For image files (png, jpg, gif, webp, bmp), set `as_image: true` to load the \
-                     image directly into the model's visual context.\n\n{hint}"
+                    "Read a file. Use before editing, and whenever the answer depends on what a \
+                     file actually contains. Text is returned as a string, `.pdf` as extracted \
+                     text; set `as_image` for an image file to put it in your visual context.\n\n{hint}"
                 ),
                 parameters: json!({
                     "type": "object",
                     "properties": {
-                        "path": {
-                            "type": "string",
-                            "description": hint.clone()
-                        },
+                        "path": { "type": "string" },
                         "as_image": {
                             "type": "boolean",
-                            "description": "Set to true to read the file as an image and inject it into the visual context. Supported formats: png, jpg/jpeg, gif, webp, bmp.",
+                            "description": "Read png/jpg/gif/webp/bmp as an image instead of text.",
                             "default": false
                         }
                     },
@@ -63,20 +63,17 @@ pub fn definitions(project_dir: Option<&str>) -> Vec<Tool> {
             function: ToolFunction {
                 name: "list_directory".into(),
                 description: format!(
-                    "List a directory as a nested JSON object. Files appear as their extension \
-                     string (e.g. \"rs\", \"toml\", \"\" for no extension); directories appear \
-                     as nested objects. Use \".\" for the working directory itself.\n\n{hint}"
+                    "List a directory when you need to know what is there before acting. Returns \
+                     nested JSON: a file is its extension string (\"rs\", \"\" for none), a \
+                     directory is an object. Pass \".\" for the working directory.\n\n{hint}"
                 ),
                 parameters: json!({
                     "type": "object",
                     "properties": {
-                        "path": {
-                            "type": "string",
-                            "description": format!("Directory to list. Use \".\" for the working directory itself. {hint}")
-                        },
+                        "path": { "type": "string" },
                         "depth": {
                             "type": "integer",
-                            "description": "How many directory levels to recurse. 1 = immediate children only (default), 2 = two levels, etc. A directory that is genuinely empty appears as {}; one whose contents weren't expanded because it sits at the depth limit appears as {\"…\": true} so the two are distinguishable.",
+                            "description": "Levels to recurse (1 = immediate children). An empty directory is {}; one left unexpanded at the depth limit is {\"…\": true}.",
                             "default": 1
                         }
                     },
@@ -89,21 +86,15 @@ pub fn definitions(project_dir: Option<&str>) -> Vec<Tool> {
             function: ToolFunction {
                 name: "create_file".into(),
                 description: format!(
-                    "Create a new file (or overwrite an existing one) with the given content. \
-                     Parent directories are created automatically, so a nested path such as \
-                     `docs/notes/summary.md` works without creating the folders first.\n\n{hint}"
+                    "Write a whole file, creating it or overwriting it. Use for new files; use \
+                     `edit_file` to change part of an existing one. Missing parent directories \
+                     are created.\n\n{hint}"
                 ),
                 parameters: json!({
                     "type": "object",
                     "properties": {
-                        "path": {
-                            "type": "string",
-                            "description": format!("File to create or overwrite. {hint}")
-                        },
-                        "content": {
-                            "type": "string",
-                            "description": "Full text content to write to the file."
-                        }
+                        "path": { "type": "string" },
+                        "content": { "type": "string", "description": "Full text to write." }
                     },
                     "required": ["path", "content"]
                 }),
@@ -114,26 +105,16 @@ pub fn definitions(project_dir: Option<&str>) -> Vec<Tool> {
             function: ToolFunction {
                 name: "edit_file".into(),
                 description: format!(
-                    "Edit a file by replacing an exact block of text with new text (like a targeted diff). \
-                     `old_text` must match exactly (including whitespace/newlines). \
-                     If `old_text` appears more than once, only the first occurrence is replaced. \
-                     Use `read_file` first to get the current content before editing.\n\n{hint}"
+                    "Change part of an existing file by replacing an exact block of text. Read the \
+                     file first — `old_text` must match byte for byte, whitespace included, and \
+                     only its first occurrence is replaced.\n\n{hint}"
                 ),
                 parameters: json!({
                     "type": "object",
                     "properties": {
-                        "path": {
-                            "type": "string",
-                            "description": format!("File to edit. {hint}")
-                        },
-                        "old_text": {
-                            "type": "string",
-                            "description": "The exact text to find and replace (must match the file content exactly)."
-                        },
-                        "new_text": {
-                            "type": "string",
-                            "description": "The text to replace it with."
-                        }
+                        "path": { "type": "string" },
+                        "old_text": { "type": "string", "description": "Exact text to replace." },
+                        "new_text": { "type": "string", "description": "Text to replace it with." }
                     },
                     "required": ["path", "old_text", "new_text"]
                 }),
@@ -153,23 +134,19 @@ pub fn present_file_definitions(project_dir: Option<&str>) -> Vec<Tool> {
         function: ToolFunction {
             name: "present_file".into(),
             description: format!(
-                "Present a file that already exists on disk to the user, inline in the chat. \
-                 Pair this with create_file / edit_file / read_file: produce or edit the file in one \
-                 call, then present it in another — no need to repeat its contents in the chat. \
-                 HTML files (.html) render as a live preview with an \"open in browser\" button; other \
-                 files show a card that opens them in their default app.\n\n{hint}"
+                "Show a file you already wrote to the user, inline in the chat — call this instead \
+                 of pasting the file's contents into your reply. `.html` renders as a live preview \
+                 with an \"open in browser\" button; anything else shows a card that opens it in \
+                 its default app.\n\n{hint}"
             ),
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": format!("The existing file to present. {hint}")
-                    },
+                    "path": { "type": "string" },
                     "format": {
                         "type": "string",
                         "enum": ["html", "md", "csv", "json", "txt"],
-                        "description": "Optional. Overrides how the file is presented; inferred from the file extension when omitted."
+                        "description": "Override the presentation; inferred from the extension when omitted."
                     }
                 },
                 "required": ["path"]
@@ -190,17 +167,16 @@ pub fn manage_definitions(project_dir: Option<&str>) -> Vec<Tool> {
             function: ToolFunction {
                 name: "move_file".into(),
                 description: format!(
-                    "Move or rename a file or folder. To rename in place, keep the same parent \
-                     directory and change only the final path segment. Missing parent directories \
-                     of the destination are created. Fails if the destination already exists \
-                     unless `overwrite` is true. Both paths are scope-checked.\n\n{hint}"
+                    "Move or rename a file or folder. To rename in place, keep the parent \
+                     directory and change only the last path segment. Missing destination parents \
+                     are created; an existing destination fails unless `overwrite`.\n\n{hint}"
                 ),
                 parameters: json!({
                     "type": "object",
                     "properties": {
-                        "from": { "type": "string", "description": format!("Existing path. {hint}") },
-                        "to":   { "type": "string", "description": format!("Destination path, including the new filename when renaming. {hint}") },
-                        "overwrite": { "type": "boolean", "description": "Replace the destination if it already exists.", "default": false }
+                        "from": { "type": "string", "description": "Existing path." },
+                        "to":   { "type": "string", "description": "Destination path, including the new filename when renaming." },
+                        "overwrite": { "type": "boolean", "description": "Replace the destination if it exists.", "default": false }
                     },
                     "required": ["from", "to"]
                 }),
@@ -211,16 +187,15 @@ pub fn manage_definitions(project_dir: Option<&str>) -> Vec<Tool> {
             function: ToolFunction {
                 name: "copy_file".into(),
                 description: format!(
-                    "Copy a file to a new path. Missing parent directories are created. Fails if \
-                     the destination exists unless `overwrite` is true. Copies a single file, not \
-                     a directory.\n\n{hint}"
+                    "Copy a single file (not a directory) to a new path. Missing destination \
+                     parents are created; an existing destination fails unless `overwrite`.\n\n{hint}"
                 ),
                 parameters: json!({
                     "type": "object",
                     "properties": {
-                        "from": { "type": "string", "description": format!("File to copy. {hint}") },
-                        "to":   { "type": "string", "description": format!("Destination path for the copy. {hint}") },
-                        "overwrite": { "type": "boolean", "description": "Replace the destination if it already exists.", "default": false }
+                        "from": { "type": "string", "description": "File to copy." },
+                        "to":   { "type": "string", "description": "Destination path for the copy." },
+                        "overwrite": { "type": "boolean", "description": "Replace the destination if it exists.", "default": false }
                     },
                     "required": ["from", "to"]
                 }),
@@ -231,18 +206,16 @@ pub fn manage_definitions(project_dir: Option<&str>) -> Vec<Tool> {
             function: ToolFunction {
                 name: "delete_file".into(),
                 description: format!(
-                    "Delete a file. This is destructive and cannot be undone — the user is asked \
-                     to approve every call. To delete a directory you must pass `recursive: true`, \
-                     which removes the directory and everything inside it; without it, a directory \
-                     path is refused.\n\n{hint}"
+                    "Delete a file. Destructive and not undoable — the user approves every call. A \
+                     directory path is refused unless `recursive` is set.\n\n{hint}"
                 ),
                 parameters: json!({
                     "type": "object",
                     "properties": {
-                        "path": { "type": "string", "description": format!("File (or directory, with `recursive`) to delete. {hint}") },
+                        "path": { "type": "string" },
                         "recursive": {
                             "type": "boolean",
-                            "description": "Required to delete a directory and all of its contents. Has no effect on a file.",
+                            "description": "Required to delete a directory and everything in it. No effect on a file.",
                             "default": false
                         }
                     },
@@ -255,13 +228,13 @@ pub fn manage_definitions(project_dir: Option<&str>) -> Vec<Tool> {
             function: ToolFunction {
                 name: "create_folder".into(),
                 description: format!(
-                    "Create a directory, including any missing parent directories. Succeeds \
-                     quietly if it already exists.\n\n{hint}"
+                    "Create a directory and any missing parents. Succeeds quietly if it already \
+                     exists.\n\n{hint}"
                 ),
                 parameters: json!({
                     "type": "object",
                     "properties": {
-                        "path": { "type": "string", "description": format!("Directory to create. {hint}") }
+                        "path": { "type": "string" }
                     },
                     "required": ["path"]
                 }),
@@ -280,18 +253,17 @@ pub fn search_definitions(project_dir: Option<&str>) -> Vec<Tool> {
             tool_type: "function".into(),
             function: ToolFunction {
                 name: "find_files".into(),
-                description:
-                    "Find files by name. Returns matching paths only (no contents), so it is cheap \
-                     to call. `pattern` is a glob matched against each file's path — e.g. \
-                     \"*.rs\", \"src/**/*.ts\", \"*config*\". Use this when you know roughly what a \
-                     file is called; use `search_file_text` when you know what is inside it."
-                        .into(),
+                description: format!(
+                    "Call this when you know roughly what a file is *called* — use \
+                     `search_file_text` when you know what is *inside* it. Returns paths only, so \
+                     it is cheap.\n\n{hint}"
+                ),
                 parameters: json!({
                     "type": "object",
                     "properties": {
-                        "pattern": { "type": "string", "description": "Glob pattern matched against the file path, e.g. \"**/*.rs\" or \"*test*\"." },
-                        "path": { "type": "string", "description": format!("Directory to search under. Defaults to the working directory. {hint}") },
-                        "max_results": { "type": "integer", "description": "Cap on paths returned (default 100).", "default": 100 }
+                        "pattern": { "type": "string", "description": "Glob matched against the file path, e.g. \"**/*.rs\", \"src/**/*.ts\", \"*config*\"." },
+                        "path": { "type": "string", "description": "Directory to search under. Defaults to the working directory." },
+                        "max_results": { "type": "integer", "description": "Cap on paths returned.", "default": 100 }
                     },
                     "required": ["pattern"]
                 }),
@@ -301,21 +273,20 @@ pub fn search_definitions(project_dir: Option<&str>) -> Vec<Tool> {
             tool_type: "function".into(),
             function: ToolFunction {
                 name: "search_file_text".into(),
-                description:
-                    "Search the contents of files for an exact string or regular expression, and \
-                     return each match with its file path and line number. This is exact search, \
-                     not semantic search: use it to find where a specific name, string, or symbol \
-                     appears. Narrow the sweep with `glob` (e.g. \"**/*.ts\") when you can."
-                        .into(),
+                description: format!(
+                    "Call this to find where a specific name, string, or symbol appears — exact \
+                     search, not semantic (that is `search_local_files`). Returns each match with \
+                     its path and line number. Narrow with `glob` when you can.\n\n{hint}"
+                ),
                 parameters: json!({
                     "type": "object",
                     "properties": {
-                        "query": { "type": "string", "description": "Text to search for. Treated as a regular expression unless `literal` is true." },
-                        "literal": { "type": "boolean", "description": "Match `query` as plain text rather than a regex.", "default": false },
-                        "case_sensitive": { "type": "boolean", "description": "Match case exactly.", "default": false },
-                        "glob": { "type": "string", "description": "Only search files whose path matches this glob, e.g. \"**/*.rs\"." },
-                        "path": { "type": "string", "description": format!("Directory to search under. Defaults to the working directory. {hint}") },
-                        "max_results": { "type": "integer", "description": "Cap on matching lines returned (default 50).", "default": 50 }
+                        "query": { "type": "string", "description": "Treated as a regex unless `literal` is true." },
+                        "literal": { "type": "boolean", "description": "Match `query` as plain text.", "default": false },
+                        "case_sensitive": { "type": "boolean", "default": false },
+                        "glob": { "type": "string", "description": "Only search paths matching this glob, e.g. \"**/*.rs\"." },
+                        "path": { "type": "string", "description": "Directory to search under. Defaults to the working directory." },
+                        "max_results": { "type": "integer", "description": "Cap on matching lines returned.", "default": 50 }
                     },
                     "required": ["query"]
                 }),
@@ -467,16 +438,13 @@ fn path_syntax_hint(project_dir: Option<&str>) -> String {
             let dir = dir.trim_end_matches(['/', '\\']);
             let sep = if dir.contains('\\') { '\\' } else { '/' };
             format!(
-                "PATH SYNTAX: the working directory is `{dir}`. Write `path` relative to it — \
-                 `notes.md`, `docs{sep}notes.md`. An absolute path is accepted only when it is \
-                 inside that directory, i.e. it starts with `{dir}{sep}`. A leading slash \
-                 (`/docs/notes.md`) or `~` is read as project-relative, not as a filesystem \
-                 root; anywhere else on disk is refused."
+                "PATHS: working directory is `{dir}`. Write paths relative to it (`notes.md`, \
+                 `docs{sep}notes.md`). A leading `/` or `~` is read as relative to it too. An \
+                 absolute path works only inside it; anywhere else on disk is refused."
             )
         }
-        None => "PATH SYNTAX: write `path` relative to the working directory (`notes.md`, \
-                 `docs/notes.md`), or as an absolute path inside one of the zone's allowed \
-                 roots."
+        None => "PATHS: write paths relative to the working directory (`notes.md`, \
+                 `docs/notes.md`), or absolute inside one of the zone's allowed roots."
             .to_string(),
     }
 }
@@ -616,11 +584,18 @@ pub async fn read_file(
     }
 }
 
-/// Nudge the model to cite a file it draws on, mirroring web_search /
-/// search_knowledge so reads surface in the Sources list.
+/// Nudge the model to cite a file it draws on, mirroring the searches so a read
+/// surfaces in the Sources list too.
+///
+/// The `ref` is deliberately not spelled out here (0.9.10). It used to say
+/// "cite it with [1]", which was true only when `read_file` was the turn's only
+/// citing call — a read after a search would tell the model to write `[1]` for
+/// the file when `[1]` already meant the first search hit. Refs are renumbered
+/// per turn now (see `tools::citations`), so the instruction has to point at
+/// the field rather than repeat a number that is no longer fixed.
 const READ_FILE_CITATION: &str =
-    "If you use information from this file in your answer, cite it inline with [1] \
-     immediately after the claim.";
+    "If you use information from this file in your answer, cite it inline with its `ref` \
+     number in square brackets immediately after the claim.";
 
 pub async fn list_directory(
     args: &Value,
@@ -1563,14 +1538,22 @@ mod tests {
     /// that is what stops the bad path being written in the first place.
     #[test]
     fn tool_descriptions_name_the_working_directory() {
-        let defs = definitions(Some("F:\\Development\\MultiZone2"));
+        let dir = r"F:\Development\MultiZone2";
+        let defs = definitions(Some(dir));
         let create = defs.iter().find(|t| t.function.name == "create_file").unwrap();
-        assert!(create.function.description.contains("F:\\Development\\MultiZone2"));
 
-        let path_desc = create.function.parameters["properties"]["path"]["description"]
-            .as_str()
-            .unwrap();
-        assert!(path_desc.contains("F:\\Development\\MultiZone2"), "{path_desc}");
+        // The model needs the working directory spelled out somewhere to write a
+        // path that resolves first time — but exactly once (0.9.10). It used to
+        // be repeated in the `path` parameter too, doubling the cost of a hint
+        // the model reads once.
+        assert!(create.function.description.contains(dir));
+        assert_eq!(create.function.description.matches(dir).count(), 1);
+
+        let path_desc = create.function.parameters["properties"]["path"]["description"].as_str();
+        assert!(
+            path_desc.map_or(true, |d| !d.contains(dir)),
+            "the path parameter repeats the working directory: {path_desc:?}",
+        );
 
         // With no working directory set, the wording must not claim one.
         let defs = definitions(None);

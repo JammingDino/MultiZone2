@@ -3,6 +3,14 @@ import { DEFAULT_APP_SETTINGS, type AppSettings, type Chat, type ChatTagEntry, t
 import * as api from "@/lib/tauri";
 import type { SettingsBundle } from "@/lib/settingsBundle";
 
+/**
+ * Chats whose opening turn has already kicked off an auto-title, so the check
+ * that runs on every streamed token fires exactly once. Not persisted — a chat
+ * is only ever auto-titled on its first turn, which can't recur in a later
+ * session.
+ */
+const autoTitledChats = new Set<string>();
+
 // Sidebar open/closed persists across sessions under the same `ui.sidebarOpen`
 // localStorage key the sidebar used before this moved into the store, so an
 // existing install keeps its layout.
@@ -966,39 +974,69 @@ export const useApp = create<AppStore>((set, get) => ({
       };
     });
 
-    // Title the chat off its opening message. This fires on `user_message_saved`
-    // rather than on `done`, so the title request goes out *alongside* the
-    // answer's request instead of queueing behind the whole first response — two
-    // concurrent calls to the same endpoint with the same model. The title
-    // usually lands while the answer is still streaming.
-    if (event.type === "user_message_saved") {
+    // ── Auto-titling the chat's opening turn ──────────────────────────────
+    //
+    // Only the chat's very first turn: one user message, nothing answered yet.
+    // A branched chat starts with history, so this correctly skips it.
+    const isOpeningTurn = () => {
       const msgs = get().messagesByChat[chatId] ?? [];
-      // Only the chat's very first turn: one user message, nothing answered yet.
-      // A branched chat starts with history, so this correctly skips it.
-      const userCount = msgs.filter((m) => m.role === "user").length;
-      const assistantCount = msgs.filter((m) => m.role === "assistant" && !m.zoneId).length;
-      if (userCount === 1 && assistantCount === 0 && !get().regeneratingTitles.has(chatId)) {
-        if (get().appSettings.autoTitle) {
-          get().regenerateTitle(chatId).catch(console.error);
-        } else {
-          // Use the user's first message text as the title; set empty when no text.
-          const firstUserMsg = msgs.find((m) => m.role === "user");
-          if (firstUserMsg) {
-            try {
-              const parts = JSON.parse(firstUserMsg.content) as { type: string; text?: string }[];
-              const text = parts
-                .filter((p) => p.type === "text" && p.text)
-                .map((p) => p.text!)
-                .join(" ")
-                .trim();
-              const title = text.length > 80 ? text.slice(0, 77) + "…" : text;
-              api.renameChat(chatId, title).catch(console.error);
-              get().setChatTitle(chatId, title);
-              get().refreshChats().catch(console.error);
-            } catch { /* ignore parse errors */ }
-          }
-        }
+      return (
+        msgs.filter((m) => m.role === "user").length === 1 &&
+        msgs.filter((m) => m.role === "assistant" && !m.zoneId).length === 0
+      );
+    };
+
+    // Deriving the title from the user's own text costs no provider call, so it
+    // can land the moment the message is saved.
+    if (event.type === "user_message_saved" && !get().appSettings.autoTitle) {
+      const msgs = get().messagesByChat[chatId] ?? [];
+      const firstUserMsg = msgs.find((m) => m.role === "user");
+      if (isOpeningTurn() && firstUserMsg) {
+        try {
+          const parts = JSON.parse(firstUserMsg.content) as { type: string; text?: string }[];
+          const text = parts
+            .filter((p) => p.type === "text" && p.text)
+            .map((p) => p.text!)
+            .join(" ")
+            .trim();
+          const title = text.length > 80 ? text.slice(0, 77) + "…" : text;
+          api.renameChat(chatId, title).catch(console.error);
+          get().setChatTitle(chatId, title);
+          get().refreshChats().catch(console.error);
+        } catch { /* ignore parse errors */ }
       }
+    }
+
+    // The generated title is a second call to the same endpoint, so *when* it
+    // goes out decides which request the provider serves first. It used to fire
+    // on `user_message_saved` — which the backend emits before it has dispatched
+    // the completion — so against a provider that serves one request at a time
+    // (Ollama, LM Studio, llama.cpp) the title took the slot and the answer
+    // queued behind it: a title appeared, then a wait for the reply actually
+    // asked for.
+    //
+    // Waiting for the answer's first streamed content proves that request is
+    // already being served. The title still goes out concurrently and usually
+    // lands while the answer is still streaming — it just can no longer overtake
+    // it.
+    const generating =
+      event.type === "token" ||
+      event.type === "thinking_token" ||
+      event.type === "tool_call_start";
+    if (
+      generating &&
+      get().appSettings.autoTitle &&
+      !autoTitledChats.has(chatId) &&
+      !get().regeneratingTitles.has(chatId) &&
+      isOpeningTurn()
+    ) {
+      // Claim it before awaiting: every token of the opening turn passes through
+      // here, and `regeneratingTitles` isn't set until the call starts.
+      autoTitledChats.add(chatId);
+      get().regenerateTitle(chatId).catch((e) => {
+        autoTitledChats.delete(chatId);
+        console.error(e);
+      });
     }
   },
   setChatTitle(chatId, title) {

@@ -71,7 +71,29 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             tauri::async_runtime::block_on(async move {
-                let state = AppState::init(&handle).await.expect("failed to init app state");
+                // `setup()` runs after the window exists, so panicking here shows
+                // the user a window that opens and instantly closes, with the
+                // reason buried in %TEMP%. Surface it instead — this is how the
+                // cross-machine `VersionMismatch` crash stayed invisible for so
+                // long. Reported before the process exits, not swallowed.
+                let state = match AppState::init(&handle).await {
+                    Ok(state) => state,
+                    Err(e) => {
+                        tracing::error!("failed to init app state: {e}");
+                        use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+                        handle
+                            .dialog()
+                            .message(format!(
+                                "MultiZone could not start.\n\n{e}\n\n\
+                                 Details were written to:\n{}",
+                                std::env::temp_dir().join("multizone.log").display()
+                            ))
+                            .kind(MessageDialogKind::Error)
+                            .title("MultiZone — startup failed")
+                            .blocking_show();
+                        std::process::exit(1);
+                    }
+                };
                 handle.manage(state);
                 // Launch the HTTP API server if the user has enabled it.
                 commands::api::start_if_enabled(&handle).await;

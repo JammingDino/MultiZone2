@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { X, Plus, Trash2, RefreshCw, Server, Palette, MessageSquare, Database, AlertTriangle, Loader2, Folder, FolderOpen, Globe, Copy, Check, Search, Brain, Sparkles, FileUp, FileDown, Plug, Wifi, WifiOff, Library, ChevronDown, Mic, Volume2, AudioLines } from "lucide-react";
+import { X, Plus, Trash2, RefreshCw, Server, Palette, MessageSquare, Database, AlertTriangle, Loader2, Folder, FolderOpen, Globe, Copy, Check, Search, Brain, Sparkles, FileUp, FileDown, Plug, Wifi, WifiOff, Library, ChevronDown, ChevronRight, Mic, Volume2, AudioLines } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useApp } from "@/store/app";
 import type { BackgroundEffect } from "@/store/app";
@@ -12,13 +12,14 @@ import { getVersion } from "@tauri-apps/api/app";
 import { saveTextFile } from "@/lib/saveFile";
 import { resolveBaseProvider } from "@/lib/baseZone";
 import {
-  type SettingsBundle,
-  applySettingsBundle,
+  DEFAULT_EXPORT_SELECTION,
+  type ExportSelection,
   buildSettingsBundle,
   bundleCounts,
-  parseSettingsBundle,
+  describeCounts,
   serializeSettingsBundle,
 } from "@/lib/settingsBundle";
+import { pickBundleFile } from "@/lib/importSettings";
 import { type SkillSeed, serializeSkill, parseSkill } from "@/lib/skillFile";
 import type { DbStats, GlobalKbView, IndexSummary, KbDocument, McpServerView, McpTool, Provider, Skill, SkillPack } from "@/lib/types";
 
@@ -2900,19 +2901,39 @@ function DataTab() {
  */
 function SettingsTransferSection() {
   const appSettings = useApp((s) => s.appSettings);
-  const setAppSettings = useApp((s) => s.setAppSettings);
   const theme = useApp((s) => s.theme);
-  const setTheme = useApp((s) => s.setTheme);
-  const refreshProviders = useApp((s) => s.refreshProviders);
-  const refreshZones = useApp((s) => s.refreshZones);
-  const refreshSkills = useApp((s) => s.refreshSkills);
-  const refreshMcpServers = useApp((s) => s.refreshMcpServers);
+  const providers = useApp((s) => s.providers);
+  const zones = useApp((s) => s.zones);
+  const skills = useApp((s) => s.skills);
+  const mcpServers = useApp((s) => s.mcpServers);
+  const memories = useApp((s) => s.memories);
+  const stageImport = useApp((s) => s.stageImport);
 
-  const [includeKeys, setIncludeKeys] = useState(true);
+  const [sel, setSel] = useState<ExportSelection>(DEFAULT_EXPORT_SELECTION);
+  const [customising, setCustomising] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
-  // A parsed bundle waiting for the user to confirm the overwrite.
-  const [staged, setStaged] = useState<{ bundle: SettingsBundle; name: string } | null>(null);
+
+  const globalMemoryCount = memories.filter((m) => m.scope === "global").length;
+
+  /** `null` = every row of this kind; an array = exactly those ids. */
+  const chosen = (ids: string[] | null, all: { id: string }[]) =>
+    ids === null ? all.map((r) => r.id) : ids;
+
+  function toggleRow(key: "providerIds" | "zoneIds" | "skillIds" | "mcpServerIds", all: { id: string }[], id: string) {
+    setSel((s) => {
+      const current = new Set(chosen(s[key], all));
+      if (current.has(id)) current.delete(id); else current.add(id);
+      // Collapse back to `null` when everything is selected, so a later-added
+      // row is still included in what the user asked for ("all of them").
+      return { ...s, [key]: current.size === all.length ? null : [...current] };
+    });
+  }
+
+  function setAll(key: "providerIds" | "zoneIds" | "skillIds" | "mcpServerIds", all: { id: string }[], on: boolean) {
+    setSel((s) => ({ ...s, [key]: on ? null : [] }));
+    void all;
+  }
 
   async function doExport() {
     setBusy(true);
@@ -2920,20 +2941,14 @@ function SettingsTransferSection() {
     try {
       let version: string | undefined;
       try { version = await getVersion(); } catch { /* not in the Tauri shell */ }
-      const bundle = await buildSettingsBundle(appSettings, theme, includeKeys, version);
+      const bundle = await buildSettingsBundle(appSettings, theme, sel, version);
       const stamp = new Date().toISOString().slice(0, 10);
       const saved = await saveTextFile(
         `multizone-settings-${stamp}.json`,
         serializeSettingsBundle(bundle),
         [{ name: "MultiZone settings", extensions: ["json"] }],
       );
-      const c = bundleCounts(bundle);
-      if (saved) {
-        setMsg(
-          `Exported ${c.providers} provider${c.providers === 1 ? "" : "s"}, ${c.zones} zone${c.zones === 1 ? "" : "s"}, ` +
-          `${c.skills} skill${c.skills === 1 ? "" : "s"} and ${c.mcpServers} MCP server${c.mcpServers === 1 ? "" : "s"}.`,
-        );
-      }
+      if (saved) setMsg(`Exported ${describeCounts(bundleCounts(bundle))}.`);
     } catch (e) {
       console.error(e);
       setMsg(`Export failed: ${e}`);
@@ -2943,17 +2958,11 @@ function SettingsTransferSection() {
   }
 
   async function pickImport() {
-    const selected = await open({
-      multiple: false,
-      filters: [{ name: "MultiZone settings", extensions: ["json"] }],
-    });
-    if (typeof selected !== "string") return;
     setBusy(true);
     setMsg(null);
     try {
-      const raw = await api.readTextFile(selected);
-      const bundle = parseSettingsBundle(raw);
-      setStaged({ bundle, name: selected.split(/[\\/]/).pop() ?? selected });
+      const picked = await pickBundleFile();
+      if (picked) stageImport(picked);
     } catch (e) {
       console.error(e);
       setMsg(String(e instanceof Error ? e.message : e));
@@ -2962,54 +2971,111 @@ function SettingsTransferSection() {
     }
   }
 
-  async function confirmImport() {
-    if (!staged) return;
-    setBusy(true);
-    setMsg(null);
-    try {
-      const r = await applySettingsBundle(staged.bundle, setAppSettings, setTheme);
-      await Promise.all([refreshProviders(), refreshZones(), refreshSkills(), refreshMcpServers()]);
-      setStaged(null);
-      const base =
-        `Imported ${r.providers} provider${r.providers === 1 ? "" : "s"}, ${r.zones} zone${r.zones === 1 ? "" : "s"}, ` +
-        `${r.skills} skill${r.skills === 1 ? "" : "s"} and ${r.mcpServers} MCP server${r.mcpServers === 1 ? "" : "s"}.`;
-      setMsg(r.failures.length ? `${base} ${r.failures.length} item(s) failed — see console.` : base);
-      if (r.failures.length) console.warn("settings import failures", r.failures);
-    } catch (e) {
-      console.error(e);
-      setMsg(`Import failed: ${e}`);
-    } finally {
-      setBusy(false);
-    }
-  }
+  // Warn before writing a file whose zones point at providers left out of it —
+  // they'd land provider-less on the other side.
+  const exportedProviderIds = new Set(chosen(sel.providerIds, providers));
+  const orphanZones = (sel.zoneIds === null ? zones : zones.filter((z) => sel.zoneIds!.includes(z.id)))
+    .filter((z) => z.providerId && !exportedProviderIds.has(z.providerId));
 
-  const c = staged ? bundleCounts(staged.bundle) : null;
+  const nothingSelected =
+    chosen(sel.providerIds, providers).length === 0 &&
+    chosen(sel.zoneIds, zones).length === 0 &&
+    chosen(sel.skillIds, skills).length === 0 &&
+    chosen(sel.mcpServerIds, mcpServers).length === 0 &&
+    !sel.preferences && !sel.theme && !sel.memories;
 
   return (
     <section>
       <h3 className="mb-1 text-sm font-medium">Settings backup & transfer</h3>
       <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-        Save your whole setup — providers, zones, skills, MCP servers, preferences and theme — as a
-        single JSON file, and import it into another install to get an identical MultiZone there.
-        Chats aren't included (use the markdown storage above for those), and neither are
-        machine-specific paths or the local API token, so the other install keeps its own.
+        Save your setup — providers, zones, skills, MCP servers, global memories, preferences and
+        theme — as a single JSON file, and import it into another install. Chats aren't included (use
+        the markdown storage above for those), and neither are machine-specific paths or the local
+        API token, so the other install keeps its own. You can also just drop a settings file onto
+        the window at any time.
       </p>
 
       <ToggleRow
         label="Include provider API keys"
         description={
-          includeKeys
+          sel.includeSecrets
             ? "The exported file will contain your API keys in plain text — keep it somewhere safe."
             : "Keys are left out; you'll re-enter them on the other machine."
         }
-        checked={includeKeys}
-        onChange={setIncludeKeys}
+        checked={sel.includeSecrets}
+        onChange={(v) => setSel((s) => ({ ...s, includeSecrets: v }))}
       />
+
+      <button
+        onClick={() => setCustomising((v) => !v)}
+        className="mt-3 flex items-center gap-1 text-xs text-[var(--color-accent)] hover:underline"
+      >
+        {customising ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        Choose what to include
+      </button>
+
+      {customising && (
+        <div className="mt-2 flex flex-col gap-3 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+          <div className="flex flex-col gap-1.5">
+            <CheckLine
+              label="Preferences"
+              hint="send key, tool approval, layout, voice…"
+              checked={sel.preferences}
+              onChange={(v) => setSel((s) => ({ ...s, preferences: v }))}
+            />
+            <CheckLine
+              label="Appearance"
+              hint="theme, colours, fonts"
+              checked={sel.theme}
+              onChange={(v) => setSel((s) => ({ ...s, theme: v }))}
+            />
+            <CheckLine
+              label={`Global memories (${globalMemoryCount})`}
+              hint="what the model has remembered about you"
+              checked={sel.memories}
+              onChange={(v) => setSel((s) => ({ ...s, memories: v }))}
+            />
+          </div>
+
+          <PickList
+            title="Providers" rows={providers} selected={sel.providerIds}
+            onToggle={(id) => toggleRow("providerIds", providers, id)}
+            onAll={(on) => setAll("providerIds", providers, on)}
+          />
+          <PickList
+            title="Zones" rows={zones} selected={sel.zoneIds}
+            onToggle={(id) => toggleRow("zoneIds", zones, id)}
+            onAll={(on) => setAll("zoneIds", zones, on)}
+          />
+          <PickList
+            title="Skills" rows={skills} selected={sel.skillIds}
+            onToggle={(id) => toggleRow("skillIds", skills, id)}
+            onAll={(on) => setAll("skillIds", skills, on)}
+          />
+          <PickList
+            title="MCP servers" rows={mcpServers} selected={sel.mcpServerIds}
+            onToggle={(id) => toggleRow("mcpServerIds", mcpServers, id)}
+            onAll={(on) => setAll("mcpServerIds", mcpServers, on)}
+          />
+        </div>
+      )}
+
+      {orphanZones.length > 0 && (
+        <div className="mt-2 flex gap-2 rounded border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
+          <AlertTriangle size={13} className="mt-px shrink-0 text-amber-500" />
+          <span>
+            {orphanZones.length} selected zone{orphanZones.length === 1 ? "" : "s"} use a provider
+            you haven't included ({orphanZones.slice(0, 3).map((z) => z.name).join(", ")}
+            {orphanZones.length > 3 ? "…" : ""}). They'll import without a provider unless the other
+            install already has one with a matching name.
+          </span>
+        </div>
+      )}
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <button
           onClick={doExport}
-          disabled={busy}
+          disabled={busy || nothingSelected}
           className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:border-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
         >
           {busy ? <Loader2 size={13} className="animate-spin" /> : <FileDown size={13} />}
@@ -3023,39 +3089,61 @@ function SettingsTransferSection() {
           {busy ? <Loader2 size={13} className="animate-spin" /> : <FileUp size={13} />}
           Import settings…
         </button>
-        {msg && !staged && <span className="text-xs text-[var(--color-text-muted)]">{msg}</span>}
+        {msg && <span className="text-xs text-[var(--color-text-muted)]">{msg}</span>}
       </div>
-
-      {staged && c && (
-        <div className="mt-3 rounded border border-[var(--color-accent)] bg-[var(--color-panel-hover)] p-3">
-          <div className="text-sm font-medium">Import {staged.name}?</div>
-          <div className="mt-1 text-xs text-[var(--color-text-muted)]">
-            Brings in {c.providers} provider{c.providers === 1 ? "" : "s"}, {c.zones} zone
-            {c.zones === 1 ? "" : "s"}, {c.skills} skill{c.skills === 1 ? "" : "s"} and{" "}
-            {c.mcpServers} MCP server{c.mcpServers === 1 ? "" : "s"}, plus preferences and theme.
-            Anything with a matching id is overwritten; your chats, projects and local paths are
-            untouched.
-            {!staged.bundle.includesSecrets && " This export carries no API keys — you'll need to add them after."}
-          </div>
-          <div className="mt-3 flex gap-2">
-            <button
-              onClick={() => { setStaged(null); setMsg(null); }}
-              className="rounded border border-[var(--color-border)] px-3 py-1.5 text-xs hover:border-[var(--color-accent)]"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={confirmImport}
-              disabled={busy}
-              className="flex items-center gap-1.5 rounded bg-[var(--color-accent)] px-3 py-1.5 text-xs text-white hover:opacity-90 disabled:opacity-50"
-            >
-              {busy && <Loader2 size={13} className="animate-spin" />}
-              Import
-            </button>
-          </div>
-        </div>
-      )}
     </section>
+  );
+}
+
+/** A labelled checkbox row used by the export selector. */
+function CheckLine({
+  label, hint, checked, onChange,
+}: { label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label className="flex cursor-pointer items-center gap-2 text-xs">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <span>{label}</span>
+      {hint && <span className="text-[var(--color-text-muted)]">— {hint}</span>}
+    </label>
+  );
+}
+
+/**
+ * Per-row picker for one collection. `selected === null` means "all", which is
+ * kept distinct from "every id happens to be listed" so rows added later stay in.
+ */
+function PickList({
+  title, rows, selected, onToggle, onAll,
+}: {
+  title: string;
+  rows: { id: string; name: string }[];
+  selected: string[] | null;
+  onToggle: (id: string) => void;
+  onAll: (on: boolean) => void;
+}) {
+  if (rows.length === 0) return null;
+  const isOn = (id: string) => selected === null || selected.includes(id);
+  const count = selected === null ? rows.length : selected.length;
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between">
+        <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
+          {title} ({count}/{rows.length})
+        </span>
+        <div className="flex gap-2 text-[11px]">
+          <button onClick={() => onAll(true)} className="text-[var(--color-accent)] hover:underline">All</button>
+          <button onClick={() => onAll(false)} className="text-[var(--color-accent)] hover:underline">None</button>
+        </div>
+      </div>
+      <div className="flex max-h-[120px] flex-col gap-0.5 overflow-y-auto">
+        {rows.map((r) => (
+          <label key={r.id} className="flex cursor-pointer items-center gap-2 text-xs">
+            <input type="checkbox" checked={isOn(r.id)} onChange={() => onToggle(r.id)} />
+            <span className="truncate">{r.name}</span>
+          </label>
+        ))}
+      </div>
+    </div>
   );
 }
 

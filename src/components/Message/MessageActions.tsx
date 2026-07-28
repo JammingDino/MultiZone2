@@ -31,6 +31,15 @@ interface Props {
    * that forks the chat at this message into a new chat.
    */
   branchFromMessageId?: string;
+  /**
+   * Branch this participant's thread alone (1.0). In a chat where several zones
+   * answer every turn, "branch from here" means the response you clicked on:
+   * the new chat keeps the full history — every zone's answers stay readable —
+   * but continues with this responder only. `branchSoloZoneId` names the
+   * perspective zone; null on the primary card, which pins the chat's own zone.
+   */
+  branchSolo?: boolean;
+  branchSoloZoneId?: string | null;
   /** When true, show an "edited" marker (message content was hand-edited). */
   edited?: boolean;
 }
@@ -45,6 +54,8 @@ export function MessageActions({
   canRegenerate = false,
   onEdit,
   branchFromMessageId,
+  branchSolo = false,
+  branchSoloZoneId = null,
   edited = false,
 }: Props) {
   const [copied, setCopied] = useState(false);
@@ -72,7 +83,7 @@ export function MessageActions({
     if (isBusy || branching || !branchFromMessageId) return;
     setBranching(true);
     try {
-      await branchFromMessage(chatId, branchFromMessageId);
+      await branchFromMessage(chatId, branchFromMessageId, branchSolo, branchSoloZoneId);
     } catch (e) {
       console.error(e);
     } finally {

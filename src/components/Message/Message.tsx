@@ -650,6 +650,8 @@ function BotTurnViewImpl({ turn, isLatest = false }: { turn: BotTurn; isLatest?:
             canRegenerate={isLatest}
             layout={layout}
             branchFromMessageId={lastMessageId}
+            branchSolo
+            branchSoloZoneId={null}
             fileSources={fileSources}
             carriedCitations={carriedCitations}
             statusLine={
@@ -676,6 +678,8 @@ function BotTurnViewImpl({ turn, isLatest = false }: { turn: BotTurn; isLatest?:
               canRegenerate={isLatest}
               layout={layout}
               branchFromMessageId={p.messageId}
+              branchSolo
+              branchSoloZoneId={p.zoneId}
               fileSources={fileSources}
               carriedCitations={carriedCitations}
               statusLine={
@@ -837,6 +841,8 @@ function ParticipantCard({
   canRegenerate,
   layout,
   branchFromMessageId,
+  branchSolo = false,
+  branchSoloZoneId = null,
   fileSources,
   carriedCitations,
   statusLine,
@@ -852,6 +858,9 @@ function ParticipantCard({
   canRegenerate: boolean;
   layout: "stacked" | "columns";
   branchFromMessageId?: string;
+  /** Branch this participant alone — see `MessageActions`. */
+  branchSolo?: boolean;
+  branchSoloZoneId?: string | null;
   fileSources?: FileSource[];
   carriedCitations?: Citation[];
   /** This zone's live status/stats while it generates — rendered in its own column. */
@@ -983,6 +992,8 @@ function ParticipantCard({
                 regenerateZoneId={regenerateZoneId}
                 canRegenerate={canRegenerate}
                 branchFromMessageId={branchFromMessageId}
+                branchSolo={branchSolo}
+                branchSoloZoneId={branchSoloZoneId}
                 onEdit={text || hasContent ? () => setEditing(true) : undefined}
                 edited={edited}
               />

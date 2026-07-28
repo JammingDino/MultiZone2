@@ -4,6 +4,7 @@ import { useApp, type StreamingState } from "@/store/app";
 import { useTts, zoneVoice } from "@/store/tts";
 import type { Message } from "@/lib/types";
 import { UserMessage, BotTurnView } from "@/components/Message/Message";
+import { TurnErrorNotice } from "./TurnErrorNotice";
 import { groupMessages } from "@/lib/grouping";
 
 const PIN_THRESHOLD_PX = 60;
@@ -265,6 +266,9 @@ export function MessageThread({ chatId }: { chatId: string }) {
           {/* Each participant's live status renders inside its own response
               block (see `Message.tsx`), so in a side-by-side turn the numbers
               sit in the column of the zone they describe. */}
+          {/* A failed turn saves no message, so its explanation lives outside
+              the unit list — otherwise the turn renders as nothing at all. */}
+          <TurnErrorNotice chatId={chatId} />
           <div ref={endRef} />
         </div>
       </div>

@@ -154,7 +154,15 @@ where
                 }
                 let chunk: StreamChunk = match serde_json::from_str(&data) {
                     Ok(c) => c,
-                    Err(_) => continue,
+                    Err(e) => {
+                        // Skipping the chunk is right — one unparsable frame
+                        // shouldn't kill a working stream, and some providers
+                        // interleave keep-alives and non-standard events. But a
+                        // provider whose every frame we drop looks exactly like
+                        // a model that answered with silence, so leave a trace.
+                        tracing::debug!("skipping unparsable stream chunk: {e}; data: {data}");
+                        continue;
+                    }
                 };
                 for choice in chunk.choices {
                     if let Some(reason) = &choice.finish_reason {

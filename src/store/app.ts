@@ -1,6 +1,15 @@
 import { create } from "zustand";
 import { DEFAULT_APP_SETTINGS, type AppSettings, type Chat, type ChatTagEntry, type ChatTagLink, type ChatZone, type McpServerView, type Memory, type Message, type Project, type Provider, type Skill, type SkillPack, type Tag, type Zone } from "@/lib/types";
 import * as api from "@/lib/tauri";
+import type { SettingsBundle } from "@/lib/settingsBundle";
+
+/**
+ * Chats whose opening turn has already kicked off an auto-title, so the check
+ * that runs on every streamed token fires exactly once. Not persisted — a chat
+ * is only ever auto-titled on its first turn, which can't recur in a later
+ * session.
+ */
+const autoTitledChats = new Set<string>();
 
 // Sidebar open/closed persists across sessions under the same `ui.sidebarOpen`
 // localStorage key the sidebar used before this moved into the store, so an
@@ -177,6 +186,30 @@ export interface PendingApproval {
   zoneId?: string;
 }
 
+/**
+ * A turn that ended in failure rather than an answer (1.0).
+ *
+ * The backend has always emitted `error` for a failed provider call — bad key,
+ * rate limit, unreachable host, model that doesn't exist — but the frontend used
+ * to treat it purely as a signal to tear the stream down. Since no assistant
+ * message is ever saved on that path, the whole turn then rendered as nothing at
+ * all: the user's message sat there and the app looked like it had simply
+ * stopped caring. Holding the message here lets the thread say what went wrong.
+ */
+export interface ChatError {
+  message: string;
+  at: number;
+  /** Set when the failure was a perspective zone's rather than the primary's. */
+  zoneId?: string;
+}
+
+/** A settings bundle staged for import, raised from Settings, onboarding or a file drop. */
+export interface PendingImport {
+  bundle: SettingsBundle;
+  /** File name or short description of where it came from, for the dialog. */
+  source: string;
+}
+
 interface AppStore {
   // collections
   providers: Provider[];
@@ -219,6 +252,19 @@ interface AppStore {
   pendingApprovalByChat: Record<string, PendingApproval[]>;
   /** Smart routing state per chat. null = idle, "routing" = LLM call in progress, done = zone was resolved. */
   routingByChat: Record<string, { status: "routing" } | { status: "done"; zoneId: string; zoneName: string } | null>;
+  /**
+   * Failures from the last turn, per chat — one entry for the primary plus one
+   * per perspective zone that failed. Cleared when the next turn starts, so the
+   * thread shows the current state rather than an archive of past outages.
+   */
+  errorsByChat: Record<string, ChatError[]>;
+  dismissChatErrors: (chatId: string) => void;
+
+  /** A settings bundle waiting on the user's confirmation. Null = no import in flight. */
+  pendingImport: PendingImport | null;
+  /** Stage a parsed bundle for confirmation (Settings, onboarding, or a dropped file). */
+  stageImport: (pending: PendingImport) => void;
+  clearImport: () => void;
   /** Per-message generation stats, keyed by message id. */
   statsByMessage: Record<string, MessageStats>;
   /** Current visual theme. Persisted via the backend settings table. */
@@ -266,7 +312,12 @@ interface AppStore {
   refreshChats: () => Promise<void>;
   setActiveChat: (id: string | null) => Promise<void>;
   /** Fork a chat at a message into a new chat and switch to it. */
-  branchFromMessage: (chatId: string, messageId: string) => Promise<void>;
+  branchFromMessage: (
+    chatId: string,
+    messageId: string,
+    solo?: boolean,
+    zoneId?: string | null,
+  ) => Promise<void>;
   /** Hand-edit an assistant message's text in place (persists + flags edited). */
   editMessage: (chatId: string, messageId: string, text: string) => Promise<void>;
   loadMessages: (chatId: string) => Promise<void>;
@@ -475,6 +526,8 @@ export const useApp = create<AppStore>((set, get) => ({
   regeneratingTitles: new Set(),
   pendingApprovalByChat: {},
   routingByChat: {},
+  errorsByChat: {},
+  pendingImport: null,
   statsByMessage: {},
   theme: DEFAULT_THEME,
   appSettings: DEFAULT_APP_SETTINGS,
@@ -500,6 +553,22 @@ export const useApp = create<AppStore>((set, get) => ({
   newChatProjectId: null,
   newChatTimestamp: 0,
   homeScreenDraft: "",
+
+  dismissChatErrors(chatId) {
+    set((s) => {
+      if (!s.errorsByChat[chatId]) return {};
+      const errorsByChat = { ...s.errorsByChat };
+      delete errorsByChat[chatId];
+      return { errorsByChat };
+    });
+  },
+
+  stageImport(pending) {
+    set({ pendingImport: pending });
+  },
+  clearImport() {
+    set({ pendingImport: null });
+  },
 
   async refreshProviders() {
     const providers = await api.listProviders();
@@ -575,8 +644,8 @@ export const useApp = create<AppStore>((set, get) => ({
       await get().loadChatZones(id);
     }
   },
-  async branchFromMessage(chatId, messageId) {
-    const branch = await api.branchChat(chatId, messageId);
+  async branchFromMessage(chatId, messageId, solo = false, zoneId = null) {
+    const branch = await api.branchChat(chatId, messageId, solo, zoneId);
     await get().refreshChats();
     await get().setActiveChat(branch.id);
   },
@@ -604,6 +673,7 @@ export const useApp = create<AppStore>((set, get) => ({
         const messagesByChat = { ...s.messagesByChat };
         const statsByMessage = { ...s.statsByMessage };
         const pendingApprovalByChat = { ...s.pendingApprovalByChat };
+        const errorsByChat = { ...s.errorsByChat };
         const msgs = messagesByChat[chatId] ?? [];
         const current = chatPersp[perspectiveZoneId];
 
@@ -701,9 +771,19 @@ export const useApp = create<AppStore>((set, get) => ({
             }
             delete chatPersp[perspectiveZoneId];
             break;
+          case "error":
+            // Record before tearing down: this zone produced no message, so the
+            // error text is the only thing left to show for its half of the turn.
+            errorsByChat[chatId] = [
+              ...(errorsByChat[chatId] ?? []).filter((e) => e.zoneId !== perspectiveZoneId),
+              { message: event.message, at: now, zoneId: perspectiveZoneId },
+            ];
+            delete chatPersp[perspectiveZoneId];
+            delete chatTurns[perspectiveZoneId];
+            pendingApprovalByChat[chatId] = dropApproval(pendingApprovalByChat[chatId], perspectiveZoneId);
+            break;
           case "done":
           case "cancelled":
-          case "error":
             delete chatPersp[perspectiveZoneId];
             delete chatTurns[perspectiveZoneId];
             pendingApprovalByChat[chatId] = dropApproval(pendingApprovalByChat[chatId], perspectiveZoneId);
@@ -718,6 +798,7 @@ export const useApp = create<AppStore>((set, get) => ({
           messagesByChat,
           statsByMessage,
           pendingApprovalByChat,
+          errorsByChat,
         };
       });
       return;
@@ -733,6 +814,7 @@ export const useApp = create<AppStore>((set, get) => ({
       const perspectiveTurnByChat = { ...s.perspectiveTurnByChat };
       const pendingApprovalByChat = { ...s.pendingApprovalByChat };
       const routingByChat = { ...s.routingByChat };
+      const errorsByChat = { ...s.errorsByChat };
       const current = streaming[chatId];
 
       // Turn totals span every iteration of the agentic loop — same reducer the
@@ -762,6 +844,8 @@ export const useApp = create<AppStore>((set, get) => ({
           // otherwise carry its numbers into this turn.
           turnByChat[chatId] = freshTurn(now);
           delete perspectiveTurnByChat[chatId];
+          // Last turn's failures belong to last turn.
+          delete errorsByChat[chatId];
           break;
 
         case "assistant_start":
@@ -856,9 +940,21 @@ export const useApp = create<AppStore>((set, get) => ({
           delete streaming[chatId];
           break;
 
+        case "error":
+          // The turn failed before an assistant message was ever saved, so
+          // without this the whole exchange would render as empty space.
+          errorsByChat[chatId] = [
+            ...(errorsByChat[chatId] ?? []).filter((e) => e.zoneId !== undefined),
+            { message: event.message, at: now },
+          ];
+          delete streaming[chatId];
+          delete turnByChat[chatId];
+          routingByChat[chatId] = null;
+          pendingApprovalByChat[chatId] = dropApproval(pendingApprovalByChat[chatId], undefined);
+          break;
+
         case "done":
         case "cancelled":
-        case "error":
           delete streaming[chatId];
           delete turnByChat[chatId];
           // Only clear the primary's approval; perspective zones may still be
@@ -874,42 +970,73 @@ export const useApp = create<AppStore>((set, get) => ({
         perspectiveTurnByChat,
         pendingApprovalByChat,
         routingByChat,
+        errorsByChat,
       };
     });
 
-    // Title the chat off its opening message. This fires on `user_message_saved`
-    // rather than on `done`, so the title request goes out *alongside* the
-    // answer's request instead of queueing behind the whole first response — two
-    // concurrent calls to the same endpoint with the same model. The title
-    // usually lands while the answer is still streaming.
-    if (event.type === "user_message_saved") {
+    // ── Auto-titling the chat's opening turn ──────────────────────────────
+    //
+    // Only the chat's very first turn: one user message, nothing answered yet.
+    // A branched chat starts with history, so this correctly skips it.
+    const isOpeningTurn = () => {
       const msgs = get().messagesByChat[chatId] ?? [];
-      // Only the chat's very first turn: one user message, nothing answered yet.
-      // A branched chat starts with history, so this correctly skips it.
-      const userCount = msgs.filter((m) => m.role === "user").length;
-      const assistantCount = msgs.filter((m) => m.role === "assistant" && !m.zoneId).length;
-      if (userCount === 1 && assistantCount === 0 && !get().regeneratingTitles.has(chatId)) {
-        if (get().appSettings.autoTitle) {
-          get().regenerateTitle(chatId).catch(console.error);
-        } else {
-          // Use the user's first message text as the title; set empty when no text.
-          const firstUserMsg = msgs.find((m) => m.role === "user");
-          if (firstUserMsg) {
-            try {
-              const parts = JSON.parse(firstUserMsg.content) as { type: string; text?: string }[];
-              const text = parts
-                .filter((p) => p.type === "text" && p.text)
-                .map((p) => p.text!)
-                .join(" ")
-                .trim();
-              const title = text.length > 80 ? text.slice(0, 77) + "…" : text;
-              api.renameChat(chatId, title).catch(console.error);
-              get().setChatTitle(chatId, title);
-              get().refreshChats().catch(console.error);
-            } catch { /* ignore parse errors */ }
-          }
-        }
+      return (
+        msgs.filter((m) => m.role === "user").length === 1 &&
+        msgs.filter((m) => m.role === "assistant" && !m.zoneId).length === 0
+      );
+    };
+
+    // Deriving the title from the user's own text costs no provider call, so it
+    // can land the moment the message is saved.
+    if (event.type === "user_message_saved" && !get().appSettings.autoTitle) {
+      const msgs = get().messagesByChat[chatId] ?? [];
+      const firstUserMsg = msgs.find((m) => m.role === "user");
+      if (isOpeningTurn() && firstUserMsg) {
+        try {
+          const parts = JSON.parse(firstUserMsg.content) as { type: string; text?: string }[];
+          const text = parts
+            .filter((p) => p.type === "text" && p.text)
+            .map((p) => p.text!)
+            .join(" ")
+            .trim();
+          const title = text.length > 80 ? text.slice(0, 77) + "…" : text;
+          api.renameChat(chatId, title).catch(console.error);
+          get().setChatTitle(chatId, title);
+          get().refreshChats().catch(console.error);
+        } catch { /* ignore parse errors */ }
       }
+    }
+
+    // The generated title is a second call to the same endpoint, so *when* it
+    // goes out decides which request the provider serves first. It used to fire
+    // on `user_message_saved` — which the backend emits before it has dispatched
+    // the completion — so against a provider that serves one request at a time
+    // (Ollama, LM Studio, llama.cpp) the title took the slot and the answer
+    // queued behind it: a title appeared, then a wait for the reply actually
+    // asked for.
+    //
+    // Waiting for the answer's first streamed content proves that request is
+    // already being served. The title still goes out concurrently and usually
+    // lands while the answer is still streaming — it just can no longer overtake
+    // it.
+    const generating =
+      event.type === "token" ||
+      event.type === "thinking_token" ||
+      event.type === "tool_call_start";
+    if (
+      generating &&
+      get().appSettings.autoTitle &&
+      !autoTitledChats.has(chatId) &&
+      !get().regeneratingTitles.has(chatId) &&
+      isOpeningTurn()
+    ) {
+      // Claim it before awaiting: every token of the opening turn passes through
+      // here, and `regeneratingTitles` isn't set until the call starts.
+      autoTitledChats.add(chatId);
+      get().regenerateTitle(chatId).catch((e) => {
+        autoTitledChats.delete(chatId);
+        console.error(e);
+      });
     }
   },
   setChatTitle(chatId, title) {

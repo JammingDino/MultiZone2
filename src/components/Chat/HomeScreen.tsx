@@ -14,6 +14,7 @@ import {
 import { useDictation, MicButton } from "@/components/Chat/useDictation";
 import { resolveVisionCapable } from "@/lib/vision";
 import { resolveBaseModel, resolveBaseZone } from "@/lib/baseZone";
+import { claimSettingsDrop } from "@/lib/importSettings";
 
 type Mode =
   | { type: "quick" }
@@ -40,6 +41,7 @@ export function HomeScreen() {
   const setChatSmart = useApp((s) => s.setChatSmart);
   const addChatTag = useApp((s) => s.addChatTag);
   const openSettings = useApp((s) => s.openSettings);
+  const stageImport = useApp((s) => s.stageImport);
   const globalPerspectiveMode = useApp((s) => s.appSettings.perspectiveMode);
   const openZoneEditor = useApp((s) => s.openZoneEditor);
   const newChatProjectId = useApp((s) => s.newChatProjectId);
@@ -257,9 +259,13 @@ export function HomeScreen() {
     e.preventDefault();
     dragDepth.current = 0;
     setIsDragOver(false);
-    if (e.dataTransfer.files.length > 0) {
-      handleFiles(e.dataTransfer.files);
-    }
+    // Copied out before awaiting — `dataTransfer` is cleared on return.
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length === 0) return;
+    // A dropped settings export is an import, not an attachment.
+    void claimSettingsDrop(files, stageImport).then((claimed) => {
+      if (!claimed) handleFiles(files);
+    });
   }
 
   async function onPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {

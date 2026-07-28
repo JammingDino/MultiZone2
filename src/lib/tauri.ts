@@ -87,9 +87,18 @@ export const setChatSubagents = (chatId: string, zoneIds: string[]) =>
 export const getSubchatTree = (chatId: string) =>
   invoke<SubchatNode[]>("get_subchat_tree", { chatId });
 export const deleteChat = (id: string) => invoke<void>("delete_chat", { id });
-/** Fork a chat at `messageId` into a new chat copying history up to & including it. */
-export const branchChat = (chatId: string, messageId: string) =>
-  invoke<Chat>("branch_chat", { chatId, messageId });
+/**
+ * Fork a chat at `messageId` into a new chat copying history up to that point.
+ * `solo` follows a single participant out of a multi-responder chat: the branch
+ * keeps every zone's answers in its history but continues with one responder —
+ * `zoneId` for a perspective, or null to pin the chat's own primary zone.
+ */
+export const branchChat = (
+  chatId: string,
+  messageId: string,
+  solo = false,
+  zoneId: string | null = null,
+) => invoke<Chat>("branch_chat", { chatId, messageId, solo, zoneId });
 
 // Projects
 export const listProjects = () => invoke<Project[]>("list_projects");

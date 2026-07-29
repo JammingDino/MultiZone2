@@ -2,6 +2,8 @@
 
 A desktop LLM chat application built with Tauri + React + Rust. Supports multiple named "zones" (LLM configurations), perspective mode (send the same message to several zones simultaneously), projects, tags, file attachments, and an extensible tool system including web search.
 
+![MultiZone — one prompt, every model, side by side](promo/01-hero.png)
+
 ## Requirements
 
 | Tool | Version |
@@ -59,6 +61,12 @@ Builds are not triggered on every push. To publish a release:
 
 GitHub Actions will build the MSI and NSIS installers, publish a GitHub Release tagged with the current version, then automatically reset `releaseBuild` back to `false` and bump the patch version in the same commit.
 
+## Perspective mode
+
+Each zone is its own provider, model, system prompt and toolset — a frontier API, a self-hosted endpoint, or a model on your own GPU. Add a zone as a *perspective* and every message you send fans out to all of them in parallel: one shared thread, independent replies you can read side by side. There is no fixed number — one zone or twenty, whatever you configure.
+
+![How perspective mode works](promo/02-perspectives.png)
+
 ## Configuration
 
 On first launch, go to **Settings** to add a provider (any OpenAI-compatible API endpoint + key), then create a **Zone** pointing at that provider and choosing a model.
@@ -88,6 +96,16 @@ The original single-engine tools are still available, mainly for the key-based p
 | `brave` | `api_key` | [Brave Search API](https://api.search.brave.com/). |
 | `tavily` | `api_key` | [Tavily](https://tavily.com/). |
 | `serper` | `api_key` | [Serper](https://serper.dev/) (Google via API). |
+
+## Multizone mode — the Response Leader
+
+Where perspective mode shows you every model's answer, Multizone mode resolves them into one. A zone flagged as a **Response Leader** doesn't answer from its own knowledge: it spawns a panel of sub-agent zones via `spawn_subagent`, briefs each one on a deliberately *opposing* angle rather than forwarding your message, cross-examines them against each other with `send_subchat_message`, and only then writes a single synthesized answer.
+
+The leader is the only agent that can talk to you — sub-agent `ask_user` calls are suppressed — and the whole leader → sub-agent call tree is inspectable inline in the stack tracer, with every subchat transcript openable.
+
+![How the Response Leader works](promo/05-response-leader.png)
+
+Turn any zone into one with the **Response Leader** toggle in the zone editor (it auto-enables the subchat tools), or start from the curated "Response Leader" zone in the library.
 
 ## HTTP API
 

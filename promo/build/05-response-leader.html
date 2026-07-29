@@ -1,0 +1,163 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="base.css">
+<style>
+  :root { --gold: #f59e0b; }
+  .stage { width: 1600px; height: 764px; }
+  .pad { padding: 64px 80px 56px; }
+
+  /* the app's lucide Crown, same accent as the zone template */
+  .crown { width: 1em; height: 1em; stroke: currentColor; fill: none;
+           stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+  .head { display: flex; align-items: flex-end; justify-content: space-between; }
+  .head .sub { font-size: 17px; max-width: 430px; text-align: right; }
+  .crownchip {
+    display: inline-flex; align-items: center; gap: 10px; margin-bottom: 20px;
+    font-size: 12.5px; font-weight: 700; letter-spacing: .17em; text-transform: uppercase;
+    color: var(--gold);
+  }
+  .crownchip .c {
+    width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center;
+    background: rgba(245,158,11,.16); font-size: 15px;
+  }
+
+  /* ---- four steps ---- */
+  .pipe { display: grid; grid-template-columns: repeat(4, 1fr); gap: 26px; margin-top: 62px; }
+  .col { position: relative; display: flex; flex-direction: column; }
+  .colhead { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .colhead .n {
+    width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center;
+    background: rgba(74,144,232,.16); color: var(--blue-2); font-size: 13px; font-weight: 700;
+  }
+  .colhead .t { font-size: 18.5px; font-weight: 700; letter-spacing: -.02em; }
+  .colsub { font-size: 14px; line-height: 1.55; color: var(--ink-3); margin-bottom: 26px; min-height: 66px; }
+
+  .col + .col::before {
+    content: '›'; position: absolute; left: -26px; top: 232px;
+    width: 26px; text-align: center; color: var(--blue); font-size: 28px; line-height: 1; opacity: .45;
+  }
+
+  .bub { background: var(--blue); color: #fff; font-size: 14.5px; font-weight: 500;
+         padding: 12px 16px; border-radius: 14px 14px 4px 14px; margin-bottom: 16px; }
+
+  .node {
+    display: grid; grid-template-columns: 32px 1fr; align-items: center; gap: 13px;
+    border: 1px solid var(--line); border-radius: 12px; background: var(--panel); padding: 14px 16px;
+  }
+  .node .av { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center;
+              font-size: 15px; font-weight: 700; }
+  .node .nm { font-size: 14.5px; font-weight: 650; }
+  .node .md { font-size: 12px; color: var(--ink-3); margin-top: 3px; }
+  .node.lead { border-color: rgba(245,158,11,.45);
+               background: linear-gradient(160deg, rgba(245,158,11,.16), rgba(245,158,11,.03)); }
+  .node.lead .av { background: var(--gold); color: #1a1200; }
+
+  .brief {
+    border: 1px solid var(--line); border-left: 3px solid var(--d, var(--line));
+    border-radius: 4px 12px 12px 4px; padding: 13px 15px; margin-bottom: 12px;
+    background: rgba(255,255,255,.022);
+  }
+  .brief .who { font-size: 12px; font-weight: 700; color: var(--ink-3); letter-spacing: .06em;
+                text-transform: uppercase; margin-bottom: 6px; }
+  .brief .txt { font-size: 13.5px; line-height: 1.45; color: var(--ink-2); font-style: italic; }
+
+  .xarrow { display: flex; align-items: center; gap: 10px; margin: 13px 0;
+            font-size: 12px; color: var(--blue-2); font-weight: 600; }
+  .xarrow .ln { flex: 1; height: 1px; background: linear-gradient(90deg, transparent, var(--blue)); opacity: .55; }
+  .loop { font-size: 12.5px; color: var(--ink-3); margin-top: 13px; }
+
+  .answer {
+    border: 1px solid rgba(74,144,232,.42); border-radius: 14px; padding: 18px;
+    background: linear-gradient(165deg, rgba(74,144,232,.17), rgba(74,144,232,.03));
+  }
+  .answer .l { font-size: 11.5px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+               color: var(--blue-2); margin-bottom: 11px; }
+  .answer p { font-size: 14px; line-height: 1.6; color: var(--ink-2); }
+  .answer .cite { margin-top: 12px; padding-top: 11px; border-top: 1px solid rgba(255,255,255,.07);
+                  font-size: 12px; color: var(--ink-3); }
+
+  /* ---- closing line ---- */
+  .rules {
+    margin-top: auto; display: flex; align-items: center; gap: 34px;
+    border-top: 1px solid var(--line-soft); padding-top: 26px;
+    font-size: 14.5px; color: var(--ink-2);
+  }
+  .rules .r { display: flex; align-items: center; gap: 11px; }
+  .rules .r b { color: var(--ink); font-weight: 650; }
+  .rules .k { color: var(--gold); display: grid; place-items: center; font-size: 15px; }
+  .rules .sep { width: 1px; height: 20px; background: var(--line); }
+</style></head>
+<body><div class="stage"><div class="pad">
+
+  <div class="head">
+    <div>
+      <div class="crownchip"><span class="c">
+        <svg class="crown" viewBox="0 0 24 24"><path d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294z"/><path d="M5 21h14"/></svg>
+      </span>Response Leader</div>
+      <h2>One answer, argued<br>into shape by a panel.</h2>
+    </div>
+    <div class="sub">
+      Perspective mode shows you every model's answer. Multizone mode resolves them into one.
+    </div>
+  </div>
+
+  <div class="pipe">
+
+    <div class="col">
+      <div class="colhead"><span class="n">1</span><span class="t">You ask</span></div>
+      <div class="colsub">You talk to the leader, and only the leader talks back.</div>
+      <div class="bub">Should we ship the new sync engine this quarter?</div>
+      <div class="node lead">
+        <div class="av"><svg class="crown" viewBox="0 0 24 24" style="width:17px;height:17px"><path d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294z"/><path d="M5 21h14"/></svg></div>
+        <div><div class="nm">Response Leader</div><div class="md">Coordinates · never answers alone</div></div>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="colhead"><span class="n">2</span><span class="t">It briefs a panel</span></div>
+      <div class="colsub">Each sub-agent gets an opposing angle — never your message forwarded verbatim.</div>
+      <div class="brief" style="--d:#19c398"><div class="who">Sub-agent A</div>
+        <div class="txt">“Make the strongest case for shipping.”</div></div>
+      <div class="brief" style="--d:#e08a68"><div class="who">Sub-agent B</div>
+        <div class="txt">“Try to break this plan.”</div></div>
+      <div class="brief" style="--d:#a68df5"><div class="who">Sub-agent C</div>
+        <div class="txt">“Ignore both. What does it cost?”</div></div>
+    </div>
+
+    <div class="col">
+      <div class="colhead"><span class="n">3</span><span class="t">It cross-examines</span></div>
+      <div class="colsub">The leader puts the best objection to the agent who has to answer it.</div>
+      <div class="node">
+        <div class="av" style="background:#e08a6822;color:#e08a68">B</div>
+        <div><div class="nm">“Sync corrupts on retry.”</div><div class="md">objection</div></div>
+      </div>
+      <div class="xarrow"><span class="ln"></span>→</div>
+      <div class="node">
+        <div class="av" style="background:#19c39822;color:#19c398">A</div>
+        <div><div class="nm">“Idempotent writes fix it.”</div><div class="md">rebuttal</div></div>
+      </div>
+      <div class="loop">↺ &nbsp;Repeated until the disagreement resolves.</div>
+    </div>
+
+    <div class="col">
+      <div class="colhead"><span class="n">4</span><span class="t">It synthesizes</span></div>
+      <div class="colsub">You get one reconciled answer — not a pile of transcripts.</div>
+      <div class="answer">
+        <div class="l">The synthesis</div>
+        <p><b style="color:var(--ink)">Ship it — behind a flag.</b> Retry corruption is the strongest
+           case against, and idempotent writes close it well inside the quarter.</p>
+        <div class="cite">Risk from B · countered by A · cost from C</div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="rules">
+    <div class="r"><span class="k">◎</span><span><b>Disagreement by design</b> — no accidental consensus</span></div>
+    <div class="sep"></div>
+    <div class="r"><span class="k">▤</span><span><b>Fully inspectable</b> — the whole call tree, every transcript</span></div>
+    <div class="sep"></div>
+    <div class="r"><span class="k">◍</span><span><b>Any models you like</b> — mix providers, or stay local</span></div>
+  </div>
+
+</div></div></body></html>

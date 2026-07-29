@@ -1,0 +1,162 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="base.css">
+<style>
+  .pad { padding: 60px 84px 56px; }
+  .head { display: flex; align-items: flex-end; justify-content: space-between; }
+  .head .sub { font-size: 18px; max-width: 520px; }
+
+  .flow { flex: 1; display: flex; align-items: center; justify-content: center; margin-top: 6px; position: relative; }
+  .flowgrid {
+    display: grid;
+    grid-template-columns: 296px 132px 796px;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    gap: 0;
+  }
+
+  /* step 1 : you */
+  .you {
+    border: 1px solid var(--line); border-radius: 14px; background: var(--panel);
+    padding: 22px 24px;
+  }
+  .steplabel {
+    font-size: 11.5px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--ink-3); margin-bottom: 14px; display: flex; align-items: center; gap: 9px;
+  }
+  .steplabel i {
+    font-style: normal; width: 20px; height: 20px; border-radius: 6px; display: grid; place-items: center;
+    background: rgba(74,144,232,.16); color: var(--blue-2); font-size: 11px; letter-spacing: 0;
+  }
+  .bubble {
+    background: var(--blue); color: #fff; font-size: 15px; font-weight: 500;
+    padding: 11px 16px; border-radius: 14px 14px 4px 14px; display: inline-block;
+  }
+  .you .hint { margin-top: 14px; font-size: 13px; color: var(--ink-3); line-height: 1.5; }
+
+  /* connector */
+  .fan { position: relative; height: 386px; }
+  .fan svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+
+  /* step 2 : zones */
+  .zonescol { position: relative; }
+  .zonescol > .steplabel { position: absolute; top: -36px; left: 4px; margin: 0; }
+  .zones { display: flex; flex-direction: column; gap: 14px; }
+  .zone {
+    display: grid; grid-template-columns: 34px 1fr auto; align-items: center; gap: 14px;
+    height: 66px;
+    border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+    padding: 0 18px;
+  }
+  .zone .av { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; font-size: 15px; }
+  .zone .nm { font-size: 15.5px; font-weight: 600; }
+  .zone .md { font-size: 12.5px; color: var(--ink-3); margin-top: 2px; }
+  .zone .tag {
+    font-size: 11.5px; font-weight: 600; padding: 4px 10px; border-radius: 999px;
+    background: rgba(255,255,255,.05); color: var(--ink-2); border: 1px solid var(--line);
+  }
+  .zone.ghost {
+    background: transparent; border-style: dashed; border-color: rgba(74,144,232,.34);
+  }
+  .zone.ghost .av { background: rgba(74,144,232,.10); color: var(--blue-2); font-size: 18px; font-weight: 600; }
+  .zone.ghost .nm { color: var(--ink-2); }
+  .zone.ghost .tag { border-style: dashed; border-color: rgba(74,144,232,.34); color: var(--blue-2); background: transparent; }
+
+  .note {
+    margin-top: 26px; display: flex; gap: 12px; align-items: center;
+    font-size: 15px; color: var(--ink-2);
+  }
+  .note .k {
+    font-family: 'JetBrains Mono', monospace; font-size: 12.5px; color: var(--blue-2);
+    border: 1px solid var(--line); border-radius: 6px; padding: 4px 9px; background: rgba(74,144,232,.07);
+  }
+</style></head>
+<body><div class="stage"><div class="pad">
+
+  <div class="head">
+    <div>
+      <div class="eyebrow" style="margin-bottom:16px">How perspective mode works</div>
+      <h2>Send it once.<br>Every model answers.</h2>
+    </div>
+    <div class="sub">
+      Each zone is its own provider, model, system prompt and toolset — frontier APIs, a self-hosted
+      endpoint, or a model on your own GPU. Add a zone as a
+      <em style="color:var(--ink);font-style:normal;font-weight:600">perspective</em> and every message
+      you send fans out to all of them in parallel. One zone or twenty; it's your call, and it's
+      model-agnostic.
+    </div>
+  </div>
+
+  <div class="flow"><div class="flowgrid">
+
+    <div class="you">
+      <div class="steplabel"><i>1</i>You type</div>
+      <div class="bubble">Who are you?</div>
+      <div class="hint">One message box. One conversation history. No copy-pasting between tabs.</div>
+    </div>
+
+    <div class="fan">
+      <svg viewBox="0 0 132 386" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="g" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%"  stop-color="#4a90e8" stop-opacity=".15"/>
+            <stop offset="100%" stop-color="#4a90e8" stop-opacity=".85"/>
+          </linearGradient>
+        </defs>
+        <g fill="none" stroke="url(#g)" stroke-width="2">
+          <path d="M0,193 C62,193 70,33  132,33"/>
+          <path d="M0,193 C62,193 70,113 132,113"/>
+          <path d="M0,193 C62,193 70,193 132,193"/>
+          <path d="M0,193 C62,193 70,273 132,273"/>
+        </g>
+        <path d="M0,193 C62,193 70,353 132,353" fill="none"
+              stroke="#4a90e8" stroke-opacity=".38" stroke-width="2" stroke-dasharray="5 6"/>
+        <circle cx="0" cy="193" r="5" fill="#4a90e8"/>
+        <g fill="#4a90e8">
+          <circle cx="132" cy="33" r="4"/><circle cx="132" cy="113" r="4"/>
+          <circle cx="132" cy="193" r="4"/><circle cx="132" cy="273" r="4"/>
+          <circle cx="132" cy="353" r="4" fill-opacity=".4"/>
+        </g>
+      </svg>
+    </div>
+
+    <div class="zonescol">
+      <div class="steplabel"><i>2</i>Every zone answers, in parallel</div>
+      <div class="zones">
+        <div class="zone">
+          <div class="av" style="background:#10a37f22;color:#19c398">◍</div>
+          <div><div class="nm">GPT-5.6</div><div class="md">openai/gpt-5.6</div></div>
+          <div class="tag">Primary</div>
+        </div>
+        <div class="zone">
+          <div class="av" style="background:#d9775722;color:#e08a68">◐</div>
+          <div><div class="nm">Claude Opus 5</div><div class="md">anthropic/claude-opus-5 · web tools on</div></div>
+          <div class="tag">Perspective</div>
+        </div>
+        <div class="zone">
+          <div class="av" style="background:#8b6cf022;color:#a68df5">◈</div>
+          <div><div class="nm">Kimi K3</div><div class="md">moonshotai/kimi-k3</div></div>
+          <div class="tag">Perspective</div>
+        </div>
+        <div class="zone">
+          <div class="av" style="background:#4a90e822;color:#6aa9f0">▤</div>
+          <div><div class="nm">GLM-5.2</div><div class="md">z-ai/glm-5.2</div></div>
+          <div class="tag">Perspective</div>
+        </div>
+        <div class="zone ghost">
+          <div class="av">+</div>
+          <div><div class="nm">Add another zone</div><div class="md">A fifth opinion, or a model running on your own GPU</div></div>
+          <div class="tag">No limit</div>
+        </div>
+      </div>
+    </div>
+
+  </div></div>
+
+  <div class="note">
+    <span class="k">3</span>
+    Answers land in side-by-side columns — scroll, expand the thinking, or collapse a zone you're done with.
+    Every zone sees what the others said on previous turns.
+  </div>
+
+</div></div></body></html>

@@ -1,0 +1,98 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="base.css">
+<style>
+  .pad { padding: 62px 84px 56px; }
+  .head { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 44px; }
+  .head .sub { font-size: 17px; max-width: 460px; text-align: right; }
+
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; flex: 1; }
+  .card {
+    border: 1px solid var(--line); border-radius: 16px; background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.012));
+    padding: 26px 26px 24px; display: flex; flex-direction: column;
+  }
+  .card .ic {
+    width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center;
+    background: rgba(74,144,232,.14); color: var(--blue-2); font-size: 19px; margin-bottom: 18px;
+  }
+  .card h3 { font-size: 19px; font-weight: 700; letter-spacing: -.015em; margin-bottom: 9px; }
+  .card p { font-size: 14.5px; line-height: 1.55; color: var(--ink-2); }
+  .card .meta {
+    margin-top: auto; padding-top: 16px; font-size: 12px; font-weight: 600; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--ink-3);
+  }
+  .card.accent {
+    border-color: rgba(74,144,232,.42);
+    background: linear-gradient(165deg, rgba(74,144,232,.16), rgba(74,144,232,.03));
+  }
+  .card.accent .ic { background: var(--blue); color: #fff; }
+</style></head>
+<body><div class="stage"><div class="pad">
+
+  <div class="head">
+    <div>
+      <div class="brandbar" style="margin-bottom:22px">
+        <img src="icon.png" alt=""><div class="name"><b>Multi</b><span>Zone</span></div>
+      </div>
+      <h2>Built for people who<br>don't trust one model.</h2>
+    </div>
+    <div class="sub">Everything runs on your machine, against whatever providers you point it at —
+      hosted, self-hosted, or a model on your own GPU.</div>
+  </div>
+
+  <div class="grid">
+    <div class="card accent">
+      <div class="ic">◨</div>
+      <h3>Perspective mode</h3>
+      <p>Send one message to four models at once and read the answers in parallel columns.
+         Disagreement is the point — you see it immediately instead of discovering it later.</p>
+      <div class="meta">The headline feature</div>
+    </div>
+
+    <div class="card">
+      <div class="ic">◈</div>
+      <h3>Zones, not settings</h3>
+      <p>A zone bundles a provider, model, system prompt, temperature and tool permissions
+         into one named thing you can switch to in a keystroke.</p>
+      <div class="meta">Reusable configs</div>
+    </div>
+
+    <div class="card">
+      <div class="ic">⌕</div>
+      <h3>Web research, no API key</h3>
+      <p>Searches seven engines in parallel and merges the results, reads full pages and PDFs
+         as clean markdown, and crawls a site — all from your machine, nothing to sign up for.</p>
+      <div class="meta">smart_search · fetch · crawl</div>
+    </div>
+
+    <div class="card">
+      <div class="ic">▤</div>
+      <h3>Projects &amp; tags</h3>
+      <p>Chats get filed and labelled, so a month-old thread is a filter away rather than a
+         scroll away.</p>
+      <div class="meta">Stays organised</div>
+    </div>
+
+    <div class="card">
+      <div class="ic">◎</div>
+      <h3>Attachments &amp; voice</h3>
+      <p>Drop in files, images and PDFs, or dictate with a transcription provider of your
+         choosing — including a local Whisper server.</p>
+      <div class="meta">Input, your way</div>
+    </div>
+
+    <div class="card">
+      <div class="ic">⌘</div>
+      <h3>Local HTTP API</h3>
+      <p>Flip a switch and scripts can drive the app like a CLI — create chats, pick zones,
+         stream replies. Bound to localhost, bearer-token only.</p>
+      <div class="meta">Automatable</div>
+    </div>
+  </div>
+
+  <div class="foot" style="margin-top:38px">
+    <span>Tauri 2 · Rust · React 19 · SQLite</span><span class="dot"></span>
+    <span>Windows desktop</span><span class="dot"></span>
+    <span>Your keys and history never leave the machine</span>
+  </div>
+
+</div></div></body></html>

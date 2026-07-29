@@ -1,0 +1,89 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="base.css">
+<style>
+  .stage { display: block; }
+  .pad { padding: 70px 84px 0; }
+  .top { display: flex; align-items: flex-start; justify-content: space-between; }
+  .copy { margin-top: 54px; max-width: 900px; }
+  .copy h1 { margin-bottom: 26px; }
+  .chips { display: flex; gap: 10px; margin-top: 30px; }
+
+  .shot {
+    position: absolute;
+    left: 84px;
+    right: -260px;
+    top: 636px;
+    z-index: 2;
+  }
+  .shot .frame { border-radius: 14px; }
+  /* answering zones, floating right */
+  .fanpanel { position: absolute; right: 84px; top: 232px; width: 430px; z-index: 3; }
+  .fanpanel .cap {
+    font-size: 11.5px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--ink-3); margin-bottom: 16px; text-align: right;
+  }
+  .zrow {
+    display: grid; grid-template-columns: 30px 1fr auto; align-items: center; gap: 13px;
+    border: 1px solid var(--line); border-radius: 12px;
+    background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.015));
+    padding: 0 16px; height: 62px; margin-bottom: 12px;
+  }
+  .zrow .av { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; font-size: 14px; }
+  .zrow .nm { font-size: 14.5px; font-weight: 650; }
+  .zrow .md { font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
+  .zrow .st { font-size: 11px; font-weight: 600; color: var(--blue-2); letter-spacing: .06em; }
+  .zrow.ghostrow {
+    background: transparent; border-style: dashed; border-color: rgba(74,144,232,.32); height: 52px;
+  }
+  .zrow.ghostrow .av { background: rgba(74,144,232,.10); color: var(--blue-2); font-size: 17px; font-weight: 600; }
+  .zrow.ghostrow .nm { color: var(--ink-2); font-weight: 500; }
+
+  .glow {
+    position: absolute; left: 50%; top: 630px; width: 1200px; height: 300px;
+    transform: translateX(-50%);
+    background: radial-gradient(closest-side, rgba(74,144,232,.30), transparent 70%);
+    filter: blur(40px); z-index: 1;
+  }
+</style></head>
+<body><div class="stage">
+  <div class="glow"></div>
+  <div class="pad">
+    <div class="top">
+      <div class="brandbar">
+        <img src="icon.png" alt="">
+        <div class="name"><b>Multi</b><span>Zone</span></div>
+      </div>
+      <div class="chip"><span class="led"></span>Local-first desktop app · Tauri + Rust</div>
+    </div>
+
+    <div class="copy">
+      <div class="eyebrow" style="margin-bottom:20px">Ask once. Hear everyone.</div>
+      <h1>One prompt.<br><span class="hl">Every model,</span> <span class="dim">side by side.</span></h1>
+      <div class="sub" style="margin-top:24px">
+        MultiZone runs your message through as many models as you want — at the same time, in
+        one conversation. Compare the answers in a glance instead of keeping a browser tab open per model.
+      </div>
+      <div class="chips">
+        <div class="chip">Any OpenAI-compatible provider</div>
+        <div class="chip">Local models welcome</div>
+        <div class="chip">Your data stays on your machine</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="fanpanel">
+    <div class="cap">All answering, right now</div>
+    <div class="zrow"><div class="av" style="background:#10a37f22;color:#19c398">◍</div>
+      <div><div class="nm">GPT-5.6</div><div class="md">openai/gpt-5.6</div></div><div class="st">▍▍▍</div></div>
+    <div class="zrow"><div class="av" style="background:#d9775722;color:#e08a68">◐</div>
+      <div><div class="nm">Claude Opus 5</div><div class="md">anthropic/claude-opus-5</div></div><div class="st">▍▍▍</div></div>
+    <div class="zrow"><div class="av" style="background:#8b6cf022;color:#a68df5">◈</div>
+      <div><div class="nm">Kimi K3</div><div class="md">moonshotai/kimi-k3</div></div><div class="st">▍▍▍</div></div>
+    <div class="zrow"><div class="av" style="background:#4a90e822;color:#6aa9f0">▤</div>
+      <div><div class="nm">GLM-5.2</div><div class="md">z-ai/glm-5.2</div></div><div class="st">▍▍▍</div></div>
+    <div class="zrow ghostrow"><div class="av">+</div>
+      <div><div class="nm">…or your own local model</div></div><div class="st"></div></div>
+  </div>
+
+  <div class="shot"><div class="frame"><img src="shot-dark.png" alt=""></div></div>
+</div></body></html>

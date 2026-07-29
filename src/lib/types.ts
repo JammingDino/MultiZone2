@@ -485,6 +485,20 @@ export interface AppSettings {
    */
   pdfMode: "images" | "text";
   /**
+   * How much of the run a chat's PDF export spells out (1.0).
+   * "steps" — a card per tool call and reasoning block (the full trace)
+   * "rails" — each run of steps condensed to one line, as the chat does with
+   *           compact steps on; plans, diagrams, plots and files still drawn
+   * "text"  — the conversation only: questions, attachments, answers
+   */
+  pdfExportDetail: "steps" | "rails" | "text";
+  /**
+   * Theme the PDF export is drawn in (1.0). "app" follows the interface; the
+   * other two override it, for someone who works in dark mode but documents in
+   * light (or the reverse).
+   */
+  pdfExportTheme: "app" | "dark" | "light";
+  /**
    * Default execution mode for perspective zones (overridable per chat).
    * "parallel"   — run all perspective zones at once (default; how most people
    *                use several models — ask once, compare the answers together)
@@ -660,6 +674,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   autoApproveLevel: "all",
   maxToolSteps: 30,
   pdfMode: "images",
+  pdfExportDetail: "steps",
+  pdfExportTheme: "app",
   perspectiveMode: "parallel",
   perspectiveLayout: "stacked",
   webSearchProvider: "duckduckgo",

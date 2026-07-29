@@ -7,6 +7,8 @@ import type { LucideIcon } from "lucide-react";
 import * as api from "@/lib/tauri";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
 import { VisionOverrideSelect } from "@/components/common/VisionOverrideSelect";
+import { IconPicker } from "@/components/common/IconPicker";
+import { ColorPicker } from "@/components/common/ColorPicker";
 import type { Provider, ToolFunctionInfo, ToolUsage, Zone } from "@/lib/types";
 import { ALL_TOOLS, TOOL_CATEGORIES, mcpToolEnableId } from "@/lib/types";
 import { useApp } from "@/store/app";
@@ -120,13 +122,6 @@ function ToolGroup({
     </div>
   );
 }
-
-import {
-  ZONE_ICON_GROUPS,
-  ZONE_ICONS,
-  ZONE_COLOR_PRESETS,
-  getZoneIcon,
-} from "@/lib/zoneIcons";
 
 // ---------------------------------------------------------------------------
 // Built-in prompt templates
@@ -397,13 +392,11 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
   const [isLeader, setIsLeader] = useState(false);
   const [icon, setIcon] = useState<string | null>(null);
   const [accentColor, setAccentColor] = useState<string | null>(null);
-  const [iconSearch, setIconSearch] = useState("");
   const [models, setModels] = useState<string[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
   const [saving, setSaving] = useState(false);
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
   const templatePickerRef = useRef<HTMLDivElement>(null);
-  const [iconPickerOpen, setIconPickerOpen] = useState(false);
   /** Which tool groups are expanded. Missing key = collapsed. */
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
 
@@ -505,7 +498,6 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
       setIcon(null);
       setAccentColor(null);
     }
-    setIconSearch("");
     setOpenGroups({});
   }, [zone?.id, providers]);
 
@@ -522,12 +514,6 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
   useEffect(() => {
     refreshMcpServers().catch(console.error);
   }, [refreshMcpServers]);
-
-  const filteredIcons = useMemo(() => {
-    if (!iconSearch.trim()) return null; // null = show groups
-    const q = iconSearch.toLowerCase();
-    return ZONE_ICONS.filter((i) => i.label.toLowerCase().includes(q));
-  }, [iconSearch]);
 
   const activeColor = accentColor ?? "var(--color-accent)";
 
@@ -634,8 +620,6 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
     setTemplatePickerOpen(false);
   }
 
-  const SelectedIcon = getZoneIcon(icon);
-
   return (
     <>
       <div className="flex min-h-0 flex-1">
@@ -649,146 +633,12 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
             a popover rather than inline — it used to be the tallest thing in the
             form for what is a one-off choice. */}
         <div className="mb-3 grid grid-cols-2 gap-3">
-          <div className="relative">
-            <div className="mb-1 flex items-center justify-between text-xs text-[var(--color-text-muted)]">
-              <span>Icon</span>
-              {icon && (
-                <button
-                  onClick={() => setIcon(null)}
-                  className="flex items-center gap-1 hover:text-[var(--color-text)]"
-                >
-                  <X size={10} /> Clear
-                </button>
-              )}
-            </div>
-            <button
-              type="button"
-              onClick={() => setIconPickerOpen((v) => !v)}
-              className="flex w-full items-center gap-2 rounded border border-[var(--color-border)] px-2 py-1 text-left hover:border-[var(--color-accent)]"
-            >
-              <span
-                className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md"
-                style={{ background: activeColor }}
-              >
-                <SelectedIcon size={15} color="white" />
-              </span>
-              <span className="truncate text-xs">{icon ?? "Default"}</span>
-              <span className="ml-auto shrink-0 text-[11px] text-[var(--color-text-muted)]">Change</span>
-            </button>
-            {iconPickerOpen && (
-              <>
-                <div
-                  className="fixed inset-0 z-30"
-                  onMouseDown={(e) => { e.preventDefault(); setIconPickerOpen(false); }}
-                />
-                <div className="absolute left-0 top-full z-40 mt-1 w-[320px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] p-2 shadow-xl">
-          <input
-            value={iconSearch}
-            onChange={(e) => setIconSearch(e.target.value)}
-            placeholder="Search icons…"
-            className="input mb-2 text-xs"
+          <IconPicker value={icon} onChange={setIcon} activeColor={activeColor} />
+          <ColorPicker
+            value={accentColor}
+            onChange={setAccentColor}
+            label="Zone color"
           />
-          <div className="max-h-56 overflow-y-auto rounded border border-[var(--color-border)] p-2">
-            {filteredIcons !== null ? (
-              filteredIcons.length === 0 ? (
-                <div className="py-2 text-center text-xs text-[var(--color-text-muted)]">
-                  No icons found
-                </div>
-              ) : (
-                <div className="grid grid-cols-10 gap-1">
-                  {filteredIcons.map(({ id: iconId, icon: IconComp, label }) => (
-                    <IconButton
-                      key={iconId}
-                      iconId={iconId}
-                      IconComp={IconComp}
-                      label={label}
-                      selected={icon === iconId}
-                      activeColor={activeColor}
-                      onClick={() => {
-                        setIcon(iconId === icon ? null : iconId);
-                        setIconPickerOpen(false);
-                      }}
-                    />
-                  ))}
-                </div>
-              )
-            ) : (
-              <div className="flex flex-col gap-3">
-                {ZONE_ICON_GROUPS.map((group) => (
-                  <div key={group.label}>
-                    <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-                      {group.label}
-                    </div>
-                    <div className="grid grid-cols-10 gap-1">
-                      {group.icons.map(({ id: iconId, icon: IconComp, label }) => (
-                        <IconButton
-                          key={iconId}
-                          iconId={iconId}
-                          IconComp={IconComp}
-                          label={label}
-                          selected={icon === iconId}
-                          activeColor={activeColor}
-                          onClick={() => {
-                            setIcon(iconId === icon ? null : iconId);
-                            setIconPickerOpen(false);
-                          }}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-                </div>
-              </>
-            )}
-          </div>
-
-          {/* Color picker */}
-          <div>
-            <div className="mb-1 flex items-center justify-between text-xs text-[var(--color-text-muted)]">
-            <span>Zone color</span>
-            {accentColor && (
-              <button
-                onClick={() => setAccentColor(null)}
-                className="flex items-center gap-1 hover:text-[var(--color-text)]"
-              >
-                <X size={10} /> Use global accent
-              </button>
-            )}
-          </div>
-          <div className="flex flex-wrap items-center gap-1.5">
-            {ZONE_COLOR_PRESETS.map((color) => (
-              <button
-                key={color}
-                onClick={() => setAccentColor(accentColor === color ? null : color)}
-                className="h-6 w-6 rounded-full transition hover:scale-110"
-                style={{
-                  background: color,
-                  outline:
-                    accentColor === color ? `2px solid ${color}` : "2px solid transparent",
-                  outlineOffset: "2px",
-                }}
-                title={color}
-              />
-            ))}
-            <div
-              className="relative flex h-6 w-8 cursor-pointer items-center justify-center overflow-hidden rounded border border-[var(--color-border)] hover:border-[var(--color-accent)]"
-              title="Custom color"
-            >
-              <input
-                type="color"
-                value={accentColor ?? "#4f9cf9"}
-                onChange={(e) => setAccentColor(e.target.value)}
-                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-              />
-              <span className="pointer-events-none z-10 text-[9px] font-mono text-[var(--color-text-muted)]">
-                {accentColor ? accentColor.slice(1, 4).toUpperCase() : "···"}
-              </span>
-            </div>
-            </div>
-          </div>
         </div>
 
         <div className="grid grid-cols-2 gap-3">
@@ -1356,45 +1206,6 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
 
       <style>{`.input { width: 100%; border: 1px solid var(--color-border); border-radius: 4px; padding: 6px 8px; background: var(--color-panel); font-size: 13px; } .input:focus { border-color: var(--color-accent); outline: none; }`}</style>
     </>
-  );
-}
-
-function IconButton({
-  iconId,
-  IconComp,
-  label,
-  selected,
-  activeColor,
-  onClick,
-}: {
-  iconId: string;
-  IconComp: React.ComponentType<{ size?: number; color?: string }>;
-  label: string;
-  selected: boolean;
-  activeColor: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      key={iconId}
-      onClick={onClick}
-      title={label}
-      className="flex items-center justify-center rounded p-1.5 transition"
-      style={
-        selected
-          ? { background: activeColor }
-          : undefined
-      }
-      onMouseEnter={(e) => {
-        if (!selected)
-          (e.currentTarget as HTMLElement).style.background = "var(--color-panel-hover)";
-      }}
-      onMouseLeave={(e) => {
-        if (!selected) (e.currentTarget as HTMLElement).style.background = "";
-      }}
-    >
-      <IconComp size={14} color={selected ? "white" : undefined} />
-    </button>
   );
 }
 

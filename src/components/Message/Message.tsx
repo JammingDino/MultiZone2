@@ -17,6 +17,7 @@ import {
   type Citation,
   type FileSource,
 } from "@/lib/citations";
+import { parseFileAttachments } from "@/lib/attachmentParts";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { getZoneIcon } from "@/lib/zoneIcons";
@@ -78,44 +79,6 @@ function parseParts(json: string): ContentPart[] {
   return [{ type: "text", text: json }];
 }
 
-type FileAttachment =
-  | { fileName: string; mode: "images"; pages: string[] }
-  | { fileName: string; mode: "text"; text: string }
-  | { fileName: string; mode: "file"; text: string };
-
-/**
- * Reconstructs the attachment chips for a user turn from its hidden parts.
- * Attachments are stored as hidden text (and hidden images, for a rendered PDF)
- * so the model receives the whole file while the chat shows only a chip —
- * the markers written by the input bar are the record of what was attached.
- */
-function parseFileAttachments(parts: ContentPart[]): FileAttachment[] {
-  const result: FileAttachment[] = [];
-  let current: { fileName: string; pages: string[] } | null = null;
-
-  for (const p of parts) {
-    if (p.type === "hidden_text") {
-      if (current) { result.push({ ...current, mode: "images" }); current = null; }
-
-      const imgMatch = p.text.match(/^\[Attached PDF: (.+) — \d+ pages follow as images\]$/);
-      if (imgMatch) { current = { fileName: imgMatch[1], pages: [] }; continue; }
-
-      const txtMatch = p.text.match(/^File: (.+) \(PDF, extracted text\)\n```\n([\s\S]*?)\n```$/);
-      if (txtMatch) { result.push({ fileName: txtMatch[1], mode: "text", text: txtMatch[2] }); continue; }
-
-      // Plain text/markdown/source attachments (0.9.4).
-      const fileMatch = p.text.match(/^File: (.+)\n```\n([\s\S]*?)\n```$/);
-      if (fileMatch) result.push({ fileName: fileMatch[1], mode: "file", text: fileMatch[2] });
-    } else if (p.type === "hidden_image" && current) {
-      current.pages.push(p.image_url.url);
-    } else if (p.type !== "hidden_image") {
-      if (current) { result.push({ ...current, mode: "images" }); current = null; }
-    }
-  }
-  if (current) result.push({ ...current, mode: "images" });
-  return result;
-}
-
 /**
  * File attachments from the primary user message that opened this turn's round,
  * surfaced as citation sources (0.4.1). PDFs rendered as images carry a page
@@ -162,6 +125,7 @@ function UserMessageImpl({ message }: { message: Message }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(text);
   const [preview, setPreview] = useState<MessagePreview | null>(null);
+  const resending = useRef(false);
   const loadMessages = useApp((s) => s.loadMessages);
   const refreshChats = useApp((s) => s.refreshChats);
   // In a subchat, user-role turns are the owning zone's prompts — render them
@@ -174,18 +138,22 @@ function UserMessageImpl({ message }: { message: Message }) {
   const SenderIcon = subchatZone ? getZoneIcon(subchatZone.icon) : User;
   const senderBg = subchatZone?.accentColor ?? "var(--color-accent)";
 
-  async function commitEdit() {
-    const next = draft.trim();
-    if (!next || next === text.trim()) {
-      setEditing(false);
-      setDraft(text);
-      return;
-    }
-    setEditing(false);
+  /**
+   * Send this turn again — the given text plus every attachment it carried,
+   * with this message and everything after it dropped first. Shared by "Save &
+   * resend" (edited text) and "Resend" (unchanged), because those differ only in
+   * what the text is.
+   */
+  async function resend(nextText: string) {
+    // The turn isn't streaming yet between the click and the send, so the
+    // button's own disabled state can't cover this window.
+    if (resending.current) return;
+    resending.current = true;
     try {
       await api.deleteMessagesFrom(message.chatId, message.id);
       await loadMessages(message.chatId);
-      const parts: InputPart[] = [{ type: "text", text: next }];
+      const parts: InputPart[] = [];
+      if (nextText) parts.push({ type: "text", text: nextText });
       for (const img of images) {
         parts.push({ type: "image", data_url: img.image_url.url });
       }
@@ -197,7 +165,20 @@ function UserMessageImpl({ message }: { message: Message }) {
       refreshChats();
     } catch (e) {
       console.error(e);
+    } finally {
+      resending.current = false;
     }
+  }
+
+  async function commitEdit() {
+    const next = draft.trim();
+    if (!next || next === text.trim()) {
+      setEditing(false);
+      setDraft(text);
+      return;
+    }
+    setEditing(false);
+    await resend(next);
   }
 
   if (editing) {
@@ -321,6 +302,7 @@ function UserMessageImpl({ message }: { message: Message }) {
           chatId={message.chatId}
           variant="user"
           onEdit={() => setEditing(true)}
+          onResend={() => resend(text.trim())}
           branchFromMessageId={message.id}
         />
       </div>

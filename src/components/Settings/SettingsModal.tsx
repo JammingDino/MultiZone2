@@ -236,17 +236,14 @@ function AppearanceTab() {
     <div className="flex flex-col gap-5">
       <section>
         <h3 className="mb-2 text-sm font-medium">Color mode</h3>
-        <div className="flex gap-2">
-          {(["dark", "light"] as const).map((m) => (
-            <button
-              key={m}
-              onClick={() => setTheme({ mode: m })}
-              className={`flex-1 rounded border px-3 py-2 text-sm ${theme.mode === m ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]" : "border-[var(--color-border)] hover:border-[var(--color-accent)]"}`}
-            >
-              {m === "dark" ? "Dark" : "Light"}
-            </button>
-          ))}
-        </div>
+        <OptionCards
+          value={theme.mode}
+          onChange={(mode) => setTheme({ mode })}
+          options={[
+            ["dark",  "Dark"],
+            ["light", "Light"],
+          ]}
+        />
       </section>
 
       <section>
@@ -496,21 +493,14 @@ function AppearanceTab() {
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
           How additional model responses are arranged beneath the primary answer when a chat runs multiple zones.
         </p>
-        <div className="flex gap-2">
-          {([
+        <OptionCards
+          value={appSettings.perspectiveLayout}
+          onChange={(perspectiveLayout) => setAppSettings({ perspectiveLayout })}
+          options={[
             ["stacked", "Stacked", "Full-width response blocks stacked vertically."],
             ["columns", "Columns", "Side-by-side columns for direct comparison."],
-          ] as const).map(([val, label, desc]) => (
-            <button
-              key={val}
-              onClick={() => setAppSettings({ perspectiveLayout: val })}
-              className={`flex-1 rounded border px-3 py-2.5 text-left text-sm ${appSettings.perspectiveLayout === val ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]" : "border-[var(--color-border)] hover:border-[var(--color-accent)]"}`}
-            >
-              <div className="font-medium">{label}</div>
-              <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">{desc}</div>
-            </button>
-          ))}
-        </div>
+          ]}
+        />
       </section>
 
       <section>
@@ -518,21 +508,12 @@ function AppearanceTab() {
         <p className="mb-2 text-xs text-[var(--color-text-muted)]">
           How many zone cards the Zone Library shows per page.
         </p>
-        <div className="flex gap-2">
-          {[6, 9, 12, 15, 30].map((n) => (
-            <button
-              key={n}
-              onClick={() => setAppSettings({ zoneLibraryPageSize: n })}
-              className={`flex-1 rounded border px-3 py-2.5 text-center text-sm ${
-                (appSettings.zoneLibraryPageSize || 6) === n
-                  ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]"
-                  : "border-[var(--color-border)] hover:border-[var(--color-accent)]"
-              }`}
-            >
-              <div className="font-medium">{n}</div>
-            </button>
-          ))}
-        </div>
+        <OptionCards
+          align="center"
+          value={appSettings.zoneLibraryPageSize || 6}
+          onChange={(zoneLibraryPageSize) => setAppSettings({ zoneLibraryPageSize })}
+          options={[[6, "6"], [9, "9"], [12, "12"], [15, "15"], [30, "30"]]}
+        />
       </section>
 
     </div>
@@ -586,21 +567,14 @@ function ChatTab() {
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
           Shift+Enter always inserts a new line.
         </p>
-        <div className="flex gap-2">
-          {([
+        <OptionCards
+          value={appSettings.sendKey}
+          onChange={(sendKey) => setAppSettings({ sendKey })}
+          options={[
             ["enter", "Enter", ""],
             ["ctrl_enter", "Ctrl+Enter", "⌘+Enter on Mac"],
-          ] as const).map(([val, label, desc]) => (
-            <button
-              key={val}
-              onClick={() => setAppSettings({ sendKey: val })}
-              className={`flex-1 rounded border px-3 py-2.5 text-left text-sm ${appSettings.sendKey === val ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]" : "border-[var(--color-border)] hover:border-[var(--color-accent)]"}`}
-            >
-              <div className="font-medium">{label}</div>
-              {desc && <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">{desc}</div>}
-            </button>
-          ))}
-        </div>
+          ]}
+        />
       </section>
 
       <section>
@@ -656,27 +630,47 @@ function ChatTab() {
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
           Dangerous: code execution and shell. Moderate: web search and file access.
         </p>
-        <div className="flex flex-col gap-2">
-          {([
+        <OptionCards
+          layout="column"
+          value={appSettings.autoApproveLevel}
+          onChange={(autoApproveLevel) => setAppSettings({ autoApproveLevel })}
+          options={[
             ["all",          "Everything",          "No approval prompts."],
             ["safe_moderate","Safe + moderate",     "Dangerous tools ask first."],
             ["safe",         "Safe only",           "Moderate and dangerous tools ask first."],
             ["none",         "Nothing",             "Every tool call asks first."],
-          ] as const).map(([val, label, desc]) => (
-            <button
-              key={val}
-              onClick={() => setAppSettings({ autoApproveLevel: val })}
-              className={`rounded border px-3 py-2 text-left text-sm ${
-                appSettings.autoApproveLevel === val
-                  ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]"
-                  : "border-[var(--color-border)] hover:border-[var(--color-accent)]"
-              }`}
-            >
-              <div className="font-medium">{label}</div>
-              <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">{desc}</div>
-            </button>
-          ))}
-        </div>
+          ]}
+        />
+      </section>
+
+      <section>
+        <h3 className="mb-1 text-sm font-medium">PDF export</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          How much of a run the chat's PDF export writes down.
+        </p>
+        <OptionCards
+          layout="column"
+          value={appSettings.pdfExportDetail}
+          onChange={(pdfExportDetail) => setAppSettings({ pdfExportDetail })}
+          options={[
+            ["steps", "Every step",  "One card per tool call and reasoning block."],
+            ["rails", "Condensed",   "Each run of steps on one line, as the chat shows it. Plans, diagrams and files still drawn."],
+            ["text",  "Text only",   "The conversation and its attachments, nothing else."],
+          ]}
+        />
+        <p className="mb-2 mt-3 text-xs text-[var(--color-text-muted)]">
+          Theme the document is drawn in — for working in one mode and documenting
+          in the other.
+        </p>
+        <OptionCards
+          value={appSettings.pdfExportTheme}
+          onChange={(pdfExportTheme) => setAppSettings({ pdfExportTheme })}
+          options={[
+            ["app",   "Follow app"],
+            ["light", "Light"],
+            ["dark",  "Dark"],
+          ]}
+        />
       </section>
 
       <section>
@@ -684,21 +678,14 @@ function ChatTab() {
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
           How attached PDFs are sent to the model.
         </p>
-        <div className="flex gap-2">
-          {([
+        <OptionCards
+          value={appSettings.pdfMode}
+          onChange={(pdfMode) => setAppSettings({ pdfMode })}
+          options={[
             ["images", "Images", "Best for diagrams and scans."],
             ["text",   "Text",   "Faster, for text-heavy PDFs."],
-          ] as const).map(([val, label, desc]) => (
-            <button
-              key={val}
-              onClick={() => setAppSettings({ pdfMode: val })}
-              className={`flex-1 rounded border px-3 py-2.5 text-left text-sm ${appSettings.pdfMode === val ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]" : "border-[var(--color-border)] hover:border-[var(--color-accent)]"}`}
-            >
-              <div className="font-medium">{label}</div>
-              <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">{desc}</div>
-            </button>
-          ))}
-        </div>
+          ]}
+        />
       </section>
 
       <section>
@@ -752,21 +739,14 @@ function ChatTab() {
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
           Default for new chats; each chat can override it.
         </p>
-        <div className="flex gap-2">
-          {([
+        <OptionCards
+          value={appSettings.perspectiveMode}
+          onChange={(perspectiveMode) => setAppSettings({ perspectiveMode })}
+          options={[
             ["parallel",   "Parallel",   "All zones at once — fastest."],
             ["sequential", "Sequential", "One at a time — easier on local VRAM."],
-          ] as const).map(([val, label, desc]) => (
-            <button
-              key={val}
-              onClick={() => setAppSettings({ perspectiveMode: val })}
-              className={`flex-1 rounded border px-3 py-2.5 text-left text-sm ${appSettings.perspectiveMode === val ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]" : "border-[var(--color-border)] hover:border-[var(--color-accent)]"}`}
-            >
-              <div className="font-medium">{label}</div>
-              <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">{desc}</div>
-            </button>
-          ))}
-        </div>
+          ]}
+        />
       </section>
 
       <section>
@@ -774,21 +754,12 @@ function ChatTab() {
         <p className="mb-2 text-xs text-[var(--color-text-muted)]">
           How many levels deep zones may spawn subagents. Deeper calls are refused.
         </p>
-        <div className="flex gap-2">
-          {[1, 2, 3, 4, 5].map((n) => (
-            <button
-              key={n}
-              onClick={() => setAppSettings({ subchatDepthLimit: n })}
-              className={`flex-1 rounded border px-3 py-2.5 text-center text-sm ${
-                (appSettings.subchatDepthLimit || 3) === n
-                  ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]"
-                  : "border-[var(--color-border)] hover:border-[var(--color-accent)]"
-              }`}
-            >
-              {n}
-            </button>
-          ))}
-        </div>
+        <OptionCards
+          align="center"
+          value={appSettings.subchatDepthLimit || 3}
+          onChange={(subchatDepthLimit) => setAppSettings({ subchatDepthLimit })}
+          options={[[1, "1"], [2, "2"], [3, "3"], [4, "4"], [5, "5"]]}
+        />
       </section>
 
     </div>
@@ -895,21 +866,14 @@ function VoiceTab() {
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
           How the mic button starts and stops a recording.
         </p>
-        <div className="flex gap-2">
-          {([
+        <OptionCards
+          value={appSettings.sttActivationMode}
+          onChange={(sttActivationMode) => setAppSettings({ sttActivationMode })}
+          options={[
             ["toggle", "Toggle", "Click to start, click again to stop"],
             ["hold", "Hold", "Press and hold to record (push-to-talk)"],
-          ] as const).map(([val, label, desc]) => (
-            <button
-              key={val}
-              onClick={() => setAppSettings({ sttActivationMode: val })}
-              className={`flex-1 rounded border px-3 py-2.5 text-left text-sm ${appSettings.sttActivationMode === val ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]" : "border-[var(--color-border)] hover:border-[var(--color-accent)]"}`}
-            >
-              <div className="font-medium">{label}</div>
-              <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">{desc}</div>
-            </button>
-          ))}
-        </div>
+          ]}
+        />
       </section>
 
       <section>
@@ -917,21 +881,14 @@ function VoiceTab() {
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
           Where the transcript goes relative to text already in the input field.
         </p>
-        <div className="flex gap-2">
-          {([
+        <OptionCards
+          value={appSettings.sttInsertionMode}
+          onChange={(sttInsertionMode) => setAppSettings({ sttInsertionMode })}
+          options={[
             ["cursor", "At cursor", "Insert the transcript at the cursor position"],
             ["replace", "Replace field", "Replace the entire input field with the transcript"],
-          ] as const).map(([val, label, desc]) => (
-            <button
-              key={val}
-              onClick={() => setAppSettings({ sttInsertionMode: val })}
-              className={`flex-1 rounded border px-3 py-2.5 text-left text-sm ${appSettings.sttInsertionMode === val ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]" : "border-[var(--color-border)] hover:border-[var(--color-accent)]"}`}
-            >
-              <div className="font-medium">{label}</div>
-              <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">{desc}</div>
-            </button>
-          ))}
-        </div>
+          ]}
+        />
       </section>
 
       <section>
@@ -3261,6 +3218,57 @@ function SettingSelect({
 }
 
 /** Labeled toggle row — the shared pattern for an on/off setting with a description. */
+/**
+ * A group of mutually-exclusive option cards — the settings counterpart to
+ * [`ToggleRow`], for a choice with more than two states or one that needs a line
+ * of explanation per option.
+ *
+ * This markup was hand-copied ten times across this file and had drifted in
+ * padding and in whether an option could carry a description, so two settings
+ * screens away from each other looked subtly different. One component, one look.
+ *
+ * `layout` is only about shape: `row` for two or three short labels side by
+ * side, `column` when the descriptions need the width. `align` centres a row of
+ * bare values (a numeric choice) where a label with prose reads better left.
+ */
+function OptionCards<T extends string | number>({
+  value,
+  onChange,
+  options,
+  layout = "row",
+  align = "left",
+}: {
+  value: T;
+  onChange: (value: T) => void;
+  /** `[value, label]` or `[value, label, description]`. */
+  options: readonly (readonly [T, string] | readonly [T, string, string])[];
+  layout?: "row" | "column";
+  align?: "left" | "center";
+}) {
+  return (
+    <div className={layout === "row" ? "flex gap-2" : "flex flex-col gap-2"}>
+      {options.map(([val, label, description]) => (
+        <button
+          key={val}
+          onClick={() => onChange(val)}
+          className={`rounded border px-3 py-2.5 text-sm ${
+            align === "center" ? "text-center" : "text-left"
+          } ${layout === "row" ? "flex-1" : ""} ${
+            value === val
+              ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]"
+              : "border-[var(--color-border)] hover:border-[var(--color-accent)]"
+          }`}
+        >
+          <div className="font-medium">{label}</div>
+          {description && (
+            <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">{description}</div>
+          )}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function ToggleRow({
   label, description, checked, onChange,
 }: {

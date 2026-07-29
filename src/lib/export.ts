@@ -24,15 +24,19 @@ import {
   Wrench,
   type LucideIcon,
 } from "lucide-react";
+import { parseFileAttachments, type FileAttachment } from "@/lib/attachmentParts";
 import type { Chat, ContentPart, Message } from "@/lib/types";
 import { saveTextFile } from "@/lib/saveFile";
 import { chatContextEstimate, estimateTokens } from "@/lib/tokens";
 import {
   buildTrace,
+  condenseRuns,
   describeTool,
   formatDuration,
   traceStats,
   type ToolIcon,
+  type TraceAttachmentsItem,
+  type TraceRunItem,
   type TraceStats,
   type TraceThinkingItem,
   type TraceToolItem,
@@ -81,6 +85,25 @@ export interface ExportTheme {
   fontFamily: string;
 }
 
+/**
+ * How much of the run the PDF spells out (1.0). The full trace is a power-user
+ * document; someone exporting a chat to hand to a colleague usually wants the
+ * conversation, not thirty tool cards. Configured in Settings → PDF export.
+ *
+ * "steps" — one card per tool call and reasoning block (the 0.9.8 document).
+ * "rails" — each run of steps condensed to one line, the way the chat's activity
+ *           rail does it; plans, diagrams, plots and presented files still drawn.
+ * "text"  — the conversation only: what was asked, what was attached, what came
+ *           back.
+ */
+export type ExportDetail = "steps" | "rails" | "text";
+
+export interface ExportOptions {
+  detail: ExportDetail;
+}
+
+const DEFAULT_OPTIONS: ExportOptions = { detail: "steps" };
+
 interface RenderedMessage {
   role: "user" | "assistant";
   /** Zone label for assistant turns (primary or perspective); null otherwise. */
@@ -88,11 +111,23 @@ interface RenderedMessage {
   accent: string | null;
   text: string;
   imageCount: number;
+  /** Files attached to the turn, recovered from its hidden parts. */
+  attachments: FileAttachment[];
   timestamp: number;
 }
 
+function parseParts(json: string): ContentPart[] {
+  try {
+    const parts = JSON.parse(json);
+    return Array.isArray(parts) ? (parts as ContentPart[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 /** Pull the visible text out of a message's JSON content parts. Hidden parts
- *  (context-injection artifacts) are intentionally excluded from exports. */
+ *  carry the attachments (named separately) and context-injection artifacts, so
+ *  they are excluded here. */
 function visibleText(m: Message): string {
   try {
     const parts = JSON.parse(m.content) as ContentPart[];
@@ -124,7 +159,8 @@ function renderMessages(data: ExportChatData): RenderedMessage[] {
     if (m.role !== "user" && m.role !== "assistant") continue;
     const text = visibleText(m);
     const images = imageCount(m);
-    if (!text && images === 0) continue;
+    const attachments = parseFileAttachments(parseParts(m.content));
+    if (!text && images === 0 && attachments.length === 0) continue;
 
     let zoneLabel: string | null = null;
     let accent: string | null = null;
@@ -134,7 +170,15 @@ function renderMessages(data: ExportChatData): RenderedMessage[] {
       zoneLabel = z?.name ?? data.zoneName ?? "Assistant";
       accent = z?.accentColor ?? null;
     }
-    out.push({ role: m.role, zoneLabel, accent, text, imageCount: images, timestamp: m.createdAt });
+    out.push({
+      role: m.role,
+      zoneLabel,
+      accent,
+      text,
+      imageCount: images,
+      attachments,
+      timestamp: m.createdAt,
+    });
   }
   return out;
 }
@@ -191,6 +235,16 @@ export function buildChatMarkdown(data: ExportChatData): string {
     if (m.text) body.push(m.text, "");
     if (m.imageCount > 0) {
       body.push(`_${m.imageCount} image${m.imageCount === 1 ? "" : "s"} attached_`, "");
+    }
+    // Named, so the transcript records which document the turn was about.
+    for (const att of m.attachments) {
+      const note =
+        att.mode === "images"
+          ? `PDF, ${att.pages.length} page${att.pages.length === 1 ? "" : "s"} as images`
+          : att.mode === "text"
+            ? "PDF, extracted text"
+            : "text file";
+      body.push(`_Attached: ${att.fileName} (${note})_`, "");
     }
   }
 
@@ -529,11 +583,93 @@ function renderThinking(item: TraceThinkingItem): string {
     </div>`;
 }
 
+/** What each attachment mode is called in the export, and what its size means. */
+function attachmentNote(file: TraceAttachmentsItem["files"][number]): string {
+  if (file.mode === "images") {
+    return `PDF · ${file.pages ?? 0} page${file.pages === 1 ? "" : "s"} as images`;
+  }
+  const size = file.characters !== null ? formatBytes(file.characters) : null;
+  const kind = file.mode === "text" ? "PDF · extracted text" : "text file";
+  return size ? `${kind} · ${size}` : kind;
+}
+
+/** Compact byte size for an attachment's text payload. */
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * The files that came with a user turn. Named, because "the assistant answered
+ * about a spec" and "the assistant answered about *this* spec" are different
+ * documents to anyone reading the export later.
+ */
+function renderAttachments(item: TraceAttachmentsItem, accent: string): string {
+  const rows = item.files
+    .map(
+      (f) => `<span class="att">
+        <span class="attico" style="color:${accent}">${icon("file", 11)}</span>
+        <span class="attname">${escapeHtml(f.fileName)}</span>
+        <span class="attmeta">${escapeHtml(attachmentNote(f))}</span>
+      </span>`,
+    )
+    .join("");
+  return `<div class="atts">${rows}</div>`;
+}
+
+/**
+ * A run of steps as one line — icon, what it did, how long, how many failed.
+ * The condensed counterpart to the stack of tool cards, and the same summary the
+ * chat's activity rail shows when compact steps are on.
+ */
+function renderRun(run: TraceRunItem, visuals: VisualCache, accent: string, p: Palette): string {
+  const single = run.steps.length === 1 ? run.steps[0] : null;
+  const label = single
+    ? single.kind === "thinking"
+      ? "Reasoning"
+      : [describeTool(single).label, describeTool(single).subject].filter(Boolean).join(" · ")
+    : `Worked through ${run.steps.length} steps`;
+
+  const bits: string[] = [];
+  if (run.toolCalls > 0) {
+    bits.push(`${run.toolCalls} tool call${run.toolCalls === 1 ? "" : "s"}`);
+  }
+  if (run.thinkingBlocks > 0) {
+    bits.push(`${run.thinkingBlocks} reasoning`);
+  }
+  if (run.toolTimeMs !== null) bits.push(formatDuration(run.toolTimeMs));
+
+  // One failure in a long run is not a failed run — the model usually reads the
+  // error and carries on. Only a run where everything failed is called out, and
+  // anything short of that is a count. (Same reading as the chat's rail.)
+  const allFailed = run.toolCalls > 0 && run.errors === run.toolCalls;
+  const issues =
+    run.errors > 0
+      ? `<span class="runissue ${allFailed ? "runfail" : ""}">${run.errors}/${run.steps.length} failed</span>`
+      : "";
+
+  const drawn = run.visuals
+    .map((item) => renderToolCard(item, visuals, accent, p))
+    .join("");
+
+  return `
+    <div class="run">
+      <span class="runico" style="color:${accent}">${icon("tool", 11)}</span>
+      <span class="runlabel">${escapeHtml(label)}</span>
+      <span class="runrule"></span>
+      ${issues}
+      ${bits.length ? `<span class="runmeta">${escapeHtml(bits.join(" · "))}</span>` : ""}
+    </div>
+    ${drawn}`;
+}
+
 function renderUnit(
   unit: TraceUnit,
   data: ExportChatData,
   visuals: VisualCache,
   theme: { accent: string; p: Palette },
+  detail: ExportDetail,
 ): string {
   const { accent, p } = theme;
   if (unit.role === "user") {
@@ -545,7 +681,9 @@ function renderUnit(
             ? `<div class="imgnote">${icon("image", 11)} ${item.count} image${
                 item.count === 1 ? "" : "s"
               } attached</div>`
-            : "",
+            : item.kind === "attachments"
+              ? renderAttachments(item, accent)
+              : "",
       )
       .join("");
     return `
@@ -561,14 +699,34 @@ function renderUnit(
   const zone = unit.zoneId ? data.zonesById[unit.zoneId] : undefined;
   const zoneAccent = zone?.accentColor ?? accent;
   const label = zone?.name ?? data.zoneName ?? "Assistant";
-  const items = unit.items
-    .map((item) => {
-      if (item.kind === "text") return `<div class="text say">${renderMarkdown(item.text)}</div>`;
-      if (item.kind === "thinking") return renderThinking(item);
-      if (item.kind === "tool") return renderToolCard(item, visuals, zoneAccent, p);
-      return "";
-    })
-    .join("");
+
+  let items: string;
+  if (detail === "text") {
+    items = unit.items
+      .map((item) =>
+        item.kind === "text" ? `<div class="text say">${renderMarkdown(item.text)}</div>` : "",
+      )
+      .join("");
+    // A turn that only called tools has nothing to say in text-only mode.
+    if (!items.trim()) return "";
+  } else if (detail === "rails") {
+    items = condenseRuns(unit.items)
+      .map((item) => {
+        if (item.kind === "text") return `<div class="text say">${renderMarkdown(item.text)}</div>`;
+        if (item.kind === "run") return renderRun(item, visuals, zoneAccent, p);
+        return "";
+      })
+      .join("");
+  } else {
+    items = unit.items
+      .map((item) => {
+        if (item.kind === "text") return `<div class="text say">${renderMarkdown(item.text)}</div>`;
+        if (item.kind === "thinking") return renderThinking(item);
+        if (item.kind === "tool") return renderToolCard(item, visuals, zoneAccent, p);
+        return "";
+      })
+      .join("");
+  }
 
   return `
     <div class="turn assistant">
@@ -616,6 +774,12 @@ function renderOverview(stats: TraceStats, tokens: { input: number; output: numb
       stats.thinkingBlocks === 1 ? "reasoning block" : "reasoning blocks",
     ]);
   }
+  // What the conversation was given, not just what it produced — a run that
+  // hinged on an attached document should say so before the first turn.
+  const attached = stats.attachedFiles + stats.attachedImages;
+  if (attached > 0) {
+    cells.push([String(attached), attached === 1 ? "file attached" : "files attached"]);
+  }
   if (elapsed) cells.push([elapsed, "elapsed"]);
 
   const stat = cells
@@ -646,6 +810,7 @@ function renderOverview(stats: TraceStats, tokens: { input: number; output: numb
 export async function buildChatPrintHtml(
   data: ExportChatData,
   theme: ExportTheme,
+  options: ExportOptions = DEFAULT_OPTIONS,
 ): Promise<string> {
   const p = PALETTE[theme.mode];
   const accent = theme.accent || "#4f9cf9";
@@ -663,8 +828,11 @@ export async function buildChatPrintHtml(
   const units = buildTrace(data.messages);
   const stats = traceStats(units);
   const ctx = chatContextEstimate(data.messages);
-  const visuals = await renderVisuals(units);
-  const body = units.map((u) => renderUnit(u, data, visuals, { accent, p })).join("");
+  // Nothing a tool drew is shown in text-only mode, so nothing needs rendering.
+  const visuals = options.detail === "text" ? new Map() : await renderVisuals(units);
+  const body = units
+    .map((u) => renderUnit(u, data, visuals, { accent, p }, options.detail))
+    .join("");
 
   return `<!doctype html>
 <html class="${theme.mode}">
@@ -708,6 +876,23 @@ export async function buildChatPrintHtml(
   .steps { border-left: 2px solid ${p.border}; padding-left: 12px;
     display: flex; flex-direction: column; gap: 8px; }
   .say { border: 1px solid ${p.border}; background: ${p.panel}; border-radius: 8px; padding: 9px 12px; }
+
+  /* ── Attachments on a user turn ── */
+  .atts { display: flex; flex-direction: column; gap: 4px; margin-top: 7px; }
+  .att { display: flex; align-items: center; gap: 6px; font-size: 10px;
+    border: 1px solid ${p.border}; border-radius: 6px; padding: 4px 8px; background: ${p.panel}; }
+  .attico { display: inline-flex; }
+  .attname { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .attmeta { margin-left: auto; color: ${p.muted}; white-space: nowrap; }
+
+  /* ── Condensed activity run ── */
+  .run { display: flex; align-items: center; gap: 7px; font-size: 10.5px; color: ${p.muted}; }
+  .runico { display: inline-flex; }
+  .runlabel { color: ${p.text}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .runrule { flex: 1 1 auto; min-width: 16px; height: 1px; background: ${p.border}; }
+  .runmeta { flex: 0 0 auto; white-space: nowrap; }
+  .runissue { flex: 0 0 auto; color: #fbbf24; white-space: nowrap; }
+  .runissue.runfail { color: #f87171; }
 
   /* ── Reasoning marker ── */
   .think { display: flex; align-items: center; gap: 7px; font-size: 10px; color: ${p.muted};
@@ -825,8 +1010,12 @@ export async function buildChatPrintHtml(
 /** Render the themed document into a hidden iframe, size the page to the full
  *  content height (so the PDF is one continuous page with no breaks), then open
  *  the print dialog. */
-export async function exportChatPdf(data: ExportChatData, theme: ExportTheme): Promise<void> {
-  const html = await buildChatPrintHtml(data, theme);
+export async function exportChatPdf(
+  data: ExportChatData,
+  theme: ExportTheme,
+  options: ExportOptions = DEFAULT_OPTIONS,
+): Promise<void> {
+  const html = await buildChatPrintHtml(data, theme, options);
   const iframe = document.createElement("iframe");
   // Off-screen but laid out at the real page width so height measures correctly.
   iframe.style.position = "fixed";

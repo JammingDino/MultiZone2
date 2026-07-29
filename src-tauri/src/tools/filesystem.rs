@@ -1,3 +1,4 @@
+use crate::commands::messages::StreamSink;
 use crate::error::AppResult;
 use crate::llm::types::{Tool, ToolFunction};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
@@ -5,6 +6,9 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
 const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
+/// A PDF travels to the frontend renderer base64-encoded over the IPC boundary,
+/// so the ceiling is about what that costs rather than what a page image costs.
+const MAX_PDF_BYTES: usize = 50 * 1024 * 1024;
 
 fn image_mime(path: &Path) -> Option<&'static str> {
     match path
@@ -41,8 +45,10 @@ pub fn definitions(project_dir: Option<&str>) -> Vec<Tool> {
                 name: "read_file".into(),
                 description: format!(
                     "Read a file. Use before editing, and whenever the answer depends on what a \
-                     file actually contains. Text is returned as a string, `.pdf` as extracted \
-                     text; set `as_image` for an image file to put it in your visual context.\n\n{hint}"
+                     file actually contains. Text is returned as a string; set `as_image` for an \
+                     image file to put it in your visual context. A `.pdf` is returned as page \
+                     images (so you see tables, figures and scans) — page 1 plus the document's \
+                     page count unless you ask for more via `pages`.\n\n{hint}"
                 ),
                 parameters: json!({
                     "type": "object",
@@ -51,6 +57,16 @@ pub fn definitions(project_dir: Option<&str>) -> Vec<Tool> {
                         "as_image": {
                             "type": "boolean",
                             "description": "Read png/jpg/gif/webp/bmp as an image instead of text.",
+                            "default": false
+                        },
+                        "pages": {
+                            "type": "string",
+                            "description": "PDF pages to read: \"3\", \"1-4,9\", or \"all\" (capped at 30 per call).",
+                            "default": "1"
+                        },
+                        "as_text": {
+                            "type": "boolean",
+                            "description": "Extract a PDF's text instead of rendering pages. Cheaper for long text-only documents; loses layout, figures and scans.",
                             "default": false
                         }
                     },
@@ -498,6 +514,7 @@ pub async fn read_file(
     args: &Value,
     zone_config: &Value,
     project_dir: Option<&str>,
+    sink: &StreamSink,
 ) -> AppResult<String> {
     let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
     let as_image = args.get("as_image").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -549,23 +566,17 @@ pub async fn read_file(
             Ok(b) => b,
             Err(e) => return Ok(json!({ "error": e.to_string() }).to_string()),
         };
-        let path_str = p.to_string_lossy().to_string();
-        let result = tokio::task::spawn_blocking(move || {
-            pdf_extract::extract_text_from_mem(&bytes)
-        })
-        .await;
-        return match result {
-            Ok(Ok(text)) => Ok(json!({
-                "ref": 1,
-                "path": path_str,
-                "source": path_str,
-                "content": text,
-                "citation_instructions": READ_FILE_CITATION,
+        if bytes.len() > MAX_PDF_BYTES {
+            return Ok(json!({
+                "error": format!(
+                    "PDF is too large ({} MB); maximum is {} MB",
+                    bytes.len() / 1024 / 1024,
+                    MAX_PDF_BYTES / 1024 / 1024
+                )
             })
-            .to_string()),
-            Ok(Err(e)) => Ok(json!({ "error": format!("PDF text extraction failed: {e}") }).to_string()),
-            Err(e) => Ok(json!({ "error": format!("task join error: {e}") }).to_string()),
-        };
+            .to_string());
+        }
+        return read_pdf(&p, args, bytes, zone_config, sink).await;
     }
 
     match tokio::fs::read(&p).await {
@@ -582,6 +593,187 @@ pub async fn read_file(
         }
         Err(e) => Ok(json!({ "error": e.to_string() }).to_string()),
     }
+}
+
+/// Read a PDF for the model (1.0). Pages are rendered to images by default —
+/// a PDF is a *visual* document, and text extraction silently loses tables,
+/// figures, form layout and anything scanned, which the model then answers about
+/// as if it had seen it. `as_text` opts back into extraction for a long
+/// text-heavy document where the layout doesn't matter.
+///
+/// Only the selected pages come back (`pages`, default page 1), and the result
+/// always names the total page count — so the first read of an unknown document
+/// is cheap and tells the model how long it is, rather than the model having to
+/// choose between one page and four hundred with no way to know the difference.
+///
+/// Rasterizing is the frontend's job (see [`crate::pdf_bridge`]). When no window
+/// answers — the headless HTTP API, or a timeout — this falls back to
+/// `pdf-extract` so the turn still gets the document's text.
+async fn read_pdf(
+    p: &Path,
+    args: &Value,
+    bytes: Vec<u8>,
+    zone_config: &Value,
+    sink: &StreamSink,
+) -> AppResult<String> {
+    use crate::pdf_bridge::{read_pdf as bridge_read, PdfReadMode, MAX_PAGES_PER_CALL};
+
+    let path_str = p.to_string_lossy().to_string();
+    let as_text = args.get("as_text").and_then(|v| v.as_bool()).unwrap_or(false);
+    // The spec is passed through verbatim; the frontend resolves it against the
+    // real page count (see `parsePageSpec` in lib/pdf.ts).
+    let spec = args
+        .get("pages")
+        .and_then(|v| match v {
+            // A bare number is the obvious way to write "just page 3", and models
+            // write it that way whatever the schema says.
+            Value::Number(n) => Some(n.to_string()),
+            Value::String(s) => Some(s.to_string()),
+            _ => None,
+        })
+        .unwrap_or_else(|| "1".to_string());
+    // Page images are no use to a model that can't see them; that zone reads a
+    // PDF as text whatever the call asked for (see `inject_global_tool_config`).
+    let can_see = zone_config
+        .get("vision_capable")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    let mode = if as_text || !can_see { PdfReadMode::Text } else { PdfReadMode::Images };
+
+    let response = match bridge_read(sink.app(), &path_str, &spec, mode, &bytes).await {
+        Ok(r) => r,
+        Err(why) => return Ok(pdf_text_fallback(&path_str, bytes, &why).await),
+    };
+
+    let total = response.page_count;
+    let shown: Vec<u32> = response.pages.iter().map(|pg| pg.page).collect();
+    if shown.is_empty() {
+        return Ok(json!({
+            "error": format!("no pages matched `pages: \"{spec}\"`; the document has {total} pages"),
+        })
+        .to_string());
+    }
+
+    // What the model is looking at, and how to see the rest. Without the second
+    // half of this a model that got page 1 of 40 will answer from page 1.
+    let mut note = format!(
+        "PDF: {path_str}\n{total} page{} total; showing {}{}.",
+        if total == 1 { "" } else { "s" },
+        describe_pages(&shown),
+        // Say so when the mode isn't the one that was asked for, so extracted
+        // text is never mistaken for having seen the page.
+        if mode == PdfReadMode::Text && !as_text {
+            " as text (the active model can't accept images)"
+        } else {
+            ""
+        },
+    );
+    if response.truncated {
+        note.push_str(&format!(
+            " The selection was capped at {MAX_PAGES_PER_CALL} pages per call."
+        ));
+    }
+    if (shown.len() as u32) < total {
+        note.push_str(
+            " Read the pages you still need before answering — call read_file again with \
+             `pages` (e.g. \"2-6\", \"all\").",
+        );
+    }
+
+    if mode == PdfReadMode::Text {
+        let content = response
+            .pages
+            .iter()
+            .map(|pg| {
+                format!(
+                    "--- Page {} ---\n{}",
+                    pg.page,
+                    pg.text.as_deref().unwrap_or("").trim()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        return Ok(json!({
+            "ref": 1,
+            "path": path_str,
+            "source": path_str,
+            "page_count": total,
+            "pages_read": describe_pages(&shown),
+            "content": content,
+            "note": note,
+            "citation_instructions": READ_FILE_CITATION,
+        })
+        .to_string());
+    }
+
+    // Image mode: a text part naming the document, then one image part per page.
+    // Same multimodal shape `as_image` returns, so the provider layer already
+    // knows how to send it.
+    let mut parts = vec![json!({ "type": "text", "text": note })];
+    for pg in &response.pages {
+        let Some(url) = pg.image.as_deref() else { continue };
+        parts.push(json!({ "type": "text", "text": format!("Page {}:", pg.page) }));
+        parts.push(json!({ "type": "image_url", "image_url": { "url": url } }));
+    }
+    Ok(serde_json::to_string(&parts)
+        .unwrap_or_else(|_| json!({ "error": "serialization failed" }).to_string()))
+}
+
+/// Text extraction in-process, for when the frontend renderer isn't reachable.
+/// Reports why it fell back, so a model that asked for page images doesn't treat
+/// extracted text as if it had seen the page.
+async fn pdf_text_fallback(path_str: &str, bytes: Vec<u8>, why: &str) -> String {
+    let extracted =
+        tokio::task::spawn_blocking(move || pdf_extract::extract_text_from_mem_by_pages(&bytes))
+            .await;
+    match extracted {
+        Ok(Ok(pages)) => {
+            let content = pages
+                .iter()
+                .enumerate()
+                .map(|(i, text)| format!("--- Page {} ---\n{}", i + 1, text.trim()))
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            json!({
+                "ref": 1,
+                "path": path_str,
+                "source": path_str,
+                "page_count": pages.len(),
+                "pages_read": "all",
+                "content": content,
+                "note": format!(
+                    "Page images were unavailable ({why}), so this is extracted text for the \
+                     whole document — figures, tables and any scanned pages are not in it."
+                ),
+                "citation_instructions": READ_FILE_CITATION,
+            })
+            .to_string()
+        }
+        Ok(Err(e)) => json!({
+            "error": format!("could not read the PDF: page images unavailable ({why}) and text extraction failed ({e})"),
+        })
+        .to_string(),
+        Err(e) => json!({ "error": format!("task join error: {e}") }).to_string(),
+    }
+}
+
+/// "page 3", "pages 1-4", "pages 1-3, 7" — a compact, human reading of a page
+/// selection, collapsing runs into ranges.
+fn describe_pages(pages: &[u32]) -> String {
+    let mut ranges: Vec<(u32, u32)> = Vec::new();
+    for &n in pages {
+        match ranges.last_mut() {
+            Some(last) if n == last.1 + 1 => last.1 = n,
+            _ => ranges.push((n, n)),
+        }
+    }
+    let body = ranges
+        .iter()
+        .map(|(a, b)| if a == b { a.to_string() } else { format!("{a}-{b}") })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let plural = pages.len() > 1 || ranges.iter().any(|(a, b)| a != b);
+    format!("page{} {}", if plural { "s" } else { "" }, body)
 }
 
 /// Nudge the model to cite a file it draws on, mirroring the searches so a read
@@ -1293,6 +1485,17 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.root);
         }
+    }
+
+    /// The page note is the only thing telling the model it is looking at part
+    /// of a document, so it has to read as a sentence for every shape of
+    /// selection — one page, a run, and a scattered set.
+    #[test]
+    fn page_selections_read_as_prose() {
+        assert_eq!(describe_pages(&[1]), "page 1");
+        assert_eq!(describe_pages(&[1, 2, 3, 4]), "pages 1-4");
+        assert_eq!(describe_pages(&[1, 2, 3, 7]), "pages 1-3, 7");
+        assert_eq!(describe_pages(&[2, 9]), "pages 2, 9");
     }
 
     #[tokio::test]

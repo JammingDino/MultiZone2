@@ -5,6 +5,7 @@ mod knowledge;
 mod llm;
 mod mcp;
 mod ocr;
+mod pdf_bridge;
 mod skillpacks;
 mod tools;
 mod util;
@@ -192,6 +193,7 @@ pub fn run() {
             commands::messages::regenerate_participant,
             commands::messages::cancel_stream,
             commands::messages::respond_tool_approval,
+            pdf_bridge::resolve_pdf_read,
             commands::messages::update_message,
             commands::settings::get_setting,
             commands::settings::set_setting,

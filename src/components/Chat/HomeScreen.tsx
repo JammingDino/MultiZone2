@@ -300,17 +300,19 @@ export function HomeScreen() {
     const parts: InputPart[] = [];
     const visibleTextParts: string[] = [];
     if (currentText.trim()) visibleTextParts.push(currentText.trim());
-    for (const att of currentPending) {
-      if (att.fileType === "text") {
-        visibleTextParts.push(`File: ${att.fileName}\n\`\`\`\n${att.payload as string}\n\`\`\``);
-      }
-    }
     const joined = visibleTextParts.join("\n\n");
     if (joined) parts.push({ type: "text", text: joined });
 
     const pdfSaves: { fileName: string; pages: string[] }[] = [];
     for (const att of currentPending) {
-      if (att.fileType === "image") {
+      // Same as the input bar: a text file is an attachment chip, not a wall of
+      // text pasted into the user's turn.
+      if (att.fileType === "text") {
+        parts.push({
+          type: "hidden_text",
+          text: `File: ${att.fileName}\n\`\`\`\n${att.payload as string}\n\`\`\``,
+        });
+      } else if (att.fileType === "image") {
         parts.push({ type: "image", data_url: att.payload as string });
       } else if (att.fileType === "pdf") {
         if (typeof att.payload === "string") {

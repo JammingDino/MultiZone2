@@ -276,19 +276,22 @@ export function InputBar({ chatId, disabled, ref }: InputBarProps) {
       const visibleTextParts: string[] = [];
       if (hasText) visibleTextParts.push(sourceText.trim());
 
-      for (const att of pending) {
-        if (att.fileType === "text") {
-          visibleTextParts.push(`File: ${att.fileName}\n\`\`\`\n${att.payload as string}\n\`\`\``);
-        }
-      }
-
       const joined = visibleTextParts.join("\n\n");
       if (joined) {
         parts.push({ type: "text", text: joined });
       }
 
       for (const att of pending) {
-        if (att.fileType === "image") {
+        // Text files ride along as hidden parts, the same way PDF text does: the
+        // model gets the whole file, the chat shows a chip you can open. Inlining
+        // them into the visible turn buried a one-line question under a wall of
+        // README.
+        if (att.fileType === "text") {
+          parts.push({
+            type: "hidden_text",
+            text: `File: ${att.fileName}\n\`\`\`\n${att.payload as string}\n\`\`\``,
+          });
+        } else if (att.fileType === "image") {
           parts.push({ type: "image", data_url: att.payload as string });
         } else if (att.fileType === "pdf") {
           if (typeof att.payload === "string") {

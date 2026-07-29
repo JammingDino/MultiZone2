@@ -78,12 +78,19 @@ function parseParts(json: string): ContentPart[] {
   return [{ type: "text", text: json }];
 }
 
-type PdfAttachment =
+type FileAttachment =
   | { fileName: string; mode: "images"; pages: string[] }
-  | { fileName: string; mode: "text"; text: string };
+  | { fileName: string; mode: "text"; text: string }
+  | { fileName: string; mode: "file"; text: string };
 
-function parsePdfAttachments(parts: ContentPart[]): PdfAttachment[] {
-  const result: PdfAttachment[] = [];
+/**
+ * Reconstructs the attachment chips for a user turn from its hidden parts.
+ * Attachments are stored as hidden text (and hidden images, for a rendered PDF)
+ * so the model receives the whole file while the chat shows only a chip —
+ * the markers written by the input bar are the record of what was attached.
+ */
+function parseFileAttachments(parts: ContentPart[]): FileAttachment[] {
+  const result: FileAttachment[] = [];
   let current: { fileName: string; pages: string[] } | null = null;
 
   for (const p of parts) {
@@ -94,7 +101,11 @@ function parsePdfAttachments(parts: ContentPart[]): PdfAttachment[] {
       if (imgMatch) { current = { fileName: imgMatch[1], pages: [] }; continue; }
 
       const txtMatch = p.text.match(/^File: (.+) \(PDF, extracted text\)\n```\n([\s\S]*?)\n```$/);
-      if (txtMatch) result.push({ fileName: txtMatch[1], mode: "text", text: txtMatch[2] });
+      if (txtMatch) { result.push({ fileName: txtMatch[1], mode: "text", text: txtMatch[2] }); continue; }
+
+      // Plain text/markdown/source attachments (0.9.4).
+      const fileMatch = p.text.match(/^File: (.+)\n```\n([\s\S]*?)\n```$/);
+      if (fileMatch) result.push({ fileName: fileMatch[1], mode: "file", text: fileMatch[2] });
     } else if (p.type === "hidden_image" && current) {
       current.pages.push(p.image_url.url);
     } else if (p.type !== "hidden_image") {
@@ -107,8 +118,8 @@ function parsePdfAttachments(parts: ContentPart[]): PdfAttachment[] {
 
 /**
  * File attachments from the primary user message that opened this turn's round,
- * surfaced as citation sources (0.4.1). PDFs carry a page count; other file types
- * aren't reliably named in the stored message parts, so only PDFs are returned.
+ * surfaced as citation sources (0.4.1). PDFs rendered as images carry a page
+ * count; everything else is named alone.
  */
 function deriveFileSources(messages: Message[], firstTurnMsgId: string | undefined): FileSource[] {
   if (!firstTurnMsgId) return [];
@@ -118,7 +129,7 @@ function deriveFileSources(messages: Message[], firstTurnMsgId: string | undefin
     if (m.role === "user" && !m.zoneId) user = m;
   }
   if (!user) return [];
-  return parsePdfAttachments(parseParts(user.content)).map((p) => ({
+  return parseFileAttachments(parseParts(user.content)).map((p) => ({
     fileName: p.fileName,
     pages: p.mode === "images" ? p.pages.length : undefined,
   }));
@@ -127,7 +138,8 @@ function deriveFileSources(messages: Message[], firstTurnMsgId: string | undefin
 type MessagePreview =
   | { kind: "image"; url: string }
   | { kind: "pdf-images"; fileName: string; pages: string[] }
-  | { kind: "pdf-text"; fileName: string; text: string };
+  | { kind: "pdf-text"; fileName: string; text: string }
+  | { kind: "file-text"; fileName: string; text: string };
 
 function UserMessageImpl({ message }: { message: Message }) {
   const parts = parseParts(message.content);
@@ -140,7 +152,12 @@ function UserMessageImpl({ message }: { message: Message }) {
   );
   // hidden_text and hidden_image parts are never rendered — they are sent to
   // the model but kept invisible in the chat UI.
-  const pdfAttachments = parsePdfAttachments(parts);
+  const fileAttachments = parseFileAttachments(parts);
+  // Hidden parts carry the attachments; keep them intact when a turn is edited
+  // and resent, so editing the question doesn't silently drop the file with it.
+  const hiddenParts = parts.filter(
+    (p) => p.type === "hidden_text" || p.type === "hidden_image",
+  );
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(text);
@@ -171,6 +188,10 @@ function UserMessageImpl({ message }: { message: Message }) {
       const parts: InputPart[] = [{ type: "text", text: next }];
       for (const img of images) {
         parts.push({ type: "image", data_url: img.image_url.url });
+      }
+      for (const p of hiddenParts) {
+        if (p.type === "hidden_text") parts.push({ type: "hidden_text", text: p.text });
+        else parts.push({ type: "hidden_image", data_url: p.image_url.url });
       }
       await api.sendMessage(message.chatId, parts);
       refreshChats();
@@ -256,23 +277,25 @@ function UserMessageImpl({ message }: { message: Message }) {
               ))}
             </div>
           )}
-          {pdfAttachments.length > 0 && (
+          {fileAttachments.length > 0 && (
             <div className="flex flex-wrap justify-end gap-1.5">
-              {pdfAttachments.map((pdf, i) => (
+              {fileAttachments.map((f, i) => (
                 <button
                   key={i}
                   onClick={() =>
                     setPreview(
-                      pdf.mode === "images"
-                        ? { kind: "pdf-images", fileName: pdf.fileName, pages: pdf.pages }
-                        : { kind: "pdf-text", fileName: pdf.fileName, text: pdf.text },
+                      f.mode === "images"
+                        ? { kind: "pdf-images", fileName: f.fileName, pages: f.pages }
+                        : f.mode === "text"
+                          ? { kind: "pdf-text", fileName: f.fileName, text: f.text }
+                          : { kind: "file-text", fileName: f.fileName, text: f.text },
                     )
                   }
                   className="flex items-center gap-1.5 rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1 text-xs hover:border-[var(--color-accent)] hover:bg-[var(--color-panel-hover)]"
                   title="Click to preview"
                 >
                   <FileType size={11} className="shrink-0 text-[var(--color-text-muted)]" />
-                  <span className="max-w-[180px] truncate">{pdf.fileName}</span>
+                  <span className="max-w-[180px] truncate">{f.fileName}</span>
                   <ZoomIn size={10} className="shrink-0 text-[var(--color-text-muted)]" />
                 </button>
               ))}

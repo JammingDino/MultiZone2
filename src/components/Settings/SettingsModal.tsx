@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { X, Plus, Trash2, RefreshCw, Server, Palette, MessageSquare, Database, AlertTriangle, Loader2, Folder, FolderOpen, Globe, Copy, Check, Search, Brain, Sparkles, FileUp, FileDown, Plug, Wifi, WifiOff, Library, ChevronDown, ChevronRight, Mic, Volume2, AudioLines } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useApp } from "@/store/app";
-import type { BackgroundEffect } from "@/store/app";
+import type { BackgroundEffect, ThemeColorKey } from "@/store/app";
+import { THEME_COLOR_KEYS } from "@/store/app";
 import { useShallow } from "zustand/react/shallow";
 import * as api from "@/lib/tauri";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
@@ -168,6 +169,38 @@ function ProvidersTab() {
 const ACCENT_PRESETS = ["#4f9cf9", "#22c55e", "#a855f7", "#f97316", "#ec4899", "#facc15"];
 const FONT_PRESETS = ["Inter", "Roboto", "JetBrains Mono", "Fira Code", "Merriweather", "Lato"];
 
+/**
+ * The palette each mode falls back to — a mirror of the `:root` / `html.light`
+ * blocks in styles.css. Needed here because a colour the user hasn't overridden
+ * still has to show its real value in the picker.
+ */
+const BASE_PALETTE: Record<"dark" | "light", Record<ThemeColorKey, string>> = {
+  dark:  { bg: "#0b0d10", panel: "#14171c", panelHover: "#242a33", border: "#2d333d", text: "#e4e6eb", textMuted: "#8b929e" },
+  light: { bg: "#fafafa", panel: "#ffffff", panelHover: "#e9edf2", border: "#d8dde4", text: "#1f2329", textMuted: "#5b6573" },
+};
+
+const COLOR_LABELS: Record<ThemeColorKey, string> = {
+  bg: "Background",
+  panel: "Panels",
+  panelHover: "Hover",
+  border: "Borders",
+  text: "Text",
+  textMuted: "Muted text",
+};
+
+const BACKGROUND_EFFECTS: [BackgroundEffect, string][] = [
+  ["none", "None"],
+  ["particles", "Particles"],
+  ["orbs", "Orbs"],
+  ["aurora", "Aurora"],
+  ["grid", "Grid"],
+  ["stars", "Stars"],
+  ["shooting", "Shooting stars"],
+  ["waves", "Waves"],
+  ["fireflies", "Fireflies"],
+  ["boids", "Boids"],
+];
+
 function AppearanceTab() {
   const theme = useApp((s) => s.theme);
   const setTheme = useApp((s) => s.setTheme);
@@ -176,10 +209,27 @@ function AppearanceTab() {
   const [fontInput, setFontInput] = useState(appSettings.fontFamily ?? "");
 
   const fontSize = typeof appSettings.fontSize === "number" ? appSettings.fontSize : 14;
+  const linked = !!appSettings.fontSizeLinked;
+  const uiFontSize = linked
+    ? Math.round((fontSize / 14) * 16)
+    : typeof appSettings.uiFontSize === "number" ? appSettings.uiFontSize : 16;
 
   function applyFont(f: string) {
     setFontInput(f);
     setAppSettings({ fontFamily: f });
+  }
+
+  // Colour editing always targets the mode currently on screen, so what you
+  // change is what you see.
+  const paletteKey = theme.mode === "light" ? "colorsLight" : "colorsDark";
+  const overrides = (theme.mode === "light" ? theme.colorsLight : theme.colorsDark) ?? {};
+  const base = BASE_PALETTE[theme.mode === "light" ? "light" : "dark"];
+
+  function setColor(key: ThemeColorKey, value: string | null) {
+    const next = { ...overrides };
+    if (value) next[key] = value;
+    else delete next[key];
+    setTheme({ [paletteKey]: next });
   }
 
   return (
@@ -224,56 +274,121 @@ function AppearanceTab() {
       </section>
 
       <section>
-        <h3 className="mb-2 text-sm font-medium">Font</h3>
-        <div className="mb-2 flex flex-wrap gap-1.5">
-          {FONT_PRESETS.map((f) => (
-            <button
-              key={f}
-              onClick={() => applyFont(fontInput === f ? "" : f)}
-              className={`rounded border px-2.5 py-1 text-xs ${
-                fontInput === f
-                  ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)] text-[var(--color-text)]"
-                  : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-accent)]"
-              }`}
-              style={{ fontFamily: f }}
-            >
-              {f}
-            </button>
-          ))}
+        <h3 className="mb-2 text-sm font-medium">
+          Colors · {theme.mode === "light" ? "Light" : "Dark"} mode
+        </h3>
+        <div className="grid grid-cols-3 gap-2">
+          {(Object.keys(THEME_COLOR_KEYS) as ThemeColorKey[]).map((key) => {
+            const value = overrides[key] ?? base[key];
+            const custom = !!overrides[key];
+            return (
+              <label
+                key={key}
+                className="flex items-center gap-2 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5"
+              >
+                <input
+                  type="color"
+                  value={value}
+                  onChange={(e) => setColor(key, e.target.value)}
+                  className="h-6 w-8 shrink-0 cursor-pointer rounded border border-[var(--color-border)] bg-transparent"
+                />
+                <span className="min-w-0 flex-1 truncate text-xs">{COLOR_LABELS[key]}</span>
+                {custom && (
+                  <button
+                    onClick={(e) => { e.preventDefault(); setColor(key, null); }}
+                    title="Reset to default"
+                    className="shrink-0 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                  >
+                    <X size={11} />
+                  </button>
+                )}
+              </label>
+            );
+          })}
         </div>
-        <div className="flex gap-2">
-          <input
-            value={fontInput}
-            onChange={(e) => setFontInput(e.target.value)}
-            onBlur={() => setAppSettings({ fontFamily: fontInput })}
-            onKeyDown={(e) => { if (e.key === "Enter") setAppSettings({ fontFamily: fontInput }); }}
-            placeholder="Custom Google Font name, e.g. Source Code Pro"
-            className="flex-1 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 py-1.5 text-xs outline-none focus:border-[var(--color-accent)]"
-          />
-          {fontInput && (
+        <div className="mt-1.5 flex items-center justify-between">
+          <p className="text-[10px] text-[var(--color-text-muted)]">
+            Saved per mode — dark and light keep their own palettes.
+          </p>
+          {Object.keys(overrides).length > 0 && (
             <button
-              onClick={() => applyFont("")}
-              className="rounded border border-[var(--color-border)] px-2 py-1 text-xs hover:border-[var(--color-accent)]"
+              onClick={() => setTheme({ [paletteKey]: {} })}
+              className="text-[10px] text-[var(--color-text-muted)] underline hover:text-[var(--color-accent)]"
             >
-              Reset
+              Reset all
             </button>
           )}
         </div>
-        <p className="mt-1.5 text-[10px] text-[var(--color-text-muted)]">
-          Enter any Google Fonts name. Applied to the whole app.
-        </p>
       </section>
 
       <section>
-        <h3 className="mb-2 text-sm font-medium">Message font size</h3>
-        <SliderRow
-          label=""
-          value={fontSize}
-          min={10} max={24} step={1}
-          display={`${fontSize}px`}
-          onChange={(v) => setAppSettings({ fontSize: v })}
-        />
-        <p className="mt-1 text-[10px] text-[var(--color-text-muted)]">Applies to message text only. UI chrome scales separately.</p>
+        <h3 className="mb-2 text-sm font-medium">Typography</h3>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <div className="mb-1 text-xs text-[var(--color-text-muted)]">Font</div>
+            <select
+              value={FONT_PRESETS.includes(fontInput) ? fontInput : fontInput ? "__custom" : ""}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === "__custom") return;
+                applyFont(v);
+              }}
+              className="w-full rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 text-xs outline-none focus:border-[var(--color-accent)]"
+            >
+              <option value="">Default (Inter)</option>
+              {FONT_PRESETS.map((f) => (
+                <option key={f} value={f}>{f}</option>
+              ))}
+              {fontInput && !FONT_PRESETS.includes(fontInput) && (
+                <option value="__custom">{fontInput} (custom)</option>
+              )}
+            </select>
+            <div className="mt-2 flex gap-2">
+              <input
+                value={fontInput}
+                onChange={(e) => setFontInput(e.target.value)}
+                onBlur={() => setAppSettings({ fontFamily: fontInput })}
+                onKeyDown={(e) => { if (e.key === "Enter") setAppSettings({ fontFamily: fontInput }); }}
+                placeholder="Any Google Font, e.g. Source Code Pro"
+                className="min-w-0 flex-1 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 py-1.5 text-xs outline-none focus:border-[var(--color-accent)]"
+              />
+              {fontInput && (
+                <button
+                  onClick={() => applyFont("")}
+                  className="shrink-0 rounded border border-[var(--color-border)] px-2 py-1 text-xs hover:border-[var(--color-accent)]"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="flex flex-col gap-3">
+            <SliderRow
+              label="Message text"
+              value={fontSize}
+              min={10} max={24} step={1}
+              display={`${fontSize}px`}
+              onChange={(v) => setAppSettings({ fontSize: v })}
+            />
+            <div className={linked ? "pointer-events-none opacity-50" : ""}>
+              <SliderRow
+                label="Interface"
+                value={uiFontSize}
+                min={12} max={22} step={1}
+                display={`${uiFontSize}px`}
+                onChange={(v) => setAppSettings({ uiFontSize: v })}
+              />
+            </div>
+            <label className="flex cursor-pointer items-center gap-2 text-xs text-[var(--color-text-muted)]">
+              <input
+                type="checkbox"
+                checked={linked}
+                onChange={(e) => setAppSettings({ fontSizeLinked: e.target.checked })}
+              />
+              Scale the interface with message text
+            </label>
+          </div>
+        </div>
       </section>
 
       <section>
@@ -307,88 +422,73 @@ function AppearanceTab() {
 
       <section>
         <h3 className="mb-2 text-sm font-medium">Background effect</h3>
-        <div className="mb-3 grid grid-cols-4 gap-1.5">
-          {(
-            [
-              ["none", "None"],
-              ["particles", "Particles"],
-              ["orbs", "Orbs"],
-              ["aurora", "Aurora"],
-              ["grid", "Grid"],
-              ["stars", "Stars"],
-              ["shooting", "Shooting"],
-              ["waves", "Waves"],
-              ["fireflies", "Fireflies"],
-              ["boids", "Boids"],
-            ] as [BackgroundEffect, string][]
-          ).map(([val, label]) => (
-            <button
-              key={val}
-              onClick={() => setTheme({ backgroundEffect: val })}
-              className={`rounded border px-2 py-1.5 text-xs ${
-                theme.backgroundEffect === val
-                  ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)] text-[var(--color-text)]"
-                  : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
-              }`}
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <div className="mb-1 text-xs text-[var(--color-text-muted)]">Effect</div>
+            <select
+              value={theme.backgroundEffect}
+              onChange={(e) => setTheme({ backgroundEffect: e.target.value as BackgroundEffect })}
+              className="w-full rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 text-xs outline-none focus:border-[var(--color-accent)]"
             >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        {theme.backgroundEffect !== "none" && (
-          <div className="flex flex-col gap-3 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
-            <SliderRow
-              label="Speed"
-              value={theme.effectSpeed}
-              min={0.1} max={3} step={0.1}
-              display={`${theme.effectSpeed.toFixed(1)}×`}
-              onChange={(v) => setTheme({ effectSpeed: v })}
-            />
-            {["particles", "orbs", "stars", "shooting", "grid", "waves", "fireflies", "boids"].includes(theme.backgroundEffect) && (
-              <SliderRow
-                label={theme.backgroundEffect === "grid" ? "Scale" : "Density"}
-                value={theme.effectDensity}
-                min={theme.backgroundEffect === "grid" ? 15 : 10}
-                max={theme.backgroundEffect === "grid" ? 150 : 200}
-                step={5}
-                display={theme.backgroundEffect === "grid" ? `${theme.effectDensity}px` : String(theme.effectDensity)}
-                onChange={(v) => setTheme({ effectDensity: v })}
-              />
-            )}
-            <SliderRow
-              label="Opacity"
-              value={theme.effectOpacity}
-              min={0.05} max={1} step={0.05}
-              display={`${Math.round(theme.effectOpacity * 100)}%`}
-              onChange={(v) => setTheme({ effectOpacity: v })}
-            />
-            <div>
-              <div className="mb-1.5 text-xs text-[var(--color-text-muted)]">Effect color</div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setTheme({ effectColor: "accent" })}
-                  className={`rounded border px-3 py-1 text-xs ${
-                    theme.effectColor === "accent"
-                      ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]"
-                      : "border-[var(--color-border)] hover:border-[var(--color-accent)]"
-                  }`}
-                >
-                  Use accent
-                </button>
-                <label className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-                  Custom
+              {BACKGROUND_EFFECTS.map(([val, label]) => (
+                <option key={val} value={val}>{label}</option>
+              ))}
+            </select>
+            {theme.backgroundEffect !== "none" && (
+              <div className="mt-3">
+                <div className="mb-1.5 text-xs text-[var(--color-text-muted)]">Color</div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setTheme({ effectColor: "accent" })}
+                    className={`rounded border px-2.5 py-1 text-xs ${
+                      theme.effectColor === "accent"
+                        ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]"
+                        : "border-[var(--color-border)] hover:border-[var(--color-accent)]"
+                    }`}
+                  >
+                    Accent
+                  </button>
                   <input
                     type="color"
                     value={theme.effectColor === "accent" ? theme.accent : (theme.effectColor || theme.accent)}
                     onChange={(e) => setTheme({ effectColor: e.target.value })}
+                    title="Custom effect color"
                     className="h-7 w-10 cursor-pointer rounded border border-[var(--color-border)] bg-transparent"
                   />
-                </label>
+                </div>
               </div>
-            </div>
+            )}
           </div>
-        )}
+          {theme.backgroundEffect !== "none" && (
+            <div className="flex flex-col gap-3">
+              <SliderRow
+                label="Speed"
+                value={theme.effectSpeed}
+                min={0.1} max={3} step={0.1}
+                display={`${theme.effectSpeed.toFixed(1)}×`}
+                onChange={(v) => setTheme({ effectSpeed: v })}
+              />
+              {["particles", "orbs", "stars", "shooting", "grid", "waves", "fireflies", "boids"].includes(theme.backgroundEffect) && (
+                <SliderRow
+                  label={theme.backgroundEffect === "grid" ? "Scale" : "Density"}
+                  value={theme.effectDensity}
+                  min={theme.backgroundEffect === "grid" ? 15 : 10}
+                  max={theme.backgroundEffect === "grid" ? 150 : 200}
+                  step={5}
+                  display={theme.backgroundEffect === "grid" ? `${theme.effectDensity}px` : String(theme.effectDensity)}
+                  onChange={(v) => setTheme({ effectDensity: v })}
+                />
+              )}
+              <SliderRow
+                label="Opacity"
+                value={theme.effectOpacity}
+                min={0.05} max={1} step={0.05}
+                display={`${Math.round(theme.effectOpacity * 100)}%`}
+                onChange={(v) => setTheme({ effectOpacity: v })}
+              />
+            </div>
+          )}
+        </div>
       </section>
 
       <section>
@@ -459,9 +559,7 @@ function ChatTab() {
       <section>
         <h3 className="mb-1 text-sm font-medium">Base zone</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Your default assistant: the zone that answers a Quick Chat, and the provider everything
-          else falls back to. It sets the model, system prompt, and tools. With no base zone,
-          Quick Chat runs your first provider's default model with no prompt and only safe tools.
+          Answers Quick Chat and provides the fallback model, prompt, and tools.
         </p>
         <SettingSelect
           value={appSettings.baseZoneId ?? ""}
@@ -486,12 +584,12 @@ function ChatTab() {
       <section>
         <h3 className="mb-1 text-sm font-medium">Send key</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Which key combination sends a message. Shift+Enter always inserts a new line.
+          Shift+Enter always inserts a new line.
         </p>
         <div className="flex gap-2">
           {([
-            ["enter", "Enter", "Press Enter to send"],
-            ["ctrl_enter", "Ctrl+Enter", "Press Ctrl+Enter (⌘+Enter on Mac) to send"],
+            ["enter", "Enter", ""],
+            ["ctrl_enter", "Ctrl+Enter", "⌘+Enter on Mac"],
           ] as const).map(([val, label, desc]) => (
             <button
               key={val}
@@ -499,60 +597,41 @@ function ChatTab() {
               className={`flex-1 rounded border px-3 py-2.5 text-left text-sm ${appSettings.sendKey === val ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]" : "border-[var(--color-border)] hover:border-[var(--color-accent)]"}`}
             >
               <div className="font-medium">{label}</div>
-              <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">{desc}</div>
+              {desc && <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">{desc}</div>}
             </button>
           ))}
         </div>
       </section>
 
       <section>
-        <h3 className="mb-1 text-sm font-medium">Chat titles</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Automatically ask the model to generate a short title after the first response.
-        </p>
-        <ToggleRow
-          label="Auto-generate titles"
-          checked={appSettings.autoTitle}
-          onChange={(v) => setAppSettings({ autoTitle: v })}
-        />
-      </section>
-
-      <section>
-        <h3 className="mb-1 text-sm font-medium">Step display</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Compact mode folds a response's thinking and tool steps into one thin activity
-          rail that names what the model is doing right now, instead of stacking a card per
-          step. Click the rail to open the full step-by-step trace. Plans, diagrams, plots,
-          presented files and questions are never hidden — they render outside the rail
-          either way. Turn this off to see every step laid out as it happens.
-        </p>
-        <ToggleRow
-          label="Compact steps into one activity rail"
-          checked={appSettings.compactSteps}
-          onChange={(v) => setAppSettings({ compactSteps: v })}
-        />
-      </section>
-
-      <section>
-        <h3 className="mb-1 text-sm font-medium">Reasoning blocks</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Show thinking/reasoning expanded by default. When off, blocks are collapsed once streaming finishes.
-        </p>
-        <ToggleRow
-          label="Expand reasoning by default"
-          checked={appSettings.expandThinkingByDefault}
-          onChange={(v) => setAppSettings({ expandThinkingByDefault: v })}
-        />
+        <h3 className="mb-2 text-sm font-medium">Messages</h3>
+        <div className="flex flex-col gap-2">
+          <ToggleRow
+            label="Auto-generate chat titles"
+            description="Names a chat from its first response."
+            checked={appSettings.autoTitle}
+            onChange={(v) => setAppSettings({ autoTitle: v })}
+          />
+          <ToggleRow
+            label="Compact steps into one activity rail"
+            description="Off shows every thinking and tool step as its own card."
+            checked={appSettings.compactSteps}
+            onChange={(v) => setAppSettings({ compactSteps: v })}
+          />
+          <ToggleRow
+            label="Expand reasoning by default"
+            description="Off collapses thinking blocks once streaming finishes."
+            checked={appSettings.expandThinkingByDefault}
+            onChange={(v) => setAppSettings({ expandThinkingByDefault: v })}
+          />
+        </div>
       </section>
 
       <section>
         <h3 className="mb-1 text-sm font-medium">Task length</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          How many tool steps one response may take before the model has to stop and answer.
-          A step is one model message and can contain several tool calls at once, so 30 steps
-          is well over 30 tool calls. The last two steps always go to writing the answer, so a
-          long task ends with a summary rather than trailing off after a tool result. Raise it
-          for long research or refactoring runs; lower it to keep a model on a short leash.
+          Tool steps one response may take before it must answer. A step can carry several
+          tool calls; the last two always go to writing the answer.
         </p>
         <div className="flex items-center gap-3">
           <input
@@ -575,15 +654,14 @@ function ChatTab() {
       <section>
         <h3 className="mb-1 text-sm font-medium">Tool auto-approval</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Controls which tool safety classes run automatically. Dangerous tools include code
-          execution and shell commands; moderate tools include web search and file system access.
+          Dangerous: code execution and shell. Moderate: web search and file access.
         </p>
         <div className="flex flex-col gap-2">
           {([
-            ["all",          "Auto-approve everything",          "All tools run without prompts — same as the previous default behavior."],
-            ["safe_moderate","Auto-approve safe + moderate",     "Only dangerous tools (code exec, shell) show an approval prompt."],
-            ["safe",         "Auto-approve safe tools only",     "Moderate tools (web search, file system) and dangerous tools require approval."],
-            ["none",         "Require approval for all tools",   "Every tool call shows an approval prompt before it runs."],
+            ["all",          "Everything",          "No approval prompts."],
+            ["safe_moderate","Safe + moderate",     "Dangerous tools ask first."],
+            ["safe",         "Safe only",           "Moderate and dangerous tools ask first."],
+            ["none",         "Nothing",             "Every tool call asks first."],
           ] as const).map(([val, label, desc]) => (
             <button
               key={val}
@@ -602,14 +680,14 @@ function ChatTab() {
       </section>
 
       <section>
-        <h3 className="mb-1 text-sm font-medium">PDF processing</h3>
+        <h3 className="mb-1 text-sm font-medium">PDF attachments</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          How PDF files are handled when attached to a message.
+          How attached PDFs are sent to the model.
         </p>
         <div className="flex gap-2">
           {([
-            ["images", "Images", "Render each page as an image — good for diagrams, layouts, and scanned documents."],
-            ["text",   "Text",   "Extract the text content from each page — faster and works with text-heavy PDFs."],
+            ["images", "Images", "Best for diagrams and scans."],
+            ["text",   "Text",   "Faster, for text-heavy PDFs."],
           ] as const).map(([val, label, desc]) => (
             <button
               key={val}
@@ -626,10 +704,9 @@ function ChatTab() {
       <section>
         <h3 className="mb-1 text-sm font-medium">OCR fallback</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          When the chosen model can't process images, attached images and PDFs are
-          converted to text via OCR before sending. This language hint guides
-          recognition (e.g. <span className="font-mono">eng</span>,{" "}
-          <span className="font-mono">deu</span>, <span className="font-mono">fra</span>).
+          Language hint used when images are OCR'd for a model that can't see them
+          (<span className="font-mono">eng</span>, <span className="font-mono">deu</span>,{" "}
+          <span className="font-mono">fra</span>…).
         </p>
         <input
           type="text"
@@ -644,8 +721,7 @@ function ChatTab() {
       <section>
         <h3 className="mb-1 text-sm font-medium">Default file directory</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Fallback directory for file system tools when a chat isn't in a project (or the project has no directory set).
-          Starts as your Downloads folder — point it somewhere else to change what the file tools can reach.
+          Where file tools work when a chat has no project directory.
         </p>
         <div className="flex items-center gap-2">
           <button
@@ -674,12 +750,12 @@ function ChatTab() {
       <section>
         <h3 className="mb-1 text-sm font-medium">Perspective run mode</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Default for how multiple zones answer in a chat. Each chat can override this from its Perspectives menu.
+          Default for new chats; each chat can override it.
         </p>
         <div className="flex gap-2">
           {([
-            ["parallel",   "Parallel",   "Run all perspective zones at once — fastest, best for remote APIs. (Default)"],
-            ["sequential", "Sequential", "Run perspective zones one at a time — gentler on local model VRAM."],
+            ["parallel",   "Parallel",   "All zones at once — fastest."],
+            ["sequential", "Sequential", "One at a time — easier on local VRAM."],
           ] as const).map(([val, label, desc]) => (
             <button
               key={val}
@@ -696,8 +772,7 @@ function ChatTab() {
       <section>
         <h3 className="mb-1 text-sm font-medium">Subagent depth limit</h3>
         <p className="mb-2 text-xs text-[var(--color-text-muted)]">
-          How many levels deep zones may spawn subagents (subchats). Deeper
-          <span className="font-mono"> spawn_subagent</span> calls are refused to prevent runaway recursion.
+          How many levels deep zones may spawn subagents. Deeper calls are refused.
         </p>
         <div className="flex gap-2">
           {[1, 2, 3, 4, 5].map((n) => (

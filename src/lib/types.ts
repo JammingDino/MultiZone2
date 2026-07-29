@@ -429,6 +429,14 @@ export interface AppSettings {
   compactSteps: boolean;
   /** Base font size for message text (px). */
   fontSize: number;
+  /**
+   * Base font size for the interface itself (px, default 16). Sets the root
+   * font size, so every rem-based size in the UI — text and spacing — scales
+   * with it.
+   */
+  uiFontSize: number;
+  /** When true, the interface size follows the message size. */
+  fontSizeLinked: boolean;
   /** Font family for message text. Empty string = Inter (default). */
   fontFamily: string;
   /**
@@ -638,6 +646,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   expandThinkingByDefault: false,
   compactSteps: true,
   fontSize: 14,
+  uiFontSize: 16,
+  fontSizeLinked: false,
   fontFamily: "",
   defaultDirectory: "",
   seededStarterZones: false,

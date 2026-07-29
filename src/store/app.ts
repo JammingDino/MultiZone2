@@ -447,7 +447,26 @@ export interface ThemePrefs {
   bloomEnabled: boolean;
   bloomIntensity: number;
   shadowsEnabled: boolean;
+  /**
+   * Per-mode overrides of the base palette (0.9.4). Kept separate for dark and
+   * light so a blue background chosen for dark doesn't follow you into light,
+   * where it would be unreadable. Any key left out falls back to the stylesheet.
+   */
+  colorsDark?: Partial<Record<ThemeColorKey, string>>;
+  colorsLight?: Partial<Record<ThemeColorKey, string>>;
 }
+
+/** The palette entries a user may override, and the CSS variable each drives. */
+export const THEME_COLOR_KEYS = {
+  bg: "--color-bg",
+  panel: "--color-panel",
+  panelHover: "--color-panel-hover",
+  border: "--color-border",
+  text: "--color-text",
+  textMuted: "--color-text-muted",
+} as const;
+
+export type ThemeColorKey = keyof typeof THEME_COLOR_KEYS;
 
 const DEFAULT_THEME: ThemePrefs = {
   mode: "dark",
@@ -469,6 +488,17 @@ let fontLinkEl: HTMLLinkElement | null = null;
 function applyAppSettingsToDom(settings: AppSettings) {
   const fs = typeof settings.fontSize === "number" ? settings.fontSize : 14;
   document.documentElement.style.setProperty("--font-size-message", `${fs}px`);
+
+  // Interface size rides the root font size, which is what every rem-based
+  // Tailwind size in the app resolves against. Linked mode keeps the same ratio
+  // the defaults have (16px UI to 14px messages) rather than making them equal.
+  const linked = !!settings.fontSizeLinked;
+  const ui = linked
+    ? Math.round((fs / 14) * 16)
+    : typeof settings.uiFontSize === "number"
+      ? settings.uiFontSize
+      : 16;
+  document.documentElement.style.fontSize = `${ui}px`;
 
   const family = settings.fontFamily?.trim();
   if (family) {
@@ -500,6 +530,20 @@ function applyThemeToDom(theme: ThemePrefs) {
   html.classList.toggle("bloom", !!theme.bloomEnabled);
   html.classList.toggle("shadows", !!theme.shadowsEnabled);
   html.style.setProperty("--bloom-intensity", String(theme.bloomIntensity ?? 0.5));
+
+  // Palette overrides for the mode being shown. Every key is cleared first, so
+  // switching modes (or resetting a colour) drops back to the stylesheet value
+  // instead of leaving the other mode's inline override in place.
+  const overrides = (theme.mode === "light" ? theme.colorsLight : theme.colorsDark) ?? {};
+  for (const [key, cssVar] of Object.entries(THEME_COLOR_KEYS)) {
+    const value = overrides[key as ThemeColorKey];
+    if (value) html.style.setProperty(cssVar, value);
+    else html.style.removeProperty(cssVar);
+  }
+  // The strong border shade is derived rather than exposed — one fewer control
+  // for something no one wants to tune independently.
+  if (overrides.border) html.style.setProperty("--color-border-strong", overrides.border);
+  else html.style.removeProperty("--color-border-strong");
 }
 
 export const useApp = create<AppStore>((set, get) => ({

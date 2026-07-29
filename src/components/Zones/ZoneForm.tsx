@@ -1,5 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { RefreshCw, Trash2, X, BookOpen, ChevronDown, Crown } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  RefreshCw, Trash2, X, BookOpen, ChevronDown, ChevronLeft, ChevronRight, Crown,
+  Sliders, MessageSquareText, Wrench, Gauge, Cog, Brain,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import * as api from "@/lib/tauri";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
 import { VisionOverrideSelect } from "@/components/common/VisionOverrideSelect";
@@ -54,6 +58,69 @@ function GroupToggle({
     </label>
   );
 }
+/**
+ * A collapsible tool group (0.9.4). The header carries the group's own
+ * enable-all checkbox alongside the disclosure, so a category can be switched on
+ * wholesale without expanding it — and the "n of m on" count means a collapsed
+ * group still says what it's doing.
+ */
+function ToolGroup({
+  label,
+  enabled,
+  mixed,
+  onToggle,
+  open,
+  onOpenChange,
+  count,
+  total,
+  children,
+}: {
+  label: string;
+  enabled: boolean;
+  mixed: boolean;
+  onToggle: () => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  count: number;
+  total: number;
+  children: React.ReactNode;
+}) {
+  const box = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (box.current) box.current.indeterminate = mixed;
+  }, [mixed]);
+  return (
+    <div className="overflow-hidden rounded border border-[var(--color-border)]">
+      <div className="flex items-center gap-2 px-2 py-1.5 hover:bg-[var(--color-panel-hover)]">
+        <input
+          ref={box}
+          type="checkbox"
+          checked={enabled}
+          onChange={onToggle}
+          onClick={(e) => e.stopPropagation()}
+          className="shrink-0"
+          title={enabled ? `Disable all of ${label}` : `Enable all of ${label}`}
+        />
+        <button
+          type="button"
+          onClick={() => onOpenChange(!open)}
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+        >
+          <ChevronDown
+            size={12}
+            className={`shrink-0 text-[var(--color-text-muted)] transition-transform ${open ? "" : "-rotate-90"}`}
+          />
+          <span className="truncate text-[11px] font-semibold uppercase tracking-wide">{label}</span>
+          <span className="ml-auto shrink-0 text-[10px] font-normal text-[var(--color-text-muted)]">
+            {count} of {total} on
+          </span>
+        </button>
+      </div>
+      {open && <div className="flex flex-col gap-1.5 border-t border-[var(--color-border)] p-2">{children}</div>}
+    </div>
+  );
+}
+
 import {
   ZONE_ICON_GROUPS,
   ZONE_ICONS,
@@ -266,6 +333,21 @@ When debugging: reproduce first, hypothesise second, fix third. Always explain *
 ];
 
 
+/**
+ * The five anchors of the editor. The form is one continuous scroll — this list
+ * drives both the section headings and the nav rail beside them, so adding a
+ * section here is all it takes for it to appear in the rail.
+ */
+const SECTIONS: { id: string; label: string; icon: LucideIcon }[] = [
+  { id: "basics",   label: "Basics",   icon: Sliders },
+  { id: "prompt",   label: "Prompt",   icon: MessageSquareText },
+  { id: "tools",    label: "Tools",    icon: Wrench },
+  { id: "sampling", label: "Sampling", icon: Gauge },
+  { id: "advanced", label: "Advanced", icon: Cog },
+];
+
+const NAV_OPEN_KEY = "mz.zoneForm.navOpen";
+
 interface Props {
   zone: Zone | null;
   providers: Provider[];
@@ -308,7 +390,9 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
   const refreshMcpServers = useApp((s) => s.refreshMcpServers);
   const [ceHeadless, setCeHeadless] = useState(false);
   const [ttsVoice, setTtsVoice] = useState("");
-  const [thinkingEnabled, setThinkingEnabled] = useState(false);
+  // Thinking is on by default for new zones (0.9.4) — most current models
+  // benefit, and the ones that don't simply ignore the request.
+  const [thinkingEnabled, setThinkingEnabled] = useState(true);
   const [includeThinkingInContext, setIncludeThinkingInContext] = useState(false);
   const [isLeader, setIsLeader] = useState(false);
   const [icon, setIcon] = useState<string | null>(null);
@@ -319,6 +403,54 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
   const [saving, setSaving] = useState(false);
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
   const templatePickerRef = useRef<HTMLDivElement>(null);
+  const [iconPickerOpen, setIconPickerOpen] = useState(false);
+  /** Which tool groups are expanded. Missing key = collapsed. */
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+
+  // ── Section nav (anchor scroll) ────────────────────────────────────────────
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [activeSection, setActiveSection] = useState(SECTIONS[0].id);
+  const [navOpen, setNavOpen] = useState(
+    () => localStorage.getItem(NAV_OPEN_KEY) !== "0",
+  );
+  useEffect(() => {
+    localStorage.setItem(NAV_OPEN_KEY, navOpen ? "1" : "0");
+  }, [navOpen]);
+
+  /**
+   * Scroll spy. An IntersectionObserver is the usual reach, but sections here
+   * differ wildly in height (Tools dwarfs Sampling) and collapse as groups are
+   * toggled, which makes ratio-based observers jumpy. Measuring tops against a
+   * fixed probe line is stable under all of that.
+   */
+  const syncActive = useCallback(() => {
+    const box = scrollRef.current;
+    if (!box) return;
+    const probe = box.getBoundingClientRect().top + 72;
+    let current = SECTIONS[0].id;
+    for (const s of SECTIONS) {
+      const el = sectionRefs.current[s.id];
+      if (el && el.getBoundingClientRect().top <= probe) current = s.id;
+    }
+    // At the very bottom the last section may never cross the probe line, so
+    // claim it explicitly — otherwise the rail sticks on the second-to-last.
+    if (box.scrollTop + box.clientHeight >= box.scrollHeight - 4) {
+      current = SECTIONS[SECTIONS.length - 1].id;
+    }
+    setActiveSection(current);
+  }, []);
+
+  useLayoutEffect(syncActive, [syncActive]);
+
+  function goToSection(id: string) {
+    const el = sectionRefs.current[id];
+    const box = scrollRef.current;
+    if (!el || !box) return;
+    const top = el.offsetTop - 12;
+    box.scrollTo({ top, behavior: "smooth" });
+    setActiveSection(id);
+  }
 
   // Reset form when switching zones (keyed on zone id, not object reference).
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -349,7 +481,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
             : {},
         );
       } catch { /* ignore */ }
-      setThinkingEnabled(zone.thinkingEnabled ?? false);
+      setThinkingEnabled(zone.thinkingEnabled ?? true);
       setIncludeThinkingInContext(zone.includeThinkingInContext ?? false);
       setIsLeader(zone.isLeader ?? false);
       setIcon(zone.icon ?? null);
@@ -367,13 +499,14 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
       setCeHeadless(false);
       setTtsVoice("");
       setDescOverrides({});
-      setThinkingEnabled(false);
+      setThinkingEnabled(true);
       setIncludeThinkingInContext(false);
       setIsLeader(false);
       setIcon(null);
       setAccentColor(null);
     }
     setIconSearch("");
+    setOpenGroups({});
   }, [zone?.id, providers]);
 
   useEffect(() => {
@@ -505,47 +638,57 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
 
   return (
     <>
-      <div className="flex-1 overflow-y-auto p-4">
-        {/* Name + icon preview row */}
-        <div className="mb-3 flex items-start gap-3">
-          <div className="flex-1">
-            <Field label="Name">
-              <input value={name} onChange={(e) => setName(e.target.value)} className="input" />
-            </Field>
-          </div>
-          {/* Live preview avatar — spacer div matches the Field label height so the
-              avatar visually aligns with the input rather than the label text. */}
-          <div className="flex shrink-0 flex-col">
-            <div className="mb-1 h-[16px]" />
-            <div
-              className="flex h-[34px] w-9 items-center justify-center rounded-lg shadow-sm"
-              style={{ background: activeColor }}
-            >
-              <SelectedIcon size={18} color="white" />
-            </div>
-          </div>
-        </div>
+      <div className="flex min-h-0 flex-1">
+        <div ref={scrollRef} onScroll={syncActive} className="flex-1 overflow-y-auto p-4">
+        <Section id="basics" label="Basics" refs={sectionRefs}>
+        <Field label="Name">
+          <input value={name} onChange={(e) => setName(e.target.value)} className="input" />
+        </Field>
 
-        {/* Icon picker */}
-        <div className="mb-4">
-          <div className="mb-1.5 flex items-center justify-between text-xs text-[var(--color-text-muted)]">
-            <span>Icon</span>
-            {icon && (
-              <button
-                onClick={() => setIcon(null)}
-                className="flex items-center gap-1 hover:text-[var(--color-text)]"
+        {/* Identity: icon and colour sit side by side, and the icon grid lives in
+            a popover rather than inline — it used to be the tallest thing in the
+            form for what is a one-off choice. */}
+        <div className="mb-3 grid grid-cols-2 gap-3">
+          <div className="relative">
+            <div className="mb-1 flex items-center justify-between text-xs text-[var(--color-text-muted)]">
+              <span>Icon</span>
+              {icon && (
+                <button
+                  onClick={() => setIcon(null)}
+                  className="flex items-center gap-1 hover:text-[var(--color-text)]"
+                >
+                  <X size={10} /> Clear
+                </button>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setIconPickerOpen((v) => !v)}
+              className="flex w-full items-center gap-2 rounded border border-[var(--color-border)] px-2 py-1 text-left hover:border-[var(--color-accent)]"
+            >
+              <span
+                className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md"
+                style={{ background: activeColor }}
               >
-                <X size={10} /> Clear
-              </button>
-            )}
-          </div>
+                <SelectedIcon size={15} color="white" />
+              </span>
+              <span className="truncate text-xs">{icon ?? "Default"}</span>
+              <span className="ml-auto shrink-0 text-[11px] text-[var(--color-text-muted)]">Change</span>
+            </button>
+            {iconPickerOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-30"
+                  onMouseDown={(e) => { e.preventDefault(); setIconPickerOpen(false); }}
+                />
+                <div className="absolute left-0 top-full z-40 mt-1 w-[320px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] p-2 shadow-xl">
           <input
             value={iconSearch}
             onChange={(e) => setIconSearch(e.target.value)}
             placeholder="Search icons…"
             className="input mb-2 text-xs"
           />
-          <div className="max-h-44 overflow-y-auto rounded border border-[var(--color-border)] p-2">
+          <div className="max-h-56 overflow-y-auto rounded border border-[var(--color-border)] p-2">
             {filteredIcons !== null ? (
               filteredIcons.length === 0 ? (
                 <div className="py-2 text-center text-xs text-[var(--color-text-muted)]">
@@ -561,7 +704,10 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
                       label={label}
                       selected={icon === iconId}
                       activeColor={activeColor}
-                      onClick={() => setIcon(iconId === icon ? null : iconId)}
+                      onClick={() => {
+                        setIcon(iconId === icon ? null : iconId);
+                        setIconPickerOpen(false);
+                      }}
                     />
                   ))}
                 </div>
@@ -582,7 +728,10 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
                           label={label}
                           selected={icon === iconId}
                           activeColor={activeColor}
-                          onClick={() => setIcon(iconId === icon ? null : iconId)}
+                          onClick={() => {
+                            setIcon(iconId === icon ? null : iconId);
+                            setIconPickerOpen(false);
+                          }}
                         />
                       ))}
                     </div>
@@ -591,11 +740,14 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
               </div>
             )}
           </div>
-        </div>
+                </div>
+              </>
+            )}
+          </div>
 
-        {/* Color picker */}
-        <div className="mb-4">
-          <div className="mb-1.5 flex items-center justify-between text-xs text-[var(--color-text-muted)]">
+          {/* Color picker */}
+          <div>
+            <div className="mb-1 flex items-center justify-between text-xs text-[var(--color-text-muted)]">
             <span>Zone color</span>
             {accentColor && (
               <button
@@ -635,6 +787,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
                 {accentColor ? accentColor.slice(1, 4).toUpperCase() : "···"}
               </span>
             </div>
+            </div>
           </div>
         </div>
 
@@ -671,10 +824,35 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
           </Field>
         </div>
 
-        <Field label="Image input">
-          <VisionOverrideSelect model={model} />
-        </Field>
+        {/* Image input and reasoning share a row. Reasoning used to be two
+            paragraph-sized cards further down the form; the long-form rationale
+            now lives in tooltips so the choice reads as the pair of switches it
+            actually is. */}
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Image input">
+            <VisionOverrideSelect model={model} />
+          </Field>
+          <div className="mb-3">
+            <div className="mb-1 flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
+              <Brain size={12} /> Reasoning
+            </div>
+            <label
+              className="flex h-[34px] cursor-pointer items-center gap-2 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 text-xs hover:border-[var(--color-accent)]"
+              title={'Requests reasoning output (sends reasoning_effort: "medium") and renders the model\'s thinking as a step before its answer. Works with reasoning models like DeepSeek-R1, Qwen QwQ, and OpenAI\'s o-series.'}
+            >
+              <input
+                type="checkbox"
+                checked={thinkingEnabled}
+                onChange={(e) => setThinkingEnabled(e.target.checked)}
+                className="shrink-0"
+              />
+              Enable thinking
+            </label>
+          </div>
+        </div>
+        </Section>
 
+        <Section id="prompt" label="Prompt" refs={sectionRefs}>
         {/* System prompt — kept as a plain div (not label) so the template-picker
             backdrop overlay doesn't trigger label focus side-effects. */}
         <div className="mb-3">
@@ -738,37 +916,9 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
           />
         </div>
 
-        <div className="grid grid-cols-3 gap-3">
-          <Field label={`Temperature: ${temperature.toFixed(2)}`}>
-            <input
-              type="range"
-              min={0}
-              max={2}
-              step={0.05}
-              value={temperature}
-              onChange={(e) => setTemperature(parseFloat(e.target.value))}
-              className="w-full"
-            />
-          </Field>
-          <Field label="Max tokens">
-            <input
-              value={maxTokens}
-              onChange={(e) => setMaxTokens(e.target.value.replace(/\D/g, ""))}
-              className="input"
-              placeholder="unlimited"
-            />
-          </Field>
-          <Field label="Top-p">
-            <input
-              value={topP}
-              onChange={(e) => setTopP(e.target.value)}
-              className="input"
-              placeholder="optional"
-            />
-          </Field>
-        </div>
+        </Section>
 
-        <Field label="Tools">
+        <Section id="tools" label="Tools" refs={sectionRefs}>
           <div className="flex flex-col gap-1.5">
             {/* Master toggle. Enabling writes out every id explicitly rather than
                 storing a wildcard, so a zone's toolset stays a fixed, reviewable
@@ -804,14 +954,17 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
               const ids = inCategory.map((t) => t.id);
               const on = ids.filter((id) => tools.includes(id)).length;
               return (
-                <div key={category} className="mt-1">
-                  <GroupToggle
-                    label={category}
-                    enabled={on === ids.length}
-                    mixed={on > 0 && on < ids.length}
-                    onToggle={() => setGroupEnabled(ids, on !== ids.length)}
-                  />
-                  <div className="mt-1 flex flex-col gap-1.5">
+                <ToolGroup
+                  key={category}
+                  label={category}
+                  enabled={on === ids.length}
+                  mixed={on > 0 && on < ids.length}
+                  onToggle={() => setGroupEnabled(ids, on !== ids.length)}
+                  open={!!openGroups[category]}
+                  onOpenChange={(o) => setOpenGroups((g) => ({ ...g, [category]: o }))}
+                  count={on}
+                  total={ids.length}
+                >
                     {inCategory.map((t) => {
                       const badge = SAFETY_BADGE[t.safety];
                       const enabled = tools.includes(t.id);
@@ -941,8 +1094,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
                         </div>
                       );
                     })}
-                  </div>
-                </div>
+                </ToolGroup>
               );
             })}
 
@@ -956,14 +1108,17 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
                 const ids = s.tools.map((t) => mcpToolEnableId(s.id, t.name));
                 const on = ids.filter((id) => tools.includes(id)).length;
                 return (
-                  <div key={s.id} className="mt-1">
-                    <GroupToggle
-                      label={`MCP · ${s.name}`}
-                      enabled={on === ids.length}
-                      mixed={on > 0 && on < ids.length}
-                      onToggle={() => setGroupEnabled(ids, on !== ids.length)}
-                    />
-                    <div className="mt-1 flex flex-col gap-1.5">
+                  <ToolGroup
+                    key={s.id}
+                    label={`MCP · ${s.name}`}
+                    enabled={on === ids.length}
+                    mixed={on > 0 && on < ids.length}
+                    onToggle={() => setGroupEnabled(ids, on !== ids.length)}
+                    open={!!openGroups[`mcp:${s.id}`]}
+                    onOpenChange={(o) => setOpenGroups((g) => ({ ...g, [`mcp:${s.id}`]: o }))}
+                    count={on}
+                    total={ids.length}
+                  >
                       {s.tools.map((t) => {
                         const id = mcpToolEnableId(s.id, t.name);
                         const badge = SAFETY_BADGE[t.dangerLevel] ?? SAFETY_BADGE[1];
@@ -992,15 +1147,13 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
                           </label>
                         );
                       })}
-                    </div>
-                  </div>
+                  </ToolGroup>
                 );
               })}
           </div>
-        </Field>
 
         {tools.includes("code_exec") && (
-          <div className="mb-3 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+          <div className="mt-3 mb-3 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
             <div className="mb-2 text-xs font-medium text-[var(--color-text)]">Code Execution settings</div>
             <label className="flex cursor-pointer items-start gap-2 rounded border border-[var(--color-border)] bg-[var(--color-panel)] p-2 text-xs hover:border-[var(--color-accent)]">
               <input
@@ -1020,44 +1173,41 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
           </div>
         )}
 
-        <Field label="Reasoning">
-          <div className="flex flex-col gap-1.5">
-            <label className="flex cursor-pointer items-start gap-2 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-2 text-xs hover:border-[var(--color-accent)]">
-              <input
-                type="checkbox"
-                checked={thinkingEnabled}
-                onChange={(e) => setThinkingEnabled(e.target.checked)}
-              />
-              <div>
-                <div className="font-medium">Enable thinking</div>
-                <div className="text-[var(--color-text-muted)]">
-                  Requests reasoning output (sends <code>reasoning_effort: "medium"</code>) and
-                  renders the model's thinking as a step before its answer. Works with reasoning
-                  models like DeepSeek-R1, Qwen QwQ, and OpenAI's o-series.
-                </div>
-              </div>
-            </label>
-            <label className="flex cursor-pointer items-start gap-2 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-2 text-xs hover:border-[var(--color-accent)]">
-              <input
-                type="checkbox"
-                checked={includeThinkingInContext}
-                onChange={(e) => setIncludeThinkingInContext(e.target.checked)}
-              />
-              <div>
-                <div className="font-medium">Keep thinking in conversation history</div>
-                <div className="text-[var(--color-text-muted)]">
-                  When off (default), inline <code>&lt;think&gt;…&lt;/think&gt;</code> blocks are
-                  stripped from past assistant turns before being fed back to the model. Long chats
-                  with Qwen-style models stay cheap. Turn on only if you want the model to see its
-                  own prior reasoning verbatim on follow-ups. (Models that emit thinking on a
-                  separate <code>reasoning_content</code> field — DeepSeek-R1, OpenAI o-series —
-                  are not affected; that field is never echoed back regardless.)
-                </div>
-              </div>
-            </label>
-          </div>
-        </Field>
+        </Section>
 
+        <Section id="sampling" label="Sampling" refs={sectionRefs}>
+        <div className="grid grid-cols-3 gap-3">
+          <Field label={`Temperature: ${temperature.toFixed(2)}`}>
+            <input
+              type="range"
+              min={0}
+              max={2}
+              step={0.05}
+              value={temperature}
+              onChange={(e) => setTemperature(parseFloat(e.target.value))}
+              className="w-full"
+            />
+          </Field>
+          <Field label="Max tokens">
+            <input
+              value={maxTokens}
+              onChange={(e) => setMaxTokens(e.target.value.replace(/\D/g, ""))}
+              className="input"
+              placeholder="unlimited"
+            />
+          </Field>
+          <Field label="Top-p">
+            <input
+              value={topP}
+              onChange={(e) => setTopP(e.target.value)}
+              className="input"
+              placeholder="optional"
+            />
+          </Field>
+        </div>
+        </Section>
+
+        <Section id="advanced" label="Advanced" refs={sectionRefs}>
         <Field label="Multizone">
           <label className="flex cursor-pointer items-start gap-2 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-2 text-xs hover:border-[var(--color-accent)]">
             <input
@@ -1114,6 +1264,75 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
             placeholder='{ "code_exec": { "timeout_secs": 10, "enabled_languages": ["python"] } }'
           />
         </Field>
+
+        {/* The counterpart to "Enable thinking" up in Basics, but a much rarer
+            thing to want — it lives down here with the other sharp edges. */}
+        <Field label="Thinking in history">
+          <label
+            className={`flex items-start gap-2 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-2 text-xs ${
+              thinkingEnabled ? "cursor-pointer hover:border-[var(--color-accent)]" : "cursor-default opacity-50"
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={includeThinkingInContext}
+              onChange={(e) => setIncludeThinkingInContext(e.target.checked)}
+              disabled={!thinkingEnabled}
+              className="mt-0.5 shrink-0"
+            />
+            <div>
+              <div className="font-medium">Keep thinking in conversation history</div>
+              <div className="text-[var(--color-text-muted)]">
+                When off (default), inline <code>&lt;think&gt;…&lt;/think&gt;</code> blocks are
+                stripped from past assistant turns before being fed back to the model, so long
+                chats with Qwen-style models stay cheap. Turn on only if you want the model to see
+                its own prior reasoning verbatim on follow-ups. (Models that emit thinking on a
+                separate <code>reasoning_content</code> field — DeepSeek-R1, OpenAI o-series — are
+                not affected; that field is never echoed back regardless.)
+              </div>
+            </div>
+          </label>
+        </Field>
+        </Section>
+        </div>
+
+        {/* Section rail. Collapses to icons — the labels are useful the first few
+            times and noise after that. */}
+        <nav
+          className="flex flex-shrink-0 flex-col gap-1 border-l border-[var(--color-border)] p-2 transition-[width] duration-150"
+          style={{ width: navOpen ? 136 : 44 }}
+        >
+          <button
+            type="button"
+            onClick={() => setNavOpen((v) => !v)}
+            title={navOpen ? "Collapse section nav" : "Expand section nav"}
+            className="mb-1 flex h-7 items-center justify-center rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
+          >
+            {navOpen ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
+          </button>
+          {SECTIONS.map((s) => {
+            const Icon = s.icon;
+            const active = activeSection === s.id;
+            return (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => goToSection(s.id)}
+                title={navOpen ? undefined : s.label}
+                className={`flex h-8 items-center gap-2 overflow-hidden rounded-md px-2.5 text-xs font-medium transition ${
+                  navOpen ? "" : "justify-center"
+                } ${
+                  active
+                    ? "bg-[var(--color-accent)]/10 text-[var(--color-accent)]"
+                    : "text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
+                }`}
+              >
+                <Icon size={14} className="flex-shrink-0" />
+                {navOpen && <span className="whitespace-nowrap">{s.label}</span>}
+              </button>
+            );
+          })}
+        </nav>
       </div>
 
       <div className="flex justify-end gap-2 border-t border-[var(--color-border)] px-4 py-3">
@@ -1176,6 +1395,31 @@ function IconButton({
     >
       <IconComp size={14} color={selected ? "white" : undefined} />
     </button>
+  );
+}
+
+/** One anchor target in the continuous scroll, registered with the nav rail. */
+function Section({
+  id,
+  label,
+  refs,
+  children,
+}: {
+  id: string;
+  label: string;
+  refs: React.MutableRefObject<Record<string, HTMLDivElement | null>>;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      ref={(el) => { refs.current[id] = el; }}
+      className="mt-5 border-t border-[var(--color-border)] pt-4 first:mt-0 first:border-t-0 first:pt-0"
+    >
+      <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+        {label}
+      </div>
+      {children}
+    </div>
   );
 }
 

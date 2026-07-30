@@ -1083,8 +1083,9 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
                 Marks this zone as a sub-agent coordinator. In a multizone session it
                 delegates to specialist zones via <code>spawn_subagent</code> /{" "}
                 <code>send_subchat_message</code>, presents opposing views to each, and
-                synthesizes their answers before replying. Enabling this turns on the
-                subchat tools.
+                synthesizes their answers before replying. It's told to fan several
+                sub-agents out in the background at once and reuse the ones it already
+                briefed. Enabling this turns on the subchat tools.
               </div>
             </div>
           </label>

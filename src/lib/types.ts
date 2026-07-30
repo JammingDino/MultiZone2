@@ -198,6 +198,12 @@ export interface LibraryEntry {
   examples: string[];
   /** True for shipped MultiZone presets; false for user imports/snapshots. */
   curatedTeam: boolean;
+  /**
+   * Name of the multi-zone team this preset belongs to, when it only works as
+   * part of a set (a Response Leader plus its specialists). The library groups
+   * these and installs them together. Null for a stand-alone zone.
+   */
+  team: string | null;
   createdAt: number;
 }
 
@@ -805,7 +811,7 @@ export const ALL_TOOLS: ToolInfo[] = [
   { id: "compact",      label: "Condense a long chat", category: "Knowledge", safety: 1, description: "When a conversation grows long, let the assistant summarize the earlier turns so it keeps its thread instead of quietly losing the oldest messages. You still see the whole conversation — only what the model re-reads is condensed." },
 
   // Agents
-  { id: "subchat",      label: "Delegate to other zones", category: "Agents", safety: 1, description: "Hand a task to another zone in its own subchat, exchange messages with it, and read the transcript — the basis of Multizone mode." },
+  { id: "subchat",      label: "Delegate to other zones", category: "Agents", safety: 1, description: "Hand a task to another zone in its own subchat, exchange messages with it, and read the transcript — the basis of Multizone mode. Sub-agents can run in the background, so one leader can put a whole panel to work at once and keep going while they think." },
   { id: "plan",         label: "Plan a multi-step task",  category: "Agents", safety: 0, description: "Keep a visible checklist of the steps in a long task, ticking them off as it goes. Helps the assistant stay on track and shows you what it is doing." },
   { id: "ask_user",     label: "Ask you a question",      category: "Agents", safety: 0, description: "Pause and ask you a clarifying question, with answer buttons, instead of guessing." },
   { id: "switch_zone",  label: "Switch zone",             category: "Agents", safety: 1, description: "List your zones and switch this chat to a better-suited one mid-conversation." },

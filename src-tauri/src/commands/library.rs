@@ -57,6 +57,14 @@ pub struct LibraryEntry {
     /// True for shipped MultiZone presets; false for user imports/snapshots.
     #[serde(default)]
     pub curated_team: bool,
+    /// Name of the multi-zone team this preset belongs to, when it is one part of
+    /// a set that only works together (0.9.10) — e.g. a Response Leader and the
+    /// specialists it delegates to. The library groups these and installs them in
+    /// one action, because installing four of six and wondering why the leader
+    /// keeps saying a zone is missing is nobody's idea of a good time. `None` for
+    /// a stand-alone zone.
+    #[serde(default)]
+    pub team: Option<String>,
     #[serde(default)]
     pub created_at: i64,
 }

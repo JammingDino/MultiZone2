@@ -56,7 +56,7 @@ pub fn definitions(project_dir: Option<&str>) -> Vec<Tool> {
                         "path": { "type": "string" },
                         "as_image": {
                             "type": "boolean",
-                            "description": "Read png/jpg/gif/webp/bmp as an image instead of text.",
+                            "description": "Read png/jpg/gif/webp/bmp as an image instead of text. On a `.pdf` it renders the selected `pages` as images (the default anyway).",
                             "default": false
                         },
                         "pages": {
@@ -523,7 +523,16 @@ pub async fn read_file(
         Err(e) => return Ok(e),
     };
 
-    if as_image {
+    let is_pdf = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.eq_ignore_ascii_case("pdf"))
+        .unwrap_or(false);
+
+    // `as_image` on a PDF is the model asking to *see* the document, which is
+    // what the PDF branch below already does — page images. So only non-PDFs
+    // take the single-image path; a PDF falls through and is rasterized.
+    if as_image && !is_pdf {
         let mime = match image_mime(&p) {
             Some(m) => m,
             None => {
@@ -554,12 +563,6 @@ pub async fn read_file(
         ]))
         .unwrap_or_else(|_| json!({ "error": "serialization failed" }).to_string()));
     }
-
-    let is_pdf = p
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|s| s.eq_ignore_ascii_case("pdf"))
-        .unwrap_or(false);
 
     if is_pdf {
         let bytes = match tokio::fs::read(&p).await {
@@ -619,7 +622,10 @@ async fn read_pdf(
     use crate::pdf_bridge::{read_pdf as bridge_read, PdfReadMode, MAX_PAGES_PER_CALL};
 
     let path_str = p.to_string_lossy().to_string();
-    let as_text = args.get("as_text").and_then(|v| v.as_bool()).unwrap_or(false);
+    // An explicit `as_image` is a request to see the pages, so it wins over a
+    // simultaneous `as_text` — models set both when they mean "show me this".
+    let as_image = args.get("as_image").and_then(|v| v.as_bool()).unwrap_or(false);
+    let as_text = !as_image && args.get("as_text").and_then(|v| v.as_bool()).unwrap_or(false);
     // The spec is passed through verbatim; the frontend resolves it against the
     // real page count (see `parsePageSpec` in lib/pdf.ts).
     let spec = args

@@ -2,8 +2,20 @@ import * as pdfjsLib from "pdfjs-dist";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 
-const TARGET_WIDTH = 1024;
-const JPEG_QUALITY = 0.85;
+/**
+ * Long-edge pixel target for a rasterized page. 1568px is the largest edge the
+ * vision models make use of — anything bigger is downscaled on their side, so
+ * this is "as sharp as the page can usefully get". Normalizing the *long* edge
+ * rather than the width also stops landscape pages and slides from being
+ * rendered at roughly half the detail of a portrait page.
+ */
+const TARGET_LONG_EDGE = 1568;
+/**
+ * Handwritten annotations and small print are thin, high-contrast strokes —
+ * exactly what JPEG ringing eats first — so pages are encoded well above the
+ * usual photo quality.
+ */
+const JPEG_QUALITY = 0.95;
 
 export interface PdfRenderProgress {
   page: number;
@@ -79,10 +91,10 @@ export async function extractPdfText(
     .join("\n\n");
 }
 
-/** Rasterize one already-loaded page to a base64 JPEG at ~1024px wide. */
+/** Rasterize one already-loaded page to a base64 JPEG at ~1568px on its long edge. */
 async function renderPage(page: pdfjsLib.PDFPageProxy): Promise<string> {
   const base = page.getViewport({ scale: 1.0 });
-  const scale = TARGET_WIDTH / base.width;
+  const scale = TARGET_LONG_EDGE / Math.max(base.width, base.height);
   const viewport = page.getViewport({ scale });
 
   const canvas = document.createElement("canvas");
@@ -106,7 +118,7 @@ async function pageText(page: pdfjsLib.PDFPageProxy): Promise<string> {
     .trim();
 }
 
-/** Render every page of a PDF to base64-encoded JPEGs at ~1024px wide. */
+/** Render every page of a PDF to base64-encoded JPEGs at ~1568px on the long edge. */
 export async function renderPdfToJpegs(
   file: File,
   onProgress?: (p: PdfRenderProgress) => void,

@@ -812,6 +812,7 @@ export const ALL_TOOLS: ToolInfo[] = [
 
   // Agents
   { id: "subchat",      label: "Delegate to other zones", category: "Agents", safety: 1, description: "Hand a task to another zone in its own subchat, exchange messages with it, and read the transcript — the basis of Multizone mode. Sub-agents can run in the background, so one leader can put a whole panel to work at once and keep going while they think." },
+  { id: "teamwork",     label: "Work alongside other zones", category: "Agents", safety: 0, description: "Lets several zones edit one project at the same time without overwriting each other: each claims the files it is about to change, and posts decisions to a board every agent reads. A write to a file another agent has claimed is refused rather than silently clobbering it. Enable it on every member of a team." },
   { id: "plan",         label: "Plan a multi-step task",  category: "Agents", safety: 0, description: "Keep a visible checklist of the steps in a long task, ticking them off as it goes. Helps the assistant stay on track and shows you what it is doing." },
   { id: "ask_user",     label: "Ask you a question",      category: "Agents", safety: 0, description: "Pause and ask you a clarifying question, with answer buttons, instead of guessing." },
   { id: "switch_zone",  label: "Switch zone",             category: "Agents", safety: 1, description: "List your zones and switch this chat to a better-suited one mid-conversation." },

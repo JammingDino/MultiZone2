@@ -109,11 +109,24 @@ Sub-agents don't have to run one at a time. `spawn_subagent`/`send_subchat_messa
 
 Turn any zone into one with the **Response Leader** toggle in the zone editor (it auto-enables the subchat tools), or start from the curated "Response Leader" zone in the library.
 
+### Working one codebase together
+
+Sub-agents have always had the real tools — read, write, search, shell — and they inherit the parent chat's project directory. What they lacked was any way to know the others existed, which left only two safe patterns: run them one at a time, or have them hand patches back for someone else to apply. Agents working *against* each other, carefully sequenced.
+
+The **teamwork** tool is the coordination layer that makes them work *alongside* each other instead:
+
+- `claim_files` takes an advisory lock on the files an agent is about to edit, with a stated intent. A write to a file another agent holds is **refused by the tools**, so a claim isn't a convention someone can forget. An unclaimed write auto-claims, so the protection holds even for a zone that never calls the tool; claims expire, and release when the agent's turn ends, so a crashed agent can't own a file forever.
+- `post_note` / `team_status` are the session's shared board. Parallel edits only compose if the decisions travel with them — "`parse()` returns None now instead of raising" has to reach whoever is editing the caller, and one sub-agent can't read another's transcript.
+
+Reads are never blocked, and an ordinary single-zone chat never touches any of it.
+
 ### Zone teams
 
 Some presets only work as a set. The library's **Teams** section installs one in a single action — a leader plus the specialists it delegates to, all bound to your default model.
 
-The shipped **SWE-Bench Panel** is a benchmark-shaped example: **SWE Lead** runs repro and localization in parallel, hands one root-cause brief to two patch authors on the *same model at different temperatures* (0.1 and 0.9) so their attempts are genuinely independent, verifies each candidate one at a time through a mechanical test runner, has an adversarial reviewer try to break the leader, arbitrates on test evidence, and finishes with one applied and verified unified diff. Before a run, set **Settings → Chat → Tool auto-approval** to *Everything* (a sub-agent cannot show you an approval prompt) and raise **Task length** to 60 or more.
+The shipped **Code Team** is a general codebase collaboration: talk to **Code Team Lead** like a colleague about a symptom, a feature or a piece of code that annoys you, and it runs the team over your project. It clarifies the ask, has **Code Scout** map the ground, writes the contract the others must honour, then splits the work into file-disjoint slices that **Code Implementer (Careful)** (0.15) and **Code Implementer (Inventive)** (0.85) edit *at the same time* while **Code Test Author** writes the tests against the same contract — with **Code Reviewer** attacking the result and **Code Verifier** running the builds and suites on the combined tree. For a hard bug it switches to compete mode instead: both implementers attack the same problem independently, hand back diffs, and the leader picks on test evidence.
+
+Seven zones on one model at seven temperatures: the value comes from independent attempts and adversarial review, not from a bigger model. Before a long run, set **Settings → Chat → Tool auto-approval** to *Everything* (a sub-agent cannot show you an approval prompt) and raise **Task length** to 60 or more.
 
 ## HTTP API
 

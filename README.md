@@ -105,7 +105,15 @@ The leader is the only agent that can talk to you — sub-agent `ask_user` calls
 
 ![How the Response Leader works](promo/05-response-leader.png)
 
+Sub-agents don't have to run one at a time. `spawn_subagent`/`send_subchat_message` take `background: true`, which returns the subchat id immediately and runs that sub-agent on its own task — so a leader can put five specialists to work in a single message, keep reading code while they think, and pick every reply up with `collect_subagents`. `list_subchats` shows the sub-agents a conversation already has, and the leader is told to continue one rather than re-brief a fresh copy. Stopping the chat stops its background sub-agents with it.
+
 Turn any zone into one with the **Response Leader** toggle in the zone editor (it auto-enables the subchat tools), or start from the curated "Response Leader" zone in the library.
+
+### Zone teams
+
+Some presets only work as a set. The library's **Teams** section installs one in a single action — a leader plus the specialists it delegates to, all bound to your default model.
+
+The shipped **SWE-Bench Panel** is a benchmark-shaped example: **SWE Lead** runs repro and localization in parallel, hands one root-cause brief to two patch authors on the *same model at different temperatures* (0.1 and 0.9) so their attempts are genuinely independent, verifies each candidate one at a time through a mechanical test runner, has an adversarial reviewer try to break the leader, arbitrates on test evidence, and finishes with one applied and verified unified diff. Before a run, set **Settings → Chat → Tool auto-approval** to *Everything* (a sub-agent cannot show you an approval prompt) and raise **Task length** to 60 or more.
 
 ## HTTP API
 

@@ -100,16 +100,6 @@ export function ExportMenu({ chatId }: { chatId: string }) {
               <FileType size={13} className="text-[var(--color-text-muted)]" />
               Export as PDF
             </button>
-            <div className="px-3 pb-1 pt-1.5 text-[10px] leading-snug text-[var(--color-text-muted)]">
-              {pdfExportDetail === "steps"
-                ? "The PDF includes the full trace — tool calls, plans, diagrams and timings."
-                : pdfExportDetail === "rails"
-                  ? "The PDF condenses each run of steps to one line, keeping plans, diagrams and files."
-                  : "The PDF includes the conversation only — no tool steps."}{" "}
-              Change that in Settings → PDF export. It opens your print dialog:
-              choose “Save as PDF”, and set Margins to “None” for a single
-              continuous page.
-            </div>
           </div>
         </>
       )}

@@ -516,6 +516,43 @@ function AppearanceTab() {
         />
       </section>
 
+      {/* Exporting a chat as a PDF is a question of how the document looks —
+          how much of the run it draws and in which theme — so it lives here
+          with the rest of the appearance settings rather than under Chat. */}
+      <section>
+        <h3 className="mb-1 text-sm font-medium">PDF export</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          How much of a run the chat's PDF export writes down.
+        </p>
+        <OptionCards
+          layout="column"
+          value={appSettings.pdfExportDetail}
+          onChange={(pdfExportDetail) => setAppSettings({ pdfExportDetail })}
+          options={[
+            ["steps", "Every step",  "One card per tool call and reasoning block."],
+            ["rails", "Condensed",   "Each run of steps on one line, as the chat shows it. Plans, diagrams and files still drawn."],
+            ["text",  "Text only",   "The conversation and its attachments, nothing else."],
+          ]}
+        />
+        <p className="mb-2 mt-3 text-xs text-[var(--color-text-muted)]">
+          Theme the document is drawn in — for working in one mode and documenting
+          in the other.
+        </p>
+        <OptionCards
+          value={appSettings.pdfExportTheme}
+          onChange={(pdfExportTheme) => setAppSettings({ pdfExportTheme })}
+          options={[
+            ["app",   "Follow app"],
+            ["light", "Light"],
+            ["dark",  "Dark"],
+          ]}
+        />
+        <p className="mt-3 text-xs text-[var(--color-text-muted)]">
+          Export opens your print dialog: choose “Save as PDF”, and set Margins to
+          “None” for a single continuous page.
+        </p>
+      </section>
+
     </div>
   );
 }
@@ -639,36 +676,6 @@ function ChatTab() {
             ["safe_moderate","Safe + moderate",     "Dangerous tools ask first."],
             ["safe",         "Safe only",           "Moderate and dangerous tools ask first."],
             ["none",         "Nothing",             "Every tool call asks first."],
-          ]}
-        />
-      </section>
-
-      <section>
-        <h3 className="mb-1 text-sm font-medium">PDF export</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          How much of a run the chat's PDF export writes down.
-        </p>
-        <OptionCards
-          layout="column"
-          value={appSettings.pdfExportDetail}
-          onChange={(pdfExportDetail) => setAppSettings({ pdfExportDetail })}
-          options={[
-            ["steps", "Every step",  "One card per tool call and reasoning block."],
-            ["rails", "Condensed",   "Each run of steps on one line, as the chat shows it. Plans, diagrams and files still drawn."],
-            ["text",  "Text only",   "The conversation and its attachments, nothing else."],
-          ]}
-        />
-        <p className="mb-2 mt-3 text-xs text-[var(--color-text-muted)]">
-          Theme the document is drawn in — for working in one mode and documenting
-          in the other.
-        </p>
-        <OptionCards
-          value={appSettings.pdfExportTheme}
-          onChange={(pdfExportTheme) => setAppSettings({ pdfExportTheme })}
-          options={[
-            ["app",   "Follow app"],
-            ["light", "Light"],
-            ["dark",  "Dark"],
           ]}
         />
       </section>

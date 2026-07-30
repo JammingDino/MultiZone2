@@ -348,6 +348,7 @@ pub async fn spawn(
     }
 
     run_turn_boxed(ctx, sink, &subchat_id, parts).await?;
+    crate::tools::teamwork::release_all_for_chat(&ctx.db, &subchat_id).await;
 
     let response = last_response(&ctx.db, &subchat_id).await?;
     Ok(json!({
@@ -403,6 +404,7 @@ pub async fn send(args: &Value, ctx: &EngineCtx, sink: &StreamSink) -> AppResult
     }
 
     run_turn_boxed(ctx, sink, &subchat_id, parts).await?;
+    crate::tools::teamwork::release_all_for_chat(&ctx.db, &subchat_id).await;
 
     let response = last_response(&ctx.db, &subchat_id).await?;
     Ok(json!({ "status": "ok", "subchat_id": subchat_id, "response": response }).to_string())
@@ -636,7 +638,12 @@ fn start_background(
     let sink = sink.clone();
     let chat_id = subchat_id.to_string();
     tokio::spawn(async move {
+        let db = ctx.db.clone();
         let result = run_turn_owned(ctx, sink.clone(), chat_id.clone(), parts).await;
+        // Its edits are written by now, so its file claims have done their job.
+        // A claim outliving the turn that took it is how a finished sub-agent
+        // blocks everyone else from touching the file it was working on.
+        crate::tools::teamwork::release_all_for_chat(&db, &chat_id).await;
         let state = match result {
             Ok(()) => RunState::Done,
             Err(e) => {

@@ -2166,6 +2166,29 @@ async fn build_leader_preamble(
         zone.name
     );
 
+    // Shared-tree coordination (0.9.10). Only when the leader actually has the
+    // tool — and it changes the shape of the delegation, because sub-agents
+    // editing one working directory at the same time need their seams agreed
+    // before they start rather than discovered when a write is refused.
+    if serde_json::from_str::<Vec<String>>(&zone.tools_enabled)
+        .map_or(false, |t| t.iter().any(|id| id == "teamwork"))
+    {
+        text.push_str(
+            "\n\nWorking one tree together:\n\
+             • Your sub-agents edit the same working directory you do, at the same time. \
+               Before they start, decide the seams — which files each one owns, and any \
+               signature or name they must all honour — and `post_note` that to the shared \
+               board. Parallel edits only compose if the contract exists first.\n\
+             • Give each sub-agent a slice whose files don't overlap another's. Two agents \
+               told to edit one file is a decomposition mistake, not something they can \
+               negotiate: the tools refuse a write to a file another agent has claimed.\n\
+             • `team_status` shows who holds which files and every note posted. Read it \
+               between stages instead of asking each sub-agent what it did.\n\
+             • When work must be compared rather than combined — two attempts at one hard \
+               problem — tell each sub-agent to hand back a diff and leave the tree alone.",
+        );
+    }
+
     if roster.is_empty() {
         text.push_str(
             "\n\nNo sub-agents are pre-assigned to this session. Call `list_zones` to \

@@ -17,6 +17,7 @@ pub mod memory;
 pub mod skills;
 pub mod knowledge;
 pub mod subchat;
+pub mod teamwork;
 pub mod plan;
 pub mod http;
 pub mod citations;
@@ -135,6 +136,9 @@ pub enum ToolId {
     /// 0.9.5 — run Linux commands in WSL, optionally in a shell that persists
     /// across calls so multi-step work can build up state.
     Wsl,
+    /// 0.9.10 — file claims and a shared note board, so several sub-agents can
+    /// edit one working tree at the same time without overwriting each other.
+    Teamwork,
 }
 
 impl ToolId {
@@ -166,6 +170,7 @@ impl ToolId {
             "http_request" => Some(Self::HttpRequest),
             "compact" => Some(Self::Compact),
             "wsl_exec" => Some(Self::Wsl),
+            "teamwork" => Some(Self::Teamwork),
             // `save_output` is the legacy id for this group (briefly shipped as a
             // write+present tool); it now maps to the present-only tool.
             "present_file" | "save_output" => Some(Self::PresentFile),
@@ -198,6 +203,7 @@ impl ToolId {
             Self::HttpRequest => "http_request",
             Self::Compact => "compact",
             Self::Wsl => "wsl_exec",
+            Self::Teamwork => "teamwork",
         }
     }
 
@@ -235,6 +241,7 @@ impl ToolId {
             Self::Plan => vec![plan::definition()],
             Self::HttpRequest => vec![http::definition()],
             Self::Compact => vec![compact::definition()],
+            Self::Teamwork => teamwork::definitions(),
         }
     }
 
@@ -246,8 +253,11 @@ impl ToolId {
             // skill is disabled until the user enables it) with update (moderate) —
             // per-call gating by name keeps the group in the safe default set while
             // still prompting before an agent rewrites an existing skill.
+            // Teamwork only writes coordination metadata — claims and notes the
+            // other agents read. Nothing it does reaches the user's files.
             Self::DateTime | Self::AskUser | Self::ManageTags | Self::RenderGraph
-            | Self::Memory | Self::Skills | Self::PresentFile | Self::Plan => 0,
+            | Self::Memory | Self::Skills | Self::PresentFile | Self::Plan
+            | Self::Teamwork => 0,
             // Subchat groups reads (read/list/collect: safe) + spawn/send (moderate); classed moderate
             // here so it isn't in the safe default set. Per-call gating uses the
             // function name (see `tool_safety_by_name`). FileSearch reads file
@@ -273,7 +283,7 @@ impl ToolId {
 /// Every built-in tool group. The single source of truth for enumerating tools
 /// (e.g. `list_tool_functions`, which flattens each group into the functions the
 /// model actually sees). Keep in step with the `ToolId` variants.
-pub const ALL_TOOL_IDS: [ToolId; 22] = [
+pub const ALL_TOOL_IDS: [ToolId; 23] = [
     ToolId::DateTime,
     ToolId::WebSearch,
     ToolId::Extract,
@@ -296,6 +306,7 @@ pub const ALL_TOOL_IDS: [ToolId; 22] = [
     ToolId::Compact,
     ToolId::Plan,
     ToolId::Subchat,
+    ToolId::Teamwork,
 ];
 
 /// Tool ids classified as "safe" (safety level 0). Used as the default toolset
@@ -334,6 +345,7 @@ pub fn tool_safety_by_name(name: &str) -> u8 {
         // background subagents are all reads of work the user already approved
         // when the spawn went through.
         | "load_skill" | "read_subchat" | "list_subchats" | "collect_subagents"
+        | "team_status" | "claim_files" | "release_files" | "post_note"
         | "present_file" | "update_plan"
         // A created skill is disabled until the user enables it, so writing one
         // changes nothing an agent can act on — safe. Revising an existing skill
@@ -405,6 +417,16 @@ pub async fn dispatch(
         return crate::mcp::manager().call(name, call_args).await;
     }
 
+    // Multi-agent write coordination (0.9.10). In a session that has sub-agents,
+    // a write to a file another agent is editing is refused instead of silently
+    // clobbering it, and an unclaimed write takes an implicit claim so the writer
+    // is protected in turn. A no-op for an ordinary single-zone chat.
+    if let Some(refusal) =
+        teamwork::guard_write(name, &args, db, chat_id, caller_zone_id, project_dir).await?
+    {
+        return Ok(refusal);
+    }
+
     match name {
         "get_current_datetime" => datetime::run(&args).await,
         "web_search" => web_search::run(&args, zone_config, http).await,
@@ -451,6 +473,10 @@ pub async fn dispatch(
         "collect_subagents" => subchat::collect(&args, db, chat_id).await,
         "list_subchats" => subchat::list(db, chat_id).await,
         "read_subchat" => subchat::read(&args, db).await,
+        "team_status" => teamwork::status(db, chat_id).await,
+        "claim_files" => teamwork::claim(&args, db, chat_id, caller_zone_id, project_dir).await,
+        "release_files" => teamwork::release(&args, db, chat_id, caller_zone_id, project_dir).await,
+        "post_note" => teamwork::note(&args, db, chat_id, caller_zone_id).await,
         other => Ok(serde_json::json!({
             "error": format!("unknown tool: {other}")
         }).to_string()),
@@ -478,13 +504,17 @@ mod tests {
     #[test]
     fn toolset_is_concise() {
         // The full built-in surface. No real zone enables all of it at once, so
-        // this is the worst case rather than a typical request. Measured at
-        // 39,165 bytes before the 0.9.10 pass and 30,348 after; 32,195 once the
-        // subchat group grew `collect_subagents` and `list_subchats` (1.0), which
-        // are two genuinely new capabilities rather than more prose about the
-        // existing ones. The ceiling leaves a little headroom for one more tool
-        // without leaving room to quietly re-inflate the descriptions.
-        const BUDGET_BYTES: usize = 33_000;
+        // this is the worst case rather than a typical request — a zone in the
+        // Code Team enables six of the twenty-three groups.
+        //
+        // Measured at 39,165 bytes before the 0.9.10 pass and 30,348 after. The
+        // multi-agent work took it to 34,411 across six new *functions*
+        // (`collect_subagents`, `list_subchats`, and the four coordination tools),
+        // at ~600 bytes each — in line with the existing surface rather than a
+        // re-inflation of it, and none of them lands in the top five. The ceiling
+        // is raised for the new capabilities and no further: it still leaves no
+        // room to grow the descriptions themselves.
+        const BUDGET_BYTES: usize = 35_000;
 
         let ctx = ToolContext {
             project_dir: Some(r"C:\Users\me\project".to_string()),

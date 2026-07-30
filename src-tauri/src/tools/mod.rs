@@ -358,8 +358,11 @@ pub fn tool_safety_by_name(name: &str) -> u8 {
 /// conversation on every single request, so it is the one part of the context
 /// the user never sees and always pays for.
 ///
-/// Used by the `toolset_is_concise` test below and available to callers that
-/// want to report the cost of a zone's toolset.
+/// Test-only: this measures the whole built-in surface, which is a budget check
+/// rather than anything a request needs. `#[cfg(test)]` keeps it from being dead
+/// code in the shipped build — a warning on every compile is a warning nobody
+/// reads.
+#[cfg(test)]
 pub fn definition_sizes(ctx: &ToolContext) -> Vec<(&'static str, usize)> {
     let mut out = Vec::new();
     for id in ALL_TOOL_IDS {
@@ -407,7 +410,9 @@ pub async fn dispatch(
         "smart_fetch" => smart_fetch::run(&args).await,
         "smart_crawl" => smart_crawl::run(&args).await,
         "execute_code" => code_exec::run(&args, zone_config).await,
-        "read_file" => filesystem::read_file(&args, zone_config, project_dir).await,
+        // `sink` carries the window handle: a PDF's pages are rasterized by the
+        // frontend's PDF.js (see `pdf_bridge`).
+        "read_file" => filesystem::read_file(&args, zone_config, project_dir, sink).await,
         "list_directory" => filesystem::list_directory(&args, zone_config, project_dir).await,
         "create_file" => filesystem::create_file(&args, zone_config, project_dir).await,
         "edit_file" => filesystem::edit_file(&args, zone_config, project_dir).await,

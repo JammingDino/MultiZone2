@@ -1,3 +1,4 @@
+import { parseFileAttachments } from "@/lib/attachmentParts";
 import type { ContentPart, Message, ToolCall } from "@/lib/types";
 
 /**
@@ -37,6 +38,29 @@ export interface TraceImagesItem {
   timestamp: number;
 }
 
+/** One file the user attached to a turn. */
+export interface TraceAttachment {
+  fileName: string;
+  /** How it was sent: rendered PDF pages, extracted PDF text, or a text file. */
+  mode: "images" | "text" | "file";
+  /** Page count, for a PDF sent as page images. */
+  pages: number | null;
+  /** Character count of the text the model received, when it was text. */
+  characters: number | null;
+}
+
+/**
+ * The files attached to a user turn. Attachments ride along as hidden parts, so
+ * before 1.0 an export of a turn that was mostly "here is the spec, review it"
+ * showed the one-line question and no sign that a document came with it —
+ * leaving the answer looking like it came from nowhere.
+ */
+export interface TraceAttachmentsItem {
+  kind: "attachments";
+  files: TraceAttachment[];
+  timestamp: number;
+}
+
 export interface TraceToolItem {
   kind: "tool";
   call: ToolCall;
@@ -54,7 +78,12 @@ export interface TraceToolItem {
 
 export type ToolStatus = "ok" | "error" | "no-result";
 
-export type TraceItem = TraceTextItem | TraceThinkingItem | TraceImagesItem | TraceToolItem;
+export type TraceItem =
+  | TraceTextItem
+  | TraceThinkingItem
+  | TraceImagesItem
+  | TraceAttachmentsItem
+  | TraceToolItem;
 
 export interface TraceUnit {
   role: "user" | "assistant";
@@ -86,6 +115,16 @@ function visibleText(m: Message): string {
 
 function visibleImageCount(m: Message): number {
   return parseParts(m.content).filter((p) => p.type === "image_url").length;
+}
+
+/** The files attached to a message, read back off its hidden parts. */
+function attachmentsOf(m: Message): TraceAttachment[] {
+  return parseFileAttachments(parseParts(m.content)).map((a) => ({
+    fileName: a.fileName,
+    mode: a.mode,
+    pages: a.mode === "images" ? a.pages.length : null,
+    characters: a.mode === "images" ? null : a.text.length,
+  }));
 }
 
 function parseToolCalls(json: string | null): ToolCall[] {
@@ -143,6 +182,8 @@ export function buildTrace(messages: Message[]): TraceUnit[] {
       if (text) items.push({ kind: "text", text, timestamp: m.createdAt });
       const images = visibleImageCount(m);
       if (images > 0) items.push({ kind: "images", count: images, timestamp: m.createdAt });
+      const files = attachmentsOf(m);
+      if (files.length > 0) items.push({ kind: "attachments", files, timestamp: m.createdAt });
       if (items.length === 0) continue;
       units.push({ role: "user", zoneId: null, timestamp: m.createdAt, items });
       continue;
@@ -207,6 +248,92 @@ function applyResult(item: TraceToolItem, m: Message): void {
   const elapsed = m.createdAt - item.timestamp;
   // Clock skew and resumed sessions produce nonsense; only report a plausible one.
   item.durationMs = elapsed >= 0 && elapsed < 60 * 60 * 1000 ? elapsed : null;
+}
+
+// ─── Condensing a turn into activity runs ────────────────────────────────────
+
+/** Tools whose result is an artefact the user asked for, so it survives
+ *  condensing. Mirrors `VISUAL_TOOLS` in lib/stepSummary.ts, which does the same
+ *  job for the chat's activity rail. */
+const VISUAL_TOOLS = new Set(["update_plan", "draw_diagram", "plot_function", "present_file"]);
+
+/**
+ * A stretch of consecutive thinking/tool steps, collapsed into one unit — the
+ * export's counterpart to the chat's activity rail.
+ */
+export interface TraceRunItem {
+  kind: "run";
+  steps: (TraceThinkingItem | TraceToolItem)[];
+  toolCalls: number;
+  errors: number;
+  thinkingBlocks: number;
+  /** Steps whose output is drawn in full anyway (plan, diagram, plot, file). */
+  visuals: TraceToolItem[];
+  timestamp: number;
+  /** Time spent inside the run's tool calls, when any of them are known. */
+  toolTimeMs: number | null;
+}
+
+export type CondensedItem = TraceItem | TraceRunItem;
+
+/**
+ * Group a turn's items so that each run of consecutive thinking/tool steps
+ * becomes a single [`TraceRunItem`]; prose and attachments pass through
+ * untouched. Prose ends a run, so the model's answer is never swallowed by one.
+ */
+export function condenseRuns(items: TraceItem[]): CondensedItem[] {
+  const out: CondensedItem[] = [];
+  let run: TraceRunItem | null = null;
+
+  const close = () => {
+    if (!run) return;
+    // A plan is rewritten as the model goes, so only the last one is worth
+    // drawing — same rule the chat's rail applies.
+    const lastPlan = run.visuals.reduce(
+      (acc, s, i) => (s.call.function.name === "update_plan" ? i : acc),
+      -1,
+    );
+    if (lastPlan >= 0) {
+      run.visuals = run.visuals.filter(
+        (s, i) => s.call.function.name !== "update_plan" || i === lastPlan,
+      );
+    }
+    out.push(run);
+    run = null;
+  };
+
+  for (const item of items) {
+    if (item.kind !== "thinking" && item.kind !== "tool") {
+      close();
+      out.push(item);
+      continue;
+    }
+    if (!run) {
+      run = {
+        kind: "run",
+        steps: [],
+        toolCalls: 0,
+        errors: 0,
+        thinkingBlocks: 0,
+        visuals: [],
+        timestamp: item.timestamp,
+        toolTimeMs: null,
+      };
+    }
+    run.steps.push(item);
+    if (item.kind === "thinking") {
+      run.thinkingBlocks++;
+    } else {
+      run.toolCalls++;
+      if (item.status === "error") run.errors++;
+      if (item.durationMs !== null) run.toolTimeMs = (run.toolTimeMs ?? 0) + item.durationMs;
+      if (item.status === "ok" && VISUAL_TOOLS.has(item.call.function.name)) {
+        run.visuals.push(item);
+      }
+    }
+  }
+  close();
+  return out;
 }
 
 // ─── Tool descriptions ───────────────────────────────────────────────────────
@@ -439,6 +566,21 @@ function describeOutcome(
     const msg = body ? str(body.error) : null;
     return msg ? truncate(msg, 120) : "failed";
   }
+  // A multimodal result is an array of content parts, not an object: an image
+  // read, or a PDF read as page images. Counting the images says what the model
+  // actually got to look at, where "N lines of output" would only describe the
+  // caption above them.
+  if (Array.isArray(item.result)) {
+    const images = item.result.filter(
+      (p) => asRecord(p)?.type === "image_url",
+    ).length;
+    // `read_file` labels its own multimodal result: "PDF: …" for page renders,
+    // "Image file: …" for a picture read with `as_image`.
+    const asPages = item.resultText?.startsWith("PDF:") ?? false;
+    if (images > 0) {
+      return asPages ? plural(images, "page read", "pages read") : plural(images, "image");
+    }
+  }
   if (!body) {
     return item.resultText ? `${plural(countLines(item.resultText), "line")} of output` : null;
   }
@@ -512,6 +654,10 @@ export interface TraceStats {
   thinkingBlocks: number;
   /** Total reasoning characters across the conversation. */
   thinkingCharacters: number;
+  /** Files the user attached across the conversation (images excluded). */
+  attachedFiles: number;
+  /** Images the user attached across the conversation. */
+  attachedImages: number;
   /** Tool name → call count, most-used first. */
   toolCounts: [string, number][];
   firstAt: number | null;
@@ -527,6 +673,8 @@ export function traceStats(units: TraceUnit[]): TraceStats {
     failedToolCalls: 0,
     thinkingBlocks: 0,
     thinkingCharacters: 0,
+    attachedFiles: 0,
+    attachedImages: 0,
     toolCounts: [],
     firstAt: null,
     lastAt: null,
@@ -542,6 +690,10 @@ export function traceStats(units: TraceUnit[]): TraceStats {
       if (item.kind === "thinking") {
         stats.thinkingBlocks++;
         stats.thinkingCharacters += item.characters;
+      } else if (item.kind === "images") {
+        stats.attachedImages += item.count;
+      } else if (item.kind === "attachments") {
+        stats.attachedFiles += item.files.length;
       } else if (item.kind === "tool") {
         stats.toolCalls++;
         if (item.status === "error") stats.failedToolCalls++;

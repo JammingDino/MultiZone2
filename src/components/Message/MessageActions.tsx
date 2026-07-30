@@ -11,11 +11,6 @@ interface Props {
   text: string;
   /** Assistant message id for stats lookup. */
   messageId?: string;
-  /**
-   * Editing a user message: the id of the user message to delete from before
-   * resending. Only used for `variant === "user"`.
-   */
-  pivotMessageId?: string;
   chatId: string;
   variant: "user" | "assistant" | "perspective";
   /**
@@ -26,6 +21,14 @@ interface Props {
   /** Whether this turn is the latest round (regenerate is only offered there). */
   canRegenerate?: boolean;
   onEdit?: () => void;
+  /**
+   * Send this user turn again as-is (1.0). The counterpart to regenerating an
+   * answer: when a turn failed on something outside the message — a provider
+   * error, a tool that wasn't reachable, a model that wasn't loaded — the fix is
+   * to send the same thing again, and until now that meant opening the editor
+   * and making a pointless edit to get the resend.
+   */
+  onResend?: () => void;
   /**
    * Pivot message id for "Branch from here". When set, a branch button is shown
    * that forks the chat at this message into a new chat.
@@ -47,12 +50,12 @@ interface Props {
 export function MessageActions({
   text,
   messageId,
-  pivotMessageId,
   chatId,
   variant,
   regenerateZoneId = null,
   canRegenerate = false,
   onEdit,
+  onResend,
   branchFromMessageId,
   branchSolo = false,
   branchSoloZoneId = null,
@@ -127,6 +130,18 @@ export function MessageActions({
         <ActionButton
           onClick={onRegenerate}
           label="Regenerate"
+          disabled={isBusy}
+        >
+          <RotateCcw size={11} />
+        </ActionButton>
+      )}
+
+      {/* Sits where Regenerate sits on an answer, and carries the same icon:
+          both mean "run this again". */}
+      {onResend && (
+        <ActionButton
+          onClick={onResend}
+          label="Resend"
           disabled={isBusy}
         >
           <RotateCcw size={11} />

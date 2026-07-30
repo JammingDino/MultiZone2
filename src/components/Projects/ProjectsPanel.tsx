@@ -5,7 +5,9 @@ import { useApp } from "@/store/app";
 import { useShallow } from "zustand/react/shallow";
 import * as api from "@/lib/tauri";
 import type { IndexSummary, KbDocument, KnowledgeStatus, Project, Tag, Zone } from "@/lib/types";
-import { ZONE_COLOR_PRESETS, getZoneIcon, ZONE_ICON_GROUPS, ZONE_ICONS } from "@/lib/zoneIcons";
+import { getZoneIcon } from "@/lib/zoneIcons";
+import { IconPicker } from "@/components/common/IconPicker";
+import { ColorPicker } from "@/components/common/ColorPicker";
 import { Modal } from "@/components/common/Modal";
 
 export function ProjectsPanel() {
@@ -171,7 +173,6 @@ function ProjectForm({
   const [contextSnippet, setContextSnippet] = useState("");
   const [directory, setDirectory] = useState<string | null>(null);
   const [defaultContextEnabled, setDefaultContextEnabled] = useState(false);
-  const [iconSearch, setIconSearch] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -188,7 +189,6 @@ function ProjectForm({
       setDefaultZoneId(null); setContextSnippet(""); setDirectory(null);
       setDefaultContextEnabled(false);
     }
-    setIconSearch("");
   }, [project?.id]);
 
   async function pickDirectory() {
@@ -198,10 +198,6 @@ function ProjectForm({
 
   const activeColor = accentColor ?? "var(--color-accent)";
   const PreviewIcon = getZoneIcon(icon);
-
-  const filteredIcons = iconSearch.trim()
-    ? ZONE_ICONS.filter((i) => i.label.toLowerCase().includes(iconSearch.toLowerCase()))
-    : null;
 
   async function onSave() {
     if (!name.trim()) return;
@@ -243,62 +239,11 @@ function ProjectForm({
           </div>
         </div>
 
-        {/* Color */}
-        <div className="mb-4">
-          <div className="mb-1.5 text-xs text-[var(--color-text-muted)]">Color</div>
-          <div className="flex flex-wrap items-center gap-1.5">
-            {ZONE_COLOR_PRESETS.map((c) => (
-              <button
-                key={c}
-                onClick={() => setAccentColor(accentColor === c ? null : c)}
-                className="h-6 w-6 rounded-full transition hover:scale-110"
-                style={{ background: c, outline: accentColor === c ? `2px solid ${c}` : "2px solid transparent", outlineOffset: "2px" }}
-                title={c}
-              />
-            ))}
-            <div className="relative flex h-6 w-8 cursor-pointer items-center justify-center overflow-hidden rounded border border-[var(--color-border)] hover:border-[var(--color-accent)]">
-              <input type="color" value={accentColor ?? "#4f9cf9"} onChange={(e) => setAccentColor(e.target.value)} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
-              <span className="pointer-events-none z-10 text-[9px] font-mono text-[var(--color-text-muted)]">{accentColor ? accentColor.slice(1, 4).toUpperCase() : "···"}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Icon picker */}
-        <div className="mb-4">
-          <div className="mb-1.5 text-xs text-[var(--color-text-muted)]">Icon</div>
-          <input value={iconSearch} onChange={(e) => setIconSearch(e.target.value)} placeholder="Search icons…" className="input mb-2 text-xs" />
-          <div className="max-h-36 overflow-y-auto rounded border border-[var(--color-border)] p-2">
-            {filteredIcons !== null ? (
-              <div className="grid grid-cols-10 gap-1">
-                {filteredIcons.map(({ id: iid, icon: IC, label }) => (
-                  <button key={iid} onClick={() => setIcon(iid === icon ? null : iid)} title={label}
-                    className="flex items-center justify-center rounded p-1.5 transition"
-                    style={icon === iid ? { background: activeColor } : undefined}
-                  >
-                    <IC size={14} color={icon === iid ? "white" : undefined} />
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <div className="flex flex-col gap-3">
-                {ZONE_ICON_GROUPS.map((group) => (
-                  <div key={group.label}>
-                    <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">{group.label}</div>
-                    <div className="grid grid-cols-10 gap-1">
-                      {group.icons.map(({ id: iid, icon: IC, label }) => (
-                        <button key={iid} onClick={() => setIcon(iid === icon ? null : iid)} title={label}
-                          className="flex items-center justify-center rounded p-1.5 transition"
-                          style={icon === iid ? { background: activeColor } : undefined}
-                        >
-                          <IC size={14} color={icon === iid ? "white" : undefined} />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+        {/* Identity: the same side-by-side icon + colour pair the zone editor
+            uses, from the same two controls. */}
+        <div className="mb-4 grid grid-cols-2 gap-3">
+          <IconPicker value={icon} onChange={setIcon} activeColor={activeColor} />
+          <ColorPicker value={accentColor} onChange={setAccentColor} />
         </div>
 
         {/* Default zone */}
@@ -804,20 +749,7 @@ function TagForm({
         </label>
 
         <div className="mb-4">
-          <div className="mb-1.5 text-xs text-[var(--color-text-muted)]">Color</div>
-          <div className="flex flex-wrap items-center gap-1.5">
-            {ZONE_COLOR_PRESETS.map((c) => (
-              <button key={c} onClick={() => setColor(color === c ? null : c)}
-                className="h-6 w-6 rounded-full transition hover:scale-110"
-                style={{ background: c, outline: color === c ? `2px solid ${c}` : "2px solid transparent", outlineOffset: "2px" }}
-                title={c}
-              />
-            ))}
-            <div className="relative flex h-6 w-8 cursor-pointer items-center justify-center overflow-hidden rounded border border-[var(--color-border)]">
-              <input type="color" value={color ?? "#4f9cf9"} onChange={(e) => setColor(e.target.value)} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
-              <span className="pointer-events-none z-10 text-[9px] font-mono text-[var(--color-text-muted)]">{color ? color.slice(1, 4).toUpperCase() : "···"}</span>
-            </div>
-          </div>
+          <ColorPicker value={color} onChange={setColor} clearLabel="Use default" />
         </div>
 
         <label className="mb-3 block">

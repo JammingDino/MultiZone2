@@ -17,6 +17,8 @@ export function ExportMenu({ chatId }: { chatId: string }) {
   const tagsByChat = useApp((s) => s.tagsByChat);
   const theme = useApp((s) => s.theme);
   const fontFamily = useApp((s) => s.appSettings.fontFamily);
+  const pdfExportDetail = useApp((s) => s.appSettings.pdfExportDetail);
+  const pdfExportTheme = useApp((s) => s.appSettings.pdfExportTheme);
 
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<null | "md" | "pdf">(null);
@@ -47,8 +49,18 @@ export function ExportMenu({ chatId }: { chatId: string }) {
       if (!data) return;
       if (kind === "md") await exportChatMarkdown(data);
       // Awaited: the PDF renders every diagram and plot before the print dialog
-      // opens, so the button stays busy for as long as that takes.
-      else await exportChatPdf(data, { mode: theme.mode, accent: theme.accent, fontFamily });
+      // opens, so the button stays busy for as long as that takes. Detail and
+      // theme come from Settings → PDF export.
+      else
+        await exportChatPdf(
+          data,
+          {
+            mode: pdfExportTheme === "app" ? theme.mode : pdfExportTheme,
+            accent: theme.accent,
+            fontFamily,
+          },
+          { detail: pdfExportDetail },
+        );
     } catch (e) {
       console.error("chat export failed", e);
     } finally {
@@ -89,9 +101,14 @@ export function ExportMenu({ chatId }: { chatId: string }) {
               Export as PDF
             </button>
             <div className="px-3 pb-1 pt-1.5 text-[10px] leading-snug text-[var(--color-text-muted)]">
-              The PDF includes the full trace — tool calls, plans, diagrams and
-              timings. It opens your print dialog: choose “Save as PDF”, and set
-              Margins to “None” for a single continuous page.
+              {pdfExportDetail === "steps"
+                ? "The PDF includes the full trace — tool calls, plans, diagrams and timings."
+                : pdfExportDetail === "rails"
+                  ? "The PDF condenses each run of steps to one line, keeping plans, diagrams and files."
+                  : "The PDF includes the conversation only — no tool steps."}{" "}
+              Change that in Settings → PDF export. It opens your print dialog:
+              choose “Save as PDF”, and set Margins to “None” for a single
+              continuous page.
             </div>
           </div>
         </>

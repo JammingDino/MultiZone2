@@ -10,6 +10,7 @@ import { ImportSettingsDialog } from "./components/Settings/ImportSettingsDialog
 import { ShortcutsHelpModal } from "./components/common/ShortcutsHelpModal";
 import { useApp } from "./store/app";
 import { useGlobalShortcuts } from "./lib/useGlobalShortcuts";
+import { usePdfReadBridge } from "./lib/usePdfReadBridge";
 import { seedCuratedLibrary, CURATED_LIBRARY_VERSION } from "./lib/zoneLibrary";
 import { seedDefaultZones } from "./lib/defaultZones";
 import { seedDefaultSkills } from "./lib/defaultSkills";
@@ -34,6 +35,9 @@ export default function App() {
 
   // App-wide keyboard shortcuts (new chat, settings, sidebar, navigation, …).
   useGlobalShortcuts();
+  // Answers `read_file`'s PDF page requests — the rasterizer is PDF.js, and it
+  // lives in the window (see lib/usePdfReadBridge.ts).
+  usePdfReadBridge();
   // Guard against concurrent invocations of the one-time seeders.
   const libRef = useRef(false);
   const zonesRef = useRef(false);

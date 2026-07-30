@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { PdfReadPage } from "@/lib/pdf";
 import type {
   Attachment,
   Chat,
@@ -297,6 +298,29 @@ export const respondToolApproval = (
   zoneId: string | null,
   approved: boolean,
 ) => invoke<void>("respond_tool_approval", { chatId, zoneId, approved });
+
+// PDF reads for the `read_file` tool (1.0). Rasterizing is PDF.js's job, so the
+// backend asks the window to do it and waits for `resolve_pdf_read`.
+export interface PdfReadRequest {
+  id: string;
+  path: string;
+  /** Page spec as the model wrote it: "3", "1-4,9", "all". */
+  spec: string;
+  mode: "images" | "text";
+  maxPages: number;
+  /** The PDF itself, base64-encoded. */
+  data: string;
+}
+export const resolvePdfRead = (
+  id: string,
+  result: { pageCount: number; pages: PdfReadPage[]; truncated: boolean } | null,
+  error: string | null,
+) => invoke<void>("resolve_pdf_read", { id, result, error });
+export function onPdfReadRequest(
+  handler: (req: PdfReadRequest) => void,
+): Promise<UnlistenFn> {
+  return listen<PdfReadRequest>("pdf-read-request", (e) => handler(e.payload));
+}
 
 // Settings
 export const getSetting = (key: string) =>

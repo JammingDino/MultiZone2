@@ -168,6 +168,13 @@ impl StreamSink {
         }
     }
 
+    /// The window handle behind this sink. Tools that need the frontend to do
+    /// something the backend can't (rasterizing a PDF page — see `pdf_bridge`)
+    /// emit their own request/response events on it.
+    pub fn app(&self) -> &AppHandle {
+        &self.app
+    }
+
     /// Side-channel app events (tag/title/zone refreshes). GUI-only; no SSE.
     fn emit_event(&self, event: &str, payload: Value) {
         let _ = self.app.emit(event, payload);
@@ -319,6 +326,33 @@ async fn ocr_language(db: &SqlitePool) -> String {
         .and_then(|v| v.get("ocrLanguage").and_then(|v| v.as_str()).map(String::from))
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| "eng".to_string())
+}
+
+/// Layer the settings a tool needs but a zone doesn't store onto a zone's own
+/// `tool_config`, so every zone reaches the tools with the same global state.
+///
+/// Re-applied on a zone switch, because both entries depend on which zone (and
+/// so which model) is now answering.
+async fn inject_global_tool_config(
+    zone_config: &mut Value,
+    global_ws_cfg: &Option<Value>,
+    db: &SqlitePool,
+    model: &str,
+) {
+    // A PDF read returns page images by default, which is only useful to a model
+    // that can see them. For a vision-incapable one the tool extracts text
+    // instead — the same call attachments make, and for the same reason:
+    // extracting a PDF's own text beats OCR'ing a picture of the page.
+    let vision_capable = match vision_override(db, model).await.as_deref() {
+        Some("on") => true,
+        Some("off") => false,
+        _ => crate::ocr::is_vision_capable(model),
+    };
+    let Some(obj) = zone_config.as_object_mut() else { return };
+    obj.insert("vision_capable".to_string(), Value::Bool(vision_capable));
+    if let Some(ws) = global_ws_cfg {
+        obj.insert("web_search".to_string(), ws.clone());
+    }
 }
 
 /// Look up the user's manual vision override for a model, from the
@@ -1184,11 +1218,7 @@ async fn run_participant_turn(
             serde_json::json!({ "provider": provider, "endpoint": endpoint, "api_key": api_key })
         })
     };
-    if let Some(ws) = &global_ws_cfg {
-        if let Some(obj) = zone_config.as_object_mut() {
-            obj.insert("web_search".to_string(), ws.clone());
-        }
-    }
+    inject_global_tool_config(&mut zone_config, &global_ws_cfg, &ctx.db, &zone.model).await;
 
     // The directory that scopes the filesystem tools. Resolved with the tool
     // context above, so the descriptions the model sees and the roots the tools
@@ -1666,11 +1696,13 @@ async fn run_participant_turn(
                         };
                         zone_config = serde_json::from_str(&zone.tool_config)
                             .unwrap_or(Value::Object(Default::default()));
-                        if let Some(ws) = &global_ws_cfg {
-                            if let Some(obj) = zone_config.as_object_mut() {
-                                obj.insert("web_search".to_string(), ws.clone());
-                            }
-                        }
+                        inject_global_tool_config(
+                            &mut zone_config,
+                            &global_ws_cfg,
+                            &ctx.db,
+                            &zone.model,
+                        )
+                        .await;
                         client = LlmClient::new(
                             &ctx.http,
                             &provider.base_url,

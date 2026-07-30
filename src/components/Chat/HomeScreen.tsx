@@ -5,6 +5,7 @@ import * as api from "@/lib/tauri";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import type { InputPart, Zone } from "@/lib/types";
 import { renderPdfToJpegs, extractPdfText } from "@/lib/pdf";
+import { fileTextMarker, pdfImagesMarker, pdfTextMarker } from "@/lib/attachmentParts";
 import {
   type PendingAttachment,
   AttachmentChip,
@@ -310,16 +311,16 @@ export function HomeScreen() {
       if (att.fileType === "text") {
         parts.push({
           type: "hidden_text",
-          text: `File: ${att.fileName}\n\`\`\`\n${att.payload as string}\n\`\`\``,
+          text: fileTextMarker(att.fileName, att.payload as string),
         });
       } else if (att.fileType === "image") {
         parts.push({ type: "image", data_url: att.payload as string });
       } else if (att.fileType === "pdf") {
         if (typeof att.payload === "string") {
-          parts.push({ type: "hidden_text", text: `File: ${att.fileName} (PDF, extracted text)\n\`\`\`\n${att.payload}\n\`\`\`` });
+          parts.push({ type: "hidden_text", text: pdfTextMarker(att.fileName, att.payload) });
         } else {
           const pages = att.payload as string[];
-          parts.push({ type: "hidden_text", text: `[Attached PDF: ${att.fileName} — ${pages.length} pages follow as images]` });
+          parts.push({ type: "hidden_text", text: pdfImagesMarker(att.fileName, pages.length) });
           for (const dataUrl of pages) {
             parts.push({ type: "hidden_image", data_url: dataUrl });
           }

@@ -189,19 +189,40 @@ impl StreamSink {
 
 #[tauri::command]
 pub async fn cancel_stream(state: State<'_, AppState>, chat_id: String) -> AppResult<()> {
+    // Background sub-agents (0.9.10) outlive the tool call that started them, so
+    // stopping the chat that spawned them has to stop them too — otherwise Stop
+    // looks like it did nothing while five detached turns keep streaming tokens
+    // into subchats the user can't cancel from anywhere.
+    let mut targets = vec![chat_id.clone()];
+    let mut frontier = vec![chat_id.clone()];
+    // Bounded so a cyclic parent link can't spin here.
+    for _ in 0..crate::tools::subchat::MAX_CANCEL_DEPTH {
+        let mut next = Vec::new();
+        for parent in frontier.drain(..) {
+            next.extend(crate::tools::subchat::running_children(&parent));
+        }
+        if next.is_empty() {
+            break;
+        }
+        targets.extend(next.iter().cloned());
+        frontier = next;
+    }
+
     {
         let map = state.active_streams.read().await;
-        if let Some(flag) = map.get(&chat_id) {
-            flag.store(true, Ordering::Relaxed);
+        for id in &targets {
+            if let Some(flag) = map.get(id) {
+                flag.store(true, Ordering::Relaxed);
+            }
         }
     }
-    // Deny every pending tool approval for this chat — the primary (keyed by
-    // chat id) and any perspective zones (keyed `chat_id::zone_id`) — so no
-    // participant's loop is left blocked waiting on the user.
+    // Deny every pending tool approval for the cancelled chats — the primary
+    // (keyed by chat id) and any perspective zones (keyed `chat_id::zone_id`) —
+    // so no participant's loop is left blocked waiting on the user.
     let mut approvals = state.tool_approvals.lock().await;
     let keys: Vec<String> = approvals
         .keys()
-        .filter(|k| approval_key_belongs_to_chat(k, &chat_id))
+        .filter(|k| targets.iter().any(|id| approval_key_belongs_to_chat(k, id)))
         .cloned()
         .collect();
     for k in keys {
@@ -2124,13 +2145,24 @@ async fn build_leader_preamble(
          • Drive sub-agents exclusively through the `spawn_subagent` and \
            `send_subchat_message` tools — never answer purely from your own knowledge \
            when a sub-agent could do the work better.\n\
+         • Fan out, don't queue. Spawn every sub-agent you need for the current stage \
+           with `background: true` in one message, keep working while they run, then \
+           read their replies with `collect_subagents`. A blocking spawn stops you dead \
+           until that one sub-agent finishes, so use it only when the next decision \
+           genuinely depends on that single reply.\n\
+         • Reuse your sub-agents. `list_subchats` shows the ones you already have; \
+           continuing one with `send_subchat_message` keeps its context and costs far \
+           less than briefing a fresh one. Spawn a second sub-agent on the same zone \
+           only when you deliberately want two independent attempts.\n\
          • To stress-test an idea, present each sub-agent with a deliberately *opposing* \
            or devil's-advocate framing of the task rather than forwarding the user's \
            message verbatim. Have them argue different sides, then reconcile.\n\
          • Treat each sub-agent's reply (returned to you as a tool result) as input, not \
            as the final answer. Synthesize across them before you respond to the user.\n\
          • You are the only participant who may call `ask_user`; sub-agents cannot pause \
-           to ask the user, so give them everything they need up front.",
+           to ask the user, so give them everything they need up front.\n\
+         • Never end your turn with sub-agents still in flight — collect them first, or \
+           their work is wasted.",
         zone.name
     );
 
@@ -2153,6 +2185,42 @@ async fn build_leader_preamble(
             "\n\nSpawn these by name with `spawn_subagent`. You may also bring in other \
              zones via `list_zones` if a task needs a specialist not listed here.",
         );
+    }
+
+    // Sub-agents this chat already has (0.9.10). Without this a leader on turn
+    // two has no idea it briefed anyone on turn one, so it re-spawns the same
+    // specialists from scratch and pays for the same context twice. Listing them
+    // here is what makes reuse the path of least resistance.
+    let existing: Vec<(String, String, i64)> = sqlx::query_as(
+        "SELECT c.id, COALESCE(z.name, 'unknown'),
+                (SELECT COUNT(*) FROM messages m
+                  WHERE m.chat_id = c.id AND m.zone_id IS NULL
+                    AND m.role IN ('user', 'assistant')) AS turns
+           FROM chats c LEFT JOIN zones z ON z.id = c.zone_id
+          WHERE c.parent_chat_id = ?1 AND c.initiated_by_zone_id IS NOT NULL
+          ORDER BY c.created_at ASC",
+    )
+    .bind(chat_id)
+    .fetch_all(db)
+    .await?;
+
+    if !existing.is_empty() {
+        text.push_str("\n\nSub-agents you have already briefed in this session:");
+        for (id, name, turns) in &existing {
+            text.push_str(&format!("\n• {name} [{id}] — {turns} turn(s)"));
+        }
+        text.push_str(
+            "\n\nContinue one of these with `send_subchat_message` (it still has its own \
+             context) rather than spawning a duplicate. `read_subchat` re-reads what one \
+             already told you.",
+        );
+    }
+
+    if let Some(in_flight) = crate::tools::subchat::in_flight_summary(chat_id) {
+        text.push_str(&format!(
+            "\n\nBackground sub-agents from earlier this session:\n{in_flight}\n\
+             Call `collect_subagents` to pick up anything uncollected before you spawn more.",
+        ));
     }
 
     Ok(Some(text))

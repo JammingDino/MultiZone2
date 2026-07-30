@@ -248,7 +248,7 @@ impl ToolId {
             // still prompting before an agent rewrites an existing skill.
             Self::DateTime | Self::AskUser | Self::ManageTags | Self::RenderGraph
             | Self::Memory | Self::Skills | Self::PresentFile | Self::Plan => 0,
-            // Subchat groups read (safe) + spawn/send (moderate); classed moderate
+            // Subchat groups reads (read/list/collect: safe) + spawn/send (moderate); classed moderate
             // here so it isn't in the safe default set. Per-call gating uses the
             // function name (see `tool_safety_by_name`). FileSearch reads file
             // contents, so it is gated like the other file reads rather than as safe.
@@ -330,7 +330,10 @@ pub fn tool_safety_by_name(name: &str) -> u8 {
         "get_current_datetime" | "ask_user" | "tag_chat"
         | "plot_function" | "draw_diagram"
         | "save_memory" | "read_memory" | "delete_memory"
-        | "load_skill" | "read_subchat"
+        // Reading a subchat, listing the ones a chat already has, and waiting on
+        // background subagents are all reads of work the user already approved
+        // when the spawn went through.
+        | "load_skill" | "read_subchat" | "list_subchats" | "collect_subagents"
         | "present_file" | "update_plan"
         // A created skill is disabled until the user enables it, so writing one
         // changes nothing an agent can act on — safe. Revising an existing skill
@@ -445,6 +448,8 @@ pub async fn dispatch(
         "compact_context" => compact::run(&args, db, chat_id).await,
         "spawn_subagent" => subchat::spawn(&args, ctx, sink, caller_zone_id, chat_id).await,
         "send_subchat_message" => subchat::send(&args, ctx, sink).await,
+        "collect_subagents" => subchat::collect(&args, db, chat_id).await,
+        "list_subchats" => subchat::list(db, chat_id).await,
         "read_subchat" => subchat::read(&args, db).await,
         other => Ok(serde_json::json!({
             "error": format!("unknown tool: {other}")
@@ -474,10 +479,12 @@ mod tests {
     fn toolset_is_concise() {
         // The full built-in surface. No real zone enables all of it at once, so
         // this is the worst case rather than a typical request. Measured at
-        // 39,165 bytes before the 0.9.10 pass and 30,348 after; the ceiling
-        // leaves a little headroom for a genuinely new tool without leaving
-        // room to quietly re-inflate the descriptions.
-        const BUDGET_BYTES: usize = 31_000;
+        // 39,165 bytes before the 0.9.10 pass and 30,348 after; 32,195 once the
+        // subchat group grew `collect_subagents` and `list_subchats` (1.0), which
+        // are two genuinely new capabilities rather than more prose about the
+        // existing ones. The ceiling leaves a little headroom for one more tool
+        // without leaving room to quietly re-inflate the descriptions.
+        const BUDGET_BYTES: usize = 33_000;
 
         let ctx = ToolContext {
             project_dir: Some(r"C:\Users\me\project".to_string()),

@@ -400,6 +400,8 @@ const LABELS: Record<string, { label: string; icon: ToolIcon }> = {
   spawn_subagent: { label: "Delegated to a zone", icon: "users" },
   send_subchat_message: { label: "Messaged subagent", icon: "users" },
   read_subchat: { label: "Read subagent transcript", icon: "users" },
+  collect_subagents: { label: "Collected subagents", icon: "users" },
+  list_subchats: { label: "Listed subagents", icon: "users" },
   list_zones: { label: "Listed zones", icon: "users" },
   change_zone: { label: "Switched zone", icon: "users" },
   ask_user: { label: "Asked a question", icon: "users" },
@@ -532,6 +534,11 @@ export function describeTool(item: TraceToolItem): ToolDescription {
     case "spawn_subagent":
       desc.subject = str(args?.zone_name) ?? str(args?.zone_id) ?? str(args?.task);
       break;
+    case "collect_subagents": {
+      const ids = Array.isArray(args?.subchat_ids) ? (args!.subchat_ids as unknown[]) : [];
+      desc.subject = ids.length ? plural(ids.length, "sub-agent") : "all in flight";
+      break;
+    }
     case "save_memory":
     case "read_memory":
       desc.subject = str(args?.content) ?? str(args?.scope);

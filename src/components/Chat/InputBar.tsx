@@ -11,6 +11,11 @@ import { fileTextMarker, pdfImagesMarker, pdfTextMarker } from "@/lib/attachment
 import { resolveVisionCapable } from "@/lib/vision";
 import { resolveBaseModel, resolveBaseProvider } from "@/lib/baseZone";
 
+/** Shared empty result for store selectors. A selector that builds its own `[]`
+ *  hands `useSyncExternalStore` a new snapshot on every read, which re-renders
+ *  forever — one stable reference is what makes "nothing queued" a no-op. */
+const EMPTY: never[] = [];
+
 /** Sentinel zone id meaning "Quick chat (no zone)" for a one-shot override. */
 const SIMPLE_ZONE_ID = "__simple__";
 /** Sentinel zone id meaning "Smart chat (router picks zone)" for a one-shot override. */
@@ -132,7 +137,7 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
   // "next" because that is the safe reading of a message typed mid-turn — a
   // follow-up you thought of, not a correction you're sure about.
   const [queueMode, setQueueMode] = useState<PendingMode>("next");
-  const queued = useApp((s) => s.pendingByChat[chatId] ?? []);
+  const queued = useApp((s) => s.pendingByChat[chatId] ?? EMPTY);
   const queuePendingMessage = useApp((s) => s.queuePendingMessage);
   const cancelPending = useApp((s) => s.cancelPendingMessage);
 

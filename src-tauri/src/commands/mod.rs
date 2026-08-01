@@ -17,6 +17,7 @@ pub mod mirror;
 pub mod pending;
 pub mod voice;
 pub mod tool_usage;
+pub mod usage;
 
 pub fn now_ts() -> i64 {
     chrono::Utc::now().timestamp_millis()

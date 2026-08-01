@@ -776,6 +776,14 @@ function ChatTab() {
           onChange={(subchatDepthLimit) => setAppSettings({ subchatDepthLimit })}
           options={[[1, "1"], [2, "2"], [3, "3"], [4, "4"], [5, "5"]]}
         />
+        <div className="mt-3">
+          <ToggleRow
+            label="Show the team's total context"
+            description="The context meter also reports every subagent's context, not just this chat's. Only appears when a chat has subagents."
+            checked={appSettings.teamContextMeter !== false}
+            onChange={(v) => setAppSettings({ teamContextMeter: v })}
+          />
+        </div>
       </section>
 
     </div>

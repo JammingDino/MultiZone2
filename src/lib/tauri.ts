@@ -21,6 +21,7 @@ import type {
   PendingMode,
   Project,
   Provider,
+  SessionUsage,
   Skill,
   SkillPack,
   StreamEnvelope,
@@ -165,6 +166,14 @@ export const getToolUsage = (zoneId?: string) =>
   invoke<ToolUsage[]>("get_tool_usage", { zoneId: zoneId ?? null });
 export const resetToolUsage = (zoneId?: string) =>
   invoke<void>("reset_tool_usage", { zoneId: zoneId ?? null });
+
+/**
+ * Estimated context carried by every chat in this chat's sub-agent session —
+ * the session root plus every descendant subchat. Answers the same from
+ * anywhere in the family, so the total doesn't depend on which pane is open.
+ */
+export const sessionContextUsage = (chatId: string) =>
+  invoke<SessionUsage>("session_context_usage", { chatId });
 
 // Skills (global, on-demand catalog)
 export const listSkills = () => invoke<Skill[]>("list_skills");

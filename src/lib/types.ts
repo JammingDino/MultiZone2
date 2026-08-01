@@ -411,6 +411,30 @@ export type StreamEvent =
   | { type: "done" }
   | { type: "error"; message: string };
 
+/** One chat's share of a sub-agent session's context (see commands::usage). */
+export interface AgentUsage {
+  chatId: string;
+  title: string;
+  zoneName: string | null;
+  isCurrent: boolean;
+  /** Subchat levels below the session root; 0 for the root itself. */
+  depth: number;
+  messages: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+}
+
+/** Context carried by every chat in one sub-agent family. */
+export interface SessionUsage {
+  rootChatId: string;
+  /** Root first, then descendants in creation order. */
+  agents: AgentUsage[];
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+}
+
 /** How a message queued mid-turn reaches the model (see commands::pending). */
 export type PendingMode = "steer" | "next";
 
@@ -610,6 +634,13 @@ export interface AppSettings {
    */
   subchatDepthLimit: number;
   /**
+   * When true (0.9.12), the context meter also reports the whole sub-agent
+   * session's context — the leader plus every subchat under it — beside the
+   * open chat's own. Only ever shown when the chat actually has sub-agents, so
+   * turning it off only matters to people running teams.
+   */
+  teamContextMeter: boolean;
+  /**
    * When true (0.7.2), every chat is mirrored to a `.md` file under
    * `markdownMirrorDir` and kept in sync on each message save, with zone
    * configs written as JSON in a `zones/` subdirectory alongside.
@@ -732,6 +763,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   autoReindex: true,
   knowledgeDefaultEnabled: false,
   subchatDepthLimit: 3,
+  teamContextMeter: true,
   markdownMirrorEnabled: false,
   markdownMirrorDir: "",
   visionOverrides: {},

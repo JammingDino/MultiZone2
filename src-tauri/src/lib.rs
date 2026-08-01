@@ -188,6 +188,7 @@ pub fn run() {
             commands::messages::list_tool_functions,
             commands::tool_usage::get_tool_usage,
             commands::tool_usage::reset_tool_usage,
+            commands::usage::session_context_usage,
             commands::messages::send_message,
             commands::messages::regenerate_response,
             commands::messages::regenerate_participant,

@@ -35,9 +35,12 @@ interface InputBarProps {
   chatId: string;
   disabled?: boolean;
   ref?: Ref<InputBarHandle>;
+  /** Rendered above the composer, inside its column — for context notices that
+   *  belong to the input rather than to the thread (e.g. the subchat banner). */
+  notice?: React.ReactNode;
 }
 
-export function InputBar({ chatId, disabled, ref }: InputBarProps) {
+export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
   const [text, setText] = useState("");
   const [pending, setPending] = useState<PendingAttachment[]>([]);
   const [sending, setSending] = useState(false);
@@ -351,6 +354,7 @@ export function InputBar({ chatId, disabled, ref }: InputBarProps) {
   return (
     <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-2 sm:px-4 sm:py-3">
       <div className="mx-auto w-full max-w-3xl">
+        {notice}
         {pending.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2">
             {pending.map((att) => (

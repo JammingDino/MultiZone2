@@ -145,6 +145,10 @@ export function ChatPanel() {
   const dragDepth = useRef(0);
   const [isDragOver, setIsDragOver] = useState(false);
 
+  // Rendered inside whichever composer-row is showing (input, approval, or
+  // ask-user) rather than as a strip of its own above them — see SubchatBanner.
+  const subchatNotice = isSubchat ? <SubchatBanner zone={subchatZone} /> : null;
+
   function hasFiles(e: React.DragEvent) {
     return Array.from(e.dataTransfer?.types ?? []).includes("Files");
   }
@@ -327,10 +331,10 @@ export function ChatPanel() {
           />
 
           <MessageThread chatId={activeChat.id} />
-          {isSubchat && <SubchatBanner zone={subchatZone} />}
           {pendingApprovals.length > 0 ? (
             <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3">
               <div className="mx-auto flex max-w-3xl flex-col gap-2">
+                {subchatNotice}
                 {pendingApprovals.map((pa) => (
                   <ToolApprovalBanner
                     key={pa.zoneId ?? "__primary__"}
@@ -350,6 +354,7 @@ export function ChatPanel() {
           ) : pendingAskUser ? (
             <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3">
               <div className="mx-auto max-w-3xl">
+                {subchatNotice}
                 <AskUserCard
                   chatId={pendingAskUser.chatId}
                   questions={
@@ -370,7 +375,12 @@ export function ChatPanel() {
               </div>
             </div>
           ) : (
-            <InputBar chatId={activeChat.id} disabled={inputDisabled} ref={inputRef} />
+            <InputBar
+              chatId={activeChat.id}
+              disabled={inputDisabled}
+              ref={inputRef}
+              notice={subchatNotice}
+            />
           )}
         </>
       ) : (
@@ -399,32 +409,38 @@ import type { ChatTagEntry, ChatZone, Project, Tag, Zone } from "@/lib/types";
 import { claimSettingsDrop } from "@/lib/importSettings";
 
 /**
- * Strip above the composer in a subchat, naming the zone that started it.
+ * Notice above the composer in a subchat, naming the zone that started it.
  *
  * You can type here, but you are not the only one who can: the owning zone may
  * send to this same conversation in the middle of its own turn. Saying so is
  * the point of the banner — a reply that arrives out of nowhere is confusing in
  * a way that a reply you were told to expect is not.
+ *
+ * It renders as a pill inside the composer's own column, the same shape as the
+ * override / OCR-fallback notices. It used to be a full-width strip of its own,
+ * which put a second horizontal rule a few pixels above the composer's and left
+ * the text hanging off the left edge of the input box it belonged to.
  */
 function SubchatBanner({ zone }: { zone: Zone | null }) {
   const Icon = zone ? getZoneIcon(zone.icon) : Eye;
   const color = zone?.accentColor ?? "var(--color-accent)";
   return (
-    <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 pt-2">
-      <div className="mx-auto flex max-w-3xl items-center gap-2 text-[11px] text-[var(--color-text-muted)]">
-        <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded" style={{ background: color }}>
-          <Icon size={9} color="white" />
+    <div className="mb-2 flex w-fit max-w-full items-center gap-2 rounded-full border border-[var(--color-border)] bg-[var(--color-panel)] py-1 pl-1 pr-3 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+      <span
+        className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full"
+        style={{ background: color }}
+      >
+        <Icon size={9} color="white" />
+      </span>
+      {zone ? (
+        <span className="truncate">
+          Sub-agent conversation ·{" "}
+          <span className="font-medium text-[var(--color-text)]">{zone.name}</span> can also send
+          here — you can reply directly.
         </span>
-        {zone ? (
-          <span>
-            Sub-agent conversation started by{" "}
-            <span className="font-medium text-[var(--color-text)]">{zone.name}</span>, which can
-            also send to it. You can reply here directly.
-          </span>
-        ) : (
-          <span>Sub-agent conversation. You can reply here directly.</span>
-        )}
-      </div>
+      ) : (
+        <span className="truncate">Sub-agent conversation — you can reply here directly.</span>
+      )}
     </div>
   );
 }

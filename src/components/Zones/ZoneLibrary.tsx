@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   X, Download, Check, Loader2, Sparkles, Bookmark, ChevronLeft, ChevronRight,
   ChevronDown, Plus, Upload, Settings as SettingsIcon, MessageSquare, Trash2, Star, Pencil, Crown,
+  Users,
 } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
@@ -9,7 +10,7 @@ import type { LibraryEntry, Provider, Zone } from "@/lib/types";
 import { ALL_TOOLS } from "@/lib/types";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import { resolveBaseModel, resolveBaseProvider } from "@/lib/baseZone";
-import { installEntry, saveZoneToLibrary, importEntryFromJson, exportZoneJson } from "@/lib/zoneLibrary";
+import { installEntry, installTeam, saveZoneToLibrary, importEntryFromJson, exportZoneJson } from "@/lib/zoneLibrary";
 import { ZoneForm } from "./ZoneForm";
 import { Modal, ModalTitle } from "@/components/common/Modal";
 
@@ -25,6 +26,25 @@ function parseTools(json: string): string[] {
   } catch {
     return [];
   }
+}
+
+/**
+ * True when an installed zone no longer matches the library preset it came from
+ * — which, for a curated entry, usually means the shipped prompt or toolset has
+ * moved on since it was installed. Installing writes a copy, so a refreshed
+ * preset would otherwise be invisible to everyone who already has the zone.
+ *
+ * Provider, model and name are deliberately not compared: those are the user's
+ * bindings, and an update preserves them.
+ */
+function driftsFromLibrary(entry: LibraryEntry, zone: Zone): boolean {
+  return (
+    (zone.systemPrompt ?? "") !== (entry.systemPrompt ?? "") ||
+    parseTools(zone.toolsEnabled).join(",") !== parseTools(entry.toolsEnabled).join(",") ||
+    zone.temperature !== entry.temperature ||
+    zone.thinkingEnabled !== entry.thinkingEnabled ||
+    zone.isLeader !== entry.isLeader
+  );
 }
 
 /**
@@ -93,9 +113,30 @@ export function ZoneLibrary() {
   const liveZoneFor = (e: LibraryEntry): Zone | undefined =>
     zones.find((z) => z.name.toLowerCase() === e.name.toLowerCase());
 
+  // Teams are shipped sets that only work together — a Response Leader plus the
+  // specialists it delegates to. They get their own section and install in one
+  // action, and their members are kept out of the flat curated grid below:
+  // installing five of eight and then wondering why the leader keeps saying a
+  // zone is missing is exactly what that grouping prevents.
+  const teams = useMemo(() => {
+    const byName = new Map<string, LibraryEntry[]>();
+    for (const e of entries) {
+      if (!e.team) continue;
+      const list = byName.get(e.team) ?? [];
+      list.push(e);
+      byName.set(e.team, list);
+    }
+    return [...byName.entries()].map(([name, members]) => ({
+      name,
+      members: members.sort(
+        (a, b) => Number(b.isLeader) - Number(a.isLeader) || a.name.localeCompare(b.name),
+      ),
+    }));
+  }, [entries]);
+
   // "Curated" = shipped presets you haven't installed yet (available to add).
   // "Saved by you" = your zones — anything installed, plus your imports.
-  const available = entries.filter((e) => e.curated && !isInstalled(e));
+  const available = entries.filter((e) => e.curated && !e.team && !isInstalled(e));
   const yours = entries.filter((e) => isInstalled(e) || !e.curated);
   const totalPages = Math.max(1, Math.ceil(available.length / pageSize));
   const pageSafe = Math.min(page, totalPages - 1);
@@ -169,9 +210,78 @@ export function ZoneLibrary() {
     }
   }
 
+  async function onInstallTeam(team: { name: string; members: LibraryEntry[] }) {
+    if (!quickProvider || busy) return;
+    const missing = team.members.filter((e) => !isInstalled(e));
+    if (missing.length === 0) return;
+    setBusy(true);
+    try {
+      const res = await installTeam(
+        missing, quickProvider.id, quickModel, zones.map((z) => z.name),
+      );
+      await refreshZones();
+      const parts = [`Installed ${res.installed.length} zone${res.installed.length === 1 ? "" : "s"} — “${team.name}”`];
+      if (res.fallbacks.length > 0) {
+        parts.push(`${res.fallbacks.length} fell back to ${quickModel}`);
+      }
+      if (res.failures.length > 0) {
+        parts.push(`${res.failures.length} failed: ${res.failures.map((f) => f.name).join(", ")}`);
+        console.error("team install failures", res.failures);
+      }
+      flash(parts.join(" · "));
+    } catch (err) {
+      console.error(err);
+      flash(`Couldn't install “${team.name}”: ${(err as Error).message ?? err}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function onConfigure(e: LibraryEntry) {
     const z = liveZoneFor(e);
     if (z) openEditor(z.id);
+  }
+
+  /** Does this entry have a newer shipped definition than the installed zone? */
+  function hasUpdate(e: LibraryEntry): boolean {
+    if (!e.curated) return false;
+    const z = liveZoneFor(e);
+    return !!z && driftsFromLibrary(e, z);
+  }
+
+  /**
+   * Re-apply a library entry's definition to the zone installed from it, keeping
+   * the zone's own id, name, provider and model — so an update can't silently
+   * re-point the zone at a model the user didn't choose, and every chat already
+   * bound to the zone keeps working.
+   */
+  async function onUpdateFromLibrary(e: LibraryEntry) {
+    const z = liveZoneFor(e);
+    if (!z || busy) return;
+    setBusy(true);
+    try {
+      await api.upsertZone({
+        ...z,
+        systemPrompt: e.systemPrompt,
+        temperature: e.temperature,
+        maxTokens: e.maxTokens,
+        topP: e.topP,
+        toolsEnabled: e.toolsEnabled,
+        toolConfig: e.toolConfig,
+        thinkingEnabled: e.thinkingEnabled,
+        includeThinkingInContext: e.includeThinkingInContext,
+        isLeader: e.isLeader,
+        icon: e.icon,
+        accentColor: e.accentColor,
+      });
+      await refreshZones();
+      flash(`Updated “${z.name}” from the library`);
+    } catch (err) {
+      console.error(err);
+      flash(`Couldn't update “${e.name}”: ${(err as Error).message ?? err}`);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function onUninstall(e: LibraryEntry) {
@@ -355,21 +465,26 @@ export function ZoneLibrary() {
               <DetailView
                 entry={selected}
                 installed={isInstalled(selected)}
+                updateAvailable={hasUpdate(selected)}
                 canInstall={canInstall}
                 busy={busy}
                 onBack={() => setView("library")}
                 onInstall={() => onInstall(selected)}
                 onConfigure={() => onConfigure(selected)}
                 onUninstall={() => onUninstall(selected)}
+                onUpdate={() => onUpdateFromLibrary(selected)}
                 onDelete={() => onDeleteEntry(selected)}
               />
             ) : (
               <LibraryView
                 pageAvailable={pageAvailable}
                 yours={yours}
+                teams={teams}
                 canInstall={canInstall}
                 busy={busy}
                 isInstalled={isInstalled}
+                hasUpdate={hasUpdate}
+                onInstallTeam={onInstallTeam}
                 onOpen={(e) => { setSelectedId(e.id); setView("detail"); }}
                 onInstall={onInstall}
                 onConfigure={onConfigure}
@@ -466,12 +581,20 @@ function MenuItem({ icon, label, onClick, danger }: { icon: React.ReactNode; lab
 
 // ─── Library (grid) view ────────────────────────────────────────────────────
 
+export interface LibraryTeam {
+  name: string;
+  members: LibraryEntry[];
+}
+
 function LibraryView(props: {
   pageAvailable: LibraryEntry[];
   yours: LibraryEntry[];
+  teams: LibraryTeam[];
   canInstall: boolean;
   busy: boolean;
   isInstalled: (e: LibraryEntry) => boolean;
+  hasUpdate: (e: LibraryEntry) => boolean;
+  onInstallTeam: (t: LibraryTeam) => void;
   onOpen: (e: LibraryEntry) => void;
   onInstall: (e: LibraryEntry) => void;
   onConfigure: (e: LibraryEntry) => void;
@@ -594,6 +717,26 @@ function LibraryView(props: {
 
       {/* scroll content */}
       <div onDragOver={p.onDragOver} onDragLeave={p.onDragLeave} onDrop={p.onDrop} className="relative flex-1 overflow-y-auto px-6 py-5">
+        {p.teams.length > 0 && (
+          <>
+            <SectionLabel>Teams</SectionLabel>
+            <div className="mb-6 flex flex-col gap-3">
+              {p.teams.map((t) => (
+                <TeamCard
+                  key={t.name}
+                  team={t}
+                  canInstall={p.canInstall}
+                  busy={p.busy}
+                  installedCount={t.members.filter(p.isInstalled).length}
+                  onInstallTeam={() => p.onInstallTeam(t)}
+                  onOpenMember={p.onOpen}
+                  isInstalled={p.isInstalled}
+                />
+              ))}
+            </div>
+          </>
+        )}
+
         <SectionLabel>Curated</SectionLabel>
         {p.pageAvailable.length === 0 ? (
           <div className="rounded-lg border border-dashed border-[var(--color-border)] bg-[var(--color-bg)]/40 px-4 py-4 text-[12.5px] text-[var(--color-text-muted)]">
@@ -602,7 +745,7 @@ function LibraryView(props: {
         ) : (
           <div className="grid grid-cols-3 gap-3.5">
             {p.pageAvailable.map((e) => (
-              <ZoneCard key={e.id} entry={e} installed={p.isInstalled(e)} canInstall={p.canInstall} busy={p.busy}
+              <ZoneCard key={e.id} entry={e} installed={p.isInstalled(e)} updateAvailable={p.hasUpdate(e)} canInstall={p.canInstall} busy={p.busy}
                 onOpen={() => p.onOpen(e)} onInstall={() => p.onInstall(e)} onConfigure={() => p.onConfigure(e)} />
             ))}
           </div>
@@ -616,7 +759,7 @@ function LibraryView(props: {
         ) : (
           <div className="grid grid-cols-3 gap-3.5">
             {p.yours.map((e) => (
-              <ZoneCard key={e.id} entry={e} installed={p.isInstalled(e)} canInstall={p.canInstall} busy={p.busy} compact
+              <ZoneCard key={e.id} entry={e} installed={p.isInstalled(e)} updateAvailable={p.hasUpdate(e)} canInstall={p.canInstall} busy={p.busy} compact
                 onOpen={() => p.onOpen(e)} onInstall={() => p.onInstall(e)} onConfigure={() => p.onConfigure(e)}
                 onContextMenu={(ev) => p.onCardContextMenu(e, ev)} />
             ))}
@@ -670,11 +813,97 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   return <div className="mb-3 text-[10.5px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">{children}</div>;
 }
 
+/**
+ * A shipped multi-zone team: the leader's blurb describes the workflow, the
+ * chips are its members (leader first), and one button installs whatever is
+ * missing. The temperature is on each chip because a team of one model at
+ * several temperatures is the whole design of a panel like this — reading
+ * 0.1 next to 0.9 is how you see that at a glance.
+ */
+function TeamCard({
+  team, canInstall, busy, installedCount, onInstallTeam, onOpenMember, isInstalled,
+}: {
+  team: LibraryTeam;
+  canInstall: boolean;
+  busy: boolean;
+  installedCount: number;
+  onInstallTeam: () => void;
+  onOpenMember: (e: LibraryEntry) => void;
+  isInstalled: (e: LibraryEntry) => boolean;
+}) {
+  const leader = team.members.find((m) => m.isLeader) ?? team.members[0];
+  const accent = leader?.accentColor ?? "var(--color-accent)";
+  const total = team.members.length;
+  const complete = installedCount === total;
+
+  return (
+    <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)]/40 p-4">
+      <div className="flex items-start gap-3">
+        <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl shadow-sm" style={{ background: accent }}>
+          <Users size={20} color="white" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="truncate text-[14px] font-semibold tracking-tight" style={{ color: accent }}>{team.name}</span>
+            <span className="flex-shrink-0 rounded-full border border-[var(--color-border)] px-2 py-0.5 text-[10.5px] text-[var(--color-text-muted)]">
+              {total} zones · {installedCount} installed
+            </span>
+          </div>
+          <div className="mt-1 text-[12px] leading-snug text-[var(--color-text-muted)]">
+            {leader?.description || "A leader zone plus the specialists it delegates to."}
+          </div>
+        </div>
+        {complete ? (
+          <span className="flex h-9 flex-shrink-0 items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 text-[12.5px] font-semibold text-green-500">
+            <Check size={14} /> Team installed
+          </span>
+        ) : (
+          <button
+            onClick={onInstallTeam}
+            disabled={!canInstall || busy}
+            className="flex h-9 flex-shrink-0 items-center gap-1.5 rounded-lg px-3.5 text-[12.5px] font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+            style={{ background: accent }}
+          >
+            {busy ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+            Install team ({total - installedCount})
+          </button>
+        )}
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        {team.members.map((m) => {
+          const Icon = getZoneIcon(m.icon);
+          const on = isInstalled(m);
+          return (
+            <button
+              key={m.id}
+              onClick={() => onOpenMember(m)}
+              title={m.description ?? m.name}
+              className={`flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11px] transition hover:border-[var(--color-accent)] ${
+                on ? "border-green-600/40 bg-green-600/5" : "border-[var(--color-border)]"
+              }`}
+            >
+              <span className="flex h-4 w-4 items-center justify-center rounded" style={{ background: m.accentColor ?? "var(--color-accent)" }}>
+                <Icon size={10} color="white" />
+              </span>
+              {m.isLeader && <Crown size={10} className="text-amber-500" />}
+              <span className="max-w-[190px] truncate">{m.name}</span>
+              <span className="font-mono text-[10px] text-[var(--color-text-muted)]">{m.temperature.toFixed(1)}</span>
+              {on && <Check size={10} className="text-green-500" />}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function ZoneCard({
-  entry, installed, canInstall, busy, compact, onOpen, onInstall, onConfigure, onContextMenu,
+  entry, installed, updateAvailable, canInstall, busy, compact, onOpen, onInstall, onConfigure, onContextMenu,
 }: {
   entry: LibraryEntry;
   installed: boolean;
+  updateAvailable?: boolean;
   canInstall: boolean;
   busy: boolean;
   compact?: boolean;
@@ -696,9 +925,18 @@ function ZoneCard({
       className={`relative flex cursor-pointer flex-col rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)]/40 p-4 transition hover:-translate-y-0.5 hover:border-[var(--color-accent)]/50 hover:shadow-lg ${compact ? "min-h-[188px]" : "min-h-[230px]"}`}
     >
       {installed && (
-        <span className="absolute right-3 top-3 flex items-center gap-1 rounded-full bg-green-500/15 px-2 py-0.5 text-[10.5px] font-semibold text-green-500">
-          <Check size={11} /> Installed
-        </span>
+        updateAvailable ? (
+          <span
+            title="The shipped version of this preset has changed — open it to update your zone"
+            className="absolute right-3 top-3 flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10.5px] font-semibold text-amber-500"
+          >
+            <Download size={11} /> Update
+          </span>
+        ) : (
+          <span className="absolute right-3 top-3 flex items-center gap-1 rounded-full bg-green-500/15 px-2 py-0.5 text-[10.5px] font-semibold text-green-500">
+            <Check size={11} /> Installed
+          </span>
+        )
       )}
       {!installed && !entry.curated && (
         <span className="absolute right-3 top-3 rounded-full bg-[var(--color-accent)]/15 px-2 py-0.5 text-[10px] font-semibold text-[var(--color-accent)]">Imported</span>
@@ -782,16 +1020,19 @@ function EditorView({
 // ─── Detail view ────────────────────────────────────────────────────────────
 
 function DetailView({
-  entry, installed, canInstall, busy, onBack, onInstall, onConfigure, onUninstall, onDelete,
+  entry, installed, updateAvailable, canInstall, busy,
+  onBack, onInstall, onConfigure, onUninstall, onUpdate, onDelete,
 }: {
   entry: LibraryEntry;
   installed: boolean;
+  updateAvailable: boolean;
   canInstall: boolean;
   busy: boolean;
   onBack: () => void;
   onInstall: () => void;
   onConfigure: () => void;
   onUninstall: () => void;
+  onUpdate: () => void;
   onDelete: () => void;
 }) {
   const Icon = getZoneIcon(entry.icon);
@@ -809,6 +1050,16 @@ function DetailView({
           {!entry.curated && (
             <button onClick={onDelete} disabled={busy} className="flex h-8 items-center gap-1.5 rounded-lg border border-[var(--color-border)] px-3 text-[12.5px] font-medium text-[var(--color-text-muted)] transition hover:border-[var(--color-danger)] hover:text-[var(--color-danger)] disabled:opacity-50">
               <Trash2 size={13} /> Remove
+            </button>
+          )}
+          {installed && updateAvailable && (
+            <button
+              onClick={onUpdate}
+              disabled={busy}
+              title="Re-apply the shipped prompt, tools and settings to your installed zone (keeps its name, provider and model)"
+              className="flex h-8 items-center gap-1.5 rounded-lg border border-amber-500/50 px-3 text-[12.5px] font-semibold text-amber-500 transition hover:bg-amber-500/10 disabled:opacity-50"
+            >
+              {busy ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} Update from library
             </button>
           )}
           {installed ? (
@@ -876,9 +1127,11 @@ function DetailView({
 
         <div className="mt-6 flex flex-wrap gap-x-8 gap-y-4 border-t border-[var(--color-border)] pt-4">
           <MetaCell label="Model" value={entry.model || "Default model"} mono />
+          <MetaCell label="Temperature" value={entry.temperature.toFixed(2)} mono />
           <MetaCell label="Source" value={entry.source || "—"} />
           <MetaCell label="Author" value={entry.author || "—"} />
           <MetaCell label="Version" value={entry.version || "—"} />
+          {entry.team && <MetaCell label="Team" value={entry.team} />}
         </div>
       </div>
     </>

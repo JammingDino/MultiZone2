@@ -336,7 +336,11 @@ fn allowed_roots(zone_config: &Value, project_dir: Option<&str>) -> Vec<PathBuf>
     roots
 }
 
-fn resolve_path(path: &str, project_dir: Option<&str>) -> PathBuf {
+/// `pub(crate)` so the multi-agent claim keys (`tools::teamwork`) are built with
+/// the same rule the file tools resolve by. Two path rules would mean a claim on
+/// `src/a.ts` and a write to `src/a.ts` disagreeing about whether they are the
+/// same file, which is the one thing an advisory lock must never do.
+pub(crate) fn resolve_path(path: &str, project_dir: Option<&str>) -> PathBuf {
     let p = PathBuf::from(path.trim());
     if p.is_absolute() {
         return p;

@@ -11,7 +11,7 @@ import { DEFAULT_ZONES } from "@/lib/defaultZones";
 
 /** Bump when the shipped curated set changes so existing installs re-seed the
  * library (idempotent — stable ids overwrite, user snapshots are untouched). */
-export const CURATED_LIBRARY_VERSION = 8;
+export const CURATED_LIBRARY_VERSION = 10;
 
 /** Stable, content-independent id for a curated entry so re-seeding overwrites
  * the same file instead of creating duplicates. */
@@ -34,7 +34,7 @@ export function curatedEntries(): LibraryEntry[] {
     topP: null,
     toolsEnabled: JSON.stringify(z.tools),
     toolConfig: "{}",
-    thinkingEnabled: false,
+    thinkingEnabled: z.thinking ?? false,
     includeThinkingInContext: false,
     isLeader: z.isLeader ?? false,
     description: z.description,
@@ -43,6 +43,7 @@ export function curatedEntries(): LibraryEntry[] {
     version: z.version ?? "v1.0.0",
     examples: z.examples ?? [],
     curatedTeam: z.preinstall !== false,
+    team: z.team ?? null,
     createdAt: 0,
   }));
 }
@@ -168,6 +169,46 @@ export async function installEntry(
   return { zone, modelFallback };
 }
 
+/**
+ * Install every not-yet-installed member of a team in one action, leader first.
+ *
+ * Sequential rather than `Promise.all`: each install has to see the names the
+ * previous one took, or two members that collide with an existing zone both get
+ * suffixed "(2)". Individual failures are collected rather than thrown so one
+ * bad member doesn't leave the team half-installed with no report of what
+ * happened.
+ */
+export interface TeamInstallResult {
+  installed: Zone[];
+  /** Members whose saved model the provider doesn't offer, and what was used. */
+  fallbacks: { name: string; wanted: string; used: string }[];
+  failures: { name: string; error: string }[];
+}
+
+export async function installTeam(
+  entries: LibraryEntry[],
+  providerId: string,
+  model: string,
+  existingNames: string[],
+): Promise<TeamInstallResult> {
+  const ordered = [...entries].sort(
+    (a, b) => Number(b.isLeader) - Number(a.isLeader) || a.name.localeCompare(b.name),
+  );
+  const names = [...existingNames];
+  const out: TeamInstallResult = { installed: [], fallbacks: [], failures: [] };
+  for (const entry of ordered) {
+    try {
+      const { zone, modelFallback } = await installEntry(entry, providerId, model, names);
+      names.push(zone.name);
+      out.installed.push(zone);
+      if (modelFallback) out.fallbacks.push({ name: entry.name, ...modelFallback });
+    } catch (e) {
+      out.failures.push({ name: entry.name, error: (e as Error).message ?? String(e) });
+    }
+  }
+  return out;
+}
+
 /** Snapshot a live zone into the library as a user (non-curated) entry. */
 export async function saveZoneToLibrary(zone: Zone): Promise<LibraryEntry> {
   return api.upsertLibraryEntry({
@@ -192,6 +233,7 @@ export async function saveZoneToLibrary(zone: Zone): Promise<LibraryEntry> {
     version: "v1.0.0",
     examples: [],
     curatedTeam: false,
+    team: null,
     createdAt: 0,
   });
 }
@@ -235,6 +277,7 @@ export async function importEntryFromJson(text: string, fallbackName: string): P
     version: raw.version ?? "v1.0.0",
     examples: Array.isArray(raw.examples) ? raw.examples.map(String) : [],
     curatedTeam: false,
+    team: typeof raw.team === "string" && raw.team.trim() ? raw.team.trim() : null,
     createdAt: 0,
   });
 }

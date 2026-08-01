@@ -85,6 +85,24 @@ All three run entirely from your machine, through a browser-emulating HTTP clien
 
 Enable them per-zone in the zone editor; they are on by default in the curated research zones.
 
+### Terminals that stay open
+
+`run_command` runs a command and waits for it to exit, which cannot express *starting* something — a dev server, a REPL, a log to follow, a program that asks a question part-way through. The **terminal** tool group (0.9.11) keeps a process alive between calls instead:
+
+| Tool | What it does |
+|------|--------------|
+| `terminal_start` | Start a process (or a bare shell) and get back a short id (`t1`). Returns immediately; the process keeps running. |
+| `terminal_write` | Type into it — a command, an answer to a prompt, a password. Returns only the output that followed. |
+| `terminal_read` | Read what it has printed. Pass back the `cursor` from a previous call to get only what is new. |
+| `terminal_list` | The conversation's terminals: label, whether each is alive, how much output is waiting. |
+| `terminal_stop` | Stop one (or all) and return the final output. |
+
+Driving an interactive program is a timing problem, so every call that can wait takes `delay_ms` (wait *before* typing — start a server, send the sudo password five seconds later), `wait_for` (a regex to wait for in the new output, with `timeout_ms`, reporting whether it matched), or `wait_ms` (collect for a fixed span).
+
+Reader tasks drain stdout and stderr continuously, so output printed *between* tool calls is still there when you look; ANSI escapes are stripped and a `\r`-redrawn progress line collapses to where it landed. Terminals are visible to the whole session — a leader's dev server is one its own sub-agents can query — and are never reaped on idle: they end when stopped, when the process exits, or when the app closes.
+
+stdin/stdout are **pipes, not a PTY**. Servers, build tools and REPLs work; programs that insist on a real terminal do not — pass `sudo -S`, expect `ssh` password prompts and full-screen TUIs to fail, and stop a process with `terminal_stop` rather than trying to send Ctrl-C. Children block-buffer on a pipe, so unbuffer where it matters (`python -u`, `stdbuf -oL`); `PYTHONUNBUFFERED` is set for you.
+
 #### Legacy `web_search` / `extract_url`
 
 The original single-engine tools are still available, mainly for the key-based providers. Configure under **Settings → Web search provider** (applies to every zone with the tool enabled):
@@ -101,11 +119,34 @@ The original single-engine tools are still available, mainly for the key-based p
 
 Where perspective mode shows you every model's answer, Multizone mode resolves them into one. A zone flagged as a **Response Leader** doesn't answer from its own knowledge: it spawns a panel of sub-agent zones via `spawn_subagent`, briefs each one on a deliberately *opposing* angle rather than forwarding your message, cross-examines them against each other with `send_subchat_message`, and only then writes a single synthesized answer.
 
-The leader is the only agent that can talk to you — sub-agent `ask_user` calls are suppressed — and the whole leader → sub-agent call tree is inspectable inline in the stack tracer, with every subchat transcript openable.
+While a leader is driving them, sub-agents can't reach you — their `ask_user` calls are suppressed, since a question raised in a chat nobody is watching would wait forever. The whole leader → sub-agent call tree is inspectable inline in the stack tracer, with every subchat transcript openable, and you can open a subchat and **talk to the sub-agent yourself**: it takes messages like any other chat, exports like any other chat, and can ask *you* a question when you are the one who sent. Exporting the chat keeps them: sub-agent conversations are nested under the turns that spawned them in both the Markdown and PDF exports, with each turn attributed to the zone that wrote it, so a prompt from the leader is never presented as something you asked for. Turn it off under **Settings → Appearance → Chat export** when you only want the conversation you were part of.
 
 ![How the Response Leader works](promo/05-response-leader.png)
 
+Sub-agents don't have to run one at a time. `spawn_subagent`/`send_subchat_message` take `background: true`, which returns the subchat id immediately and runs that sub-agent on its own task — so a leader can put five specialists to work in a single message, keep reading code while they think, and pick every reply up with `collect_subagents`. `list_subchats` shows the sub-agents a conversation already has, and the leader is told to continue one rather than re-brief a fresh copy. Stopping the chat stops its background sub-agents with it.
+
 Turn any zone into one with the **Response Leader** toggle in the zone editor (it auto-enables the subchat tools), or start from the curated "Response Leader" zone in the library.
+
+### Working one codebase together
+
+Sub-agents have always had the real tools — read, write, search, shell — and they inherit the parent chat's project directory. What they lacked was any way to know the others existed, which left only two safe patterns: run them one at a time, or have them hand patches back for someone else to apply. Agents working *against* each other, carefully sequenced.
+
+The **teamwork** tool is the coordination layer that makes them work *alongside* each other instead:
+
+- `claim_files` takes an advisory lock on the files an agent is about to edit, with a stated intent. A write to a file another agent holds is **refused by the tools**, so a claim isn't a convention someone can forget. An unclaimed write auto-claims, so the protection holds even for a zone that never calls the tool; claims expire, and release when the agent's turn ends, so a crashed agent can't own a file forever.
+- `post_note` / `team_status` are the session's shared board. Parallel edits only compose if the decisions travel with them — "`parse()` returns None now instead of raising" has to reach whoever is editing the caller, and one sub-agent can't read another's transcript.
+
+Reads are never blocked, and an ordinary single-zone chat never touches any of it.
+
+### Zone teams
+
+Some presets only work as a set. The library's **Teams** section installs one in a single action — a leader plus the specialists it delegates to, all bound to your default model.
+
+The shipped **Code Team** is a general codebase collaboration: talk to **Code Team Lead** like a colleague about a symptom, a feature or a piece of code that annoys you, and it runs the team over your project. It clarifies the ask, has **Code Scout** map the ground, writes the contract the others must honour, then splits the work into file-disjoint slices that **Code Implementer (Careful)** (0.15) and **Code Implementer (Inventive)** (0.85) edit *at the same time* while **Code Test Author** writes the tests against the same contract — with **Code Reviewer** attacking the result and **Code Verifier** running the builds and suites on the combined tree. For a hard bug it switches to compete mode instead: both implementers attack the same problem independently, hand back diffs, and the leader picks on test evidence.
+
+Seven zones on one model at seven temperatures: the value comes from independent attempts and adversarial review, not from a bigger model.
+
+Every member is equipped like an agent you'd actually want on the job — web search and full page reads (an unfamiliar library's real API beats a half-remembered one), skills, the code runner, and shared memory at project scope, which is the durable counterpart to the board: how this repo's tests are run, or a trap someone hit, is injected into every agent on the project, including the ones spawned next week. Before a long run, set **Settings → Chat → Tool auto-approval** to *Everything* (a sub-agent cannot show you an approval prompt) and raise **Task length** to 60 or more.
 
 ## HTTP API
 

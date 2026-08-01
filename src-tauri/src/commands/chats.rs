@@ -723,6 +723,9 @@ pub async fn delete_chat(state: State<'_, AppState>, id: String) -> AppResult<()
     // Tear down any persistent WSL shell owned by this chat, so deleting a chat
     // does not leave an orphaned `bash` running until the idle reaper notices.
     crate::tools::wsl::close_session(&id).await;
+    // Terminals are never reaped on idle, so a deleted chat's are only ever
+    // stopped here or at app exit.
+    crate::tools::terminal::close_session(&id).await;
     Ok(())
 }
 

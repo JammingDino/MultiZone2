@@ -17,6 +17,83 @@ export interface DefaultSkillDef {
 
 export const DEFAULT_SKILLS: DefaultSkillDef[] = [
   {
+    name: "about-this-app",
+    description:
+      "Use when the question is about MultiZone — the app this conversation is happening " +
+      "inside — whether the user names it or just says \"this app\" or \"this harness\": what " +
+      "it is, what it can do, how providers, zones, projects, sub-agents, tools, skills, " +
+      "memory or knowledge work, how to configure or troubleshoot any of it, and how to get " +
+      "better answers out of it. Covers \"tell me about MultiZone\", \"what is this app\", " +
+      "\"how does MultiZone mode work\", \"how should I set up a project\", \"why can't you " +
+      "read that file\", \"which zone should answer this\". Load it before explaining the " +
+      "environment rather than guessing at it.",
+    content: `# The app you are running in
+
+MultiZone is a desktop chat app for LLMs. It talks to any OpenAI-compatible endpoint — a frontier API, a self-hosted server, a model on the user's own GPU — and stores every chat in a local SQLite database. Nothing is sent anywhere except to the providers the user configured.
+
+Answer questions about it from this page. If something here doesn't match what you can actually see, say so rather than inventing behaviour; the app changes and this page can lag.
+
+## Providers
+
+A **provider** is one endpoint: a base URL, an optional API key, and a default model. A local server (Ollama, LM Studio, llama.cpp) and a hosted API are the same kind of thing here, and several can be configured at once. This is the first thing to set up — nothing sends until one exists. **MCP servers** are separate: external tool servers whose tools a zone can enable alongside the built-in ones.
+
+## Zones
+
+A **zone** is the unit of configuration: one provider + model + system prompt + temperature + toolset + thinking setting, saved under a name with an icon and colour. A chat is bound to a zone, and that zone answers.
+
+- **Perspective zones** — add more zones to one chat and every message fans out to all of them. One thread, independent replies, side by side or stacked. Good for comparing models, bad for a long task (each zone pays the full context).
+- **Smart chat** — a router picks the best zone per turn instead of you choosing.
+- **Quick chat** — a chat with no zone. The app-wide default zone answers (Settings → Chat), or the first provider's default model with no system prompt and only the safe tools.
+- The **Zone Library** ships curated presets. Installing one binds it to the user's own provider and model.
+
+## Multizone mode: leaders and sub-agents
+
+A zone flagged **Response Leader** doesn't answer from its own knowledge. It spawns other zones as sub-agents, each in its own subchat, cross-examines them, and writes one synthesized answer.
+
+- Sub-agents get real tools and inherit the parent chat's project directory.
+- \`background: true\` on a spawn returns immediately, so a leader can put several specialists to work at once and collect the replies later.
+- **Only the leader can talk to the user.** A sub-agent's request for input is suppressed — which is why an unattended multi-agent run needs *Tool auto-approval: Everything*, or it will silently stall on an approval prompt nobody can see.
+- The **teamwork** tool lets several agents edit one working tree at once: each claims the files it is about to change, and a write to a file another agent holds is refused rather than clobbering it. There is a shared note board for decisions, because agents can't read each other's transcripts.
+- **Teams** in the library install a leader plus its specialists in one action.
+- The whole call tree is inspectable inline in the chat, and chat exports fold the sub-agent conversations in.
+
+## Projects
+
+A project groups chats and, more importantly, gives them a **directory**. That directory is what the file tools are scoped to — a chat with no project falls back to the default directory in Settings.
+
+Configuring one well:
+- **Set the directory** first. Most "the assistant can't find my file" problems are this.
+- Keep the **context snippet** short and factual — it is prepended to every chat in the project, so it is paid for on every turn. Conventions and constraints, not documentation.
+- **Knowledge (RAG)** is opt-in per chat. Index the directory when you want meaning-based search over a lot of prose; for code, the exact \`file_search\` tools are usually better and cost nothing to keep current.
+
+## Memory, skills, tags
+
+- **Memory** — facts the model saves itself, scoped to this chat, this project, or everywhere. Project-scope memory reaches every agent working on that project, including ones spawned later, which makes it the durable counterpart to the team board.
+- **Skills** — named instruction sets. Every enabled skill's *description* is offered on each turn; the model loads the body on demand. Folder-backed skill packs installed on disk are picked up too (Settings → Skills). A skill an agent writes itself arrives disabled, for review.
+- **Tags** — labels for finding chats, optionally carrying a context snippet of their own.
+
+## Tools
+
+Grouped as Files, Web, Knowledge, Agents, System, and enabled per zone. Notes that matter:
+
+- **Every enabled tool costs context on every single turn**, used or not. A focused toolset makes a zone both cheaper and more accurate. Per-zone usage counters in the zone editor show which ones actually earn their place.
+- Web research is keyless out of the box — \`smart_search\` queries several engines at once and merges them.
+- \`run_command\` runs a command and waits for it to finish. For something that keeps running — a dev server, a REPL, a program that prompts part-way through — the **terminal** tools start it and stay attached, so you can read its output and type into it across several turns.
+- Tools are classified safe / moderate / dangerous, and **Settings → Chat → Tool auto-approval** decides which prompt first.
+- **Task length** caps how many steps one turn may take before the model must answer. Raise it for long agentic work; the default suits ordinary chat.
+
+## Getting better results
+
+- Match the zone to the job: a cheap fast model for chat, a strong one with file tools for code, a leader with a panel for anything genuinely hard.
+- Put durable instructions in the zone's system prompt, task-specific ones in the message.
+- For a long unattended run: auto-approval to *Everything*, task length up, and a project directory set.
+- If answers drift late in a long chat, the \`compact\` tool condenses the older turns; the user still sees the whole conversation.
+
+## Where to change things
+
+Settings holds Providers, Chat (approvals, task length, default zone), Appearance (including chat export), Web search, Knowledge, Skills, MCP servers, Voice, and the local HTTP API. The API exposes chats and messages on \`127.0.0.1\` behind a bearer token, so scripts can drive the app the same way the window does.`,
+  },
+  {
     name: "frontend-design",
     description:
       "Use when the user asks to build, design, restyle, or review a web UI — components, " +
@@ -91,9 +168,31 @@ When asked for structured / JSON output:
   },
 ];
 
-/** Create the built-in skill templates. Caller gates this on first-run state. */
-export async function seedDefaultSkills(): Promise<void> {
+/**
+ * Highest version of the built-in set that has been seeded. Bumped whenever a
+ * skill is *added* here, so an install that seeded an earlier set picks the new
+ * one up — one-time seeding alone would mean only brand-new installs ever see
+ * anything added later.
+ *
+ * 1 — `about-this-app` (0.9.11).
+ */
+export const SKILL_SEED_VERSION = 1;
+
+/**
+ * Create the built-in skills the catalog doesn't already have, matched by name.
+ * Returns how many were created.
+ *
+ * Matching by name is what makes a re-seed safe: a default the user has edited,
+ * renamed or deleted-and-replaced is left alone, and only genuinely absent ones
+ * are written. Caller decides *when* to run this; see App.tsx.
+ */
+export async function seedDefaultSkills(existingNames: Iterable<string>): Promise<number> {
+  const have = new Set(existingNames);
+  let created = 0;
   for (const s of DEFAULT_SKILLS) {
+    if (have.has(s.name)) continue;
     await api.upsertSkill({ name: s.name, description: s.description, content: s.content, enabled: true });
+    created += 1;
   }
+  return created;
 }

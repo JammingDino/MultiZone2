@@ -386,6 +386,11 @@ const LABELS: Record<string, { label: string; icon: ToolIcon }> = {
   execute_code: { label: "Ran code", icon: "terminal" },
   run_command: { label: "Ran command", icon: "terminal" },
   wsl_exec: { label: "Ran Linux command", icon: "terminal" },
+  terminal_start: { label: "Opened terminal", icon: "terminal" },
+  terminal_write: { label: "Typed into terminal", icon: "terminal" },
+  terminal_read: { label: "Read terminal", icon: "terminal" },
+  terminal_list: { label: "Listed terminals", icon: "terminal" },
+  terminal_stop: { label: "Closed terminal", icon: "terminal" },
   update_plan: { label: "Plan", icon: "checklist" },
   draw_diagram: { label: "Diagram", icon: "diagram" },
   plot_function: { label: "Plot", icon: "chart" },
@@ -400,6 +405,12 @@ const LABELS: Record<string, { label: string; icon: ToolIcon }> = {
   spawn_subagent: { label: "Delegated to a zone", icon: "users" },
   send_subchat_message: { label: "Messaged subagent", icon: "users" },
   read_subchat: { label: "Read subagent transcript", icon: "users" },
+  collect_subagents: { label: "Collected subagents", icon: "users" },
+  list_subchats: { label: "Listed subagents", icon: "users" },
+  team_status: { label: "Read the team board", icon: "users" },
+  claim_files: { label: "Claimed files", icon: "users" },
+  release_files: { label: "Released files", icon: "users" },
+  post_note: { label: "Posted to the team board", icon: "users" },
   list_zones: { label: "Listed zones", icon: "users" },
   change_zone: { label: "Switched zone", icon: "users" },
   ask_user: { label: "Asked a question", icon: "users" },
@@ -510,6 +521,17 @@ export function describeTool(item: TraceToolItem): ToolDescription {
     case "wsl_exec":
       desc.subject = str(args?.command);
       break;
+    case "terminal_start":
+      desc.subject = str(args?.command) ?? str(args?.name);
+      break;
+    case "terminal_write":
+    case "terminal_read":
+    case "terminal_stop":
+      // Which terminal, deliberately not what was typed: `terminal_write` is how
+      // a password reaches a prompt, and a summary line is the last place it
+      // should be reprinted.
+      desc.subject = str(args?.terminal_id);
+      break;
     case "update_plan": {
       const steps = Array.isArray(args?.steps) ? (args!.steps as unknown[]) : [];
       desc.subject = steps.length ? plural(steps.length, "step") : null;
@@ -532,6 +554,11 @@ export function describeTool(item: TraceToolItem): ToolDescription {
     case "spawn_subagent":
       desc.subject = str(args?.zone_name) ?? str(args?.zone_id) ?? str(args?.task);
       break;
+    case "collect_subagents": {
+      const ids = Array.isArray(args?.subchat_ids) ? (args!.subchat_ids as unknown[]) : [];
+      desc.subject = ids.length ? plural(ids.length, "sub-agent") : "all in flight";
+      break;
+    }
     case "save_memory":
     case "read_memory":
       desc.subject = str(args?.content) ?? str(args?.scope);
@@ -628,6 +655,24 @@ function describeOutcome(
       if (code !== null) parts.push(code === 0 ? "exit 0" : `exit ${code}`);
       if (out) parts.push(`${plural(countLines(out), "line")} of output`);
       return parts.join(" · ") || null;
+    }
+    case "terminal_start":
+    case "terminal_write":
+    case "terminal_read":
+    case "terminal_stop": {
+      // Whether the thing is still alive is the fact that matters here — an
+      // exit code on a terminal that was supposed to keep running is the story.
+      const parts: string[] = [];
+      if (body.running === true) parts.push("still running");
+      else if (typeof body.exit_code === "number") parts.push(`exited ${body.exit_code}`);
+      if (body.matched === false) parts.push("pattern not seen");
+      const out = str(body.output);
+      if (out) parts.push(`${plural(countLines(out), "line")} of output`);
+      return parts.join(" · ") || null;
+    }
+    case "terminal_list": {
+      const n = Array.isArray(body.terminals) ? body.terminals.length : null;
+      return n !== null ? plural(n, "terminal") : null;
     }
     default: {
       const pages = Array.isArray(body.pages) ? body.pages.length : null;

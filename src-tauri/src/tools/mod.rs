@@ -17,11 +17,13 @@ pub mod memory;
 pub mod skills;
 pub mod knowledge;
 pub mod subchat;
+pub mod teamwork;
 pub mod plan;
 pub mod http;
 pub mod citations;
 pub mod compact;
 pub mod wsl;
+pub mod terminal;
 
 use crate::commands::messages::{EngineCtx, StreamSink};
 use crate::error::AppResult;
@@ -135,6 +137,12 @@ pub enum ToolId {
     /// 0.9.5 — run Linux commands in WSL, optionally in a shell that persists
     /// across calls so multi-step work can build up state.
     Wsl,
+    /// 0.9.10 — file claims and a shared note board, so several sub-agents can
+    /// edit one working tree at the same time without overwriting each other.
+    Teamwork,
+    /// 0.9.11 — terminals that keep running between calls, so an agent can start
+    /// a server or a REPL and go on typing into it.
+    Terminal,
 }
 
 impl ToolId {
@@ -166,6 +174,8 @@ impl ToolId {
             "http_request" => Some(Self::HttpRequest),
             "compact" => Some(Self::Compact),
             "wsl_exec" => Some(Self::Wsl),
+            "teamwork" => Some(Self::Teamwork),
+            "terminal" => Some(Self::Terminal),
             // `save_output` is the legacy id for this group (briefly shipped as a
             // write+present tool); it now maps to the present-only tool.
             "present_file" | "save_output" => Some(Self::PresentFile),
@@ -198,6 +208,8 @@ impl ToolId {
             Self::HttpRequest => "http_request",
             Self::Compact => "compact",
             Self::Wsl => "wsl_exec",
+            Self::Teamwork => "teamwork",
+            Self::Terminal => "terminal",
         }
     }
 
@@ -235,6 +247,8 @@ impl ToolId {
             Self::Plan => vec![plan::definition()],
             Self::HttpRequest => vec![http::definition()],
             Self::Compact => vec![compact::definition()],
+            Self::Teamwork => teamwork::definitions(),
+            Self::Terminal => terminal::definitions(),
         }
     }
 
@@ -246,9 +260,12 @@ impl ToolId {
             // skill is disabled until the user enables it) with update (moderate) —
             // per-call gating by name keeps the group in the safe default set while
             // still prompting before an agent rewrites an existing skill.
+            // Teamwork only writes coordination metadata — claims and notes the
+            // other agents read. Nothing it does reaches the user's files.
             Self::DateTime | Self::AskUser | Self::ManageTags | Self::RenderGraph
-            | Self::Memory | Self::Skills | Self::PresentFile | Self::Plan => 0,
-            // Subchat groups read (safe) + spawn/send (moderate); classed moderate
+            | Self::Memory | Self::Skills | Self::PresentFile | Self::Plan
+            | Self::Teamwork => 0,
+            // Subchat groups reads (read/list/collect: safe) + spawn/send (moderate); classed moderate
             // here so it isn't in the safe default set. Per-call gating uses the
             // function name (see `tool_safety_by_name`). FileSearch reads file
             // contents, so it is gated like the other file reads rather than as safe.
@@ -265,7 +282,12 @@ impl ToolId {
             // moderate while every delete prompts.
             // HttpRequest can send data off the machine and mutate remote state;
             // the approval prompt is its security boundary (see http.rs).
-            Self::CodeExec | Self::Shell | Self::FileManage | Self::HttpRequest | Self::Wsl => 2,
+            // Terminal groups reads (read/list: safe) with start/write, which run
+            // and drive arbitrary programs; the group is dangerous so it never
+            // lands in a default toolset, and per-call gating keeps watching a
+            // terminal cheap while starting or typing into one prompts.
+            Self::CodeExec | Self::Shell | Self::FileManage | Self::HttpRequest | Self::Wsl
+            | Self::Terminal => 2,
         }
     }
 }
@@ -273,7 +295,7 @@ impl ToolId {
 /// Every built-in tool group. The single source of truth for enumerating tools
 /// (e.g. `list_tool_functions`, which flattens each group into the functions the
 /// model actually sees). Keep in step with the `ToolId` variants.
-pub const ALL_TOOL_IDS: [ToolId; 22] = [
+pub const ALL_TOOL_IDS: [ToolId; 24] = [
     ToolId::DateTime,
     ToolId::WebSearch,
     ToolId::Extract,
@@ -296,6 +318,8 @@ pub const ALL_TOOL_IDS: [ToolId; 22] = [
     ToolId::Compact,
     ToolId::Plan,
     ToolId::Subchat,
+    ToolId::Teamwork,
+    ToolId::Terminal,
 ];
 
 /// Tool ids classified as "safe" (safety level 0). Used as the default toolset
@@ -330,7 +354,13 @@ pub fn tool_safety_by_name(name: &str) -> u8 {
         "get_current_datetime" | "ask_user" | "tag_chat"
         | "plot_function" | "draw_diagram"
         | "save_memory" | "read_memory" | "delete_memory"
-        | "load_skill" | "read_subchat"
+        // Reading a subchat, listing the ones a chat already has, and waiting on
+        // background subagents are all reads of work the user already approved
+        // when the spawn went through.
+        | "load_skill" | "read_subchat" | "list_subchats" | "collect_subagents"
+        | "team_status" | "claim_files" | "release_files" | "post_note"
+        // Watching a terminal someone already approved starting is a read.
+        | "terminal_read" | "terminal_list"
         | "present_file" | "update_plan"
         // A created skill is disabled until the user enables it, so writing one
         // changes nothing an agent can act on — safe. Revising an existing skill
@@ -347,8 +377,10 @@ pub fn tool_safety_by_name(name: &str) -> u8 {
         | "update_skill"
         | "find_files" | "search_file_text"
         | "move_file" | "copy_file" | "create_folder"
-        | "compact_context" => 1,
-        "execute_code" | "run_command" | "delete_file" | "http_request" => 2,
+        | "compact_context"
+        | "terminal_stop" => 1,
+        "execute_code" | "run_command" | "delete_file" | "http_request"
+        | "terminal_start" | "terminal_write" => 2,
         _ => 1,
     }
 }
@@ -402,6 +434,16 @@ pub async fn dispatch(
         return crate::mcp::manager().call(name, call_args).await;
     }
 
+    // Multi-agent write coordination (0.9.10). In a session that has sub-agents,
+    // a write to a file another agent is editing is refused instead of silently
+    // clobbering it, and an unclaimed write takes an implicit claim so the writer
+    // is protected in turn. A no-op for an ordinary single-zone chat.
+    if let Some(refusal) =
+        teamwork::guard_write(name, &args, db, chat_id, caller_zone_id, project_dir).await?
+    {
+        return Ok(refusal);
+    }
+
     match name {
         "get_current_datetime" => datetime::run(&args).await,
         "web_search" => web_search::run(&args, zone_config, http).await,
@@ -445,7 +487,18 @@ pub async fn dispatch(
         "compact_context" => compact::run(&args, db, chat_id).await,
         "spawn_subagent" => subchat::spawn(&args, ctx, sink, caller_zone_id, chat_id).await,
         "send_subchat_message" => subchat::send(&args, ctx, sink).await,
+        "collect_subagents" => subchat::collect(&args, db, chat_id).await,
+        "list_subchats" => subchat::list(db, chat_id).await,
         "read_subchat" => subchat::read(&args, db).await,
+        "terminal_start" => terminal::start(&args, db, chat_id, project_dir).await,
+        "terminal_write" => terminal::write(&args, db, chat_id).await,
+        "terminal_read" => terminal::read(&args, db, chat_id).await,
+        "terminal_list" => terminal::list(db, chat_id).await,
+        "terminal_stop" => terminal::stop(&args, db, chat_id).await,
+        "team_status" => teamwork::status(db, chat_id).await,
+        "claim_files" => teamwork::claim(&args, db, chat_id, caller_zone_id, project_dir).await,
+        "release_files" => teamwork::release(&args, db, chat_id, caller_zone_id, project_dir).await,
+        "post_note" => teamwork::note(&args, db, chat_id, caller_zone_id).await,
         other => Ok(serde_json::json!({
             "error": format!("unknown tool: {other}")
         }).to_string()),
@@ -473,11 +526,28 @@ mod tests {
     #[test]
     fn toolset_is_concise() {
         // The full built-in surface. No real zone enables all of it at once, so
-        // this is the worst case rather than a typical request. Measured at
-        // 39,165 bytes before the 0.9.10 pass and 30,348 after; the ceiling
-        // leaves a little headroom for a genuinely new tool without leaving
-        // room to quietly re-inflate the descriptions.
-        const BUDGET_BYTES: usize = 31_000;
+        // this is the worst case rather than a typical request — a zone in the
+        // Code Team enables six of the twenty-three groups.
+        //
+        // Measured at 39,165 bytes before the 0.9.10 pass and 30,348 after. The
+        // multi-agent work took it to 34,411 across six new *functions*
+        // (`collect_subagents`, `list_subchats`, and the four coordination tools),
+        // at ~600 bytes each — in line with the existing surface rather than a
+        // re-inflation of it, and none of them lands in the top five.
+        //
+        // 0.9.11 adds the five `terminal_*` functions, taking it to 38,093. Three
+        // of them carry the same `wait_for`/`timeout_ms`/`wait_ms` block, which is
+        // repetition of the kind this test exists to catch — but the timing
+        // vocabulary is the whole point of the group, and a model that only sees
+        // it on one function will reach for that function. Shared verbatim from
+        // one helper so it cannot drift into three explanations of one thing.
+        //
+        // The first draft of the group came in at 4,380 bytes and put `terminal`
+        // in the top five; trimmed to 3,682, it is back in line with the rest of
+        // the surface. The ceiling is raised for the new capabilities and no
+        // further — under a kilobyte of slack, which is a rounding error against
+        // one tool, not room to grow the descriptions.
+        const BUDGET_BYTES: usize = 39_000;
 
         let ctx = ToolContext {
             project_dir: Some(r"C:\Users\me\project".to_string()),

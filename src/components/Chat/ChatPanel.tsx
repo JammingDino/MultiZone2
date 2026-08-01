@@ -94,8 +94,12 @@ export function ChatPanel() {
   const activeChat = chats.find((c) => c.id === activeChatId) ?? null;
   const activeZone = activeChat ? zones.find((z) => z.id === activeChat.zoneId) : null;
 
-  // A subchat is owned and driven by a zone — observable but read-only for the
-  // user. We swap the composer for a notice and skip approval/ask widgets.
+  // A subchat is a conversation another zone started. It used to be read-only
+  // on the theory that it belongs to its owner, but that made the sub-agent's
+  // work a dead end: the interesting finding is often *in* the subchat, and the
+  // only way to follow it up was to go back to the leader and ask it to relay.
+  // It is an ordinary chat bound to the answering zone, so it now takes messages
+  // like any other — the banner names who else is driving it.
   const isSubchat = !!activeChat?.initiatedByZoneId;
   const subchatZone =
     isSubchat && activeChat
@@ -278,7 +282,7 @@ export function ChatPanel() {
             />
             <div className="flex shrink-0 items-center gap-2">
             <ContextMeter chatId={activeChat.id} />
-            {!isSubchat && <ExportMenu chatId={activeChat.id} />}
+            <ExportMenu chatId={activeChat.id} />
             <PerspectiveZonePicker
               chatId={activeChat.id}
               primaryZoneId={activeChat.zoneId}
@@ -323,9 +327,8 @@ export function ChatPanel() {
           />
 
           <MessageThread chatId={activeChat.id} />
-          {isSubchat ? (
-            <SubchatNotice zone={subchatZone} />
-          ) : pendingApprovals.length > 0 ? (
+          {isSubchat && <SubchatBanner zone={subchatZone} />}
+          {pendingApprovals.length > 0 ? (
             <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3">
               <div className="mx-auto flex max-w-3xl flex-col gap-2">
                 {pendingApprovals.map((pa) => (
@@ -395,23 +398,31 @@ export function ChatPanel() {
 import type { ChatTagEntry, ChatZone, Project, Tag, Zone } from "@/lib/types";
 import { claimSettingsDrop } from "@/lib/importSettings";
 
-/** Read-only footer shown in place of the composer for subchats — these are
- *  driven by their owning zone, so the user observes but can't send. */
-function SubchatNotice({ zone }: { zone: Zone | null }) {
+/**
+ * Strip above the composer in a subchat, naming the zone that started it.
+ *
+ * You can type here, but you are not the only one who can: the owning zone may
+ * send to this same conversation in the middle of its own turn. Saying so is
+ * the point of the banner — a reply that arrives out of nowhere is confusing in
+ * a way that a reply you were told to expect is not.
+ */
+function SubchatBanner({ zone }: { zone: Zone | null }) {
   const Icon = zone ? getZoneIcon(zone.icon) : Eye;
   const color = zone?.accentColor ?? "var(--color-accent)";
   return (
-    <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3">
-      <div className="mx-auto flex max-w-3xl items-center justify-center gap-2 text-xs text-[var(--color-text-muted)]">
-        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded" style={{ background: color }}>
-          <Icon size={11} color="white" />
+    <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 pt-2">
+      <div className="mx-auto flex max-w-3xl items-center gap-2 text-[11px] text-[var(--color-text-muted)]">
+        <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded" style={{ background: color }}>
+          <Icon size={9} color="white" />
         </span>
         {zone ? (
           <span>
-            Subchat driven by <span className="font-medium text-[var(--color-text)]">{zone.name}</span> — observable, not interactive
+            Sub-agent conversation started by{" "}
+            <span className="font-medium text-[var(--color-text)]">{zone.name}</span>, which can
+            also send to it. You can reply here directly.
           </span>
         ) : (
-          <span>Subchat — observable, not interactive</span>
+          <span>Sub-agent conversation. You can reply here directly.</span>
         )}
       </div>
     </div>

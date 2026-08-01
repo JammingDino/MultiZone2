@@ -13,7 +13,7 @@ import { useGlobalShortcuts } from "./lib/useGlobalShortcuts";
 import { usePdfReadBridge } from "./lib/usePdfReadBridge";
 import { seedCuratedLibrary, CURATED_LIBRARY_VERSION } from "./lib/zoneLibrary";
 import { seedDefaultZones } from "./lib/defaultZones";
-import { seedDefaultSkills } from "./lib/defaultSkills";
+import { seedDefaultSkills, SKILL_SEED_VERSION } from "./lib/defaultSkills";
 import { resolveBaseProvider } from "./lib/baseZone";
 import * as api from "./lib/tauri";
 
@@ -25,6 +25,7 @@ export default function App() {
   const libraryCuratedVersion = useApp((s) => s.appSettings.libraryCuratedVersion);
   const seededStarterZones = useApp((s) => s.appSettings.seededStarterZones);
   const seededSkills = useApp((s) => s.appSettings.seededSkills);
+  const seededSkillsVersion = useApp((s) => s.appSettings.seededSkillsVersion);
   const defaultDirectory = useApp((s) => s.appSettings.defaultDirectory);
   const onboardingSkipped = useApp((s) => s.appSettings.onboardingSkipped);
   const accent = useApp((s) => s.theme.accent);
@@ -109,25 +110,32 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [providersLoaded, appSettingsLoaded, seededStarterZones, providers]);
 
-  // One-time seed of the built-in skill templates, so the Skills panel starts
-  // populated. Only seeds when the user has no skills yet; provider-independent.
+  // Seed the built-in skill templates, so the Skills panel starts populated.
+  // Provider-independent. Runs on first launch, and again whenever the shipped
+  // set grows past what this install has seen — otherwise a skill added in a
+  // later version would only ever reach brand-new installs.
   useEffect(() => {
-    if (!appSettingsLoaded || seededSkills || skillsRef.current) return;
+    if (!appSettingsLoaded || skillsRef.current) return;
+    if (seededSkills && seededSkillsVersion >= SKILL_SEED_VERSION) return;
     skillsRef.current = true;
     (async () => {
       try {
         const existing = await api.listSkills();
-        if (existing.length === 0) {
-          await seedDefaultSkills();
+        // On a genuine first run into a catalog the user has already filled
+        // themselves, stay out of it — they built that list deliberately. A
+        // later top-up is a different matter: the install has accepted the
+        // built-ins before, so the ones added since are filled in by name.
+        const theirs = !seededSkills && existing.length > 0;
+        if (!theirs && (await seedDefaultSkills(existing.map((s) => s.name))) > 0) {
           await refreshSkills();
         }
-        await setAppSettings({ seededSkills: true });
+        await setAppSettings({ seededSkills: true, seededSkillsVersion: SKILL_SEED_VERSION });
       } finally {
         skillsRef.current = false;
       }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appSettingsLoaded, seededSkills]);
+  }, [appSettingsLoaded, seededSkills, seededSkillsVersion]);
 
   // First-run setup, until a provider exists or the user waves it away. Skipping
   // swaps the overlay for a banner rather than leaving the state unexplained —

@@ -47,6 +47,19 @@ pub struct TurnOverride {
     pub zone_id: Option<String>,
     /// Model to use for this turn, overriding the resolved zone's model.
     pub model: Option<String>,
+    /// True when another *agent* drove this turn rather than a person — a leader
+    /// spawning or messaging a sub-agent.
+    ///
+    /// It decides whether `ask_user` survives in a subchat. A sub-agent a leader
+    /// is driving has nobody to ask: its question would render in a chat nobody
+    /// is looking at and the turn would wait forever, which is why the tool is
+    /// stripped. When the *user* sends into that same subchat directly (0.9.11),
+    /// they are by definition right there, and taking the question away just
+    /// makes the sub-agent guess at something it could have asked.
+    ///
+    /// Defaults to false, so the seam is opt-in: the subchat tools set it, and
+    /// every user-facing path gets the honest answer by doing nothing.
+    pub agent_driven: bool,
 }
 
 impl TurnOverride {
@@ -189,19 +202,40 @@ impl StreamSink {
 
 #[tauri::command]
 pub async fn cancel_stream(state: State<'_, AppState>, chat_id: String) -> AppResult<()> {
+    // Background sub-agents (0.9.10) outlive the tool call that started them, so
+    // stopping the chat that spawned them has to stop them too — otherwise Stop
+    // looks like it did nothing while five detached turns keep streaming tokens
+    // into subchats the user can't cancel from anywhere.
+    let mut targets = vec![chat_id.clone()];
+    let mut frontier = vec![chat_id.clone()];
+    // Bounded so a cyclic parent link can't spin here.
+    for _ in 0..crate::tools::subchat::MAX_CANCEL_DEPTH {
+        let mut next = Vec::new();
+        for parent in frontier.drain(..) {
+            next.extend(crate::tools::subchat::running_children(&parent));
+        }
+        if next.is_empty() {
+            break;
+        }
+        targets.extend(next.iter().cloned());
+        frontier = next;
+    }
+
     {
         let map = state.active_streams.read().await;
-        if let Some(flag) = map.get(&chat_id) {
-            flag.store(true, Ordering::Relaxed);
+        for id in &targets {
+            if let Some(flag) = map.get(id) {
+                flag.store(true, Ordering::Relaxed);
+            }
         }
     }
-    // Deny every pending tool approval for this chat — the primary (keyed by
-    // chat id) and any perspective zones (keyed `chat_id::zone_id`) — so no
-    // participant's loop is left blocked waiting on the user.
+    // Deny every pending tool approval for the cancelled chats — the primary
+    // (keyed by chat id) and any perspective zones (keyed `chat_id::zone_id`) —
+    // so no participant's loop is left blocked waiting on the user.
     let mut approvals = state.tool_approvals.lock().await;
     let keys: Vec<String> = approvals
         .keys()
-        .filter(|k| approval_key_belongs_to_chat(k, &chat_id))
+        .filter(|k| targets.iter().any(|id| approval_key_belongs_to_chat(k, id)))
         .cloned()
         .collect();
     for k in keys {
@@ -494,6 +528,9 @@ pub async fn send_message(
     let ov = TurnOverride {
         zone_id: override_zone_id.filter(|s| !s.is_empty()),
         model: override_model.filter(|s| !s.trim().is_empty()),
+        // A person is on the other end of this one, including when they send
+        // into a subchat a leader started.
+        agent_driven: false,
     };
     run_send_entry(&ctx, &sink, &chat_id, parts, ov).await
 }
@@ -1066,6 +1103,10 @@ struct TurnParticipant {
     persp_zone_id: Option<String>,
     /// Honour a mid-turn `change_zone` switch (primary, zone mode, no override).
     allow_zone_switch: bool,
+    /// Carried from [`TurnOverride::agent_driven`]: whether a leader drove this
+    /// turn rather than a person. Decides whether `ask_user` survives in a
+    /// subchat — see the strip site below.
+    agent_driven: bool,
 }
 
 /// Primary-zone wrapper: resolves the turn's mode (override → chat state →
@@ -1098,6 +1139,7 @@ async fn run_agentic_loop(
         provider,
         persp_zone_id: None,
         allow_zone_switch: !ov.is_active() && is_zone_mode,
+        agent_driven: ov.agent_driven,
     };
     run_participant_turn(ctx, sink, chat_id, participant, cancel).await
 }
@@ -1137,6 +1179,7 @@ async fn run_participant_turn(
         mut provider,
         persp_zone_id,
         allow_zone_switch,
+        agent_driven,
     } = participant;
     let persp = persp_zone_id.as_deref();
     let tool_ctx = load_tool_context(&ctx.db, Some(chat_id)).await;
@@ -1173,23 +1216,29 @@ async fn run_participant_turn(
         }
     };
 
-    // Sub-agent (subchat) turns suppress `ask_user`: only the leader may surface
-    // questions to the user. Detect it once here; the flag also gates the tool
-    // rebuild after a mid-turn zone switch below.
-    let is_subchat: bool = sqlx::query_scalar::<_, Option<String>>(
-        "SELECT initiated_by_zone_id FROM chats WHERE id = ?1",
-    )
-    .bind(chat_id)
-    .fetch_optional(&ctx.db)
-    .await?
-    .flatten()
-    .is_some();
+    // A sub-agent turn that a *leader* is driving suppresses `ask_user`: the
+    // question would render in a chat nobody is watching, and the turn would
+    // wait on an answer that can never come. A turn the user sent into that same
+    // subchat themselves (0.9.11) keeps it — they are right there, and making
+    // the sub-agent guess instead of ask would be the worse outcome.
+    //
+    // Computed once here; the flag also gates the tool rebuild after a mid-turn
+    // zone switch below.
+    let suppress_ask_user: bool = agent_driven
+        && sqlx::query_scalar::<_, Option<String>>(
+            "SELECT initiated_by_zone_id FROM chats WHERE id = ?1",
+        )
+        .bind(chat_id)
+        .fetch_optional(&ctx.db)
+        .await?
+        .flatten()
+        .is_some();
 
     let mut tools = build_tools_for_zone(&ctx.db, &zone, &tool_ctx).await;
     if knowledge_available {
         tools.push(crate::tools::knowledge::definition());
     }
-    if is_subchat {
+    if suppress_ask_user {
         strip_ask_user(&mut tools);
     }
     // Per-zone MCP tool danger levels, refreshed on zone switch, consulted by the
@@ -1686,7 +1735,7 @@ async fn run_participant_turn(
                         if knowledge_available {
                             tools.push(crate::tools::knowledge::definition());
                         }
-                        if is_subchat {
+                        if suppress_ask_user {
                             strip_ask_user(&mut tools);
                         }
                         mcp_danger = {
@@ -1803,6 +1852,8 @@ async fn run_perspective(
         provider,
         persp_zone_id: Some(zone_id.to_string()),
         allow_zone_switch: false,
+        // A perspective zone answers the user's own message, never a leader's.
+        agent_driven: false,
     };
     run_participant_turn(ctx, sink, chat_id, participant, cancel).await
 }
@@ -2124,15 +2175,49 @@ async fn build_leader_preamble(
          • Drive sub-agents exclusively through the `spawn_subagent` and \
            `send_subchat_message` tools — never answer purely from your own knowledge \
            when a sub-agent could do the work better.\n\
+         • Fan out, don't queue. Spawn every sub-agent you need for the current stage \
+           with `background: true` in one message, keep working while they run, then \
+           read their replies with `collect_subagents`. A blocking spawn stops you dead \
+           until that one sub-agent finishes, so use it only when the next decision \
+           genuinely depends on that single reply.\n\
+         • Reuse your sub-agents. `list_subchats` shows the ones you already have; \
+           continuing one with `send_subchat_message` keeps its context and costs far \
+           less than briefing a fresh one. Spawn a second sub-agent on the same zone \
+           only when you deliberately want two independent attempts.\n\
          • To stress-test an idea, present each sub-agent with a deliberately *opposing* \
            or devil's-advocate framing of the task rather than forwarding the user's \
            message verbatim. Have them argue different sides, then reconcile.\n\
          • Treat each sub-agent's reply (returned to you as a tool result) as input, not \
            as the final answer. Synthesize across them before you respond to the user.\n\
          • You are the only participant who may call `ask_user`; sub-agents cannot pause \
-           to ask the user, so give them everything they need up front.",
+           to ask the user, so give them everything they need up front.\n\
+         • Never end your turn with sub-agents still in flight — collect them first, or \
+           their work is wasted.",
         zone.name
     );
+
+    // Shared-tree coordination (0.9.10). Only when the leader actually has the
+    // tool — and it changes the shape of the delegation, because sub-agents
+    // editing one working directory at the same time need their seams agreed
+    // before they start rather than discovered when a write is refused.
+    if serde_json::from_str::<Vec<String>>(&zone.tools_enabled)
+        .map_or(false, |t| t.iter().any(|id| id == "teamwork"))
+    {
+        text.push_str(
+            "\n\nWorking one tree together:\n\
+             • Your sub-agents edit the same working directory you do, at the same time. \
+               Before they start, decide the seams — which files each one owns, and any \
+               signature or name they must all honour — and `post_note` that to the shared \
+               board. Parallel edits only compose if the contract exists first.\n\
+             • Give each sub-agent a slice whose files don't overlap another's. Two agents \
+               told to edit one file is a decomposition mistake, not something they can \
+               negotiate: the tools refuse a write to a file another agent has claimed.\n\
+             • `team_status` shows who holds which files and every note posted. Read it \
+               between stages instead of asking each sub-agent what it did.\n\
+             • When work must be compared rather than combined — two attempts at one hard \
+               problem — tell each sub-agent to hand back a diff and leave the tree alone.",
+        );
+    }
 
     if roster.is_empty() {
         text.push_str(
@@ -2153,6 +2238,42 @@ async fn build_leader_preamble(
             "\n\nSpawn these by name with `spawn_subagent`. You may also bring in other \
              zones via `list_zones` if a task needs a specialist not listed here.",
         );
+    }
+
+    // Sub-agents this chat already has (0.9.10). Without this a leader on turn
+    // two has no idea it briefed anyone on turn one, so it re-spawns the same
+    // specialists from scratch and pays for the same context twice. Listing them
+    // here is what makes reuse the path of least resistance.
+    let existing: Vec<(String, String, i64)> = sqlx::query_as(
+        "SELECT c.id, COALESCE(z.name, 'unknown'),
+                (SELECT COUNT(*) FROM messages m
+                  WHERE m.chat_id = c.id AND m.zone_id IS NULL
+                    AND m.role IN ('user', 'assistant')) AS turns
+           FROM chats c LEFT JOIN zones z ON z.id = c.zone_id
+          WHERE c.parent_chat_id = ?1 AND c.initiated_by_zone_id IS NOT NULL
+          ORDER BY c.created_at ASC",
+    )
+    .bind(chat_id)
+    .fetch_all(db)
+    .await?;
+
+    if !existing.is_empty() {
+        text.push_str("\n\nSub-agents you have already briefed in this session:");
+        for (id, name, turns) in &existing {
+            text.push_str(&format!("\n• {name} [{id}] — {turns} turn(s)"));
+        }
+        text.push_str(
+            "\n\nContinue one of these with `send_subchat_message` (it still has its own \
+             context) rather than spawning a duplicate. `read_subchat` re-reads what one \
+             already told you.",
+        );
+    }
+
+    if let Some(in_flight) = crate::tools::subchat::in_flight_summary(chat_id) {
+        text.push_str(&format!(
+            "\n\nBackground sub-agents from earlier this session:\n{in_flight}\n\
+             Call `collect_subagents` to pick up anything uncollected before you spawn more.",
+        ));
     }
 
     Ok(Some(text))

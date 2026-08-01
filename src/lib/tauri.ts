@@ -405,6 +405,9 @@ export const stopDictation = (sessionId: string) =>
   invoke<string>("stop_dictation", { sessionId });
 export const cancelDictation = (sessionId: string) =>
   invoke<void>("cancel_dictation", { sessionId });
+/** Live input peak (0–1) for a recording session, polled to drive the meter. */
+export const dictationLevel = (sessionId: string) =>
+  invoke<number>("dictation_level", { sessionId });
 
 // Text-to-speech (0.8.1)
 /** Synthesized audio: base64 payload plus its MIME type (e.g. audio/mpeg, audio/wav). */

@@ -72,6 +72,19 @@ pub async fn start_dictation(
     Ok(session_id)
 }
 
+/// Current input level for a live dictation session, 0.0–1.0.
+///
+/// Polled by the composer's meter a dozen times a second while recording, which
+/// is why it is a plain read of an atomic rather than an event stream: there is
+/// nothing to buffer, a missed sample is the next frame's problem, and a session
+/// that has already stopped answers 0 instead of erroring (the poll and the stop
+/// race by design).
+#[tauri::command]
+pub async fn dictation_level(state: State<'_, AppState>, session_id: String) -> AppResult<f32> {
+    let sessions = state.voice_sessions.lock().await;
+    Ok(sessions.get(&session_id).map_or(0.0, |h| h.level()))
+}
+
 fn take_session(
     sessions: &mut std::collections::HashMap<String, CaptureHandle>,
     session_id: &str,

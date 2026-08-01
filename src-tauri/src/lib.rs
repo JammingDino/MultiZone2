@@ -211,6 +211,7 @@ pub fn run() {
             commands::voice::start_dictation,
             commands::voice::stop_dictation,
             commands::voice::cancel_dictation,
+            commands::voice::dictation_level,
             commands::voice::synthesize_speech,
             commands::voice::summarize_for_speech,
             commands::voice::list_tts_voices,

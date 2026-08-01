@@ -12,6 +12,7 @@
 //! `stop_capture`, since the transcript is only needed after the user stops
 //! speaking (there are no live partials).
 
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -64,6 +65,22 @@ pub struct CaptureHandle {
     join: Option<std::thread::JoinHandle<()>>,
     buffer: Arc<Mutex<Vec<f32>>>,
     source_rate: u32,
+    /// Peak amplitude of the most recent callback's samples, as `f32` bits.
+    ///
+    /// Transcription only needs the audio at the end, but the *user* needs to
+    /// know the mic is live while they are still talking — a recording that
+    /// looks identical whether or not the device is working is the whole
+    /// complaint the meter answers. An atomic rather than the buffer mutex
+    /// because this is read on a poll from the UI thread and must never make
+    /// the realtime audio callback wait.
+    level: Arc<AtomicU32>,
+}
+
+impl CaptureHandle {
+    /// Most recent input peak, 0.0 (silence) to 1.0 (clipping).
+    pub fn level(&self) -> f32 {
+        f32::from_bits(self.level.load(Ordering::Relaxed))
+    }
 }
 
 /// Starts capturing from `device_name` (or the system default when `None`) on
@@ -83,12 +100,14 @@ pub fn start_capture(device_name: Option<String>) -> AppResult<CaptureHandle> {
 
     let buffer: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
     let buffer_for_thread = buffer.clone();
+    let level: Arc<AtomicU32> = Arc::new(AtomicU32::new(0));
+    let level_for_thread = level.clone();
     let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
     let (ready_tx, ready_rx) = std::sync::mpsc::channel::<AppResult<()>>();
 
     let join = std::thread::spawn(move || {
         let err_fn = |e: cpal::StreamError| tracing::warn!("audio stream error: {e}");
-        let build_result = build_stream(&device, &stream_config, sample_format, channels, buffer_for_thread, err_fn);
+        let build_result = build_stream(&device, &stream_config, sample_format, channels, buffer_for_thread, level_for_thread, err_fn);
         let stream = match build_result {
             Ok(s) => s,
             Err(e) => {
@@ -113,7 +132,7 @@ pub fn start_capture(device_name: Option<String>) -> AppResult<CaptureHandle> {
         Err(_) => return Err(AppError::Other("capture thread exited unexpectedly".to_string())),
     }
 
-    Ok(CaptureHandle { stop_tx, join: Some(join), buffer, source_rate })
+    Ok(CaptureHandle { stop_tx, join: Some(join), buffer, source_rate, level })
 }
 
 fn build_stream(
@@ -122,6 +141,7 @@ fn build_stream(
     sample_format: cpal::SampleFormat,
     channels: usize,
     buffer: Arc<Mutex<Vec<f32>>>,
+    level: Arc<AtomicU32>,
     err_fn: impl FnMut(cpal::StreamError) + Send + 'static,
 ) -> AppResult<cpal::Stream> {
     macro_rules! build {
@@ -130,6 +150,8 @@ fn build_stream(
                 config,
                 move |data: &[$ty], _| {
                     let mono = to_mono(data, channels, $convert);
+                    let peak = mono.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+                    level.store(peak.to_bits(), Ordering::Relaxed);
                     if let Ok(mut buf) = buffer.lock() {
                         buf.extend_from_slice(&mono);
                     }

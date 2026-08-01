@@ -12,7 +12,7 @@ import {
   AttachmentPreview,
   readFileAsDataUrl,
 } from "@/components/Chat/InputBar";
-import { useDictation, MicButton } from "@/components/Chat/useDictation";
+import { useDictation, MicButton, DictationMeter } from "@/components/Chat/useDictation";
 import { resolveVisionCapable } from "@/lib/vision";
 import { resolveBaseModel, resolveBaseZone } from "@/lib/baseZone";
 import { claimSettingsDrop } from "@/lib/importSettings";
@@ -459,6 +459,7 @@ export function HomeScreen() {
               <span>OCR fallback: images sent as extracted text</span>
             </div>
           )}
+          <DictationMeter dictation={dictation} />
           {dictation.voiceError && (
             <div className="mb-2 flex w-fit items-center gap-1.5 rounded-full border border-red-500/40 bg-red-500/10 px-2.5 py-1 text-xs text-red-600 dark:text-red-400">
               <span>{dictation.voiceError}</span>

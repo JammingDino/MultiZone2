@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import { Loader2, Mic } from "lucide-react";
+import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { useTts } from "@/store/tts";
 
@@ -136,6 +137,101 @@ export function useDictation({
 }
 
 export type DictationController = ReturnType<typeof useDictation>;
+
+/** Bars in the level meter, and how often a new one is sampled. ~14Hz is fast
+ *  enough to look like a waveform and slow enough that the poll is free. */
+const METER_BARS = 32;
+const METER_INTERVAL_MS = 70;
+
+function formatElapsed(ms: number): string {
+  const total = Math.floor(ms / 1000);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
+/**
+ * The "something is happening" strip for dictation (0.9.12), shown above the
+ * composer while the mic is live and while the recording is being transcribed.
+ *
+ * Transcription only runs once the user stops speaking — the provider is sent
+ * one WAV at the end, so there are no live partials to show and no way to make
+ * words appear as they are said. What the user actually needs in the meantime is
+ * proof the microphone is working, so this scrolls a real level meter: each bar
+ * is one peak sample polled from the live capture session, newest on the right.
+ * A dead or muted device reads as a flat line, which is itself the answer.
+ *
+ * It polls inside this component rather than in `useDictation` so a 14Hz sample
+ * re-renders thirty-two divs and not the whole composer.
+ */
+export function DictationMeter({ dictation }: { dictation: DictationController }) {
+  const { voiceRecording, transcribing } = dictation;
+  const sessionId = useApp((s) => s.voiceSessionId);
+  const [levels, setLevels] = useState<number[]>([]);
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    if (!voiceRecording || !sessionId) return;
+    setLevels([]);
+    const startedAt = Date.now();
+    let cancelled = false;
+    const id = setInterval(async () => {
+      let level = 0;
+      try {
+        level = await api.dictationLevel(sessionId);
+      } catch {
+        // The session ended between the poll and the read — the effect's
+        // cleanup is about to run anyway.
+      }
+      if (cancelled) return;
+      setLevels((prev) => [...prev, level].slice(-METER_BARS));
+      setElapsed(Date.now() - startedAt);
+    }, METER_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [voiceRecording, sessionId]);
+
+  if (!voiceRecording && !transcribing) return null;
+
+  return (
+    <div
+      className={`mb-2 flex w-fit max-w-full items-center gap-2.5 rounded-full border px-3 py-1 text-xs ${
+        voiceRecording
+          ? "border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400"
+          : "border-[var(--color-accent)]/40 bg-[var(--color-accent)]/10 text-[var(--color-accent)]"
+      }`}
+    >
+      {voiceRecording ? (
+        <>
+          <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-red-500" />
+          <span className="flex h-4 shrink-0 items-end gap-[2px]" aria-hidden>
+            {Array.from({ length: METER_BARS }, (_, i) => {
+              // Right-aligned: the newest sample is the last bar, and an empty
+              // meter fills in from the right as the first samples arrive.
+              const level = levels[i - (METER_BARS - levels.length)] ?? 0;
+              // Speech sits low in a linear scale — the square root spreads a
+              // quiet voice across the meter instead of pinning it to the floor.
+              const height = Math.min(1, Math.sqrt(level) * 1.6);
+              return (
+                <span
+                  key={i}
+                  className="w-[2px] shrink-0 rounded-full bg-current transition-[height] duration-75"
+                  style={{ height: `${2 + height * 14}px`, opacity: 0.45 + height * 0.55 }}
+                />
+              );
+            })}
+          </span>
+          <span className="shrink-0 tabular-nums">Listening… {formatElapsed(elapsed)}</span>
+        </>
+      ) : (
+        <>
+          <Loader2 size={12} className="shrink-0 animate-spin" />
+          <span className="shrink-0">Transcribing…</span>
+        </>
+      )}
+    </div>
+  );
+}
 
 /** The mic button, driven by a `useDictation` controller. */
 export function MicButton({

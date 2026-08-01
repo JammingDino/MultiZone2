@@ -4,7 +4,7 @@ import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { useTts } from "@/store/tts";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
-import { useDictation, MicButton } from "@/components/Chat/useDictation";
+import { useDictation, MicButton, DictationMeter } from "@/components/Chat/useDictation";
 import type { InputPart } from "@/lib/types";
 import { renderPdfToJpegs, extractPdfText } from "@/lib/pdf";
 import { fileTextMarker, pdfImagesMarker, pdfTextMarker } from "@/lib/attachmentParts";
@@ -391,6 +391,7 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
             </button>
           </div>
         )}
+        <DictationMeter dictation={dictation} />
         {dictation.voiceError && (
           <div className="mb-2 flex w-fit items-center gap-1.5 rounded-full border border-red-500/40 bg-red-500/10 px-2.5 py-1 text-xs text-red-600 dark:text-red-400">
             <span>{dictation.voiceError}</span>

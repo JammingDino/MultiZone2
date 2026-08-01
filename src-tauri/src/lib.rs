@@ -219,6 +219,15 @@ pub fn run() {
             commands::voice::delete_cloned_voice,
             commands::voice::transcribe_audio_file,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, event| {
+            // Terminals outlive the turn that started them by design, so nothing
+            // else takes them down. On Windows a child is not killed with its
+            // parent either, which would leave a dev server holding its port with
+            // no window left to stop it from.
+            if let tauri::RunEvent::Exit = event {
+                tauri::async_runtime::block_on(tools::terminal::shutdown_all());
+            }
+        });
 }

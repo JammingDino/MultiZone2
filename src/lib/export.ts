@@ -67,6 +67,31 @@ export interface ExportZoneInfo {
   accentColor: string | null;
 }
 
+/**
+ * A sub-agent conversation spawned during the run (0.9.11).
+ *
+ * Exporting only the root chat used to lose most of what a Multizone run
+ * actually was: the leader's answer survived, and the panel it cross-examined to
+ * get there did not. These carry the delegated conversations, nested the way the
+ * stack tracer shows them.
+ *
+ * The `user`-role turns inside one are *not* the person using the app — they are
+ * the spawning zone briefing its sub-agent. Everything downstream of here takes
+ * care to say so; see [`ConvoVoices`].
+ */
+export interface ExportSubchat {
+  id: string;
+  /** The chat that spawned it — the root chat, or another subchat when nested. */
+  parentChatId: string | null;
+  title: string;
+  /** The zone that answers here. */
+  zoneId: string | null;
+  /** The zone that spawned it, and whose voice the prompts are in. */
+  initiatedByZoneId: string | null;
+  messages: Message[];
+  createdAt: number;
+}
+
 export interface ExportChatData {
   chat: Chat;
   messages: Message[];
@@ -77,6 +102,9 @@ export interface ExportChatData {
   tagNames: string[];
   /** zoneId → display info, for labelling each assistant turn. */
   zonesById: Record<string, ExportZoneInfo>;
+  /** Sub-agent conversations to fold in. Empty when there are none, or when the
+   *  user has turned them off in Settings. */
+  subchats: ExportSubchat[];
 }
 
 export interface ExportTheme {
@@ -106,15 +134,35 @@ const DEFAULT_OPTIONS: ExportOptions = { detail: "steps" };
 
 interface RenderedMessage {
   role: "user" | "assistant";
-  /** Zone label for assistant turns (primary or perspective); null otherwise. */
+  /** Display name for the turn. Null only for a turn the person actually typed;
+   *  a `user` turn inside a subchat carries the spawning zone's name instead. */
   zoneLabel: string | null;
   accent: string | null;
   text: string;
   imageCount: number;
   /** Files attached to the turn, recovered from its hidden parts. */
   attachments: FileAttachment[];
+  /** Sub-agent conversations this turn started, nested under it. */
+  subchats: ExportSubchat[];
   timestamp: number;
 }
+
+/**
+ * Who is speaking in a conversation, so the same renderers can draw the root
+ * chat and a delegated one without either being mislabelled.
+ *
+ * `prompter` is the crux. In the root chat it is null and a `user` turn is the
+ * person reading the export. In a subchat it is the zone that spawned the
+ * sub-agent, and a `user` turn is one machine instructing another — which must
+ * never be presented as something the user asked for.
+ */
+interface ConvoVoices {
+  prompter: { name: string; accent: string | null } | null;
+  /** Fallback name for assistant turns that carry no zone of their own. */
+  responder: string | null;
+}
+
+const USER_VOICES: ConvoVoices = { prompter: null, responder: null };
 
 function parseParts(json: string): ContentPart[] {
   try {
@@ -123,6 +171,75 @@ function parseParts(json: string): ContentPart[] {
   } catch {
     return [];
   }
+}
+
+// ─── Sub-agent conversations ─────────────────────────────────────────────────
+
+/**
+ * Hands out each subchat exactly once, at the call that spawned it.
+ *
+ * Taking rather than looking up does two jobs: a subchat can't be printed twice
+ * if a run somehow references it twice, and a cycle in the parent chain (which
+ * would otherwise recurse forever) terminates on its own.
+ */
+class SubchatIndex {
+  private readonly byId = new Map<string, ExportSubchat>();
+
+  constructor(subchats: ExportSubchat[]) {
+    for (const s of subchats) this.byId.set(s.id, s);
+  }
+
+  take(id: string | null): ExportSubchat | null {
+    if (!id) return null;
+    const found = this.byId.get(id);
+    if (found) this.byId.delete(id);
+    return found ?? null;
+  }
+
+  /**
+   * The oldest subchat no spawn call ever claimed — an orphan whose tool result
+   * was trimmed, say. Taken as it is handed over, so a caller draining these can
+   * loop without re-printing one that a nested render has since claimed.
+   */
+  takeOrphan(): ExportSubchat | null {
+    let oldest: ExportSubchat | null = null;
+    for (const s of this.byId.values()) {
+      if (!oldest || s.createdAt < oldest.createdAt) oldest = s;
+    }
+    if (oldest) this.byId.delete(oldest.id);
+    return oldest;
+  }
+}
+
+/** The subchat id a `spawn_subagent` step returned, if it succeeded. */
+function spawnedIdOf(item: TraceToolItem): string | null {
+  if (item.call.function.name !== "spawn_subagent") return null;
+  const body = item.result as { subchat_id?: unknown } | null;
+  return body && typeof body.subchat_id === "string" ? body.subchat_id : null;
+}
+
+/** The sub-agent conversations a turn started, in the order it started them. */
+function subchatsSpawnedIn(unit: TraceUnit, index: SubchatIndex): ExportSubchat[] {
+  const out: ExportSubchat[] = [];
+  for (const item of unit.items) {
+    if (item.kind !== "tool") continue;
+    const sub = index.take(spawnedIdOf(item));
+    if (sub) out.push(sub);
+  }
+  return out;
+}
+
+/** How a subchat's two participants should be named. */
+function voicesFor(sub: ExportSubchat, data: ExportChatData): ConvoVoices {
+  const leader = sub.initiatedByZoneId ? data.zonesById[sub.initiatedByZoneId] : undefined;
+  const agent = sub.zoneId ? data.zonesById[sub.zoneId] : undefined;
+  return {
+    prompter: {
+      name: leader?.name ?? "the calling zone",
+      accent: leader?.accentColor ?? null,
+    },
+    responder: agent?.name ?? sub.title ?? "Sub-agent",
+  };
 }
 
 /** Pull the visible text out of a message's JSON content parts. Hidden parts
@@ -150,25 +267,77 @@ function imageCount(m: Message): number {
   }
 }
 
-/** Reduce the raw message list to the user/assistant turns worth exporting,
- *  resolving a zone label for each assistant turn. Tool/system messages and
- *  empty turns (e.g. a pure tool-call step) are dropped. */
-function renderMessages(data: ExportChatData): RenderedMessage[] {
+/**
+ * assistant message id → the subchat ids its `spawn_subagent` calls returned.
+ *
+ * The Markdown path walks raw messages rather than the trace, so the spawn
+ * points are recovered the same way the app's stack tracer does it: match each
+ * call id to the tool result that answered it.
+ */
+function spawnsByMessage(messages: Message[]): Map<string, string[]> {
+  const callToMessage = new Map<string, string>();
+  const out = new Map<string, string[]>();
+
+  for (const m of messages) {
+    if (m.role === "assistant" && m.toolCalls) {
+      try {
+        for (const call of JSON.parse(m.toolCalls) as { id?: string; function?: { name?: string } }[]) {
+          if (call?.function?.name === "spawn_subagent" && call.id) {
+            callToMessage.set(call.id, m.id);
+          }
+        }
+      } catch {
+        /* a malformed tool_calls blob just means no spawns found here */
+      }
+      continue;
+    }
+    if (m.role !== "tool" || !m.toolCallId) continue;
+    const owner = callToMessage.get(m.toolCallId);
+    if (!owner) continue;
+    try {
+      const body = JSON.parse(visibleText(m)) as { subchat_id?: unknown };
+      if (typeof body?.subchat_id !== "string") continue;
+      out.set(owner, [...(out.get(owner) ?? []), body.subchat_id]);
+    } catch {
+      /* a non-JSON result is a failed spawn — nothing to link */
+    }
+  }
+  return out;
+}
+
+/** Reduce a raw message list to the user/assistant turns worth exporting,
+ *  resolving a label for each one. Tool/system messages and empty turns (e.g. a
+ *  pure tool-call step) are dropped — unless the step spawned a sub-agent, whose
+ *  conversation hangs off it. */
+function renderMessages(
+  messages: Message[],
+  data: ExportChatData,
+  voices: ConvoVoices,
+  index: SubchatIndex,
+): RenderedMessage[] {
+  const spawns = spawnsByMessage(messages);
   const out: RenderedMessage[] = [];
-  for (const m of data.messages) {
+  for (const m of messages) {
     if (m.role !== "user" && m.role !== "assistant") continue;
     const text = visibleText(m);
     const images = imageCount(m);
     const attachments = parseFileAttachments(parseParts(m.content));
-    if (!text && images === 0 && attachments.length === 0) continue;
+    const subchats = (spawns.get(m.id) ?? [])
+      .map((id) => index.take(id))
+      .filter((s): s is ExportSubchat => s !== null);
+    if (!text && images === 0 && attachments.length === 0 && subchats.length === 0) continue;
 
     let zoneLabel: string | null = null;
     let accent: string | null = null;
     if (m.role === "assistant") {
       const zid = m.zoneId ?? m.activeZoneId;
       const z = zid ? data.zonesById[zid] : undefined;
-      zoneLabel = z?.name ?? data.zoneName ?? "Assistant";
+      zoneLabel = z?.name ?? voices.responder ?? data.zoneName ?? "Assistant";
       accent = z?.accentColor ?? null;
+    } else if (voices.prompter) {
+      // Not the user: a zone briefing the sub-agent it spawned.
+      zoneLabel = voices.prompter.name;
+      accent = voices.prompter.accent;
     }
     out.push({
       role: m.role,
@@ -177,6 +346,7 @@ function renderMessages(data: ExportChatData): RenderedMessage[] {
       text,
       imageCount: images,
       attachments,
+      subchats,
       timestamp: m.createdAt,
     });
   }
@@ -225,14 +395,64 @@ export function buildChatMarkdown(data: ExportChatData): string {
   if (data.tagNames.length) fm.push(yaml("tags", `[${data.tagNames.map(q).join(", ")}]`));
   fm.push(yaml("created", fmtIso(chat.createdAt)));
   fm.push(yaml("updated", fmtIso(chat.updatedAt)));
+  if (data.subchats.length) fm.push(yaml("subagent_conversations", String(data.subchats.length)));
   fm.push(yaml("exported", fmtIso(Date.now())));
   fm.push("---", "");
 
+  const index = new SubchatIndex(data.subchats);
   const body: string[] = [`# ${chat.title || "Untitled chat"}`, ""];
-  for (const m of renderMessages(data)) {
-    const who = m.role === "user" ? "User" : (m.zoneLabel ?? "Assistant");
-    body.push(`## ${who} · ${fmtDate(m.timestamp)}`, "");
+  if (data.subchats.length) {
+    body.push(
+      `_This run delegated to ${data.subchats.length} sub-agent conversation${
+        data.subchats.length === 1 ? "" : "s"
+      }, nested below the turns that started them. Turns inside them are between ` +
+        `zones — no one but the zone named wrote them._`,
+      "",
+    );
+  }
+  body.push(...conversationMarkdown(data.messages, data, USER_VOICES, index, 0));
+
+  // A subchat whose spawn call left no usable result would otherwise vanish.
+  for (let orphan = index.takeOrphan(); orphan; orphan = index.takeOrphan()) {
+    body.push(...subchatMarkdown(orphan, data, index, 0));
+  }
+
+  return fm.join("\n") + body.join("\n").trimEnd() + "\n";
+}
+
+/** Markdown heading prefix for a conversation nested `depth` levels down. The
+ *  root chat's turns are `##`; Markdown stops at six. */
+function heading(depth: number, offset = 0): string {
+  return "#".repeat(Math.min(2 + depth * 2 + offset, 6));
+}
+
+/** One conversation's turns as Markdown blocks, with any sub-agent conversations
+ *  nested under the turns that started them. */
+function conversationMarkdown(
+  messages: Message[],
+  data: ExportChatData,
+  voices: ConvoVoices,
+  index: SubchatIndex,
+  depth: number,
+): string[] {
+  const body: string[] = [];
+  for (const m of renderMessages(messages, data, voices, index)) {
+    const who = m.role === "user" ? (m.zoneLabel ?? "User") : (m.zoneLabel ?? "Assistant");
+    // A prompt inside a subchat is one zone instructing another; saying who it
+    // went *to* is what stops it reading as a request from the person.
+    const arrow = m.role === "user" && voices.prompter && voices.responder
+      ? ` → ${voices.responder}`
+      : "";
+    body.push(`${heading(depth)} ${who}${arrow} · ${fmtDate(m.timestamp)}`, "");
     if (m.text) body.push(m.text, "");
+    else if (m.subchats.length) {
+      // A step that only delegated says nothing of its own; without this the
+      // heading sits above the nested section with no explanation of why.
+      body.push(
+        `_Delegated to ${m.subchats.length} sub-agent${m.subchats.length === 1 ? "" : "s"}._`,
+        "",
+      );
+    }
     if (m.imageCount > 0) {
       body.push(`_${m.imageCount} image${m.imageCount === 1 ? "" : "s"} attached_`, "");
     }
@@ -246,9 +466,31 @@ export function buildChatMarkdown(data: ExportChatData): string {
             : "text file";
       body.push(`_Attached: ${att.fileName} (${note})_`, "");
     }
+    for (const sub of m.subchats) {
+      body.push(...subchatMarkdown(sub, data, index, depth));
+    }
   }
+  return body;
+}
 
-  return fm.join("\n") + body.join("\n").trimEnd() + "\n";
+/** A delegated conversation as a nested Markdown section. */
+function subchatMarkdown(
+  sub: ExportSubchat,
+  data: ExportChatData,
+  index: SubchatIndex,
+  parentDepth: number,
+): string[] {
+  const voices = voicesFor(sub, data);
+  const turns = sub.messages.filter((m) => m.role === "user" || m.role === "assistant").length;
+  return [
+    `${heading(parentDepth, 1)} ↳ Sub-agent · ${voices.responder}`,
+    "",
+    `_Spawned by ${voices.prompter?.name ?? "the calling zone"} · ${turns} turn${
+      turns === 1 ? "" : "s"
+    }_`,
+    "",
+    ...conversationMarkdown(sub.messages, data, voices, index, parentDepth + 1),
+  ];
 }
 
 /** Save the chat as a `.md` file, letting the user pick the destination. */
@@ -340,11 +582,18 @@ function visualKey(item: TraceToolItem): string {
   return item.call.id || `${item.timestamp}:${item.call.function.name}`;
 }
 
-async function renderVisuals(units: TraceUnit[]): Promise<VisualCache> {
+async function renderVisuals(
+  units: TraceUnit[],
+  subchats: ExportSubchat[] = [],
+): Promise<VisualCache> {
   const cache: VisualCache = new Map();
   const jobs: Promise<void>[] = [];
 
-  for (const unit of units) {
+  // A diagram a sub-agent drew is drawn in the export too, so the nested
+  // transcripts are not a downgraded second class of content.
+  const all = [...units, ...subchats.flatMap((s) => buildTrace(s.messages))];
+
+  for (const unit of all) {
     for (const item of unit.items) {
       if (item.kind !== "tool" || item.status === "error") continue;
       const name = item.call.function.name;
@@ -670,6 +919,9 @@ function renderUnit(
   visuals: VisualCache,
   theme: { accent: string; p: Palette },
   detail: ExportDetail,
+  voices: ConvoVoices,
+  index: SubchatIndex,
+  depth: number,
 ): string {
   const { accent, p } = theme;
   if (unit.role === "user") {
@@ -686,6 +938,24 @@ function renderUnit(
               : "",
       )
       .join("");
+
+    // Inside a subchat this is not the person: it is the spawning zone briefing
+    // its sub-agent. Drawn as a brief — left-aligned, dashed, named on both ends
+    // — so it can't be mistaken for the right-aligned bubble that means "you
+    // said this".
+    if (voices.prompter) {
+      const briefAccent = voices.prompter.accent ?? accent;
+      return `
+        <div class="turn brief">
+          <div class="who" style="color:${briefAccent}">
+            <span class="whoico">${icon("users", 11)}</span>${escapeHtml(voices.prompter.name)}
+            <span class="toagent">→ ${escapeHtml(voices.responder ?? "sub-agent")}</span>
+            <span class="tmeta">${escapeHtml(fmtTime(unit.timestamp))}</span>
+          </div>
+          <div class="briefbody" style="border-color:${briefAccent}55">${inner}</div>
+        </div>`;
+    }
+
     return `
       <div class="turn user">
         <div class="bubble">
@@ -698,7 +968,12 @@ function renderUnit(
 
   const zone = unit.zoneId ? data.zonesById[unit.zoneId] : undefined;
   const zoneAccent = zone?.accentColor ?? accent;
-  const label = zone?.name ?? data.zoneName ?? "Assistant";
+  const label = zone?.name ?? voices.responder ?? data.zoneName ?? "Assistant";
+  // Delegated conversations are drawn after the turn that started them, in every
+  // detail mode — in text-only they are the only trace of the delegation left.
+  const spawned = subchatsSpawnedIn(unit, index)
+    .map((sub) => renderSubchat(sub, data, visuals, theme, detail, index, depth + 1))
+    .join("");
 
   let items: string;
   if (detail === "text") {
@@ -707,8 +982,9 @@ function renderUnit(
         item.kind === "text" ? `<div class="text say">${renderMarkdown(item.text)}</div>` : "",
       )
       .join("");
-    // A turn that only called tools has nothing to say in text-only mode.
-    if (!items.trim()) return "";
+    // A turn that only called tools has nothing to say in text-only mode — but a
+    // turn that only delegated still has the delegation to show.
+    if (!items.trim() && !spawned) return "";
   } else if (detail === "rails") {
     items = condenseRuns(unit.items)
       .map((item) => {
@@ -734,7 +1010,51 @@ function renderUnit(
         <span class="whoico">${icon("assistant", 11)}</span>${escapeHtml(label)}
         <span class="tmeta">${escapeHtml(fmtDate(unit.timestamp))}</span>
       </div>
-      <div class="steps" style="border-color:${zoneAccent}33">${items}</div>
+      <div class="steps" style="border-color:${zoneAccent}33">${items}${spawned}</div>
+    </div>`;
+}
+
+/**
+ * A delegated conversation, drawn inside the turn that started it.
+ *
+ * Indented and framed rather than merged into the flow, because the reader has
+ * to be able to tell at a glance that they have stepped out of their own
+ * conversation and into one between two zones.
+ */
+function renderSubchat(
+  sub: ExportSubchat,
+  data: ExportChatData,
+  visuals: VisualCache,
+  theme: { accent: string; p: Palette },
+  detail: ExportDetail,
+  index: SubchatIndex,
+  depth: number,
+): string {
+  const voices = voicesFor(sub, data);
+  const agent = sub.zoneId ? data.zonesById[sub.zoneId] : undefined;
+  const agentAccent = agent?.accentColor ?? theme.accent;
+  const units = buildTrace(sub.messages);
+  const turns = units.length;
+
+  const body = units
+    .map((u) => renderUnit(u, data, visuals, theme, detail, voices, index, depth))
+    .join("");
+
+  return `
+    <div class="subchat" style="border-color:${agentAccent}55">
+      <div class="subhead">
+        <span class="subico" style="color:${agentAccent}">${icon("users", 12)}</span>
+        <span class="subname" style="color:${agentAccent}">${escapeHtml(
+          voices.responder ?? "Sub-agent",
+        )}</span>
+        <span class="subrole">sub-agent of ${escapeHtml(
+          voices.prompter?.name ?? "the calling zone",
+        )}</span>
+        <span class="tmeta">${escapeHtml(
+          `${turns} turn${turns === 1 ? "" : "s"} · ${fmtTime(sub.createdAt)}`,
+        )}</span>
+      </div>
+      <div class="subbody">${body || '<div class="subempty">No turns recorded.</div>'}</div>
     </div>`;
 }
 
@@ -746,7 +1066,12 @@ function formatTokenCount(n: number): string {
 }
 
 /** The numbers strip under the header: what happened, before you read any of it. */
-function renderOverview(stats: TraceStats, tokens: { input: number; output: number }, accent: string): string {
+function renderOverview(
+  stats: TraceStats,
+  tokens: { input: number; output: number },
+  accent: string,
+  subagents: number,
+): string {
   const elapsed =
     stats.firstAt !== null && stats.lastAt !== null && stats.lastAt > stats.firstAt
       ? formatDuration(stats.lastAt - stats.firstAt)
@@ -779,6 +1104,12 @@ function renderOverview(stats: TraceStats, tokens: { input: number; output: numb
   const attached = stats.attachedFiles + stats.attachedImages;
   if (attached > 0) {
     cells.push([String(attached), attached === 1 ? "file attached" : "files attached"]);
+  }
+  if (subagents > 0) {
+    cells.push([
+      String(subagents),
+      subagents === 1 ? "sub-agent conversation" : "sub-agent conversations",
+    ]);
   }
   if (elapsed) cells.push([elapsed, "elapsed"]);
 
@@ -829,10 +1160,19 @@ export async function buildChatPrintHtml(
   const stats = traceStats(units);
   const ctx = chatContextEstimate(data.messages);
   // Nothing a tool drew is shown in text-only mode, so nothing needs rendering.
-  const visuals = options.detail === "text" ? new Map() : await renderVisuals(units);
-  const body = units
-    .map((u) => renderUnit(u, data, visuals, { accent, p }, options.detail))
+  const visuals =
+    options.detail === "text" ? new Map() : await renderVisuals(units, data.subchats);
+
+  const index = new SubchatIndex(data.subchats);
+  const look = { accent, p };
+  let body = units
+    .map((u) => renderUnit(u, data, visuals, look, options.detail, USER_VOICES, index, 0))
     .join("");
+  // Anything the run never linked back to a spawn call still belongs in the
+  // document; better an unattached transcript than a missing one.
+  for (let orphan = index.takeOrphan(); orphan; orphan = index.takeOrphan()) {
+    body += renderSubchat(orphan, data, visuals, look, options.detail, index, 1);
+  }
 
   return `<!doctype html>
 <html class="${theme.mode}">
@@ -876,6 +1216,29 @@ export async function buildChatPrintHtml(
   .steps { border-left: 2px solid ${p.border}; padding-left: 12px;
     display: flex; flex-direction: column; gap: 8px; }
   .say { border: 1px solid ${p.border}; background: ${p.panel}; border-radius: 8px; padding: 9px 12px; }
+
+  /* ── Legend, when the document contains delegated conversations ── */
+  .legend { display: flex; align-items: flex-start; gap: 6px; margin: -8px 0 18px;
+    font-size: 10px; color: ${p.muted}; border-left: 2px solid ${accent}66;
+    padding: 2px 0 2px 9px; }
+  .legend svg { flex: 0 0 auto; margin-top: 2px; }
+
+  /* ── A brief from one zone to another (a subchat's "user" turn) ── */
+  .turn.brief { margin-bottom: 10px; }
+  .briefbody { border: 1px dashed; border-radius: 8px; padding: 8px 11px; background: ${p.bg}; }
+  .toagent { font-weight: 400; font-size: 10px; color: ${p.muted}; }
+
+  /* ── A delegated conversation ── */
+  .subchat { margin: 8px 0 2px; border: 1px solid; border-radius: 9px;
+    background: ${p.bg}; overflow: hidden; }
+  .subhead { display: flex; align-items: center; gap: 7px; padding: 6px 10px;
+    background: ${p.panel}; border-bottom: 1px solid ${p.border}; font-size: 10.5px; }
+  .subico { display: inline-flex; }
+  .subname { font-weight: 600; }
+  .subrole { color: ${p.muted}; }
+  .subbody { padding: 9px 11px; }
+  .subbody > .turn:last-child { margin-bottom: 0; }
+  .subempty { font-size: 10px; font-style: italic; color: ${p.muted}; }
 
   /* ── Attachments on a user turn ── */
   .atts { display: flex; flex-direction: column; gap: 4px; margin-top: 7px; }
@@ -1001,7 +1364,19 @@ export async function buildChatPrintHtml(
     <span class="htitle">${escapeHtml(data.chat.title || "Untitled chat")}</span>
     <span class="hmeta">${meta.join(" · ")}</span>
   </div>
-  ${renderOverview(stats, { input: ctx.inputTokens, output: ctx.outputTokens }, accent)}
+  ${renderOverview(
+    stats,
+    { input: ctx.inputTokens, output: ctx.outputTokens },
+    accent,
+    data.subchats.length,
+  )}
+  ${
+    data.subchats.length
+      ? `<div class="legend">${icon("users", 11)} Boxed sections are conversations between
+           zones — a leader briefing a sub-agent and reading its reply. Nothing inside one
+           was written by you.</div>`
+      : ""
+  }
   ${body}
 </body>
 </html>`;

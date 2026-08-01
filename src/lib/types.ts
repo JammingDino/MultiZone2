@@ -505,6 +505,20 @@ export interface AppSettings {
    */
   pdfExportTheme: "app" | "dark" | "light";
   /**
+   * Whether a chat export folds in the sub-agent conversations the run spawned
+   * (0.9.11), nested under the turns that started them and labelled as
+   * agent-to-agent throughout.
+   *
+   * On by default: in a Multizone run the delegated conversations *are* the
+   * work, and an export without them reads as if the leader's answer arrived
+   * from nowhere. Worth turning off when handing a transcript to someone who
+   * only wants the conversation they were part of — a seven-zone run can carry
+   * far more sub-agent text than primary text.
+   *
+   * Applies to both the Markdown and PDF exports.
+   */
+  exportSubchats: boolean;
+  /**
    * Default execution mode for perspective zones (overridable per chat).
    * "parallel"   — run all perspective zones at once (default; how most people
    *                use several models — ask once, compare the answers together)
@@ -540,6 +554,14 @@ export interface AppSettings {
   memoryScopeLimit: number;
   /** Set once the built-in skill templates have been seeded, so it never repeats. */
   seededSkills: boolean;
+  /**
+   * Highest version of the built-in skill set this install has seeded. When the
+   * shipped set grows, this falls behind `SKILL_SEED_VERSION` and the missing
+   * ones are created — matched by name, so edited or deleted originals are not
+   * disturbed. Mirrors `libraryCuratedVersion`, which does the same job for the
+   * curated zone library.
+   */
+  seededSkillsVersion: number;
   /**
    * Extra folders scanned for folder-backed skills, on top of the app's managed
    * skills folder (0.9.9). Point one at a repo that already ran an installer
@@ -682,6 +704,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   pdfMode: "images",
   pdfExportDetail: "steps",
   pdfExportTheme: "app",
+  exportSubchats: true,
   perspectiveMode: "parallel",
   perspectiveLayout: "stacked",
   webSearchProvider: "duckduckgo",
@@ -690,6 +713,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   baseZoneId: null,
   memoryScopeLimit: 50,
   seededSkills: false,
+  seededSkillsVersion: 0,
   skillPackDirs: [],
   disabledSkillPacks: [],
   ocrLanguage: "eng",
@@ -823,5 +847,6 @@ export const ALL_TOOLS: ToolInfo[] = [
   { id: "manage_tags",  label: "Tag this chat",            category: "System", safety: 0, description: "Create tags and apply them to this chat so it is easier to find later." },
   { id: "code_exec",    label: "Run code",                 category: "System", safety: 2, description: "Run a code snippet in a sandboxed subprocess (Python, Node, Bash, PowerShell)." },
   { id: "shell_exec",   label: "Run terminal commands",    category: "System", safety: 2, description: "Run any shell command in the chat's working directory. The most powerful and most dangerous tool here." },
+  { id: "terminal",     label: "Keep terminals open",      category: "System", safety: 2, description: "Start terminals that keep running between messages — a dev server, a REPL, a log to follow — then read what they print and type into them, with control over the timing. Answers a prompt that appears part-way through, which a plain command cannot. Terminals stay open until stopped or until you close the app." },
   { id: "wsl_exec",     label: "Run Linux commands (WSL)", category: "System", safety: 2, description: "Run Linux commands in WSL. Each call is independent by default; the assistant can opt into a shell that persists for this chat, so working directory, environment and virtualenvs carry across steps. Requires WSL to be installed." },
 ];

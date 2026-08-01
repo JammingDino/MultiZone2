@@ -517,7 +517,11 @@ fn norm_path(path: &str, project_dir: Option<&str>) -> String {
 /// Walks `parent_chat_id` only while the current chat is itself a subchat, so a
 /// *branch* (which also has a parent) is its own session rather than being folded
 /// back into the chat it forked from.
-async fn session_root(db: &SqlitePool, chat_id: &str) -> AppResult<String> {
+///
+/// Shared with [`crate::tools::terminal`], which scopes a terminal's visibility to
+/// the same family: a leader's dev server is one its own sub-agents can query, and
+/// one an unrelated chat cannot see.
+pub(crate) async fn session_root(db: &SqlitePool, chat_id: &str) -> AppResult<String> {
     let mut cur = chat_id.to_string();
     for _ in 0..64 {
         let row: Option<(Option<String>, Option<String>)> = sqlx::query_as(

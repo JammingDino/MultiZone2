@@ -516,11 +516,11 @@ function AppearanceTab() {
         />
       </section>
 
-      {/* Exporting a chat as a PDF is a question of how the document looks —
-          how much of the run it draws and in which theme — so it lives here
-          with the rest of the appearance settings rather than under Chat. */}
+      {/* Exporting a chat is a question of how the document looks — how much of
+          the run it draws and in which theme — so it lives here with the rest of
+          the appearance settings rather than under Chat. */}
       <section>
-        <h3 className="mb-1 text-sm font-medium">PDF export</h3>
+        <h3 className="mb-1 text-sm font-medium">Chat export</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
           How much of a run the chat's PDF export writes down.
         </p>
@@ -551,6 +551,15 @@ function AppearanceTab() {
           Export opens your print dialog: choose “Save as PDF”, and set Margins to
           “None” for a single continuous page.
         </p>
+
+        <div className="mt-4">
+          <ToggleRow
+            label="Include sub-agent conversations"
+            description="Fold the sub-agents a run delegated to into the export, nested under the turns that spawned them and marked throughout as zone-to-zone rather than something you said. Applies to Markdown and PDF."
+            checked={appSettings.exportSubchats}
+            onChange={(exportSubchats) => setAppSettings({ exportSubchats })}
+          />
+        </div>
       </section>
 
     </div>

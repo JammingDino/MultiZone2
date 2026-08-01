@@ -51,6 +51,7 @@ const LOCAL_ONLY_SETTINGS = [
   "seededStarterZones",    // one-time seeding bookkeeping
   "seededLibrary",
   "seededSkills",
+  "seededSkillsVersion",
   "libraryCuratedVersion",
   "onboardingSkipped",     // this install's own first-run state
 ] as const satisfies readonly (keyof AppSettings)[];

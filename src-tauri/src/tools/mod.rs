@@ -23,6 +23,7 @@ pub mod http;
 pub mod citations;
 pub mod compact;
 pub mod wsl;
+pub mod terminal;
 
 use crate::commands::messages::{EngineCtx, StreamSink};
 use crate::error::AppResult;
@@ -139,6 +140,9 @@ pub enum ToolId {
     /// 0.9.10 — file claims and a shared note board, so several sub-agents can
     /// edit one working tree at the same time without overwriting each other.
     Teamwork,
+    /// 0.9.11 — terminals that keep running between calls, so an agent can start
+    /// a server or a REPL and go on typing into it.
+    Terminal,
 }
 
 impl ToolId {
@@ -171,6 +175,7 @@ impl ToolId {
             "compact" => Some(Self::Compact),
             "wsl_exec" => Some(Self::Wsl),
             "teamwork" => Some(Self::Teamwork),
+            "terminal" => Some(Self::Terminal),
             // `save_output` is the legacy id for this group (briefly shipped as a
             // write+present tool); it now maps to the present-only tool.
             "present_file" | "save_output" => Some(Self::PresentFile),
@@ -204,6 +209,7 @@ impl ToolId {
             Self::Compact => "compact",
             Self::Wsl => "wsl_exec",
             Self::Teamwork => "teamwork",
+            Self::Terminal => "terminal",
         }
     }
 
@@ -242,6 +248,7 @@ impl ToolId {
             Self::HttpRequest => vec![http::definition()],
             Self::Compact => vec![compact::definition()],
             Self::Teamwork => teamwork::definitions(),
+            Self::Terminal => terminal::definitions(),
         }
     }
 
@@ -275,7 +282,12 @@ impl ToolId {
             // moderate while every delete prompts.
             // HttpRequest can send data off the machine and mutate remote state;
             // the approval prompt is its security boundary (see http.rs).
-            Self::CodeExec | Self::Shell | Self::FileManage | Self::HttpRequest | Self::Wsl => 2,
+            // Terminal groups reads (read/list: safe) with start/write, which run
+            // and drive arbitrary programs; the group is dangerous so it never
+            // lands in a default toolset, and per-call gating keeps watching a
+            // terminal cheap while starting or typing into one prompts.
+            Self::CodeExec | Self::Shell | Self::FileManage | Self::HttpRequest | Self::Wsl
+            | Self::Terminal => 2,
         }
     }
 }
@@ -283,7 +295,7 @@ impl ToolId {
 /// Every built-in tool group. The single source of truth for enumerating tools
 /// (e.g. `list_tool_functions`, which flattens each group into the functions the
 /// model actually sees). Keep in step with the `ToolId` variants.
-pub const ALL_TOOL_IDS: [ToolId; 23] = [
+pub const ALL_TOOL_IDS: [ToolId; 24] = [
     ToolId::DateTime,
     ToolId::WebSearch,
     ToolId::Extract,
@@ -307,6 +319,7 @@ pub const ALL_TOOL_IDS: [ToolId; 23] = [
     ToolId::Plan,
     ToolId::Subchat,
     ToolId::Teamwork,
+    ToolId::Terminal,
 ];
 
 /// Tool ids classified as "safe" (safety level 0). Used as the default toolset
@@ -346,6 +359,8 @@ pub fn tool_safety_by_name(name: &str) -> u8 {
         // when the spawn went through.
         | "load_skill" | "read_subchat" | "list_subchats" | "collect_subagents"
         | "team_status" | "claim_files" | "release_files" | "post_note"
+        // Watching a terminal someone already approved starting is a read.
+        | "terminal_read" | "terminal_list"
         | "present_file" | "update_plan"
         // A created skill is disabled until the user enables it, so writing one
         // changes nothing an agent can act on — safe. Revising an existing skill
@@ -362,8 +377,10 @@ pub fn tool_safety_by_name(name: &str) -> u8 {
         | "update_skill"
         | "find_files" | "search_file_text"
         | "move_file" | "copy_file" | "create_folder"
-        | "compact_context" => 1,
-        "execute_code" | "run_command" | "delete_file" | "http_request" => 2,
+        | "compact_context"
+        | "terminal_stop" => 1,
+        "execute_code" | "run_command" | "delete_file" | "http_request"
+        | "terminal_start" | "terminal_write" => 2,
         _ => 1,
     }
 }
@@ -473,6 +490,11 @@ pub async fn dispatch(
         "collect_subagents" => subchat::collect(&args, db, chat_id).await,
         "list_subchats" => subchat::list(db, chat_id).await,
         "read_subchat" => subchat::read(&args, db).await,
+        "terminal_start" => terminal::start(&args, db, chat_id, project_dir).await,
+        "terminal_write" => terminal::write(&args, db, chat_id).await,
+        "terminal_read" => terminal::read(&args, db, chat_id).await,
+        "terminal_list" => terminal::list(db, chat_id).await,
+        "terminal_stop" => terminal::stop(&args, db, chat_id).await,
         "team_status" => teamwork::status(db, chat_id).await,
         "claim_files" => teamwork::claim(&args, db, chat_id, caller_zone_id, project_dir).await,
         "release_files" => teamwork::release(&args, db, chat_id, caller_zone_id, project_dir).await,
@@ -511,10 +533,21 @@ mod tests {
         // multi-agent work took it to 34,411 across six new *functions*
         // (`collect_subagents`, `list_subchats`, and the four coordination tools),
         // at ~600 bytes each — in line with the existing surface rather than a
-        // re-inflation of it, and none of them lands in the top five. The ceiling
-        // is raised for the new capabilities and no further: it still leaves no
-        // room to grow the descriptions themselves.
-        const BUDGET_BYTES: usize = 35_000;
+        // re-inflation of it, and none of them lands in the top five.
+        //
+        // 0.9.11 adds the five `terminal_*` functions, taking it to 38,093. Three
+        // of them carry the same `wait_for`/`timeout_ms`/`wait_ms` block, which is
+        // repetition of the kind this test exists to catch — but the timing
+        // vocabulary is the whole point of the group, and a model that only sees
+        // it on one function will reach for that function. Shared verbatim from
+        // one helper so it cannot drift into three explanations of one thing.
+        //
+        // The first draft of the group came in at 4,380 bytes and put `terminal`
+        // in the top five; trimmed to 3,682, it is back in line with the rest of
+        // the surface. The ceiling is raised for the new capabilities and no
+        // further — under a kilobyte of slack, which is a rounding error against
+        // one tool, not room to grow the descriptions.
+        const BUDGET_BYTES: usize = 39_000;
 
         let ctx = ToolContext {
             project_dir: Some(r"C:\Users\me\project".to_string()),

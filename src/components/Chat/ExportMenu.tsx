@@ -6,6 +6,7 @@ import {
   exportChatMarkdown,
   exportChatPdf,
   type ExportChatData,
+  type ExportSubchat,
   type ExportZoneInfo,
 } from "@/lib/export";
 
@@ -19,14 +20,45 @@ export function ExportMenu({ chatId }: { chatId: string }) {
   const fontFamily = useApp((s) => s.appSettings.fontFamily);
   const pdfExportDetail = useApp((s) => s.appSettings.pdfExportDetail);
   const pdfExportTheme = useApp((s) => s.appSettings.pdfExportTheme);
+  const exportSubchats = useApp((s) => s.appSettings.exportSubchats);
 
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<null | "md" | "pdf">(null);
 
+  /**
+   * Every sub-agent conversation descended from this chat, with its transcript
+   * (0.9.11). The tree command already walks nesting, so one call covers the
+   * whole family however deep it goes; the transcripts are fetched in parallel
+   * because a Code Team run has seven of them.
+   */
+  async function gatherSubchats(): Promise<ExportSubchat[]> {
+    if (!exportSubchats) return [];
+    const nodes = await api.getSubchatTree(chatId);
+    return Promise.all(
+      nodes.map(async (n) => ({
+        id: n.id,
+        parentChatId: n.parentChatId,
+        title: n.title,
+        zoneId: n.zoneId,
+        initiatedByZoneId: n.initiatedByZoneId,
+        messages: await api.getMessages(n.id),
+        createdAt: n.createdAt,
+      })),
+    );
+  }
+
   async function gather(): Promise<ExportChatData | null> {
     const chat = chats.find((c) => c.id === chatId);
     if (!chat) return null;
-    const messages = await api.getMessages(chatId);
+    const [messages, subchats] = await Promise.all([
+      api.getMessages(chatId),
+      gatherSubchats().catch((e) => {
+        // A missing sub-agent tree is not a reason to refuse the export — the
+        // primary conversation is still the thing being asked for.
+        console.error("subchat export gather failed", e);
+        return [] as ExportSubchat[];
+      }),
+    ]);
     const primaryZone = chat.zoneId ? zones.find((z) => z.id === chat.zoneId) ?? null : null;
     const project = chat.projectId ? projects.find((p) => p.id === chat.projectId) ?? null : null;
     const zonesById: Record<string, ExportZoneInfo> = {};
@@ -39,6 +71,7 @@ export function ExportMenu({ chatId }: { chatId: string }) {
       projectName: project?.name ?? null,
       tagNames: (tagsByChat[chatId] ?? []).map((t) => t.name),
       zonesById,
+      subchats,
     };
   }
 

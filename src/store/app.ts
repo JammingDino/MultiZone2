@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { DEFAULT_APP_SETTINGS, type AppSettings, type Chat, type ChatTagEntry, type ChatTagLink, type ChatZone, type McpServerView, type Memory, type Message, type Project, type Provider, type Skill, type SkillPack, type Tag, type Zone } from "@/lib/types";
+import { DEFAULT_APP_SETTINGS, type AppSettings, type Chat, type ChatTagEntry, type ChatTagLink, type ChatZone, type McpServerView, type Memory, type Message, type PendingMessage, type PendingMode, type Project, type Provider, type Skill, type SkillPack, type Tag, type Zone } from "@/lib/types";
 import * as api from "@/lib/tauri";
 import type { SettingsBundle } from "@/lib/settingsBundle";
 
@@ -259,6 +259,18 @@ interface AppStore {
    */
   errorsByChat: Record<string, ChatError[]>;
   dismissChatErrors: (chatId: string) => void;
+
+  /**
+   * Messages the user sent while a turn was still running, per chat, waiting to
+   * reach the model (0.9.12). The backend owns the real queue — this mirrors it
+   * so the composer can show what's waiting and let the user take it back.
+   * Entries clear on the `steer_delivered` / `pending_cleared` events.
+   */
+  pendingByChat: Record<string, PendingMessage[]>;
+  /** Queue a message for a chat that is mid-turn. Returns false when the turn
+   *  had already finished, meaning the caller should just send it normally. */
+  queuePendingMessage: (chatId: string, text: string, mode: PendingMode) => Promise<boolean>;
+  cancelPendingMessage: (chatId: string, id: string) => Promise<void>;
 
   /** A settings bundle waiting on the user's confirmation. Null = no import in flight. */
   pendingImport: PendingImport | null;
@@ -577,6 +589,8 @@ export const useApp = create<AppStore>((set, get) => ({
   appSettings: DEFAULT_APP_SETTINGS,
   appSettingsLoaded: false,
 
+  pendingByChat: {},
+
   voiceSessionId: null,
   voiceRecording: false,
   voiceError: null,
@@ -859,7 +873,15 @@ export const useApp = create<AppStore>((set, get) => ({
       const pendingApprovalByChat = { ...s.pendingApprovalByChat };
       const routingByChat = { ...s.routingByChat };
       const errorsByChat = { ...s.errorsByChat };
+      const pendingByChat = { ...s.pendingByChat };
       const current = streaming[chatId];
+
+      /** Drop queued-message chips the backend says are no longer pending. */
+      const dropPending = (ids: string[]) => {
+        const rest = (pendingByChat[chatId] ?? []).filter((p) => !ids.includes(p.id));
+        if (rest.length === 0) delete pendingByChat[chatId];
+        else pendingByChat[chatId] = rest;
+      };
 
       // Turn totals span every iteration of the agentic loop — same reducer the
       // perspective branch uses, so the two can't drift apart.
@@ -973,6 +995,19 @@ export const useApp = create<AppStore>((set, get) => ({
           messagesByChat[chatId] = [...msgs, event.message];
           break;
 
+        // A message the user queued mid-turn reached the model. It joins the
+        // thread like any other user message, but deliberately does *not* reset
+        // the turn aggregate the way `user_message_saved` does — the turn it
+        // landed in is still the one being timed.
+        case "steer_delivered":
+          messagesByChat[chatId] = [...msgs, event.message];
+          dropPending([event.id]);
+          break;
+
+        case "pending_cleared":
+          dropPending(event.ids);
+          break;
+
         case "assistant_saved":
           messagesByChat[chatId] = [...msgs, event.message];
           // Stats come from the turn aggregate (which spans every iteration of
@@ -1015,6 +1050,7 @@ export const useApp = create<AppStore>((set, get) => ({
         pendingApprovalByChat,
         routingByChat,
         errorsByChat,
+        pendingByChat,
       };
     });
 
@@ -1208,6 +1244,32 @@ export const useApp = create<AppStore>((set, get) => ({
     } catch (e) {
       console.warn("failed to persist app settings", e);
     }
+  },
+
+  async queuePendingMessage(chatId, text, mode) {
+    const id = crypto.randomUUID();
+    // The id is minted here and passed down so the chip this adds and the
+    // `steer_delivered` / `pending_cleared` event that removes it agree on which
+    // message they mean.
+    const { running } = await api.queueChatMessage(chatId, id, text, mode);
+    if (!running) return false;
+    set((s) => ({
+      pendingByChat: {
+        ...s.pendingByChat,
+        [chatId]: [...(s.pendingByChat[chatId] ?? []), { id, text, mode }],
+      },
+    }));
+    return true;
+  },
+  async cancelPendingMessage(chatId, id) {
+    await api.cancelPendingMessage(chatId, id).catch(console.error);
+    set((s) => {
+      const rest = (s.pendingByChat[chatId] ?? []).filter((p) => p.id !== id);
+      const next = { ...s.pendingByChat };
+      if (rest.length === 0) delete next[chatId];
+      else next[chatId] = rest;
+      return { pendingByChat: next };
+    });
   },
 
   async startDictation() {

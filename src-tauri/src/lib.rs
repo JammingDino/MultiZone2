@@ -192,6 +192,8 @@ pub fn run() {
             commands::messages::regenerate_response,
             commands::messages::regenerate_participant,
             commands::messages::cancel_stream,
+            commands::pending::queue_chat_message,
+            commands::pending::cancel_pending_message,
             commands::messages::respond_tool_approval,
             pdf_bridge::resolve_pdf_read,
             commands::messages::update_message,

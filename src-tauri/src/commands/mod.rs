@@ -14,6 +14,7 @@ pub mod memory;
 pub mod mcp;
 pub mod knowledge;
 pub mod mirror;
+pub mod pending;
 pub mod voice;
 pub mod tool_usage;
 

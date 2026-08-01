@@ -1,11 +1,11 @@
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
-import { Paperclip, Send, X, FileText, Image as ImageIcon, FileType, Loader2, Square, ZoomIn, SlidersHorizontal, Zap, Brain, ScanText, AudioLines } from "lucide-react";
+import { Paperclip, Send, X, FileText, Image as ImageIcon, FileType, Loader2, Square, ZoomIn, SlidersHorizontal, Zap, Brain, ScanText, AudioLines, Clock, CornerDownRight } from "lucide-react";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { useTts } from "@/store/tts";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
 import { useDictation, MicButton, DictationMeter } from "@/components/Chat/useDictation";
-import type { InputPart } from "@/lib/types";
+import type { InputPart, PendingMode } from "@/lib/types";
 import { renderPdfToJpegs, extractPdfText } from "@/lib/pdf";
 import { fileTextMarker, pdfImagesMarker, pdfTextMarker } from "@/lib/attachmentParts";
 import { resolveVisionCapable } from "@/lib/vision";
@@ -125,6 +125,16 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
       dictation.startListening();
     }
   }
+
+  // Sending while a turn is already running (0.9.12). Two different asks, so
+  // two modes: "steer" reaches the model at its next step inside the running
+  // turn, "next" waits for the turn to end and then sends normally. Defaults to
+  // "next" because that is the safe reading of a message typed mid-turn — a
+  // follow-up you thought of, not a correction you're sure about.
+  const [queueMode, setQueueMode] = useState<PendingMode>("next");
+  const queued = useApp((s) => s.pendingByChat[chatId] ?? []);
+  const queuePendingMessage = useApp((s) => s.queuePendingMessage);
+  const cancelPending = useApp((s) => s.cancelPendingMessage);
 
   // One-shot overrides for the next send only. ovZone: undefined = use the
   // chat's own zone, null = Quick chat (no zone), string = a specific zone.
@@ -333,6 +343,32 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
     }
   }
 
+  /**
+   * Hand the composer's text to a turn that is already running. Attachments
+   * can't ride along (the queue carries text), so the button is disabled while
+   * any are staged rather than dropping them silently.
+   */
+  async function onQueue() {
+    const body = text.trim();
+    if (!body || sending || disabled || pending.length > 0) return;
+    setSending(true);
+    setText("");
+    try {
+      const accepted = await queuePendingMessage(chatId, body, queueMode);
+      // The turn finished between the keystroke and the call — there is nothing
+      // left to queue behind, so send it as an ordinary message.
+      if (!accepted) {
+        await api.sendMessage(chatId, [{ type: "text", text: body }]);
+        refreshChats();
+      }
+    } catch (e) {
+      console.error("queueing failed:", e);
+      setText(body);
+    } finally {
+      setSending(false);
+    }
+  }
+
   async function onPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
     const items = e.clipboardData?.items;
     if (!items) return;
@@ -389,6 +425,50 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
             <button onClick={clearOverride} className="hover:text-[var(--color-text)]" title="Clear override">
               <X size={11} />
             </button>
+          </div>
+        )}
+        {queued.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-2">
+            {queued.map((q) => (
+              <div
+                key={q.id}
+                className="flex max-w-full items-center gap-1.5 rounded-full border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/10 px-2.5 py-1 text-xs text-[var(--color-accent)]"
+                title={
+                  q.mode === "steer"
+                    ? `Waiting to reach the model at its next step:\n\n${q.text}`
+                    : `Will be sent when this turn finishes:\n\n${q.text}`
+                }
+              >
+                {q.mode === "steer" ? <CornerDownRight size={11} /> : <Clock size={11} />}
+                <span className="max-w-[280px] truncate">{q.text}</span>
+                <button
+                  onClick={() => cancelPending(chatId, q.id)}
+                  className="shrink-0 hover:text-[var(--color-text)]"
+                  title="Take this back"
+                >
+                  <X size={11} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        {isStreaming && (
+          <div className="mb-2 flex w-fit max-w-full items-center gap-2 rounded-full border border-[var(--color-border)] bg-[var(--color-panel)] py-1 pl-3 pr-1 text-xs text-[var(--color-text-muted)]">
+            <span className="shrink-0">Still working — send this</span>
+            <QueueModeChip
+              label="now"
+              icon={<CornerDownRight size={10} />}
+              active={queueMode === "steer"}
+              title="Hand it to the model at its next step, inside this turn. Use it to correct course — nothing it has already done is thrown away."
+              onClick={() => setQueueMode("steer")}
+            />
+            <QueueModeChip
+              label="after"
+              icon={<Clock size={10} />}
+              active={queueMode === "next"}
+              title="Hold it until this turn finishes, then send it as an ordinary message."
+              onClick={() => setQueueMode("next")}
+            />
           </div>
         )}
         <DictationMeter dictation={dictation} />
@@ -492,7 +572,11 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
               const trigger = sendKey === "ctrl_enter"
                 ? e.key === "Enter" && (e.ctrlKey || e.metaKey)
                 : e.key === "Enter" && !e.shiftKey;
-              if (trigger) { e.preventDefault(); onSend(); }
+              if (trigger) {
+                e.preventDefault();
+                if (isStreaming) onQueue();
+                else onSend();
+              }
             }}
             ref={taRef}
             rows={1}
@@ -503,14 +587,30 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
             disabled={disabled}
           />
           {isStreaming ? (
-            <button
-              onClick={() => api.cancelStream(chatId).catch(console.error)}
-              className="flex items-center gap-1 rounded bg-[var(--color-panel-hover)] p-1.5 text-[var(--color-text)] hover:bg-[var(--color-border)]"
-              title="Stop generating"
-            >
-              <Loader2 size={14} className="animate-spin text-[var(--color-accent)]" />
-              <Square size={12} />
-            </button>
+            <>
+              <button
+                onClick={onQueue}
+                disabled={disabled || sending || text.trim() === "" || pending.length > 0}
+                title={
+                  pending.length > 0
+                    ? "Attachments can't be queued — wait for this turn to finish"
+                    : queueMode === "steer"
+                      ? "Send to the model at its next step"
+                      : "Send when this turn finishes"
+                }
+                className="rounded bg-[var(--color-accent)] p-1.5 text-white hover:bg-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Send size={16} />
+              </button>
+              <button
+                onClick={() => api.cancelStream(chatId).catch(console.error)}
+                className="flex items-center gap-1 rounded bg-[var(--color-panel-hover)] p-1.5 text-[var(--color-text)] hover:bg-[var(--color-border)]"
+                title="Stop generating"
+              >
+                <Loader2 size={14} className="animate-spin text-[var(--color-accent)]" />
+                <Square size={12} />
+              </button>
+            </>
           ) : (
             <button
               onClick={() => onSend()}
@@ -524,6 +624,28 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
         </div>
       </div>
     </div>
+  );
+}
+
+/** One option of the mid-turn send-mode toggle. */
+function QueueModeChip({
+  label, icon, active, title, onClick,
+}: {
+  label: string; icon: React.ReactNode; active: boolean; title: string; onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      className={`flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 transition ${
+        active
+          ? "border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]"
+          : "border-transparent hover:border-[var(--color-border)] hover:text-[var(--color-text)]"
+      }`}
+    >
+      {icon}
+      {label}
+    </button>
   );
 }
 

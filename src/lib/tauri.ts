@@ -18,6 +18,7 @@ import type {
   McpServerView,
   Memory,
   Message,
+  PendingMode,
   Project,
   Provider,
   Skill,
@@ -293,6 +294,23 @@ export const deleteParticipantMessages = (chatId: string, zoneId: string | null)
   invoke<void>("delete_participant_messages", { chatId, zoneId });
 export const cancelStream = (chatId: string) =>
   invoke<void>("cancel_stream", { chatId });
+/**
+ * Queue a message for a chat whose turn is already running. `steer` reaches the
+ * model at its next step inside the current turn; `next` waits for the turn to
+ * finish and then sends normally.
+ *
+ * `running: false` means the turn ended first and nothing was queued — send the
+ * message the ordinary way instead.
+ */
+export const queueChatMessage = (
+  chatId: string,
+  id: string,
+  text: string,
+  mode: PendingMode,
+) => invoke<{ running: boolean; id: string | null }>("queue_chat_message", { chatId, id, text, mode });
+/** Drop a queued message that hasn't reached the model yet. */
+export const cancelPendingMessage = (chatId: string, id: string) =>
+  invoke<boolean>("cancel_pending_message", { chatId, id });
 export const respondToolApproval = (
   chatId: string,
   zoneId: string | null,

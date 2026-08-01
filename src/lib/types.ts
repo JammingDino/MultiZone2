@@ -405,9 +405,21 @@ export type StreamEvent =
   | { type: "tool_call_result"; index: number; name: string; result: string }
   | { type: "tool_message_saved"; message: Message }
   | { type: "assistant_saved"; message: Message }
+  | { type: "steer_delivered"; id: string; message: Message }
+  | { type: "pending_cleared"; ids: string[] }
   | { type: "cancelled" }
   | { type: "done" }
   | { type: "error"; message: string };
+
+/** How a message queued mid-turn reaches the model (see commands::pending). */
+export type PendingMode = "steer" | "next";
+
+/** A message the user sent while a turn was still running, not yet delivered. */
+export interface PendingMessage {
+  id: string;
+  text: string;
+  mode: PendingMode;
+}
 
 export interface StreamEnvelope {
   chatId: string;

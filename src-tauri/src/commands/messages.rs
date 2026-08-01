@@ -108,6 +108,15 @@ pub enum StreamPayload<'a> {
     ToolCallResult { index: usize, name: String, result: String },
     ToolMessageSaved { message: &'a Message },
     AssistantSaved { message: &'a Message },
+    /// A message the user queued mid-turn reached the model at a step boundary
+    /// (see `commands::pending`). Distinct from `UserMessageSaved` because this
+    /// one lands *inside* a turn: it appends to the thread without resetting the
+    /// turn's live token/timing counters, which belong to the turn already
+    /// running.
+    SteerDelivered { id: String, message: &'a Message },
+    /// Queued messages that are no longer pending — consumed into the follow-up
+    /// turn, or dropped because the turn was cancelled.
+    PendingCleared { ids: Vec<String> },
     Cancelled,
     Done,
     Error { message: String },
@@ -449,13 +458,14 @@ pub async fn run_regenerate_entry(
         .await
         .insert(chat_id.to_string(), cancel.clone());
 
-    let result = run_regenerate(ctx, sink, chat_id, cancel).await;
+    let result = run_regenerate(ctx, sink, chat_id, cancel.clone()).await;
 
     ctx.active_streams.write().await.remove(chat_id);
 
     if let Err(e) = &result {
         sink.emit(chat_id, StreamPayload::Error { message: e.to_string() });
     }
+    flush_pending_after(ctx, sink, chat_id, cancel.load(Ordering::Relaxed)).await;
     result
 }
 
@@ -511,6 +521,7 @@ pub async fn run_regenerate_participant_entry(
     }
     // This path bypasses run_turn, so mirror here too (0.7.2).
     crate::commands::mirror::mirror_chat_best_effort(&ctx.db, chat_id).await;
+    flush_pending_after(ctx, sink, chat_id, cancel.load(Ordering::Relaxed)).await;
     result
 }
 
@@ -537,27 +548,87 @@ pub async fn send_message(
 
 /// Shared entry point for "send" used by both the Tauri command and the HTTP
 /// API: registers a cancel flag, runs the send, cleans up.
+///
+/// Runs again for anything the user queued while the turn was in flight (see
+/// `commands::pending`) — the `next`-mode messages plus any steer the model
+/// finished before reaching. That is a loop rather than recursion so a user who
+/// keeps typing can't grow the stack, and it is here rather than in the Tauri
+/// command so the HTTP API and sub-agent turns behave the same way.
 pub async fn run_send_entry(
     ctx: &EngineCtx,
     sink: &StreamSink,
     chat_id: &str,
-    parts: Vec<InputPart>,
+    mut parts: Vec<InputPart>,
     ov: TurnOverride,
 ) -> AppResult<()> {
-    let cancel = Arc::new(AtomicBool::new(false));
-    ctx.active_streams
-        .write()
-        .await
-        .insert(chat_id.to_string(), cancel.clone());
+    // The one-shot zone/model override belongs to the message it was set for.
+    // A queued follow-up is a plain user turn against the chat's own zone.
+    let mut ov = ov;
+    loop {
+        let cancel = Arc::new(AtomicBool::new(false));
+        ctx.active_streams
+            .write()
+            .await
+            .insert(chat_id.to_string(), cancel.clone());
 
-    let result = run_send(ctx, sink, chat_id, parts, &ov, cancel.clone()).await;
+        let result = run_send(ctx, sink, chat_id, parts, &ov, cancel.clone()).await;
 
-    ctx.active_streams.write().await.remove(chat_id);
+        ctx.active_streams.write().await.remove(chat_id);
 
-    if let Err(e) = &result {
-        sink.emit(chat_id, StreamPayload::Error { message: e.to_string() });
+        if let Err(e) = &result {
+            sink.emit(chat_id, StreamPayload::Error { message: e.to_string() });
+        }
+
+        // A failed turn still leaves the user's queued message theirs to send;
+        // a *cancelled* one does not — stop means stop, including whatever they
+        // lined up behind it.
+        let queued = crate::commands::pending::take_all(chat_id);
+        if queued.is_empty() {
+            return result;
+        }
+        let ids: Vec<String> = queued.iter().map(|p| p.id.clone()).collect();
+        sink.emit(chat_id, StreamPayload::PendingCleared { ids });
+        if cancel.load(Ordering::Relaxed) || result.is_err() {
+            return result;
+        }
+
+        let text = queued
+            .iter()
+            .map(|p| p.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        parts = vec![InputPart::Text { text }];
+        ov = TurnOverride::default();
     }
-    result
+}
+
+/// Send anything the user queued during a turn that did not go through
+/// [`run_send_entry`] (regenerate, and per-participant regenerate). Same rule:
+/// a cancelled turn drops the queue, anything else delivers it as a new turn.
+async fn flush_pending_after(
+    ctx: &EngineCtx,
+    sink: &StreamSink,
+    chat_id: &str,
+    cancelled: bool,
+) {
+    let queued = crate::commands::pending::take_all(chat_id);
+    if queued.is_empty() {
+        return;
+    }
+    let ids: Vec<String> = queued.iter().map(|p| p.id.clone()).collect();
+    sink.emit(chat_id, StreamPayload::PendingCleared { ids });
+    if cancelled {
+        return;
+    }
+    let text = queued
+        .iter()
+        .map(|p| p.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let parts = vec![InputPart::Text { text }];
+    if let Err(e) = run_send_entry(ctx, sink, chat_id, parts, TurnOverride::default()).await {
+        tracing::warn!("queued follow-up for {chat_id} failed: {e}");
+    }
 }
 
 async fn run_send(
@@ -1164,6 +1235,66 @@ fn push_system_note(api_messages: &mut Vec<ChatMessage>, text: String) {
     });
 }
 
+/// Hand the model anything the user queued as a *steer* while this turn was
+/// running (see `commands::pending`).
+///
+/// Called at the top of each step, which is the whole point: a step boundary is
+/// where the model is deciding what to do next, so a correction lands where it
+/// can still change the plan instead of interrupting a half-written sentence.
+///
+/// Unlike the out-of-band notes above, this *is* persisted — the user really did
+/// say it, and it has to be in the transcript and in the next turn's history.
+/// Only the copy in this request body carries the "sent while you were working"
+/// framing; the stored message is exactly what they typed.
+async fn deliver_steers(
+    ctx: &EngineCtx,
+    sink: &StreamSink,
+    chat_id: &str,
+    api_messages: &mut Vec<ChatMessage>,
+) -> AppResult<()> {
+    let queued = crate::commands::pending::take_steers(chat_id);
+    if queued.is_empty() {
+        return Ok(());
+    }
+    for p in queued {
+        let content_json = serde_json::to_string(&vec![ContentPart::Text { text: p.text.clone() }])?;
+        let msg_id = new_id();
+        let now = now_ts();
+        sqlx::query(
+            "INSERT INTO messages (id, chat_id, role, content, tool_calls, tool_call_id, reasoning, created_at)
+             VALUES (?1, ?2, 'user', ?3, NULL, NULL, NULL, ?4)",
+        )
+        .bind(&msg_id)
+        .bind(chat_id)
+        .bind(&content_json)
+        .bind(now)
+        .execute(&ctx.db)
+        .await?;
+        sqlx::query("UPDATE chats SET updated_at = ?1 WHERE id = ?2")
+            .bind(now)
+            .bind(chat_id)
+            .execute(&ctx.db)
+            .await?;
+        let msg = sqlx::query_as::<_, Message>(&format!(
+            "SELECT {MSG_COLS} FROM messages WHERE id = ?1"
+        ))
+        .bind(&msg_id)
+        .fetch_one(&ctx.db)
+        .await?;
+        sink.emit(chat_id, StreamPayload::SteerDelivered { id: p.id.clone(), message: &msg });
+        push_system_note(
+            api_messages,
+            format!(
+                "The user sent this just now, while you were working. It is more recent than \
+                 anything above and it is not a new task — take it into account before you decide \
+                 your next step:\n\n{}",
+                p.text
+            ),
+        );
+    }
+    Ok(())
+}
+
 /// The shared agentic loop run by both the primary zone and each perspective
 /// zone. Streams tokens/tools, executes tool calls (with per-participant
 /// approval), and persists messages tagged for the right participant.
@@ -1303,6 +1434,14 @@ async fn run_participant_turn(
         if cancel.load(Ordering::Relaxed) {
             sink.emit_for(chat_id, persp, StreamPayload::Cancelled);
             return Ok(());
+        }
+
+        // Only the primary reads the user's mid-turn notes. A perspective zone
+        // is answering the same question in its own lane; a correction aimed at
+        // the main answer would land in every lane at once and be saved to the
+        // transcript once per participant.
+        if persp.is_none() {
+            deliver_steers(ctx, sink, chat_id, &mut api_messages).await?;
         }
 
         // Budget signalling. The wrap-up warning lands one step before the end so

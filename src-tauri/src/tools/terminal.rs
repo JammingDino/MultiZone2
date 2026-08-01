@@ -329,22 +329,26 @@ impl Terminal {
         self.exit.lock().await.is_none()
     }
 
+    /// Stop the process *and everything it started*.
+    ///
+    /// A shell's children are not its own to lose: `terminal_start` with a
+    /// command runs it under a shell, so the thing the user cares about — the
+    /// server — is a grandchild. Killing only the direct child leaves it holding
+    /// its port with nothing left to stop it from.
+    ///
+    /// Order matters, and getting it wrong is silent. Both mechanisms below find
+    /// the descendants by walking links that only exist while the parent is
+    /// alive, so the tree has to come down *before* the supervisor reaps the
+    /// shell. Kill the shell first and the server is simply re-parented, out of
+    /// reach, still serving.
     async fn kill(&self) {
+        if let Some(pid) = self.pid {
+            kill_tree(pid).await;
+        }
+        // Then let the supervisor reap, so `exit` is recorded either way — and so
+        // a terminal with no pid still stops.
         if let Some(tx) = self.kill.lock().await.take() {
             let _ = tx.send(());
-        }
-        // A shell's children are not its own to lose: killing `pwsh` leaves the
-        // server it launched running. Windows can take the tree down by pid.
-        #[cfg(windows)]
-        if let Some(pid) = self.pid {
-            let mut cmd = Command::new("taskkill");
-            cmd.args(["/PID", &pid.to_string(), "/T", "/F"])
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null());
-            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-            cmd.creation_flags(CREATE_NO_WINDOW);
-            let _ = cmd.status().await;
         }
     }
 
@@ -493,6 +497,36 @@ struct Launch {
     prog: String,
     args: Vec<String>,
     label: String,
+}
+
+/// Kill a process and its descendants, best effort.
+///
+/// Windows has no process groups, but `taskkill /T` walks the live parent-pid
+/// links and takes the tree with it. On Unix the children are in the process
+/// group the terminal was spawned into (see `process_group` in
+/// [`spawn_terminal`]), and a negative pid signals the whole group — done via
+/// `kill(1)` rather than adding a libc dependency for one call.
+async fn kill_tree(pid: u32) {
+    #[cfg(windows)]
+    {
+        let mut cmd = Command::new("taskkill");
+        cmd.args(["/PID", &pid.to_string(), "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        let _ = cmd.status().await;
+    }
+    #[cfg(not(windows))]
+    {
+        let mut cmd = Command::new("kill");
+        cmd.args(["-KILL", &format!("-{pid}")])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let _ = cmd.status().await;
+    }
 }
 
 /// PowerShell's `-EncodedCommand` payload: UTF-16LE, base64.
@@ -656,6 +690,10 @@ async fn spawn_terminal(
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             cmd.creation_flags(CREATE_NO_WINDOW);
         }
+        // Its own process group, so stopping the terminal can signal everything
+        // it started rather than just the shell. See `kill_tree`.
+        #[cfg(unix)]
+        cmd.process_group(0);
 
         let mut child = match cmd.spawn() {
             Ok(c) => c,
@@ -1197,6 +1235,63 @@ mod tests {
         assert!(matched, "input did not reach the running program: {out:?}");
 
         term.kill().await;
+    }
+
+    /// Stopping a terminal must stop what it *started*, not just the shell.
+    ///
+    /// The bug this pins down shipped and was caught by hand: a server started
+    /// through the tool kept serving after `terminal_stop` reported
+    /// `stopped: true, running: false`. The shell was killed first, which
+    /// re-parented the server out of reach before the tree-kill ran, so the call
+    /// truthfully reported the shell dead while the thing holding the port lived
+    /// on. Black-box on purpose — the grandchild writes a second marker only if
+    /// it survives, so the test cannot pass by inspecting the mechanism that was
+    /// wrong in the first place.
+    #[tokio::test]
+    #[ignore = "spawns real shell processes"]
+    async fn stopping_a_terminal_kills_what_it_started() {
+        let dir = std::env::temp_dir().join(format!("mz-term-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let started = dir.join("started.txt");
+        let survived = dir.join("survived.txt");
+        let _ = std::fs::remove_file(&started);
+        let _ = std::fs::remove_file(&survived);
+
+        // A grandchild: our shell launches *another* shell, which is what a
+        // `python -m http.server` or an `npm run dev` really looks like here.
+        #[cfg(windows)]
+        let script = format!(
+            "powershell -NoProfile -Command \"'x' > '{}'; Start-Sleep -Seconds 6; 'x' > '{}'\"",
+            started.display(),
+            survived.display(),
+        );
+        #[cfg(not(windows))]
+        let script = format!(
+            "sh -c \"echo x > '{}'; sleep 6; echo x > '{}'\"",
+            started.display(),
+            survived.display(),
+        );
+
+        let term = spawn_terminal("tree".into(), Some(script), "auto", None, "session-z".into())
+            .await
+            .expect("spawn");
+
+        // Wait for the grandchild to actually be running before killing it.
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        while !started.exists() && std::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert!(started.exists(), "grandchild never started");
+
+        term.kill().await;
+
+        // Past when it would have written the second marker had it survived.
+        tokio::time::sleep(Duration::from_secs(8)).await;
+        assert!(
+            !survived.exists(),
+            "the process the terminal started outlived terminal_stop",
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A process that ends on its own is reaped, its exit code recorded, and a

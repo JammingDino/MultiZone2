@@ -82,6 +82,13 @@ fn pending() -> &'static Mutex<HashMap<String, Pending>> {
     PENDING.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// A turn one agent is driving on another's behalf. Marks the run so `ask_user`
+/// is stripped: the leader is the only one who can reach the user, and a
+/// sub-agent's question would otherwise wait on an answer nobody can give.
+fn agent_turn() -> TurnOverride {
+    TurnOverride { agent_driven: true, ..Default::default() }
+}
+
 /// Run a subchat turn behind a `dyn Future + Send` boundary. The explicit
 /// trait-object erases the concrete future type, breaking the recursive async
 /// cycle (run_turn → dispatch → here → run_send_entry → run_turn) that would
@@ -92,7 +99,7 @@ fn run_turn_boxed<'a>(
     chat_id: &'a str,
     parts: Vec<InputPart>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = AppResult<()>> + Send + 'a>> {
-    Box::pin(run_send_entry(ctx, sink, chat_id, parts, TurnOverride::default()))
+    Box::pin(run_send_entry(ctx, sink, chat_id, parts, agent_turn()))
 }
 
 /// The same erasure, but owning everything it needs so the future can be handed
@@ -105,7 +112,7 @@ fn run_turn_owned(
     parts: Vec<InputPart>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = AppResult<()>> + Send + 'static>> {
     Box::pin(async move {
-        run_send_entry(&ctx, &sink, &chat_id, parts, TurnOverride::default()).await
+        run_send_entry(&ctx, &sink, &chat_id, parts, agent_turn()).await
     })
 }
 

@@ -47,6 +47,19 @@ pub struct TurnOverride {
     pub zone_id: Option<String>,
     /// Model to use for this turn, overriding the resolved zone's model.
     pub model: Option<String>,
+    /// True when another *agent* drove this turn rather than a person — a leader
+    /// spawning or messaging a sub-agent.
+    ///
+    /// It decides whether `ask_user` survives in a subchat. A sub-agent a leader
+    /// is driving has nobody to ask: its question would render in a chat nobody
+    /// is looking at and the turn would wait forever, which is why the tool is
+    /// stripped. When the *user* sends into that same subchat directly (0.9.11),
+    /// they are by definition right there, and taking the question away just
+    /// makes the sub-agent guess at something it could have asked.
+    ///
+    /// Defaults to false, so the seam is opt-in: the subchat tools set it, and
+    /// every user-facing path gets the honest answer by doing nothing.
+    pub agent_driven: bool,
 }
 
 impl TurnOverride {
@@ -515,6 +528,9 @@ pub async fn send_message(
     let ov = TurnOverride {
         zone_id: override_zone_id.filter(|s| !s.is_empty()),
         model: override_model.filter(|s| !s.trim().is_empty()),
+        // A person is on the other end of this one, including when they send
+        // into a subchat a leader started.
+        agent_driven: false,
     };
     run_send_entry(&ctx, &sink, &chat_id, parts, ov).await
 }
@@ -1087,6 +1103,10 @@ struct TurnParticipant {
     persp_zone_id: Option<String>,
     /// Honour a mid-turn `change_zone` switch (primary, zone mode, no override).
     allow_zone_switch: bool,
+    /// Carried from [`TurnOverride::agent_driven`]: whether a leader drove this
+    /// turn rather than a person. Decides whether `ask_user` survives in a
+    /// subchat — see the strip site below.
+    agent_driven: bool,
 }
 
 /// Primary-zone wrapper: resolves the turn's mode (override → chat state →
@@ -1119,6 +1139,7 @@ async fn run_agentic_loop(
         provider,
         persp_zone_id: None,
         allow_zone_switch: !ov.is_active() && is_zone_mode,
+        agent_driven: ov.agent_driven,
     };
     run_participant_turn(ctx, sink, chat_id, participant, cancel).await
 }
@@ -1158,6 +1179,7 @@ async fn run_participant_turn(
         mut provider,
         persp_zone_id,
         allow_zone_switch,
+        agent_driven,
     } = participant;
     let persp = persp_zone_id.as_deref();
     let tool_ctx = load_tool_context(&ctx.db, Some(chat_id)).await;
@@ -1194,23 +1216,29 @@ async fn run_participant_turn(
         }
     };
 
-    // Sub-agent (subchat) turns suppress `ask_user`: only the leader may surface
-    // questions to the user. Detect it once here; the flag also gates the tool
-    // rebuild after a mid-turn zone switch below.
-    let is_subchat: bool = sqlx::query_scalar::<_, Option<String>>(
-        "SELECT initiated_by_zone_id FROM chats WHERE id = ?1",
-    )
-    .bind(chat_id)
-    .fetch_optional(&ctx.db)
-    .await?
-    .flatten()
-    .is_some();
+    // A sub-agent turn that a *leader* is driving suppresses `ask_user`: the
+    // question would render in a chat nobody is watching, and the turn would
+    // wait on an answer that can never come. A turn the user sent into that same
+    // subchat themselves (0.9.11) keeps it — they are right there, and making
+    // the sub-agent guess instead of ask would be the worse outcome.
+    //
+    // Computed once here; the flag also gates the tool rebuild after a mid-turn
+    // zone switch below.
+    let suppress_ask_user: bool = agent_driven
+        && sqlx::query_scalar::<_, Option<String>>(
+            "SELECT initiated_by_zone_id FROM chats WHERE id = ?1",
+        )
+        .bind(chat_id)
+        .fetch_optional(&ctx.db)
+        .await?
+        .flatten()
+        .is_some();
 
     let mut tools = build_tools_for_zone(&ctx.db, &zone, &tool_ctx).await;
     if knowledge_available {
         tools.push(crate::tools::knowledge::definition());
     }
-    if is_subchat {
+    if suppress_ask_user {
         strip_ask_user(&mut tools);
     }
     // Per-zone MCP tool danger levels, refreshed on zone switch, consulted by the
@@ -1707,7 +1735,7 @@ async fn run_participant_turn(
                         if knowledge_available {
                             tools.push(crate::tools::knowledge::definition());
                         }
-                        if is_subchat {
+                        if suppress_ask_user {
                             strip_ask_user(&mut tools);
                         }
                         mcp_danger = {
@@ -1824,6 +1852,8 @@ async fn run_perspective(
         provider,
         persp_zone_id: Some(zone_id.to_string()),
         allow_zone_switch: false,
+        // A perspective zone answers the user's own message, never a leader's.
+        agent_driven: false,
     };
     run_participant_turn(ctx, sink, chat_id, participant, cancel).await
 }

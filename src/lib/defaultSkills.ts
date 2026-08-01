@@ -19,17 +19,23 @@ export const DEFAULT_SKILLS: DefaultSkillDef[] = [
   {
     name: "about-this-app",
     description:
-      "Use when the question is about the app this conversation is happening inside — what it " +
-      "is, what it can do, how zones, projects, sub-agents, tools, skills, memory or knowledge " +
-      "work, how to configure or troubleshoot any of it, or how to get better answers out of " +
-      "it. Covers \"tell me about this harness\", \"how should I set up a project\", \"why " +
-      "can't you read that file\", \"which zone should answer this\". Load it before " +
-      "explaining the environment rather than guessing at it.",
+      "Use when the question is about MultiZone — the app this conversation is happening " +
+      "inside — whether the user names it or just says \"this app\" or \"this harness\": what " +
+      "it is, what it can do, how providers, zones, projects, sub-agents, tools, skills, " +
+      "memory or knowledge work, how to configure or troubleshoot any of it, and how to get " +
+      "better answers out of it. Covers \"tell me about MultiZone\", \"what is this app\", " +
+      "\"how does MultiZone mode work\", \"how should I set up a project\", \"why can't you " +
+      "read that file\", \"which zone should answer this\". Load it before explaining the " +
+      "environment rather than guessing at it.",
     content: `# The app you are running in
 
 MultiZone is a desktop chat app for LLMs. It talks to any OpenAI-compatible endpoint — a frontier API, a self-hosted server, a model on the user's own GPU — and stores every chat in a local SQLite database. Nothing is sent anywhere except to the providers the user configured.
 
 Answer questions about it from this page. If something here doesn't match what you can actually see, say so rather than inventing behaviour; the app changes and this page can lag.
+
+## Providers
+
+A **provider** is one endpoint: a base URL, an optional API key, and a default model. A local server (Ollama, LM Studio, llama.cpp) and a hosted API are the same kind of thing here, and several can be configured at once. This is the first thing to set up — nothing sends until one exists. **MCP servers** are separate: external tool servers whose tools a zone can enable alongside the built-in ones.
 
 ## Zones
 

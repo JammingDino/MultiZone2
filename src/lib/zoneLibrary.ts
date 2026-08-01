@@ -11,7 +11,7 @@ import { DEFAULT_ZONES } from "@/lib/defaultZones";
 
 /** Bump when the shipped curated set changes so existing installs re-seed the
  * library (idempotent — stable ids overwrite, user snapshots are untouched). */
-export const CURATED_LIBRARY_VERSION = 9;
+export const CURATED_LIBRARY_VERSION = 10;
 
 /** Stable, content-independent id for a curated entry so re-seeding overwrites
  * the same file instead of creating duplicates. */

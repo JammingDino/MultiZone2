@@ -411,6 +411,12 @@ export type StreamEvent =
   | { type: "done" }
   | { type: "error"; message: string };
 
+/** One labelled component of a chat's fixed per-turn cost. */
+export interface OverheadPart {
+  label: string;
+  tokens: number;
+}
+
 /** One chat's share of a sub-agent session's context (see commands::usage). */
 export interface AgentUsage {
   chatId: string;
@@ -422,6 +428,17 @@ export interface AgentUsage {
   messages: number;
   inputTokens: number;
   outputTokens: number;
+  /** Conversation only. */
+  messageTokens: number;
+  /** System prompt: zone prompt, skills catalog, memories, project/tag context. */
+  systemTokens: number;
+  /** Tool schemas sent alongside it. */
+  toolsTokens: number;
+  toolCount: number;
+  /** systemTokens + toolsTokens — what a turn costs before anyone speaks. */
+  overheadTokens: number;
+  /** The system prompt by what put each piece there, largest first. */
+  overheadParts: OverheadPart[];
   totalTokens: number;
 }
 
@@ -432,6 +449,7 @@ export interface SessionUsage {
   agents: AgentUsage[];
   inputTokens: number;
   outputTokens: number;
+  overheadTokens: number;
   totalTokens: number;
 }
 

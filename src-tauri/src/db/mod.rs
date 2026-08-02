@@ -8,7 +8,9 @@ use sqlx::SqlitePool;
 use std::path::Path;
 use std::time::Duration;
 
-static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
+/// `pub(crate)` so tests elsewhere can build a migrated in-memory pool against
+/// the real schema rather than a hand-written approximation of it.
+pub(crate) static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 
 fn sha384(s: &str) -> Vec<u8> {
     Sha384::digest(s.as_bytes()).to_vec()

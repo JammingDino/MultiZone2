@@ -1999,22 +1999,79 @@ async fn run_perspective(
 
 // ─── Message history ──────────────────────────────────────────────────────────
 
-async fn build_message_history(
+/// A labelled piece of the system prompt.
+///
+/// The turn only needs the joined text, but the context meter needs to say
+/// *why* a chat is 12k in the hole before the user has typed anything — a fat
+/// skills catalog, a leader's roster, memories that have piled up. One opaque
+/// number can't be acted on; "Skills catalog 4.1k" can.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SnippetKind {
+    ProjectContext,
+    TagContext,
+    Skills,
+    ZonePrompt,
+    Continuity,
+    Leader,
+    Memory,
+    Identity,
+    CompactHint,
+}
+
+impl SnippetKind {
+    /// Label shown in the context meter's breakdown.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ProjectContext => "Project context",
+            Self::TagContext => "Tag context",
+            Self::Skills => "Skills catalog",
+            Self::ZonePrompt => "Zone prompt",
+            Self::Continuity => "Agent-loop preamble",
+            Self::Leader => "Sub-agent roster",
+            Self::Memory => "Memories",
+            Self::Identity => "Multi-zone identity",
+            Self::CompactHint => "Compaction hint",
+        }
+    }
+}
+
+/// True when this chat has (or has had) perspective zones, so its history is
+/// built as a shared multi-model transcript.
+async fn is_multi_model(db: &SqlitePool, chat_id: &str) -> bool {
+    let zones: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM chat_zones WHERE chat_id = ?1")
+        .bind(chat_id)
+        .fetch_one(db)
+        .await
+        .unwrap_or(0);
+    if zones > 0 {
+        return true;
+    }
+    sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM messages WHERE chat_id = ?1 AND zone_id IS NOT NULL",
+    )
+    .bind(chat_id)
+    .fetch_one(db)
+    .await
+    .unwrap_or(0)
+        > 0
+}
+
+/// Everything prepended to a chat's history as its system message, labelled by
+/// what put it there.
+///
+/// Extracted so the context meter measures the same bytes the turn sends: a
+/// meter with its own idea of what the system prompt contains is a meter that
+/// goes stale the first time either side changes.
+pub async fn build_system_snippets(
     db: &SqlitePool,
     chat_id: &str,
     zone: &Zone,
-) -> AppResult<Vec<ChatMessage>> {
-    // Collect context snippets: project (if enabled) then enabled tags, then zone system prompt.
-    let mut snippets: Vec<String> = Vec::new();
+    chat: Option<&Chat>,
+) -> AppResult<Vec<(SnippetKind, String)>> {
+    let mut snippets: Vec<(SnippetKind, String)> = Vec::new();
 
-    let chat = sqlx::query_as::<_, crate::db::models::Chat>(&format!(
-        "SELECT {CHAT_COLS} FROM chats WHERE id = ?1"
-    ))
-    .bind(chat_id)
-    .fetch_optional(db)
-    .await?;
-
-    if let Some(ref c) = chat {
+    if let Some(c) = chat {
         // Project context
         if c.project_context_enabled {
             if let Some(ref pid) = c.project_id {
@@ -2026,7 +2083,9 @@ async fn build_message_history(
                 .await?
                 .flatten();
                 if let Some(s) = snippet {
-                    if !s.trim().is_empty() { snippets.push(s); }
+                    if !s.trim().is_empty() {
+                        snippets.push((SnippetKind::ProjectContext, s));
+                    }
                 }
             }
         }
@@ -2041,7 +2100,11 @@ async fn build_message_history(
         .bind(&c.id)
         .fetch_all(db)
         .await?;
-        snippets.extend(tag_snippets);
+        snippets.extend(
+            tag_snippets
+                .into_iter()
+                .map(|s| (SnippetKind::TagContext, s)),
+        );
     }
 
     // Skills catalog (Anthropic Agent Skills model): when this zone has the
@@ -2051,12 +2114,14 @@ async fn build_message_history(
     let zone_tool_ids: Vec<String> = serde_json::from_str(&zone.tools_enabled).unwrap_or_default();
     if zone_tool_ids.iter().any(|t| t == "skills") {
         if let Some(catalog) = crate::tools::skills::build_catalog(db).await? {
-            snippets.push(catalog);
+            snippets.push((SnippetKind::Skills, catalog));
         }
     }
 
     if let Some(sys) = &zone.system_prompt {
-        if !sys.trim().is_empty() { snippets.push(sys.clone()); }
+        if !sys.trim().is_empty() {
+            snippets.push((SnippetKind::ZonePrompt, sys.clone()));
+        }
     }
 
     // How the agentic loop works (0.9.6). A model that doesn't know it will be
@@ -2064,9 +2129,12 @@ async fn build_message_history(
     // user — which is exactly what stalls a long task halfway through. Only
     // zones that actually have tools get this; for the rest it's noise.
     if !zone_tool_ids.is_empty() {
-        snippets.push(crate::llm::continuity::multi_step_preamble(
-            max_tool_steps(db).await,
-            zone_tool_ids.iter().any(|t| t == "plan"),
+        snippets.push((
+            SnippetKind::Continuity,
+            crate::llm::continuity::multi_step_preamble(
+                max_tool_steps(db).await,
+                zone_tool_ids.iter().any(|t| t == "plan"),
+            ),
         ));
     }
 
@@ -2075,39 +2143,21 @@ async fn build_message_history(
     // roster so the leader knows which zones it can spawn.
     if zone.is_leader {
         if let Some(block) = build_leader_preamble(db, chat_id, zone).await? {
-            snippets.push(block);
+            snippets.push((SnippetKind::Leader, block));
         }
     }
 
     // Long-term memory (global → project → chat), injected each turn.
     if let Some(block) = crate::tools::memory::build_memory_block(db, chat_id).await? {
-        snippets.push(block);
+        snippets.push((SnippetKind::Memory, block));
     }
-
-    // Does this chat involve perspective zones (now, or historically)? If so we
-    // build a shared multi-model transcript; otherwise we keep the original
-    // single-zone history verbatim so ordinary chats are completely unaffected.
-    let persp_zone_count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM chat_zones WHERE chat_id = ?1")
-            .bind(chat_id)
-            .fetch_one(db)
-            .await
-            .unwrap_or(0);
-    let persp_msg_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM messages WHERE chat_id = ?1 AND zone_id IS NOT NULL",
-    )
-    .bind(chat_id)
-    .fetch_one(db)
-    .await
-    .unwrap_or(0);
-    let multi_model = persp_zone_count > 0 || persp_msg_count > 0;
 
     // In a multi-zone chat, tell this model which participant it is (and who the
     // others are) so it can read the labelled transcript correctly and answer as
     // itself on this turn.
-    if multi_model {
-        if let Some(identity) = build_identity_preamble(db, chat_id, chat.as_ref(), zone).await? {
-            snippets.push(identity);
+    if is_multi_model(db, chat_id).await {
+        if let Some(identity) = build_identity_preamble(db, chat_id, chat, zone).await? {
+            snippets.push((SnippetKind::Identity, identity));
         }
     }
 
@@ -2126,15 +2176,92 @@ async fn build_message_history(
         .await
         .unwrap_or(0);
         if history_chars as usize >= crate::tools::compact::COMPACT_HINT_CHARS {
-            snippets.push(crate::tools::compact::compact_hint(history_chars as usize));
+            snippets.push((
+                SnippetKind::CompactHint,
+                crate::tools::compact::compact_hint(history_chars as usize),
+            ));
         }
     }
 
+    Ok(snippets)
+}
+
+/// What a turn in this chat costs before anyone says anything: the system
+/// prompt it will be sent, and the tool schemas offered alongside it.
+pub struct TurnOverhead {
+    /// The system prompt, in the pieces that make it up.
+    pub snippets: Vec<(SnippetKind, String)>,
+    /// The tool definitions exactly as they go on the wire — the schemas are
+    /// most of what a well-equipped zone carries, and they are re-sent on every
+    /// single step, not once per turn.
+    pub tools_json: String,
+    pub tool_count: usize,
+}
+
+/// Measure a chat's fixed per-turn cost without running anything.
+///
+/// Built from the same functions the turn uses, so it can't drift from what is
+/// actually sent. A chat whose zone or provider no longer resolves reports no
+/// overhead rather than failing — the meter is a readout, not a gate.
+pub async fn turn_overhead(db: &SqlitePool, chat_id: &str) -> AppResult<TurnOverhead> {
+    let Ok((zone, _provider)) = effective_zone_and_provider(db, chat_id).await else {
+        return Ok(TurnOverhead { snippets: Vec::new(), tools_json: String::new(), tool_count: 0 });
+    };
+
+    let chat = sqlx::query_as::<_, crate::db::models::Chat>(&format!(
+        "SELECT {CHAT_COLS} FROM chats WHERE id = ?1"
+    ))
+    .bind(chat_id)
+    .fetch_optional(db)
+    .await?;
+    let snippets = build_system_snippets(db, chat_id, &zone, chat.as_ref()).await?;
+
+    let tool_ctx = load_tool_context(db, Some(chat_id)).await;
+    let mut tools = build_tools_for_zone(db, &zone, &tool_ctx).await;
+    // Project knowledge is offered independently of the zone's toolset, so it
+    // is appended after the build here exactly as it is in the turn.
+    if chat.as_ref().map_or(false, |c| c.knowledge_enabled) {
+        let scope = chat
+            .as_ref()
+            .and_then(|c| c.project_id.clone())
+            .unwrap_or_else(|| crate::knowledge::GLOBAL_KB_ID.to_string());
+        if crate::knowledge::has_index(db, &scope).await {
+            tools.push(crate::tools::knowledge::definition());
+        }
+    }
+
+    Ok(TurnOverhead {
+        tools_json: serde_json::to_string(&tools).unwrap_or_default(),
+        tool_count: tools.len(),
+        snippets,
+    })
+}
+
+async fn build_message_history(
+    db: &SqlitePool,
+    chat_id: &str,
+    zone: &Zone,
+) -> AppResult<Vec<ChatMessage>> {
+    let chat = sqlx::query_as::<_, crate::db::models::Chat>(&format!(
+        "SELECT {CHAT_COLS} FROM chats WHERE id = ?1"
+    ))
+    .bind(chat_id)
+    .fetch_optional(db)
+    .await?;
+
+    let snippets = build_system_snippets(db, chat_id, zone, chat.as_ref()).await?;
+    let multi_model = is_multi_model(db, chat_id).await;
+
     let mut out: Vec<ChatMessage> = Vec::new();
     if !snippets.is_empty() {
+        let joined = snippets
+            .iter()
+            .map(|(_, s)| s.as_str())
+            .collect::<Vec<_>>()
+            .join("\n\n");
         out.push(ChatMessage {
             role: "system".into(),
-            content: Some(MessageContent::Text(snippets.join("\n\n"))),
+            content: Some(MessageContent::Text(joined)),
             tool_calls: None,
             tool_call_id: None,
             name: None,

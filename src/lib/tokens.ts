@@ -5,6 +5,13 @@
  * are estimated from character length (~4 chars/token, the usual rule of
  * thumb). The same estimator is used for the per-message readout and the
  * whole-chat context meter so the two stay consistent.
+ *
+ * This measures **context**: how large the conversation is right now, which is
+ * what the next request will carry. It is not what a provider bills, and the
+ * two are far apart — every step of an agentic turn re-sends the whole context
+ * and is charged for it, so a fifty-step session is billed fifty contexts. What
+ * was actually sent is counted on each request as it goes out, in the backend
+ * (`llm::tokens`), and reaches the UI as `SessionUsage.spent`.
  */
 
 import type { ContentPart, Message, ToolCall } from "./types";

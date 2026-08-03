@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Gauge, Users } from "lucide-react";
+import { Gauge, Receipt, Users } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { formatTokens } from "@/lib/format";
@@ -62,8 +62,13 @@ function sessionMemberIds(chats: Chat[], chatId: string): Set<string> {
  * leader carrying 20k while six specialists carry a million between them used to
  * look identical to a quiet chat, in the one pane the user actually watches.
  *
- * Everything is estimated from character length (no exact tokenizer for
- * arbitrary local models), so it's a guide, not a billed count.
+ * All of that is **context**: how big the next request is, and whether it still
+ * fits. It is not what the provider charges for, and the meter used to imply it
+ * was — a session reading 1.1m turned up on a DeepSeek invoice at 32m, because
+ * every step of every turn re-sends the whole context and each step is billed
+ * for it. So spend is tracked separately now (0.9.13): counted on each request
+ * as it goes out, and taken from the provider's own usage block wherever there
+ * is one. Context is estimated and labelled as such; spend is measured.
  */
 export function ContextMeter({ chatId }: { chatId: string }) {
   const [open, setOpen] = useState(false);
@@ -101,6 +106,21 @@ export function ContextMeter({ chatId }: { chatId: string }) {
   const baseline = current?.overheadTokens ?? 0;
   const chatTotal = est.totalTokens + baseline;
 
+  // Spend, shown whenever anything has been sent — team or not. A single chat
+  // that ran a forty-step turn is exactly the case where the context reading and
+  // the invoice diverge, and it has no team row to explain the gap away.
+  const chatSpent = current?.spent ?? null;
+  const sessionSpent = usage?.spent ?? null;
+  const hasSpend = !!chatSpent && chatSpent.requests > 0;
+  // `lastInputTokens` is the one context figure in the popover that isn't
+  // reconstructed from stored messages — it was measured on the request as it
+  // went out, which is what makes it worth showing next to our estimate.
+  const measuredLast = chatSpent?.lastInputTokens ?? 0;
+  // Only "measured" if every request came back with real counts; a mix would
+  // otherwise be presented as if the provider had vouched for all of it.
+  const spendIsMeasured =
+    !!chatSpent && chatSpent.requests > 0 && chatSpent.reportedRequests >= chatSpent.requests;
+
   const hasTeam = useMemo(
     () => sessionMemberIds(chats, chatId).size > 1,
     [chats, chatId],
@@ -113,6 +133,12 @@ export function ContextMeter({ chatId }: { chatId: string }) {
     ? usage.totalTokens - (current?.messageTokens ?? 0) + est.totalTokens
     : null;
 
+  // The spend chip tracks whichever scope the context chip beside it is showing,
+  // so the two numbers on the button are always about the same set of chats. A
+  // chat that has sent nothing yet has no bill to show, only a context.
+  const scopedSpend = showTeam ? sessionSpent : chatSpent;
+  const buttonSpend = scopedSpend && scopedSpend.requests > 0 ? scopedSpend : null;
+
   if (messages.length === 0 && baseline === 0) return null;
 
   return (
@@ -120,11 +146,15 @@ export function ContextMeter({ chatId }: { chatId: string }) {
       <button
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
-        title={
+        title={[
           sessionTotal != null
-            ? "This chat's context, then the whole team's (estimated)"
-            : "Context this chat carries — conversation plus its per-turn baseline (estimated)"
-        }
+            ? "Context: this chat's, then the whole team's (estimated)"
+            : "Context this chat carries — conversation plus its per-turn baseline (estimated)",
+          buttonSpend &&
+            `Spent: ${formatTokens(buttonSpend.totalTokens)} over ${buttonSpend.requests} request(s). Every step of a turn re-sends the whole context and is billed for it, so this runs far ahead of the context figure.`,
+        ]
+          .filter(Boolean)
+          .join("\n\n")}
       >
         <Gauge size={12} />
         <span className="font-mono">{formatTokens(chatTotal)}</span>
@@ -133,6 +163,12 @@ export function ContextMeter({ chatId }: { chatId: string }) {
           <span className="ml-0.5 flex items-center gap-1 border-l border-[var(--color-border)] pl-1.5 text-[var(--color-accent)]">
             <Users size={11} />
             <span className="font-mono">{formatTokens(sessionTotal)}</span>
+          </span>
+        )}
+        {buttonSpend && (
+          <span className="ml-0.5 flex items-center gap-1 border-l border-[var(--color-border)] pl-1.5">
+            <Receipt size={11} />
+            <span className="font-mono">{formatTokens(buttonSpend.totalTokens)}</span>
           </span>
         )}
       </button>
@@ -162,7 +198,31 @@ export function ContextMeter({ chatId }: { chatId: string }) {
 
             <div className="mt-1 border-t border-[var(--color-border)] pt-1">
               <MeterRow label="Total" value={chatTotal} strong />
+              {measuredLast > 0 && (
+                <MeterRow label="Last request, measured" value={measuredLast} sub />
+              )}
             </div>
+
+            {hasSpend && chatSpent && (
+              <div className="mt-2 border-t border-[var(--color-border)] pt-2">
+                <div className="mb-1 flex items-baseline justify-between gap-3">
+                  <span className="font-medium text-[var(--color-text)]">
+                    Spent {spendIsMeasured ? "" : "(part est.)"}
+                  </span>
+                  <span className="text-[10px] text-[var(--color-text-muted)]">
+                    {chatSpent.requests} request{chatSpent.requests === 1 ? "" : "s"}
+                  </span>
+                </div>
+                <MeterRow label="Input, all requests" value={chatSpent.inputTokens} />
+                {chatSpent.cachedInputTokens > 0 && (
+                  <MeterRow label="of which cached" value={chatSpent.cachedInputTokens} sub />
+                )}
+                <MeterRow label="Output" value={chatSpent.outputTokens} />
+                <div className="mt-1 border-t border-[var(--color-border)] pt-1">
+                  <MeterRow label="Billed total" value={chatSpent.totalTokens} strong />
+                </div>
+              </div>
+            )}
 
             {showTeam && usage && (
               <div className="mt-2 border-t border-[var(--color-border)] pt-2">
@@ -199,15 +259,38 @@ export function ContextMeter({ chatId }: { chatId: string }) {
                 <div className="mt-1 border-t border-[var(--color-border)] pt-1">
                   <MeterRow label="Baselines" value={usage.overheadTokens} />
                   <MeterRow label="Conversations" value={usage.inputTokens + usage.outputTokens} />
-                  <MeterRow label="Session total" value={sessionTotal ?? 0} strong />
+                  <MeterRow label="Session context" value={sessionTotal ?? 0} strong />
+                  {sessionSpent && sessionSpent.requests > 0 && (
+                    <>
+                      <MeterRow label="Session spend" value={sessionSpent.totalTokens} strong />
+                      <MeterRow
+                        label={`over ${sessionSpent.requests} requests`}
+                        value={sessionSpent.cachedInputTokens}
+                        sub
+                        suffix=" cached"
+                      />
+                    </>
+                  )}
                 </div>
               </div>
             )}
 
             <div className="mt-1.5 text-[10px] leading-relaxed text-[var(--color-text-muted)]">
-              Estimated from text length — a guide, not an exact token count. The
-              baseline is re-sent on every step of a turn, not once.
+              Context is how big the next request is — estimated from text
+              length, so a guide rather than an exact count.
               {showTeam && " Each agent carries its own; only this chat's counts against this window."}
+              {hasSpend && chatSpent && (
+                <>
+                  {" "}
+                  Spend is a different, much larger number: every step of a turn
+                  re-sends the whole context and is billed for it, so{" "}
+                  {chatSpent.requests} requests cost far more than one context
+                  does.
+                  {spendIsMeasured
+                    ? " Those figures are the provider's own, not our estimate."
+                    : " This provider doesn't report token counts, so they're estimated too."}
+                </>
+              )}
             </div>
           </div>
         </>
@@ -221,12 +304,15 @@ function MeterRow({
   value,
   strong,
   sub,
+  suffix,
 }: {
   label: string;
   value: number;
   strong?: boolean;
   /** An indented component of the row above it. */
   sub?: boolean;
+  /** Qualifies the figure where the label alone can't, e.g. " cached". */
+  suffix?: string;
 }) {
   return (
     <div className={`flex items-baseline justify-between gap-3 ${sub ? "pl-3" : ""}`}>
@@ -239,6 +325,7 @@ function MeterRow({
         }`}
       >
         {formatTokens(value)}
+        {suffix}
       </span>
     </div>
   );

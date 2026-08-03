@@ -440,6 +440,32 @@ export interface AgentUsage {
   /** The system prompt by what put each piece there, largest first. */
   overheadParts: OverheadPart[];
   totalTokens: number;
+  /** What this chat has actually sent, measured on the requests themselves. */
+  spent: SpentUsage;
+}
+
+/**
+ * Tokens actually sent and received, accumulated one request at a time.
+ *
+ * Not the same quantity as the context figures above, and the difference is
+ * large: every step of an agentic turn re-sends the whole context, so a chat
+ * carrying 50k over ten steps has spent 500k. The context number answers "will
+ * this fit in the window"; this one answers "what did it cost".
+ */
+export interface SpentUsage {
+  /** API calls, not turns — one turn is many. */
+  requests: number;
+  /** How many of those carried the provider's own counts rather than our
+   *  estimate. Below `requests` means the totals are partly estimated. */
+  reportedRequests: number;
+  inputTokens: number;
+  /** Of `inputTokens`, the part served from the provider's prompt cache, which
+   *  bills at a fraction of the rate. */
+  cachedInputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  /** The most recent request's size — what the next one will carry. */
+  lastInputTokens: number;
 }
 
 /** Context carried by every chat in one sub-agent family. */
@@ -451,6 +477,8 @@ export interface SessionUsage {
   outputTokens: number;
   overheadTokens: number;
   totalTokens: number;
+  /** Every member's spend added up — the figure a provider's dashboard shows. */
+  spent: SpentUsage;
 }
 
 /** How a message queued mid-turn reaches the model (see commands::pending). */

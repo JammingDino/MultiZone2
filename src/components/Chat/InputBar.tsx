@@ -7,7 +7,13 @@ import { ModelCombobox } from "@/components/common/ModelCombobox";
 import { useDictation, MicButton, DictationMeter } from "@/components/Chat/useDictation";
 import type { InputPart, PendingMode } from "@/lib/types";
 import { renderPdfToJpegs, extractPdfText } from "@/lib/pdf";
-import { fileTextMarker, pdfImagesMarker, pdfTextMarker } from "@/lib/attachmentParts";
+import {
+  attachmentKind,
+  attachmentToParts,
+  readTextAttachment,
+  UnreadableFileError,
+  type PendingAttachment,
+} from "@/lib/attachFiles";
 import { resolveVisionCapable } from "@/lib/vision";
 import { resolveBaseModel, resolveBaseProvider } from "@/lib/baseZone";
 
@@ -23,14 +29,10 @@ const SMART_ZONE_ID = "__smart__";
 const OV_FIELD_CLS =
   "w-full rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs outline-none focus:border-[var(--color-accent)]";
 
-export interface PendingAttachment {
-  id: string;
-  fileName: string;
-  fileType: "image" | "pdf" | "text" | "other";
-  /** For image: single data URL. For PDF: array of page data URLs. For text: content string. */
-  payload: string | string[];
-  progress?: { page: number; total: number };
-}
+// Lives in `@/lib/attachFiles` now, with the classification and part-building
+// that has to agree with it. Re-exported because the home screen composer shares
+// this file's chip and preview components.
+export type { PendingAttachment };
 
 export interface InputBarHandle {
   addFiles: (files: FileList | File[]) => Promise<void>;
@@ -50,6 +52,9 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
   const [pending, setPending] = useState<PendingAttachment[]>([]);
   const [sending, setSending] = useState(false);
   const [previewId, setPreviewId] = useState<string | null>(null);
+  /** Why the last attempted attachment didn't stage. Shown until the next try —
+   *  a file that silently fails to attach is the bug this replaced. */
+  const [attachError, setAttachError] = useState<string | null>(null);
   const previewAtt = pending.find((a) => a.id === previewId) ?? null;
   const refreshChats = useApp((s) => s.refreshChats);
   const sendKey = useApp((s) => s.appSettings.sendKey);
@@ -220,11 +225,12 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
     // When the chosen model can't see images, extract PDF text directly (better
     // quality than OCR'ing rendered pages) regardless of the global pdfMode.
     const usePdfText = pdfMode === "text" || ocrFallback;
+    setAttachError(null);
     for (const file of list) {
-      const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+      const kind = attachmentKind(file);
       const id = crypto.randomUUID();
 
-      if (ext === "pdf") {
+      if (kind === "pdf") {
         const stub: PendingAttachment = {
           id,
           fileName: file.name,
@@ -255,23 +261,27 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
           console.error(e);
           setPending((p) => p.filter((a) => a.id !== id));
         }
-      } else if (["jpg", "jpeg", "png", "gif", "webp"].includes(ext)) {
+      } else if (kind === "image") {
         const dataUrl = await readFileAsDataUrl(file);
         setPending((p) => [
           ...p,
           { id, fileName: file.name, fileType: "image", payload: dataUrl },
         ]);
-      } else if (["txt", "md", "csv", "json", "rs", "ts", "js", "py", "log"].includes(ext)) {
-        const content = await file.text();
-        setPending((p) => [
-          ...p,
-          { id, fileName: file.name, fileType: "text", payload: content },
-        ]);
       } else {
-        setPending((p) => [
-          ...p,
-          { id, fileName: file.name, fileType: "other", payload: "" },
-        ]);
+        // Anything that isn't an image or a PDF is read as text — no extension
+        // allowlist, because the file the user picked is nearly always text and
+        // the list could never name every language and config format. A file
+        // that turns out to be binary is refused where they can see it.
+        try {
+          const content = await readTextAttachment(file);
+          setPending((p) => [
+            ...p,
+            { id, fileName: file.name, fileType: "text", payload: content },
+          ]);
+        } catch (e) {
+          if (e instanceof UnreadableFileError) setAttachError(e.message);
+          else { console.error(e); setAttachError(`Couldn't read ${file.name}.`); }
+        }
       }
     }
   }
@@ -301,28 +311,11 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
       }
 
       for (const att of pending) {
-        // Text files ride along as hidden parts, the same way PDF text does: the
-        // model gets the whole file, the chat shows a chip you can open. Inlining
-        // them into the visible turn buried a one-line question under a wall of
-        // README.
-        if (att.fileType === "text") {
-          parts.push({
-            type: "hidden_text",
-            text: fileTextMarker(att.fileName, att.payload as string),
-          });
-        } else if (att.fileType === "image") {
-          parts.push({ type: "image", data_url: att.payload as string });
-        } else if (att.fileType === "pdf") {
-          if (typeof att.payload === "string") {
-            parts.push({ type: "hidden_text", text: pdfTextMarker(att.fileName, att.payload) });
-          } else {
-            const pages = att.payload as string[];
-            parts.push({ type: "hidden_text", text: pdfImagesMarker(att.fileName, pages.length) });
-            for (const dataUrl of pages) {
-              parts.push({ type: "hidden_image", data_url: dataUrl });
-            }
-            api.savePdfAttachment(chatId, att.fileName, pages).catch(console.error);
-          }
+        parts.push(...attachmentToParts(att));
+        // The rendered pages are also kept as a stored attachment, so the chat
+        // can show them again without re-rendering the PDF.
+        if (att.fileType === "pdf" && Array.isArray(att.payload)) {
+          api.savePdfAttachment(chatId, att.fileName, att.payload).catch(console.error);
         }
       }
 
@@ -396,6 +389,19 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
     <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-2 sm:px-4 sm:py-3">
       <div className="mx-auto w-full max-w-3xl">
         {notice}
+        {attachError && (
+          <div className="mb-2 flex w-fit items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-600 dark:text-amber-400">
+            <FileText size={11} />
+            <span>{attachError}</span>
+            <button
+              onClick={() => setAttachError(null)}
+              className="opacity-60 hover:opacity-100"
+              title="Dismiss"
+            >
+              <X size={11} />
+            </button>
+          </div>
+        )}
         {pending.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2">
             {pending.map((att) => (

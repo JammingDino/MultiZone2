@@ -5,9 +5,14 @@ import * as api from "@/lib/tauri";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import type { InputPart, Zone } from "@/lib/types";
 import { renderPdfToJpegs, extractPdfText } from "@/lib/pdf";
-import { fileTextMarker, pdfImagesMarker, pdfTextMarker } from "@/lib/attachmentParts";
 import {
+  attachmentKind,
+  attachmentToParts,
+  readTextAttachment,
+  UnreadableFileError,
   type PendingAttachment,
+} from "@/lib/attachFiles";
+import {
   AttachmentChip,
   AttachmentPreview,
   readFileAsDataUrl,
@@ -67,6 +72,8 @@ export function HomeScreen() {
   });
   const [text, setText] = useState(homeScreenDraft);
   const [pending, setPending] = useState<PendingAttachment[]>([]);
+  /** Why the last attempted attachment didn't stage — see the input bar. */
+  const [attachError, setAttachError] = useState<string | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
   const previewAtt = pending.find((a) => a.id === previewId) ?? null;
   const [menuOpen, setMenuOpen] = useState(false);
@@ -178,11 +185,12 @@ export function HomeScreen() {
   async function handleFiles(files: FileList | File[] | null) {
     if (!files) return;
     const list = Array.from(files);
+    setAttachError(null);
     for (const file of list) {
-      const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+      const kind = attachmentKind(file);
       const id = crypto.randomUUID();
 
-      if (ext === "pdf") {
+      if (kind === "pdf") {
         const stub: PendingAttachment = {
           id,
           fileName: file.name,
@@ -211,23 +219,25 @@ export function HomeScreen() {
           console.error(e);
           setPending((p) => p.filter((a) => a.id !== id));
         }
-      } else if (["jpg", "jpeg", "png", "gif", "webp"].includes(ext)) {
+      } else if (kind === "image") {
         const dataUrl = await readFileAsDataUrl(file);
         setPending((p) => [
           ...p,
           { id, fileName: file.name, fileType: "image", payload: dataUrl },
         ]);
-      } else if (["txt", "md", "csv", "json", "rs", "ts", "js", "py", "log"].includes(ext)) {
-        const content = await file.text();
-        setPending((p) => [
-          ...p,
-          { id, fileName: file.name, fileType: "text", payload: content },
-        ]);
       } else {
-        setPending((p) => [
-          ...p,
-          { id, fileName: file.name, fileType: "other", payload: "" },
-        ]);
+        // Everything that isn't an image or a PDF is text — see the input bar,
+        // and `@/lib/attachFiles` for why there is no extension allowlist.
+        try {
+          const content = await readTextAttachment(file);
+          setPending((p) => [
+            ...p,
+            { id, fileName: file.name, fileType: "text", payload: content },
+          ]);
+        } catch (e) {
+          if (e instanceof UnreadableFileError) setAttachError(e.message);
+          else { console.error(e); setAttachError(`Couldn't read ${file.name}.`); }
+        }
       }
     }
   }
@@ -304,28 +314,13 @@ export function HomeScreen() {
     const joined = visibleTextParts.join("\n\n");
     if (joined) parts.push({ type: "text", text: joined });
 
+    // Rendered PDF pages are stored as attachments too, but only once the chat
+    // they belong to exists — so they are collected here and saved below.
     const pdfSaves: { fileName: string; pages: string[] }[] = [];
     for (const att of currentPending) {
-      // Same as the input bar: a text file is an attachment chip, not a wall of
-      // text pasted into the user's turn.
-      if (att.fileType === "text") {
-        parts.push({
-          type: "hidden_text",
-          text: fileTextMarker(att.fileName, att.payload as string),
-        });
-      } else if (att.fileType === "image") {
-        parts.push({ type: "image", data_url: att.payload as string });
-      } else if (att.fileType === "pdf") {
-        if (typeof att.payload === "string") {
-          parts.push({ type: "hidden_text", text: pdfTextMarker(att.fileName, att.payload) });
-        } else {
-          const pages = att.payload as string[];
-          parts.push({ type: "hidden_text", text: pdfImagesMarker(att.fileName, pages.length) });
-          for (const dataUrl of pages) {
-            parts.push({ type: "hidden_image", data_url: dataUrl });
-          }
-          pdfSaves.push({ fileName: att.fileName, pages });
-        }
+      parts.push(...attachmentToParts(att));
+      if (att.fileType === "pdf" && Array.isArray(att.payload)) {
+        pdfSaves.push({ fileName: att.fileName, pages: att.payload });
       }
     }
 
@@ -432,6 +427,18 @@ export function HomeScreen() {
 
         {/* Composer */}
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-2 shadow-sm focus-within:border-[var(--color-accent)]">
+          {attachError && (
+            <div className="mb-2 flex w-fit items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-600 dark:text-amber-400">
+              <span>{attachError}</span>
+              <button
+                onClick={() => setAttachError(null)}
+                className="opacity-60 hover:opacity-100"
+                title="Dismiss"
+              >
+                <X size={11} />
+              </button>
+            </div>
+          )}
           {pending.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-2 px-1 pt-1">
               {pending.map((att) => (

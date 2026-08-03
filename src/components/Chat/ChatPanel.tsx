@@ -416,16 +416,16 @@ import { claimSettingsDrop } from "@/lib/importSettings";
  * the point of the banner — a reply that arrives out of nowhere is confusing in
  * a way that a reply you were told to expect is not.
  *
- * It renders as a pill inside the composer's own column, the same shape as the
- * override / OCR-fallback notices. It used to be a full-width strip of its own,
- * which put a second horizontal rule a few pixels above the composer's and left
- * the text hanging off the left edge of the input box it belonged to.
+ * It renders as a pill centred over the composer's own column, the same shape as
+ * the override / OCR-fallback notices. It used to be a full-width strip of its
+ * own, which put a second horizontal rule a few pixels above the composer's and
+ * left the text hanging off the left edge of the input box it belonged to.
  */
 function SubchatBanner({ zone }: { zone: Zone | null }) {
   const Icon = zone ? getZoneIcon(zone.icon) : Eye;
   const color = zone?.accentColor ?? "var(--color-accent)";
   return (
-    <div className="mb-2 flex w-fit max-w-full items-center gap-2 rounded-full border border-[var(--color-border)] bg-[var(--color-panel)] py-1 pl-1 pr-3 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+    <div className="mx-auto mb-2 flex w-fit max-w-full items-center gap-2 rounded-full border border-[var(--color-border)] bg-[var(--color-panel)] py-1 pl-1 pr-3 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
       <span
         className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full"
         style={{ background: color }}

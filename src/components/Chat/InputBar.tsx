@@ -457,9 +457,13 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
             ))}
           </div>
         )}
-        {isStreaming && (
-          <div className="mb-2 flex w-fit max-w-full items-center gap-2 rounded-full border border-[var(--color-border)] bg-[var(--color-panel)] py-1 pl-3 pr-1 text-xs text-[var(--color-text-muted)]">
-            <span className="shrink-0">Still working — send this</span>
+        {/* Only once there is something to send: the choice between "now" and
+            "after" is about a message that exists. Shown on an empty composer it
+            was a permanent mid-turn fixture asking about nothing. Centred over
+            the composer so it reads as part of it. */}
+        {isStreaming && text.trim() !== "" && (
+          <div className="mx-auto mb-2 flex w-fit max-w-full items-center gap-2 rounded-full border border-[var(--color-border)] bg-[var(--color-panel)] py-1 pl-3 pr-1 text-xs text-[var(--color-text-muted)]">
+            <span className="shrink-0">Still working, send new message:</span>
             <QueueModeChip
               label="now"
               icon={<CornerDownRight size={10} />}

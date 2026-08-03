@@ -22,7 +22,8 @@ import {
 } from "@/lib/settingsBundle";
 import { pickBundleFile } from "@/lib/importSettings";
 import { type SkillSeed, serializeSkill, parseSkill } from "@/lib/skillFile";
-import type { DbStats, GlobalKbView, IndexSummary, KbDocument, McpServerView, McpTool, Provider, Skill, SkillPack } from "@/lib/types";
+import type { DbStats, GlobalKbView, IndexSummary, KbDocument, LifetimeUsage, McpServerView, McpTool, Provider, Skill, SkillPack } from "@/lib/types";
+import { formatCount, formatTokens } from "@/lib/format";
 
 type Tab = "providers" | "appearance" | "chat" | "voice" | "speech" | "search" | "skills" | "mcp" | "knowledge" | "memory" | "api" | "data";
 
@@ -2717,6 +2718,7 @@ function ApiTab() {
 function DataTab() {
   const [stats, setStats] = useState<DbStats | null>(null);
   const [loadingStats, setLoadingStats] = useState(false);
+  const [tokens, setTokens] = useState<LifetimeUsage | null>(null);
   const [resetStage, setResetStage] = useState<"idle" | "confirm" | "resetting">("idle");
 
   const appSettings = useApp((s) => s.appSettings);
@@ -2735,6 +2737,7 @@ function DataTab() {
   useEffect(() => {
     setLoadingStats(true);
     api.getDbStats().then(setStats).catch(console.error).finally(() => setLoadingStats(false));
+    api.lifetimeTokenUsage().then(setTokens).catch(console.error);
   }, []);
 
   /** Run a full re-mirror, surfacing a short status line. */
@@ -2822,6 +2825,48 @@ function DataTab() {
           </div>
         ) : null}
       </section>
+
+      {/* Lifetime token spend (0.9.14). The chat header's meter answers "what is
+          this conversation carrying"; this answers "what has all of it cost",
+          which is what the provider's bill is actually a total of. */}
+      {tokens && tokens.spent.requests > 0 && (
+        <section>
+          <h3 className="mb-1 text-sm font-medium">Token usage, all time</h3>
+          <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+            Every request this app has ever sent, counted as it went out and taken from the
+            provider's own figures wherever they were reported
+            {tokens.spent.reportedRequests < tokens.spent.requests &&
+              ` (${formatCount(tokens.spent.reportedRequests)} of ${formatCount(tokens.spent.requests)}; the rest are estimated)`}
+            . Chats you have since deleted are still counted — deleting a transcript doesn't
+            un-spend what it spent.
+          </p>
+          <div className="grid grid-cols-3 gap-2">
+            {([
+              ["Input", formatTokens(tokens.spent.inputTokens)],
+              ["Output", formatTokens(tokens.spent.outputTokens)],
+              ["Total", formatTokens(tokens.spent.totalTokens)],
+            ] as const).map(([label, value]) => (
+              <div key={label} className="rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3 text-center">
+                <div className="text-2xl font-semibold tabular-nums text-[var(--color-text)]">{value}</div>
+                <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">{label}</div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--color-text-muted)]">
+            <span>
+              {formatCount(tokens.spent.requests)} request{tokens.spent.requests === 1 ? "" : "s"}
+            </span>
+            <span>
+              across {formatCount(tokens.chats)} chat{tokens.chats === 1 ? "" : "s"}
+            </span>
+            {tokens.spent.cachedInputTokens > 0 && (
+              // Cached input bills at a fraction of the rate, so the raw total
+              // overstates the cost — often by most of it on agentic turns.
+              <span>{formatTokens(tokens.spent.cachedInputTokens)} of input served from cache</span>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* Markdown two-way sync (0.7.2) */}
       <section>

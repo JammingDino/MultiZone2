@@ -31,10 +31,12 @@
 //! accumulated per request as it happens by `llm::tokens` and taken from the
 //! provider's own `usage` block wherever one is available.
 //!
-//! `all_time` widens that last number to every chat that has ever run (0.9.14).
-//! Per-session spend answers "what is this costing"; nobody could answer "what
-//! has all of this cost" without opening every chat in turn and adding up by
-//! hand, which is the question a provider's monthly bill actually asks.
+//! [`lifetime_token_usage`] widens that last number to every chat that has ever
+//! run (0.9.14). Per-session spend answers "what is this costing"; nobody could
+//! answer "what has all of this cost" without opening every chat in turn and
+//! adding up by hand, which is the question a provider's monthly bill asks. It
+//! is a separate command because it belongs in a separate place — Settings →
+//! Data, with the other standing figures about the install.
 
 use serde::Serialize;
 use serde_json::Value;
@@ -182,9 +184,6 @@ pub struct SessionUsage {
     /// Every member's actual spend added up — the number that should match a
     /// provider's dashboard, where `total_tokens` never could.
     pub spent: SpentUsage,
-    /// The same measurement widened to every chat that has ever run, so the
-    /// meter can show this session against the lifetime total behind it.
-    pub all_time: LifetimeUsage,
 }
 
 /// Text and image content of one stored message, split the way the meter
@@ -292,6 +291,17 @@ async fn chat_overhead(
 }
 
 /// Every request the app has ever made, added up.
+///
+/// Lives in Settings → Data beside the row counts, not in the chat header: it is
+/// a standing figure about the install, and next to a live context meter it read
+/// as though it were something about *this* conversation.
+#[tauri::command]
+pub async fn lifetime_token_usage(state: State<'_, AppState>) -> AppResult<LifetimeUsage> {
+    lifetime_usage(&state.db).await
+}
+
+/// The command's body, over a plain pool so it can be exercised without an
+/// `AppState`.
 ///
 /// `last_input_tokens` is deliberately left at zero: summing the last request of
 /// four hundred chats produces a number that looks like a context and is not one.
@@ -430,7 +440,6 @@ pub async fn session_usage(db: &SqlitePool, chat_id: &str) -> AppResult<SessionU
         overhead_tokens: overhead_total,
         total_tokens: input_tokens + output_tokens + overhead_total,
         spent: spent_total,
-        all_time: lifetime_usage(db).await?,
     })
 }
 
@@ -670,9 +679,8 @@ mod tests {
         );
     }
 
-    /// The lifetime total counts chats this session has never heard of — that is
-    /// the whole point of it. A session's own spend is a slice of the bill, and
-    /// the meter now shows both so the slice can be read against the loaf.
+    /// The lifetime total counts chats no one session has heard of — that is the
+    /// whole point of it. A session's own spend is a slice of the bill.
     #[tokio::test]
     async fn all_time_spans_every_chat_not_just_this_session() {
         let db = fixture().await;
@@ -689,13 +697,14 @@ mod tests {
         crate::llm::tokens::record_request(&db, "other", "test-model", &measure, None).await;
         crate::llm::tokens::record_request(&db, "other", "test-model", &measure, None).await;
 
-        let usage = session_usage(&db, "c1").await.unwrap();
-        assert_eq!(usage.spent.requests, 1, "this session sent one");
-        assert_eq!(usage.all_time.spent.requests, 3, "the app sent three");
-        assert_eq!(usage.all_time.spent.input_tokens, 3_000);
-        assert_eq!(usage.all_time.chats, 2);
+        let session = session_usage(&db, "c1").await.unwrap();
+        let all = lifetime_usage(&db).await.unwrap();
+        assert_eq!(session.spent.requests, 1, "this session sent one");
+        assert_eq!(all.spent.requests, 3, "the app sent three");
+        assert_eq!(all.spent.input_tokens, 3_000);
+        assert_eq!(all.chats, 2);
         assert_eq!(
-            usage.all_time.spent.last_input_tokens, 0,
+            all.spent.last_input_tokens, 0,
             "summing every chat's last request would look like a context and isn't one",
         );
     }

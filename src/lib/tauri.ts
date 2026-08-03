@@ -14,6 +14,7 @@ import type {
   GlobalKbView,
   KbDocument,
   KnowledgeStatus,
+  LifetimeUsage,
   McpServer,
   McpServerView,
   Memory,
@@ -174,6 +175,13 @@ export const resetToolUsage = (zoneId?: string) =>
  */
 export const sessionContextUsage = (chatId: string) =>
   invoke<SessionUsage>("session_context_usage", { chatId });
+
+/**
+ * Every request this install has ever made, added up — including from chats
+ * since deleted. A standing figure, shown in Settings → Data rather than beside
+ * a live context meter, where it read as a fact about the current conversation.
+ */
+export const lifetimeTokenUsage = () => invoke<LifetimeUsage>("lifetime_token_usage");
 
 // Skills (global, on-demand catalog)
 export const listSkills = () => invoke<Skill[]>("list_skills");

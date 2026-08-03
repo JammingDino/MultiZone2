@@ -475,6 +475,9 @@ export interface SpentUsage {
  * has all of it cost", which is the question the provider's monthly bill asks
  * and which no per-chat figure could be added up into by hand. Counted from the
  * request ledger, so a deleted chat's spend stays in the total.
+ *
+ * A standing figure about the install rather than about a conversation, so it
+ * lives in Settings → Data, not in the chat header's context meter.
  */
 export interface LifetimeUsage {
   /** Chats that have ever sent a request, including since-deleted ones. */
@@ -493,8 +496,6 @@ export interface SessionUsage {
   totalTokens: number;
   /** Every member's spend added up — the figure a provider's dashboard shows. */
   spent: SpentUsage;
-  /** The same, widened to every chat that has ever run. */
-  allTime: LifetimeUsage;
 }
 
 /** How a message queued mid-turn reaches the model (see commands::pending). */

@@ -386,15 +386,29 @@ async fn inject_global_tool_config(
     // that can see them. For a vision-incapable one the tool extracts text
     // instead — the same call attachments make, and for the same reason:
     // extracting a PDF's own text beats OCR'ing a picture of the page.
-    let vision_capable = match vision_override(db, model).await.as_deref() {
+    let vision_capable = model_vision_capable(db, model).await;
+    let Some(obj) = zone_config.as_object_mut() else { return };
+    obj.insert("vision_capable".to_string(), Value::Bool(vision_capable));
+    // The language an image read falls back to OCR in, for the same zones.
+    if !vision_capable {
+        obj.insert("ocr_language".to_string(), Value::String(ocr_language(db).await));
+    }
+    if let Some(ws) = global_ws_cfg {
+        obj.insert("web_search".to_string(), ws.clone());
+    }
+}
+
+/// Can this model accept image input? The user's manual `visionOverrides` entry
+/// beats the name heuristic in both directions. One helper because the answer
+/// decides three separate things — whether images survive into the history,
+/// whether a PDF comes back as pages or text, and whether the tools even offer
+/// the model an image (see [`crate::tools::ToolContext::vision_capable`]) — and
+/// they must not disagree.
+pub(crate) async fn model_vision_capable(db: &SqlitePool, model: &str) -> bool {
+    match vision_override(db, model).await.as_deref() {
         Some("on") => true,
         Some("off") => false,
         _ => crate::ocr::is_vision_capable(model),
-    };
-    let Some(obj) = zone_config.as_object_mut() else { return };
-    obj.insert("vision_capable".to_string(), Value::Bool(vision_capable));
-    if let Some(ws) = global_ws_cfg {
-        obj.insert("web_search".to_string(), ws.clone());
     }
 }
 
@@ -1323,7 +1337,9 @@ async fn run_participant_turn(
         agent_driven,
     } = participant;
     let persp = persp_zone_id.as_deref();
-    let tool_ctx = load_tool_context(&ctx.db, Some(chat_id)).await;
+    // Rebuilt on a zone switch below: the new zone's model may not see images,
+    // and the tools it is offered have to match the model that will answer.
+    let mut tool_ctx = load_tool_context(&ctx.db, Some(chat_id), Some(&zone.model)).await;
 
     // The chat's stored primary zone, tracked so the `change_zone` tool can
     // switch zones mid-turn. Only the primary in plain Zone mode can switch.
@@ -1907,6 +1923,8 @@ async fn run_participant_turn(
                         current_zone_id = Some(new_zone_id.clone());
                         zone = new_zone;
                         provider = new_provider;
+                        tool_ctx.vision_capable =
+                            model_vision_capable(&ctx.db, &zone.model).await;
                         tools = build_tools_for_zone(&ctx.db, &zone, &tool_ctx).await;
                         if knowledge_available {
                             tools.push(crate::tools::knowledge::definition());
@@ -2253,7 +2271,7 @@ pub async fn turn_overhead(db: &SqlitePool, chat_id: &str) -> AppResult<TurnOver
     .await?;
     let snippets = build_system_snippets(db, chat_id, &zone, chat.as_ref()).await?;
 
-    let tool_ctx = load_tool_context(db, Some(chat_id)).await;
+    let tool_ctx = load_tool_context(db, Some(chat_id), Some(&zone.model)).await;
     let mut tools = build_tools_for_zone(db, &zone, &tool_ctx).await;
     // Project knowledge is offered independently of the zone's toolset, so it
     // is appended after the build here exactly as it is in the turn.
@@ -2866,7 +2884,7 @@ pub struct ToolFunctionInfo {
 
 #[tauri::command]
 pub async fn list_tool_functions(state: State<'_, AppState>) -> AppResult<Vec<ToolFunctionInfo>> {
-    let ctx = load_tool_context(&state.db, None).await;
+    let ctx = load_tool_context(&state.db, None, None).await;
     let mut out = Vec::new();
     for id in crate::tools::ALL_TOOL_IDS {
         for def in id.definitions(&ctx) {
@@ -2895,7 +2913,14 @@ fn parse_tool_result_content(result: &str) -> (Vec<ContentPart>, MessageContent)
     (vec![part], MessageContent::Text(result.to_string()))
 }
 
-async fn load_tool_context(db: &SqlitePool, chat_id: Option<&str>) -> ToolContext {
+/// Request-time state the tool definitions vary with. `model` is the one that
+/// will answer, so a tool can leave out an option that model can't use; `None`
+/// (the zone editor listing every shipped tool) describes the full surface.
+async fn load_tool_context(
+    db: &SqlitePool,
+    chat_id: Option<&str>,
+    model: Option<&str>,
+) -> ToolContext {
     let row: Option<(String,)> = sqlx::query_as("SELECT value FROM settings WHERE key = ?1")
         .bind("theme")
         .fetch_optional(db)
@@ -2907,7 +2932,11 @@ async fn load_tool_context(db: &SqlitePool, chat_id: Option<&str>) -> ToolContex
         Some(id) => resolve_working_dir(db, id).await.unwrap_or(None),
         None => None,
     };
-    ToolContext { theme, project_dir }
+    let vision_capable = match model {
+        Some(m) => model_vision_capable(db, m).await,
+        None => true,
+    };
+    ToolContext { theme, project_dir, vision_capable }
 }
 
 /// The directory the file tools are scoped to: the chat's project directory, or

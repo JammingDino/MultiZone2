@@ -36,42 +36,72 @@ fn image_mime(path: &Path) -> Option<&'static str> {
 /// tokens shipped twice per tool and ~19 times across the four file groups —
 /// roughly 1.3k tokens of pure duplication on every request from a zone with
 /// file access, before the model had read a single word of the conversation.
-pub fn definitions(project_dir: Option<&str>) -> Vec<Tool> {
+pub fn definitions(project_dir: Option<&str>, vision_capable: bool) -> Vec<Tool> {
     let hint = path_syntax_hint(project_dir);
     vec![
         Tool {
             tool_type: "function".into(),
             function: ToolFunction {
                 name: "read_file".into(),
-                description: format!(
-                    "Read a file. Use before editing, and whenever the answer depends on what a \
-                     file actually contains. Text is returned as a string; set `as_image` for an \
-                     image file to put it in your visual context. A `.pdf` is returned as page \
-                     images (so you see tables, figures and scans) — page 1 plus the document's \
-                     page count unless you ask for more via `pages`.\n\n{hint}"
-                ),
-                parameters: json!({
-                    "type": "object",
-                    "properties": {
-                        "path": { "type": "string" },
-                        "as_image": {
-                            "type": "boolean",
-                            "description": "Read png/jpg/gif/webp/bmp as an image instead of text. On a `.pdf` it renders the selected `pages` as images (the default anyway).",
-                            "default": false
+                // A text-only model is never offered the image options. Their
+                // presence in the schema reads as a capability, and taking one up
+                // used to end the turn on a provider error about image content it
+                // could not accept — so `as_image` and the page-render choice are
+                // simply absent, and the PDF sentence describes what it will
+                // actually get back.
+                description: if vision_capable {
+                    format!(
+                        "Read a file. Use before editing, and whenever the answer depends on what \
+                         a file actually contains. Text is returned as a string; set `as_image` \
+                         for an image file to put it in your visual context. A `.pdf` is returned \
+                         as page images (so you see tables, figures and scans) — page 1 plus the \
+                         document's page count unless you ask for more via `pages`.\n\n{hint}"
+                    )
+                } else {
+                    format!(
+                        "Read a file. Use before editing, and whenever the answer depends on what \
+                         a file actually contains. Text is returned as a string; a `.pdf` is \
+                         returned as extracted text — page 1 plus the document's page count \
+                         unless you ask for more via `pages`.\n\n{hint}"
+                    )
+                },
+                parameters: if vision_capable {
+                    json!({
+                        "type": "object",
+                        "properties": {
+                            "path": { "type": "string" },
+                            "as_image": {
+                                "type": "boolean",
+                                "description": "Read png/jpg/gif/webp/bmp as an image instead of text. On a `.pdf` it renders the selected `pages` as images (the default anyway).",
+                                "default": false
+                            },
+                            "pages": {
+                                "type": "string",
+                                "description": "PDF pages to read: \"3\", \"1-4,9\", or \"all\" (capped at 30 per call).",
+                                "default": "1"
+                            },
+                            "as_text": {
+                                "type": "boolean",
+                                "description": "Extract a PDF's text instead of rendering pages. Cheaper for long text-only documents; loses layout, figures and scans.",
+                                "default": false
+                            }
                         },
-                        "pages": {
-                            "type": "string",
-                            "description": "PDF pages to read: \"3\", \"1-4,9\", or \"all\" (capped at 30 per call).",
-                            "default": "1"
+                        "required": ["path"]
+                    })
+                } else {
+                    json!({
+                        "type": "object",
+                        "properties": {
+                            "path": { "type": "string" },
+                            "pages": {
+                                "type": "string",
+                                "description": "PDF pages to read: \"3\", \"1-4,9\", or \"all\" (capped at 30 per call).",
+                                "default": "1"
+                            }
                         },
-                        "as_text": {
-                            "type": "boolean",
-                            "description": "Extract a PDF's text instead of rendering pages. Cheaper for long text-only documents; loses layout, figures and scans.",
-                            "default": false
-                        }
-                    },
-                    "required": ["path"]
-                }),
+                        "required": ["path"]
+                    })
+                },
             },
         },
         Tool {
@@ -533,11 +563,25 @@ pub async fn read_file(
         .map(|s| s.eq_ignore_ascii_case("pdf"))
         .unwrap_or(false);
 
+    // Whether the answering model can receive an image at all. A zone that can't
+    // never gets image parts back from this tool — sending them ends the turn on
+    // a provider error instead of an answer (see `inject_global_tool_config`).
+    let can_see = zone_config
+        .get("vision_capable")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+
     // `as_image` on a PDF is the model asking to *see* the document, which is
     // what the PDF branch below already does — page images. So only non-PDFs
     // take the single-image path; a PDF falls through and is rasterized.
-    if as_image && !is_pdf {
-        let mime = match image_mime(&p) {
+    //
+    // An image file reaches this path unasked when the model can't see: reading
+    // a PNG's bytes as text is mojibake, and OCR is the honest answer for a
+    // model whose only channel is text — the same fallback an attached image
+    // gets (see `build_message_history`).
+    let image_mime = image_mime(&p);
+    if !is_pdf && (as_image || (!can_see && image_mime.is_some())) {
+        let mime = match image_mime {
             Some(m) => m,
             None => {
                 return Ok(json!({
@@ -561,6 +605,26 @@ pub async fn read_file(
         }
         let b64 = STANDARD.encode(&bytes);
         let data_url = format!("data:{};base64,{}", mime, b64);
+        if !can_see {
+            let path_str = p.to_string_lossy().to_string();
+            let lang = zone_config
+                .get("ocr_language")
+                .and_then(|v| v.as_str())
+                .unwrap_or("eng")
+                .to_string();
+            let text = crate::ocr::ocr_data_url(data_url, lang).await;
+            return Ok(json!({
+                "ref": 1,
+                "path": path_str,
+                "source": path_str,
+                "content": text.unwrap_or_default(),
+                "note": "The active model can't accept images, so this image was read as \
+                         OCR-extracted text. Empty content means no text was found in it — \
+                         describe that limit rather than guessing at what the image shows.",
+                "citation_instructions": READ_FILE_CITATION,
+            })
+            .to_string());
+        }
         return Ok(serde_json::to_string(&json!([
             { "type": "text", "text": format!("Image file: {}", p.to_string_lossy()) },
             { "type": "image_url", "image_url": { "url": data_url } }
@@ -1752,7 +1816,7 @@ mod tests {
     #[test]
     fn tool_descriptions_name_the_working_directory() {
         let dir = r"F:\Development\MultiZone2";
-        let defs = definitions(Some(dir));
+        let defs = definitions(Some(dir), true);
         let create = defs.iter().find(|t| t.function.name == "create_file").unwrap();
 
         // The model needs the working directory spelled out somewhere to write a
@@ -1769,8 +1833,32 @@ mod tests {
         );
 
         // With no working directory set, the wording must not claim one.
-        let defs = definitions(None);
+        let defs = definitions(None, true);
         let create = defs.iter().find(|t| t.function.name == "create_file").unwrap();
         assert!(create.function.description.contains("allowed roots"));
+    }
+
+    /// A model that can't accept images is never *offered* one: `as_image` is
+    /// absent from the schema rather than present and fatal. A model reads an
+    /// argument it can see as something it may use, and using this one ended the
+    /// turn on a provider error about image content it could not accept.
+    #[test]
+    fn text_only_models_are_not_offered_image_reads() {
+        let defs = definitions(Some(r"F:\Development\MultiZone2"), false);
+        let read = defs.iter().find(|t| t.function.name == "read_file").unwrap();
+        let props = &read.function.parameters["properties"];
+
+        assert!(props["as_image"].is_null(), "as_image offered to a text-only model: {props}");
+        assert!(!read.function.description.contains("as_image"));
+        assert!(
+            !read.function.description.contains("page images"),
+            "a text-only model is promised page images it can't receive",
+        );
+
+        // …and the vision-capable definition still offers both.
+        let defs = definitions(Some(r"F:\Development\MultiZone2"), true);
+        let read = defs.iter().find(|t| t.function.name == "read_file").unwrap();
+        assert!(read.function.parameters["properties"]["as_image"].is_object());
+        assert!(read.function.description.contains("as_image"));
     }
 }

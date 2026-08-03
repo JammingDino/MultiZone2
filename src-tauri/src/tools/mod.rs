@@ -90,6 +90,11 @@ pub struct ToolContext {
     /// their descriptions so the model writes a path that resolves on the first
     /// try instead of learning the shape from a scope error.
     pub project_dir: Option<String>,
+    /// Whether the answering model accepts image input (0.9.13). A tool that can
+    /// return an image only offers that option to a model that can receive one —
+    /// otherwise the request fails at the provider, which the model reads as the
+    /// tool being broken rather than as a capability it never had.
+    pub vision_capable: bool,
 }
 
 impl Default for ToolContext {
@@ -97,6 +102,7 @@ impl Default for ToolContext {
         Self {
             theme: ThemePalette::dark("#4f9cf9".to_string()),
             project_dir: None,
+            vision_capable: true,
         }
     }
 }
@@ -225,7 +231,9 @@ impl ToolId {
             Self::SmartFetch => vec![smart_fetch::definition()],
             Self::SmartCrawl => vec![smart_crawl::definition()],
             Self::CodeExec => vec![code_exec::definition()],
-            Self::FileSystem => filesystem::definitions(ctx.project_dir.as_deref()),
+            Self::FileSystem => {
+                filesystem::definitions(ctx.project_dir.as_deref(), ctx.vision_capable)
+            }
             Self::RenderGraph => render_graph::definitions(ctx),
             Self::AskUser => vec![ask_user::definition()],
             Self::ManageTags => vec![tags::definition()],

@@ -2359,6 +2359,15 @@ async fn build_message_history(
         }
     }
 
+    // A tool result whose call is no longer in the history is fatal, not
+    // cosmetic: the provider rejects the whole request ("Messages with role
+    // 'tool' must be a response to a preceding message with 'tool_calls'"), so
+    // one orphan ends every remaining turn in the chat. Anything that removes a
+    // message can leave one behind — a compaction cutoff, a deleted turn — so
+    // the guard lives here, at the one point every request is assembled, rather
+    // than next to any single cause.
+    drop_orphan_tool_messages(&mut rows);
+
     // Find the last user message so we can downgrade images in earlier turns.
     // Qwen2-VL tokenises images at native resolution (~700-1000 tokens each);
     // with N images accumulated over K turns we'd otherwise pay a growing
@@ -2661,6 +2670,36 @@ async fn build_identity_preamble(
     );
 
     Ok(Some(text))
+}
+
+/// Drop `tool` messages that no surviving assistant message called for.
+///
+/// Only the `tool` side is repaired here. The mirror case — an assistant message
+/// whose calls never got results, which a cancelled turn can leave behind — is a
+/// different provider complaint and needs a different answer (a stand-in result
+/// rather than a deletion), so it isn't quietly folded into this.
+fn drop_orphan_tool_messages(rows: &mut Vec<Message>) {
+    let mut called: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for m in rows.iter() {
+        let Some(raw) = m.tool_calls.as_deref() else { continue };
+        if let Ok(calls) = serde_json::from_str::<Vec<ToolCall>>(raw) {
+            called.extend(calls.into_iter().map(|c| c.id));
+        }
+    }
+    rows.retain(|m| {
+        if m.role != "tool" {
+            return true;
+        }
+        let kept = m.tool_call_id.as_ref().is_some_and(|id| called.contains(id));
+        if !kept {
+            tracing::warn!(
+                "dropping orphaned tool message {} (call {:?} is not in the history)",
+                m.id,
+                m.tool_call_id,
+            );
+        }
+        kept
+    });
 }
 
 /// Builds a shared, multi-model transcript for perspective chats and appends it
@@ -2971,4 +3010,48 @@ async fn resolve_working_dir(db: &SqlitePool, chat_id: &str) -> AppResult<Option
                 .filter(|s| !s.trim().is_empty())
                 .map(String::from)
         }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn msg(id: &str, role: &str, tool_calls: Option<&str>, tool_call_id: Option<&str>) -> Message {
+        Message {
+            id: id.into(),
+            chat_id: "c1".into(),
+            role: role.into(),
+            content: "[]".into(),
+            tool_calls: tool_calls.map(str::to_string),
+            tool_call_id: tool_call_id.map(str::to_string),
+            reasoning: None,
+            zone_id: None,
+            active_zone_id: None,
+            edited: false,
+            created_at: 0,
+        }
+    }
+
+    /// The shape a compaction cutoff used to leave behind: the tool result
+    /// survives, the assistant message that called for it does not. Sent as-is,
+    /// the provider rejects the whole request, so every later turn in that chat
+    /// failed too.
+    #[test]
+    fn orphaned_tool_results_are_dropped() {
+        let calls = r#"[{"id":"call_1","type":"function","function":{"name":"read_file","arguments":"{}"}}]"#;
+        let mut rows = vec![
+            msg("m1", "tool", None, Some("call_0")), // its call was compacted away
+            msg("m2", "user", None, None),
+            msg("m3", "assistant", Some(calls), None),
+            msg("m4", "tool", None, Some("call_1")), // answered by m3
+        ];
+
+        drop_orphan_tool_messages(&mut rows);
+
+        assert_eq!(
+            rows.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            ["m2", "m3", "m4"],
+            "only the tool result with no surviving caller should be dropped",
+        );
+    }
 }

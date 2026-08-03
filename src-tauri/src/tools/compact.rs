@@ -72,22 +72,40 @@ pub async fn run(args: &Value, db: &SqlitePool, chat_id: &str) -> AppResult<Stri
         .to_string());
     }
 
-    // Cut off at the newest message that exists right now. Everything at or
-    // before it is what the summary stands in for; this turn's own messages are
-    // written after the tool call returns, so they survive into the next turn.
-    let cutoff: Option<i64> =
-        sqlx::query_scalar("SELECT MAX(created_at) FROM messages WHERE chat_id = ?1")
-            .bind(chat_id)
-            .fetch_one(db)
-            .await
-            .unwrap_or(None);
+    // Cut off at the newest message that isn't an assistant turn holding tool
+    // calls. That message and everything before it is what the summary stands in
+    // for.
+    //
+    // The cutoff must never land *on* a message with `tool_calls`, because the
+    // tool results answering it are written later and would survive into the
+    // next turn without the call they answer — which every provider rejects
+    // outright ("Messages with role 'tool' must be a response to a preceding
+    // message with 'tool_calls'"), permanently, since the cutoff is stored.
+    //
+    // This call is the live example: the assistant message carrying it is
+    // already on disk (it is written before its tools run), so it is the newest
+    // row right now, and its own result lands a few milliseconds after this
+    // returns. Skipping past it keeps the pair together above the cutoff.
+    //
+    // Scoped to the primary conversation, because that is the only history the
+    // cutoff is ever applied to (`build_message_history` filters perspective
+    // messages out first, and a multi-model chat never sees the cutoff at all).
+    let cutoff: Option<i64> = sqlx::query_scalar(
+        "SELECT MAX(created_at) FROM messages
+         WHERE chat_id = ?1 AND zone_id IS NULL
+           AND NOT (role = 'assistant' AND tool_calls IS NOT NULL)",
+    )
+    .bind(chat_id)
+    .fetch_one(db)
+    .await
+    .unwrap_or(None);
     let cutoff = match cutoff {
         Some(c) => c,
         None => return Ok(json!({ "error": "nothing to compact — this chat has no messages yet" }).to_string()),
     };
 
     let compacted: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM messages WHERE chat_id = ?1 AND created_at <= ?2",
+        "SELECT COUNT(*) FROM messages WHERE chat_id = ?1 AND zone_id IS NULL AND created_at <= ?2",
     )
     .bind(chat_id)
     .bind(cutoff)
@@ -159,4 +177,80 @@ pub fn compact_hint(approx_chars: usize) -> String {
          start falling out of your context window.",
         approx_chars / 4 / 1000
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    async fn pool_with_chat() -> sqlx::SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        sqlx::query("INSERT INTO chats (id, title, created_at, updated_at) VALUES ('c1','t',0,0)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool
+    }
+
+    async fn insert(pool: &sqlx::SqlitePool, id: &str, role: &str, calls: Option<&str>, at: i64) {
+        sqlx::query(
+            "INSERT INTO messages (id, chat_id, role, content, tool_calls, created_at)
+             VALUES (?1, 'c1', ?2, '[]', ?3, ?4)",
+        )
+        .bind(id)
+        .bind(role)
+        .bind(calls)
+        .bind(at)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    /// The cutoff must not land on the assistant message carrying this very
+    /// call. That message is already on disk when the tool runs — it is written
+    /// before its tools execute — while the result answering it is written a few
+    /// milliseconds later. A cutoff of "the newest message right now" therefore
+    /// dropped the call and kept its answer, and the provider rejected every
+    /// later turn in the chat with "Messages with role 'tool' must be a response
+    /// to a preceding message with 'tool_calls'".
+    #[tokio::test]
+    async fn the_cutoff_never_splits_the_turn_that_compacts() {
+        let pool = pool_with_chat().await;
+        let calls = r#"[{"id":"call_1","type":"function","function":{"name":"compact_context","arguments":"{}"}}]"#;
+        insert(&pool, "m1", "user", None, 100).await;
+        insert(&pool, "m2", "assistant", Some(calls), 200).await;
+        insert(&pool, "m3", "tool", None, 300).await;
+        insert(&pool, "m4", "assistant", None, 400).await;
+        insert(&pool, "m5", "user", None, 500).await;
+        // …and the turn now in flight: its result does not exist yet.
+        insert(&pool, "m6", "assistant", Some(calls), 600).await;
+
+        let summary = "x".repeat(super::MIN_SUMMARY_CHARS + 1);
+        let out = super::run(&serde_json::json!({ "summary": summary }), &pool, "c1")
+            .await
+            .unwrap();
+        assert!(out.contains("\"ok\":true"), "{out}");
+
+        let cutoff: i64 =
+            sqlx::query_scalar("SELECT context_summary_through FROM chats WHERE id = 'c1'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(cutoff, 500, "the cutoff must stop at the last message before the live turn");
+
+        // What the next turn's history keeps: the compacting turn, whole.
+        let kept: Vec<String> = sqlx::query_scalar(
+            "SELECT id FROM messages WHERE created_at > ?1 ORDER BY created_at",
+        )
+        .bind(cutoff)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(kept, ["m6"], "the call that compacted must survive to answer its own result");
+    }
 }

@@ -18,6 +18,10 @@ import { useTts } from "@/store/tts";
  * `cancelKey` cancels any in-progress recording when it changes — InputBar
  * passes the chat id so switching chats stops a recording left running — while
  * omitting it (HomeScreen) cancels only on unmount.
+ *
+ * `taRef` is any text field, not only a textarea: the ask_user card (0.9.13)
+ * dictates into a single-line `<input>`, and only `selectionStart`/`value` are
+ * read from it.
  */
 export function useDictation({
   taRef,
@@ -25,7 +29,7 @@ export function useDictation({
   cancelKey,
   onCommit,
 }: {
-  taRef: RefObject<HTMLTextAreaElement | null>;
+  taRef: RefObject<HTMLTextAreaElement | HTMLInputElement | null>;
   setText: Dispatch<SetStateAction<string>>;
   cancelKey?: string;
   /** Fired with the final transcript once a recording is transcribed. Used by

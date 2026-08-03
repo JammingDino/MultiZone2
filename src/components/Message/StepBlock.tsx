@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import {
   ChevronRight,
   ChevronDown,
@@ -10,6 +10,7 @@ import {
   Loader2,
   HelpCircle,
   Send,
+  X,
 } from "lucide-react";
 import type { Step, ToolStep, ThinkingStep } from "@/lib/grouping";
 import { analyzeToolStep } from "@/lib/stepSummary";
@@ -20,6 +21,7 @@ import { SavedFileChip } from "@/components/Renderers/SavedFileChip";
 import { PlanBlock, toPlanData } from "@/components/Renderers/PlanBlock";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
+import { useDictation, MicButton, DictationMeter } from "@/components/Chat/useDictation";
 
 function prettyJson(s: string): string {
   try {
@@ -421,9 +423,19 @@ export function AskUserCard({
   const opts = q.options ?? [];
   const currentAnswer = answers[idx] ?? "";
 
-  function setAnswer(val: string) {
-    setAnswers((prev) => prev.map((a, i) => (i === idx ? val : a)));
-  }
+  // Shaped like a useState setter so `useDictation` can splice a transcript into
+  // whatever is already typed. `idx` is the one from the render that stopped the
+  // recording, so a transcript lands in the question that is on screen.
+  const setAnswer: Dispatch<SetStateAction<string>> = (val) => {
+    setAnswers((prev) =>
+      prev.map((a, i) => (i === idx ? (typeof val === "function" ? val(a) : val) : a)),
+    );
+  };
+
+  // Dictation (0.9.13): a question is asked mid-conversation, and the answer is
+  // as speakable as anything typed in the composer — so the same mic lives here.
+  const answerRef = useRef<HTMLInputElement>(null);
+  const dictation = useDictation({ taRef: answerRef, setText: setAnswer, cancelKey: chatId });
 
   async function submit() {
     if (sent || submitting || isStreaming) return;
@@ -513,23 +525,46 @@ export function AskUserCard({
         </div>
       )}
 
-      {/* Free text input */}
+      {/* Free text input — type it or say it */}
       {allowFreeText && (
-        <input
-          value={currentAnswer}
-          onChange={(e) => setAnswer(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              if (total === 1) submit();
-              else if (isLast && currentAnswer.trim()) submit();
-              else if (currentAnswer.trim()) setIdx((v) => v + 1);
-            }
-          }}
-          placeholder={sent ? "Answer sent…" : opts.length ? "Or type your own answer…" : "Type your answer…"}
-          disabled={sent || submitting || isStreaming}
-          className="mb-3 w-full rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-sm outline-none focus:border-[var(--color-accent)] disabled:opacity-50"
-          autoFocus
-        />
+        <>
+          <DictationMeter dictation={dictation} />
+          {dictation.voiceError && (
+            <div className="mb-2 flex w-fit items-center gap-1.5 rounded-full border border-red-500/40 bg-red-500/10 px-2.5 py-1 text-xs text-red-600 dark:text-red-400">
+              <span>{dictation.voiceError}</span>
+              <button
+                onClick={dictation.dismissVoiceError}
+                className="hover:text-[var(--color-text)]"
+                title="Dismiss"
+              >
+                <X size={11} />
+              </button>
+            </div>
+          )}
+          <div className="mb-3 flex items-center gap-1 rounded border border-[var(--color-border)] bg-[var(--color-bg)] pr-1 focus-within:border-[var(--color-accent)]">
+            <input
+              ref={answerRef}
+              value={currentAnswer}
+              onChange={(e) => setAnswer(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  if (total === 1) submit();
+                  else if (isLast && currentAnswer.trim()) submit();
+                  else if (currentAnswer.trim()) setIdx((v) => v + 1);
+                }
+              }}
+              placeholder={sent ? "Answer sent…" : opts.length ? "Or type your own answer…" : "Type your answer…"}
+              disabled={sent || submitting || isStreaming}
+              className="min-w-0 flex-1 bg-transparent px-2 py-1 text-sm outline-none disabled:opacity-50"
+              autoFocus
+            />
+            <MicButton
+              dictation={dictation}
+              disabled={sent || submitting || isStreaming}
+              size={14}
+            />
+          </div>
+        </>
       )}
 
       {/* Navigation row */}

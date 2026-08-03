@@ -30,6 +30,11 @@
 //! session is billed fifty times over. `spent` carries that second number,
 //! accumulated per request as it happens by `llm::tokens` and taken from the
 //! provider's own `usage` block wherever one is available.
+//!
+//! `all_time` widens that last number to every chat that has ever run (0.9.14).
+//! Per-session spend answers "what is this costing"; nobody could answer "what
+//! has all of this cost" without opening every chat in turn and adding up by
+//! hand, which is the question a provider's monthly bill actually asks.
 
 use serde::Serialize;
 use serde_json::Value;
@@ -144,6 +149,22 @@ impl SpentUsage {
     }
 }
 
+/// Everything the app has ever sent, across every chat (0.9.14).
+///
+/// The session figures answer "what is this conversation costing"; a user who
+/// runs a dozen sessions a day has no way to add those up by opening each one,
+/// and the provider's dashboard is the only place the real number lives. This is
+/// that number, kept locally: one sum over `chat_usage`, which has no foreign key
+/// to `chats` precisely so a deleted chat's spend stays counted — money spent
+/// doesn't become unspent when the transcript is tidied away.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LifetimeUsage {
+    /// Chats that have ever sent a request, including deleted ones.
+    pub chats: i64,
+    pub spent: SpentUsage,
+}
+
 /// Every chat in one sub-agent family, plus the totals across them.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -161,6 +182,9 @@ pub struct SessionUsage {
     /// Every member's actual spend added up — the number that should match a
     /// provider's dashboard, where `total_tokens` never could.
     pub spent: SpentUsage,
+    /// The same measurement widened to every chat that has ever run, so the
+    /// meter can show this session against the lifetime total behind it.
+    pub all_time: LifetimeUsage,
 }
 
 /// Text and image content of one stored message, split the way the meter
@@ -265,6 +289,39 @@ async fn chat_overhead(
 
     let tools_tokens = estimate_tokens(overhead.tools_json.chars().count() as i64);
     Ok((system_tokens, tools_tokens, overhead.tool_count as i64, parts))
+}
+
+/// Every request the app has ever made, added up.
+///
+/// `last_input_tokens` is deliberately left at zero: summing the last request of
+/// four hundred chats produces a number that looks like a context and is not one.
+pub async fn lifetime_usage(db: &SqlitePool) -> AppResult<LifetimeUsage> {
+    // COALESCE because SUM over no rows is NULL, and a fresh install has spent
+    // nothing rather than an unknown amount.
+    let row: (i64, i64, i64, i64, i64, i64) = sqlx::query_as(
+        "SELECT COUNT(*),
+                COALESCE(SUM(requests), 0),
+                COALESCE(SUM(reported_requests), 0),
+                COALESCE(SUM(input_tokens), 0),
+                COALESCE(SUM(cached_input_tokens), 0),
+                COALESCE(SUM(output_tokens), 0)
+           FROM chat_usage",
+    )
+    .fetch_one(db)
+    .await?;
+
+    Ok(LifetimeUsage {
+        chats: row.0,
+        spent: SpentUsage {
+            requests: row.1,
+            reported_requests: row.2,
+            input_tokens: row.3,
+            cached_input_tokens: row.4,
+            output_tokens: row.5,
+            total_tokens: row.3 + row.5,
+            last_input_tokens: 0,
+        },
+    })
 }
 
 /// Context carried by every chat in `chat_id`'s sub-agent session.
@@ -373,6 +430,7 @@ pub async fn session_usage(db: &SqlitePool, chat_id: &str) -> AppResult<SessionU
         overhead_tokens: overhead_total,
         total_tokens: input_tokens + output_tokens + overhead_total,
         spent: spent_total,
+        all_time: lifetime_usage(db).await?,
     })
 }
 
@@ -610,6 +668,63 @@ mod tests {
             usage.spent.reported_requests, 0,
             "a provider that reports nothing leaves these estimated, and says so",
         );
+    }
+
+    /// The lifetime total counts chats this session has never heard of — that is
+    /// the whole point of it. A session's own spend is a slice of the bill, and
+    /// the meter now shows both so the slice can be read against the loaf.
+    #[tokio::test]
+    async fn all_time_spans_every_chat_not_just_this_session() {
+        let db = fixture().await;
+        sqlx::query(
+            "INSERT INTO chats (id, title, zone_id, created_at, updated_at)
+             VALUES ('other', 'unrelated', 'z1', 2, 2)",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+
+        let measure = crate::llm::tokens::RequestMeasure { input_tokens: 1_000, ..Default::default() };
+        crate::llm::tokens::record_request(&db, "c1", "test-model", &measure, None).await;
+        crate::llm::tokens::record_request(&db, "other", "test-model", &measure, None).await;
+        crate::llm::tokens::record_request(&db, "other", "test-model", &measure, None).await;
+
+        let usage = session_usage(&db, "c1").await.unwrap();
+        assert_eq!(usage.spent.requests, 1, "this session sent one");
+        assert_eq!(usage.all_time.spent.requests, 3, "the app sent three");
+        assert_eq!(usage.all_time.spent.input_tokens, 3_000);
+        assert_eq!(usage.all_time.chats, 2);
+        assert_eq!(
+            usage.all_time.spent.last_input_tokens, 0,
+            "summing every chat's last request would look like a context and isn't one",
+        );
+    }
+
+    /// `chat_usage` has no foreign key to `chats`, so deleting a conversation
+    /// doesn't un-spend what it spent. A lifetime total that shrank when you
+    /// tidied up would be worse than no lifetime total.
+    #[tokio::test]
+    async fn all_time_survives_the_chat_being_deleted() {
+        let db = fixture().await;
+        let measure = crate::llm::tokens::RequestMeasure { input_tokens: 7_000, ..Default::default() };
+        crate::llm::tokens::record_request(&db, "c1", "test-model", &measure, None).await;
+        crate::llm::tokens::record_request(&db, "gone", "test-model", &measure, None).await;
+        sqlx::query("DELETE FROM chats WHERE id = 'gone'").execute(&db).await.unwrap();
+
+        let all = lifetime_usage(&db).await.unwrap();
+        assert_eq!(all.spent.requests, 2);
+        assert_eq!(all.spent.input_tokens, 14_000);
+    }
+
+    /// A fresh install has spent nothing — SUM over no rows is NULL, and NULL
+    /// must not reach the frontend as a missing figure.
+    #[tokio::test]
+    async fn all_time_is_zero_before_anything_is_sent() {
+        let db = fixture().await;
+        let all = lifetime_usage(&db).await.unwrap();
+        assert_eq!(all.chats, 0);
+        assert_eq!(all.spent.requests, 0);
+        assert_eq!(all.spent.total_tokens, 0);
     }
 
     /// The frontend estimator is the reference: ~4 chars a token, never zero for

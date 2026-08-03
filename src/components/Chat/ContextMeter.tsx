@@ -69,6 +69,13 @@ function sessionMemberIds(chats: Chat[], chatId: string): Set<string> {
  * for it. So spend is tracked separately now (0.9.13): counted on each request
  * as it goes out, and taken from the provider's own usage block wherever there
  * is one. Context is estimated and labelled as such; spend is measured.
+ *
+ * Spend was still scoped to the chat in front of you, though, and the question
+ * people actually arrive at the end of the month with is what *all* of it cost —
+ * unanswerable by opening forty chats and adding up. So the popover ends with a
+ * lifetime row (0.9.14): every request the app has ever made, deleted chats
+ * included, from the same ledger. Three scopes, widening: this chat, this
+ * session, everything.
  */
 export function ContextMeter({ chatId }: { chatId: string }) {
   const [open, setOpen] = useState(false);
@@ -139,6 +146,17 @@ export function ContextMeter({ chatId }: { chatId: string }) {
   const scopedSpend = showTeam ? sessionSpent : chatSpent;
   const buttonSpend = scopedSpend && scopedSpend.requests > 0 ? scopedSpend : null;
 
+  // Every chat that has ever run, deleted ones included. Suppressed when it
+  // would only repeat the rows above it — on a fresh install the first chat *is*
+  // the lifetime total, and restating it under a grander heading says nothing.
+  const allTime = usage?.allTime ?? null;
+  const showAllTime =
+    !!allTime &&
+    allTime.spent.requests > 0 &&
+    allTime.spent.requests > (scopedSpend?.requests ?? 0);
+  const allTimeMeasured =
+    !!allTime && allTime.spent.reportedRequests >= allTime.spent.requests;
+
   if (messages.length === 0 && baseline === 0) return null;
 
   return (
@@ -152,6 +170,9 @@ export function ContextMeter({ chatId }: { chatId: string }) {
             : "Context this chat carries — conversation plus its per-turn baseline (estimated)",
           buttonSpend &&
             `Spent: ${formatTokens(buttonSpend.totalTokens)} over ${buttonSpend.requests} request(s). Every step of a turn re-sends the whole context and is billed for it, so this runs far ahead of the context figure.`,
+          showAllTime &&
+            allTime &&
+            `All time, every chat: ${formatTokens(allTime.spent.totalTokens)} over ${allTime.spent.requests} request(s).`,
         ]
           .filter(Boolean)
           .join("\n\n")}
@@ -275,6 +296,29 @@ export function ContextMeter({ chatId }: { chatId: string }) {
               </div>
             )}
 
+            {showAllTime && allTime && (
+              <div className="mt-2 border-t border-[var(--color-border)] pt-2">
+                <div className="mb-1 flex items-baseline justify-between gap-3">
+                  <span className="font-medium text-[var(--color-text)]">
+                    All time {allTimeMeasured ? "" : "(part est.)"}
+                  </span>
+                  <span className="text-[10px] text-[var(--color-text-muted)]">
+                    {allTime.chats} chat{allTime.chats === 1 ? "" : "s"},{" "}
+                    {allTime.spent.requests} request
+                    {allTime.spent.requests === 1 ? "" : "s"}
+                  </span>
+                </div>
+                <MeterRow label="Input, all requests" value={allTime.spent.inputTokens} />
+                {allTime.spent.cachedInputTokens > 0 && (
+                  <MeterRow label="of which cached" value={allTime.spent.cachedInputTokens} sub />
+                )}
+                <MeterRow label="Output" value={allTime.spent.outputTokens} />
+                <div className="mt-1 border-t border-[var(--color-border)] pt-1">
+                  <MeterRow label="Every chat, ever" value={allTime.spent.totalTokens} strong />
+                </div>
+              </div>
+            )}
+
             <div className="mt-1.5 text-[10px] leading-relaxed text-[var(--color-text-muted)]">
               Context is how big the next request is — estimated from text
               length, so a guide rather than an exact count.
@@ -291,6 +335,8 @@ export function ContextMeter({ chatId }: { chatId: string }) {
                     : " This provider doesn't report token counts, so they're estimated too."}
                 </>
               )}
+              {showAllTime &&
+                " All time covers every chat this app has ever run, deleted ones included — deleting a transcript doesn't un-spend what it spent."}
             </div>
           </div>
         </>

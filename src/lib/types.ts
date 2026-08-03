@@ -468,6 +468,20 @@ export interface SpentUsage {
   lastInputTokens: number;
 }
 
+/**
+ * Everything the app has ever sent, across every chat.
+ *
+ * Session spend answers "what is this conversation costing"; this answers "what
+ * has all of it cost", which is the question the provider's monthly bill asks
+ * and which no per-chat figure could be added up into by hand. Counted from the
+ * request ledger, so a deleted chat's spend stays in the total.
+ */
+export interface LifetimeUsage {
+  /** Chats that have ever sent a request, including since-deleted ones. */
+  chats: number;
+  spent: SpentUsage;
+}
+
 /** Context carried by every chat in one sub-agent family. */
 export interface SessionUsage {
   rootChatId: string;
@@ -479,6 +493,8 @@ export interface SessionUsage {
   totalTokens: number;
   /** Every member's spend added up — the figure a provider's dashboard shows. */
   spent: SpentUsage;
+  /** The same, widened to every chat that has ever run. */
+  allTime: LifetimeUsage;
 }
 
 /** How a message queued mid-turn reaches the model (see commands::pending). */

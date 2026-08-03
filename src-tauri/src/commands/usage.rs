@@ -21,6 +21,15 @@
 //! input/output split. Two estimators that disagree would make the popover's
 //! "this chat" row contradict the button right above it. The baseline is built
 //! from the same functions the turn builder uses, for the same reason.
+//!
+//! All of the above answers "how big is the context" — a snapshot of what the
+//! next request will carry. It is not what the provider bills, and reading it as
+//! if it were is how a session showing 1.1M turned up on a DeepSeek invoice at
+//! 32M (0.9.13). Every step of an agentic turn re-sends the whole context, so
+//! the bill is the sum over requests, not the size of the last one; a fifty-step
+//! session is billed fifty times over. `spent` carries that second number,
+//! accumulated per request as it happens by `llm::tokens` and taken from the
+//! provider's own `usage` block wherever one is available.
 
 use serde::Serialize;
 use serde_json::Value;
@@ -80,6 +89,59 @@ pub struct AgentUsage {
     pub overhead_parts: Vec<OverheadPart>,
     /// Everything: conversation plus baseline.
     pub total_tokens: i64,
+    /// What the chat has actually spent, measured on the requests themselves
+    /// rather than estimated from the transcript. Zero until it sends one.
+    pub spent: SpentUsage,
+}
+
+/// Tokens a chat has actually sent and received, accumulated one request at a
+/// time (see `llm::tokens`).
+///
+/// This is the invoice number, and it is not the context number. Every step of
+/// an agentic turn re-sends the whole context, so a chat whose context is 50k
+/// and which took ten steps has spent 500k — and the meter, which only ever
+/// showed the 50k, looked wrong by the number of steps taken.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpentUsage {
+    /// API calls, not turns. One turn is many.
+    pub requests: i64,
+    /// How many of those came back with the provider's own counts. Below
+    /// `requests` means the totals are partly estimated.
+    pub reported_requests: i64,
+    pub input_tokens: i64,
+    /// Of `input_tokens`, the part served from the provider's prompt cache —
+    /// billed at a fraction of the rate, so a raw total overstates the cost.
+    pub cached_input_tokens: i64,
+    pub output_tokens: i64,
+    pub total_tokens: i64,
+    /// The size of the most recent request. What the *next* one will cost, and
+    /// the figure that matters for the context window rather than the bill.
+    pub last_input_tokens: i64,
+}
+
+impl SpentUsage {
+    fn from_recorded(r: crate::llm::tokens::RecordedUsage) -> Self {
+        Self {
+            requests: r.requests,
+            reported_requests: r.reported_requests,
+            input_tokens: r.input_tokens,
+            cached_input_tokens: r.cached_input_tokens,
+            output_tokens: r.output_tokens,
+            total_tokens: r.input_tokens + r.output_tokens,
+            last_input_tokens: r.last_input_tokens,
+        }
+    }
+
+    fn add(&mut self, other: &SpentUsage) {
+        self.requests += other.requests;
+        self.reported_requests += other.reported_requests;
+        self.input_tokens += other.input_tokens;
+        self.cached_input_tokens += other.cached_input_tokens;
+        self.output_tokens += other.output_tokens;
+        self.total_tokens += other.total_tokens;
+        self.last_input_tokens += other.last_input_tokens;
+    }
 }
 
 /// Every chat in one sub-agent family, plus the totals across them.
@@ -96,6 +158,9 @@ pub struct SessionUsage {
     /// before it has done anything.
     pub overhead_tokens: i64,
     pub total_tokens: i64,
+    /// Every member's actual spend added up — the number that should match a
+    /// provider's dashboard, where `total_tokens` never could.
+    pub spent: SpentUsage,
 }
 
 /// Text and image content of one stored message, split the way the meter
@@ -250,15 +315,18 @@ pub async fn session_usage(db: &SqlitePool, chat_id: &str) -> AppResult<SessionU
     let mut input_tokens = 0i64;
     let mut output_tokens = 0i64;
     let mut overhead_total = 0i64;
+    let mut spent_total = SpentUsage::default();
 
     for (id, title, _, zone_name) in &rows {
         let (input, output, messages) = chat_usage(db, id).await?;
         let (system_tokens, tools_tokens, tool_count, overhead_parts) =
             chat_overhead(db, id).await?;
         let overhead_tokens = system_tokens + tools_tokens;
+        let spent = SpentUsage::from_recorded(crate::llm::tokens::recorded_usage(db, id).await?);
         input_tokens += input;
         output_tokens += output;
         overhead_total += overhead_tokens;
+        spent_total.add(&spent);
 
         // Hops from this chat up to the root. Bounded so a cyclic parent link
         // can't spin here, the same guard the other tree walks use.
@@ -293,6 +361,7 @@ pub async fn session_usage(db: &SqlitePool, chat_id: &str) -> AppResult<SessionU
             overhead_tokens,
             overhead_parts,
             total_tokens: input + output + overhead_tokens,
+            spent,
         });
     }
 
@@ -303,6 +372,7 @@ pub async fn session_usage(db: &SqlitePool, chat_id: &str) -> AppResult<SessionU
         output_tokens,
         overhead_tokens: overhead_total,
         total_tokens: input_tokens + output_tokens + overhead_total,
+        spent: spent_total,
     })
 }
 
@@ -467,6 +537,79 @@ mod tests {
         assert_eq!(from_sub.root_chat_id, "c1");
         assert_eq!(from_sub.total_tokens, usage.total_tokens);
         assert!(from_sub.agents.iter().find(|a| a.chat_id == "c2").unwrap().is_current);
+    }
+
+    /// The bug this release exists for. The meter showed context size and the
+    /// invoice showed cumulative spend, and nothing in the app distinguished
+    /// them — so a session reading 1.1M was billed 32M and the estimator got the
+    /// blame. Ten steps over one context bills ten times; the context itself
+    /// does not move. Both numbers have to survive the trip to the frontend.
+    #[tokio::test]
+    async fn spend_accumulates_per_request_while_context_stays_put() {
+        let db = fixture().await;
+        add_message(&db, "u1", "user", &"how does this work? ".repeat(50)).await;
+
+        let before = session_usage(&db, "c1").await.unwrap();
+        assert_eq!(before.spent.requests, 0, "nothing sent yet");
+        assert!(before.total_tokens > 0, "but the context is already real");
+
+        let measure = crate::llm::tokens::RequestMeasure {
+            input_tokens: 50_000,
+            payload_chars: 200_000,
+            ..Default::default()
+        };
+        let usage = crate::llm::types::Usage {
+            prompt_tokens: 50_000,
+            completion_tokens: 400,
+            prompt_cache_hit_tokens: Some(47_000),
+            ..Default::default()
+        };
+        for _ in 0..10 {
+            crate::llm::tokens::record_request(&db, "c1", "test-model", &measure, Some(&usage))
+                .await;
+        }
+
+        let after = session_usage(&db, "c1").await.unwrap();
+        assert_eq!(after.total_tokens, before.total_tokens, "no one said anything new");
+        assert_eq!(after.spent.requests, 10);
+        assert_eq!(after.spent.input_tokens, 500_000, "billed once per request");
+        assert_eq!(after.spent.cached_input_tokens, 470_000);
+        assert_eq!(after.spent.output_tokens, 4_000);
+        assert_eq!(after.spent.last_input_tokens, 50_000, "the context is still one context");
+        assert!(
+            after.spent.total_tokens > after.total_tokens * 10,
+            "spend {} must dwarf context {}",
+            after.spent.total_tokens,
+            after.total_tokens,
+        );
+        assert_eq!(after.agents[0].spent.requests, 10, "and it is attributed per agent");
+    }
+
+    /// A team's bill is every member's, the same way its context is.
+    #[tokio::test]
+    async fn session_spend_sums_every_agents_requests() {
+        let db = fixture().await;
+        sqlx::query(
+            "INSERT INTO chats (id, title, zone_id, parent_chat_id, initiated_by_zone_id,
+                                created_at, updated_at)
+             VALUES ('c2', 'sub', 'z1', 'c1', 'z1', 2, 2)",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+
+        let measure = crate::llm::tokens::RequestMeasure { input_tokens: 1_000, ..Default::default() };
+        crate::llm::tokens::record_request(&db, "c1", "test-model", &measure, None).await;
+        crate::llm::tokens::record_request(&db, "c2", "test-model", &measure, None).await;
+        crate::llm::tokens::record_request(&db, "c2", "test-model", &measure, None).await;
+
+        let usage = session_usage(&db, "c1").await.unwrap();
+        assert_eq!(usage.spent.requests, 3);
+        assert_eq!(usage.spent.input_tokens, 3_000);
+        assert_eq!(
+            usage.spent.reported_requests, 0,
+            "a provider that reports nothing leaves these estimated, and says so",
+        );
     }
 
     /// The frontend estimator is the reference: ~4 chars a token, never zero for

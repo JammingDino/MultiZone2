@@ -995,11 +995,21 @@ async fn route_zone_id(
         tool_choice: None,
         reasoning_effort: None,
         chat_template_kwargs: None,
+        stream_options: None,
         stream: false,
+    };
+
+    // Routing is a real request against a real model, once per turn. Booking it
+    // here is the difference between a spend figure that matches the provider's
+    // dashboard and one that quietly runs under it.
+    let measure = {
+        let cpt = crate::llm::tokens::chars_per_token(db, &req.model).await;
+        crate::llm::tokens::measure_request(&req, cpt)
     };
 
     let client = LlmClient::new(http, &provider.base_url, provider.api_key.as_deref());
     let resp = client.chat_completion(&req).await?;
+    crate::llm::tokens::record_request(db, chat_id, &req.model, &measure, resp.usage.as_ref()).await;
     let raw = resp
         .choices
         .first()
@@ -1489,7 +1499,21 @@ async fn run_participant_turn(
             tool_choice: None,
             reasoning_effort,
             chat_template_kwargs: None,
+            // Ask the provider for its own token counts. Exact where ours are
+            // estimated, and the only way to see prompt cache hits — which on a
+            // long agentic turn are most of what gets billed.
+            stream_options: Some(serde_json::json!({ "include_usage": true })),
             stream: true,
+        };
+
+        // The last thing before the request goes out, deliberately: `req` is
+        // fully assembled here, so measuring it counts the system prompt, the
+        // skills catalog, the memories, the tool schemas, this step's nudge and
+        // any steer delivered above — without a second code path being asked to
+        // predict what the builder produced.
+        let measure = {
+            let cpt = crate::llm::tokens::chars_per_token(&ctx.db, &zone.model).await;
+            crate::llm::tokens::measure_request(&req, cpt)
         };
 
         let response = client.chat_stream(&req).await?;
@@ -1531,6 +1555,19 @@ async fn run_participant_turn(
             }
         })
         .await?;
+
+        // Book the request against the chat before anything else can return
+        // early. Every step of the turn re-sends the whole context, so this is
+        // where the difference between "what the context costs" and "what the
+        // session cost" is actually recorded — one row, one request at a time.
+        crate::llm::tokens::record_request(
+            &ctx.db,
+            chat_id,
+            &zone.model,
+            &measure,
+            agg.usage.as_ref(),
+        )
+        .await;
 
         // Did this step end the turn, or did the model just stall? A step with
         // no tool calls used to end the turn unconditionally, which is how a

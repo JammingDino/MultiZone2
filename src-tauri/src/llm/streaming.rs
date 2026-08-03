@@ -1,5 +1,5 @@
 use crate::error::AppResult;
-use crate::llm::types::{StreamChunk, StreamToolCall, ToolCall, FunctionCall};
+use crate::llm::types::{FunctionCall, StreamChunk, StreamToolCall, ToolCall, Usage};
 use eventsource_stream::Eventsource;
 use futures_util::StreamExt;
 use serde::Serialize;
@@ -16,6 +16,11 @@ pub struct StreamAggregate {
     pub finish_reason: Option<String>,
     /// True if the caller signalled cancellation mid-stream.
     pub cancelled: bool,
+    /// The provider's own token counts, when it sent them. Arrives in a final
+    /// chunk with no choices, after the last content delta — so a stream the
+    /// user cancelled generally ends before it, and the caller falls back to the
+    /// local estimate for that step.
+    pub usage: Option<Usage>,
 }
 
 /// Callback signatures: invoked for each meaningful stream event.
@@ -164,6 +169,15 @@ where
                         continue;
                     }
                 };
+                // Providers disagree about where the usage block rides: most
+                // send it alone in a final chunk, some attach it to the chunk
+                // carrying `finish_reason`. Taking the last non-empty one either
+                // way — and never letting an empty block overwrite a real one.
+                if let Some(u) = chunk.usage {
+                    if !u.is_empty() {
+                        agg.usage = Some(u);
+                    }
+                }
                 for choice in chunk.choices {
                     if let Some(reason) = &choice.finish_reason {
                         agg.finish_reason = Some(reason.clone());

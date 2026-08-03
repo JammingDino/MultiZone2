@@ -809,11 +809,21 @@ pub async fn generate_title(
         tool_choice: None,
         reasoning_effort: None,
         chat_template_kwargs: None,
+        stream_options: None,
         stream: false,
     };
 
+    // Titling is a small request, but it is a request, and it is charged for.
+    let measure = {
+        let cpt = crate::llm::tokens::chars_per_token(&state.db, &req.model).await;
+        crate::llm::tokens::measure_request(&req, cpt)
+    };
+    let model = req.model.clone();
+
     let client = LlmClient::new(&state.http, &provider.base_url, provider.api_key.as_deref());
     let resp = request_title(&client, req).await?;
+    crate::llm::tokens::record_request(&state.db, &chat_id, &model, &measure, resp.usage.as_ref())
+        .await;
     let raw = resp
         .choices
         .first()

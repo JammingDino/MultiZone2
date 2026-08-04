@@ -22,3 +22,6 @@ skills-lock.json
 
 # Built installers collected for cross-machine debugging.
 artifacts/
+# Local credentials for cache benchmarking — never commit
+.env.cachetest
+.env.local

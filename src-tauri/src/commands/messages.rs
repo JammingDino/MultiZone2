@@ -3087,4 +3087,128 @@ mod tests {
             "only the tool result with no surviving caller should be dropped",
         );
     }
+
+    // ── Prefix-cache stability ────────────────────────────────────────────────
+
+    async fn pool_with_long_chat() -> SqlitePool {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        sqlx::query("INSERT INTO chats (id, title, created_at, updated_at) VALUES ('c1','t',0,0)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool
+    }
+
+    /// Push the chat's history past `COMPACT_HINT_CHARS` by `extra` characters,
+    /// which is what makes the compaction hint appear in the system prompt.
+    async fn grow_history(pool: &SqlitePool, extra: usize) {
+        let filler = "x".repeat(crate::tools::compact::COMPACT_HINT_CHARS + extra);
+        sqlx::query(
+            "INSERT INTO messages (id, chat_id, role, content, created_at)
+             VALUES ('grow', 'c1', 'user', ?1, 1)",
+        )
+        .bind(&filler)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    fn zone_with_compact_tool() -> Zone {
+        Zone {
+            id: "z1".into(),
+            name: "Z".into(),
+            provider_id: None,
+            model: "m".into(),
+            system_prompt: Some("You are a careful engineer.".into()),
+            temperature: 0.7,
+            max_tokens: None,
+            top_p: None,
+            tools_enabled: r#"["compact","read_file"]"#.into(),
+            tool_config: "{}".into(),
+            thinking_enabled: false,
+            include_thinking_in_context: false,
+            icon: None,
+            accent_color: None,
+            is_leader: false,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    async fn system_prompt_for(pool: &SqlitePool, zone: &Zone) -> String {
+        build_system_snippets(pool, "c1", zone, None)
+            .await
+            .unwrap()
+            .iter()
+            .map(|(_, s)| s.as_str())
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    }
+
+    /// The regression this whole exercise was about.
+    ///
+    /// The system prompt is the front of every request and prefix caches match
+    /// a byte-exact prefix, so anything in here that changes as the history
+    /// grows invalidates the cache for the entire conversation behind it — on
+    /// every turn, on exactly the long chats where caching is worth most. The
+    /// compaction hint used to embed a live token count and did precisely that.
+    ///
+    /// Growing the history must leave the system prompt byte-identical.
+    #[tokio::test]
+    async fn the_system_prompt_is_byte_stable_as_the_history_grows() {
+        let pool = pool_with_long_chat().await;
+        let zone = zone_with_compact_tool();
+
+        grow_history(&pool, 0).await;
+        let first = system_prompt_for(&pool, &zone).await;
+
+        // Sanity: the hint really is present, or this test proves nothing.
+        assert!(
+            first.contains("# Context length"),
+            "the compaction hint should be in play for this fixture",
+        );
+
+        // A few more turns' worth of conversation.
+        sqlx::query("DELETE FROM messages WHERE id = 'grow'").execute(&pool).await.unwrap();
+        grow_history(&pool, 9_000).await;
+        let second = system_prompt_for(&pool, &zone).await;
+
+        assert_eq!(
+            first, second,
+            "the system prompt changed as the history grew, so every request \
+             behind it misses the prefix cache",
+        );
+    }
+
+    /// Ordering is load-bearing, not cosmetic: the cache is valid up to the
+    /// first differing byte, so when a volatile piece *does* change, everything
+    /// declared before it still hits. Pin the invariant that the volatile
+    /// snippets sort last.
+    #[tokio::test]
+    async fn volatile_snippets_come_last_in_the_system_prompt() {
+        let pool = pool_with_long_chat().await;
+        grow_history(&pool, 0).await;
+        let snippets = build_system_snippets(&pool, "c1", &zone_with_compact_tool(), None)
+            .await
+            .unwrap();
+
+        let kinds: Vec<SnippetKind> = snippets.iter().map(|(k, _)| *k).collect();
+        let pos = |k: SnippetKind| kinds.iter().position(|x| *x == k);
+
+        let (Some(prompt), Some(hint)) = (pos(SnippetKind::ZonePrompt), pos(SnippetKind::CompactHint))
+        else {
+            panic!("fixture should produce both a zone prompt and a compaction hint: {kinds:?}");
+        };
+        assert!(prompt < hint, "the stable zone prompt must precede the volatile hint: {kinds:?}");
+        assert_eq!(
+            hint,
+            kinds.len() - 1,
+            "the compaction hint is the most volatile piece and must sort last: {kinds:?}",
+        );
+    }
 }

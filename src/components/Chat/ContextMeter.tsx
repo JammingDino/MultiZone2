@@ -220,7 +220,11 @@ export function ContextMeter({ chatId }: { chatId: string }) {
                 </div>
                 <MeterRow label="Input, all requests" value={chatSpent.inputTokens} />
                 {chatSpent.cachedInputTokens > 0 && (
-                  <MeterRow label="of which cached" value={chatSpent.cachedInputTokens} sub />
+                  <MeterRow
+                    label={`of which cached${hitRate(chatSpent)}`}
+                    value={chatSpent.cachedInputTokens}
+                    sub
+                  />
                 )}
                 <MeterRow label="Output" value={chatSpent.outputTokens} />
                 <div className="mt-1 border-t border-[var(--color-border)] pt-1">
@@ -269,7 +273,7 @@ export function ContextMeter({ chatId }: { chatId: string }) {
                     <>
                       <MeterRow label="Session spend" value={sessionSpent.totalTokens} strong />
                       <MeterRow
-                        label={`over ${sessionSpent.requests} requests`}
+                        label={`over ${sessionSpent.requests} requests${hitRate(sessionSpent)}`}
                         value={sessionSpent.cachedInputTokens}
                         sub
                         suffix=" cached"
@@ -297,6 +301,21 @@ export function ContextMeter({ chatId }: { chatId: string }) {
       )}
     </div>
   );
+}
+
+/**
+ * Cached input as a share of all input, e.g. " (94%)".
+ *
+ * The absolute figure alone doesn't say whether it's any good — 400k cached
+ * reads as a lot until you notice it was 4M sent. The share is the number that
+ * tells you the prompt prefix is holding steady across turns, and it's the one
+ * worth watching after changing anything that goes into the system prompt.
+ * Empty string when there's no input to divide by, so the label just reads
+ * normally.
+ */
+function hitRate(spent: { inputTokens: number; cachedInputTokens: number }): string {
+  if (spent.inputTokens <= 0) return "";
+  return ` (${Math.round((spent.cachedInputTokens / spent.inputTokens) * 100)}%)`;
 }
 
 function MeterRow({

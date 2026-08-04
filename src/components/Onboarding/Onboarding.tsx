@@ -1,10 +1,10 @@
-import { useState } from "react";
-import { Layers, Loader2, Server, Sparkles, ArrowRight, Check, FileUp } from "lucide-react";
+import { useRef, useState } from "react";
+import { Layers, Loader2, Server, Sparkles, ArrowRight, Check, FileUp, Upload } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
 import { seedDefaultZones } from "@/lib/defaultZones";
-import { pickBundleFile } from "@/lib/importSettings";
+import { claimSettingsDrop, pickBundleFile } from "@/lib/importSettings";
 
 /**
  * First-run setup: connect a provider and pick a default model, the minimum
@@ -35,6 +35,8 @@ export function Onboarding() {
   const [model, setModel] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const dragDepth = useRef(0);
 
   async function onConnect() {
     if (!name.trim() || !baseUrl.trim()) return;
@@ -110,13 +112,69 @@ export function Onboarding() {
     }
   }
 
+  /**
+   * Same import, by drop. This overlay covers the whole content area, so the
+   * drop targets underneath it (home screen, composer) never see the event —
+   * without these handlers dropping a bundle on first run does nothing, which
+   * is exactly when someone migrating an install is most likely to try it.
+   */
+  function hasFiles(e: React.DragEvent) {
+    return Array.from(e.dataTransfer?.types ?? []).includes("Files");
+  }
+  function onDragEnter(e: React.DragEvent) {
+    if (busy || !hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth.current += 1;
+    setIsDragOver(true);
+  }
+  function onDragOver(e: React.DragEvent) {
+    if (busy || !hasFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  }
+  function onDragLeave(e: React.DragEvent) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setIsDragOver(false);
+  }
+  function onDrop(e: React.DragEvent) {
+    if (busy || !hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth.current = 0;
+    setIsDragOver(false);
+    // Copied out before awaiting — `dataTransfer` is cleared on return.
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length === 0) return;
+    setError(null);
+    void claimSettingsDrop(files, stageImport).then((claimed) => {
+      // Nothing else on this screen can use a dropped file, so unlike the chat
+      // drop targets an unclaimed drop is a dead end — say so.
+      if (!claimed) setError("That file isn't a MultiZone settings export.");
+    });
+  }
+
   /** Dismiss setup without a provider. The banner in App.tsx takes over. */
   async function onSkip() {
     await setAppSettings({ onboardingSkipped: true });
   }
 
   return (
-    <div className="absolute inset-0 z-[100] flex items-center justify-center bg-[var(--color-bg)]/95 backdrop-blur-sm">
+    <div
+      className="absolute inset-0 z-[100] flex items-center justify-center bg-[var(--color-bg)]/95 backdrop-blur-sm"
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
+      {isDragOver && (
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-[var(--color-bg)]/80 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-3 rounded-xl border-2 border-dashed border-[var(--color-accent)] bg-[var(--color-panel)]/80 px-10 py-8 text-sm text-[var(--color-text)]">
+            <Upload size={28} className="text-[var(--color-accent)]" />
+            <div>Drop a settings export to import it</div>
+          </div>
+        </div>
+      )}
       <div className="w-[460px] rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-6 shadow-2xl">
         <div className="mb-5 flex items-center gap-2.5">
           <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--color-accent)]">

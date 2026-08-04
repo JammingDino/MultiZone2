@@ -235,6 +235,16 @@ pub async fn delete(args: &Value, db: &SqlitePool) -> AppResult<String> {
 /// Build the memory block injected into the system prompt for a chat: global
 /// notes first, then the chat's project, then the chat itself. Returns `None`
 /// when there are no applicable memories.
+/// Note on prompt caching: this block is rebuilt every turn and sits in the
+/// system prompt, so a memory written mid-session invalidates the prefix cache
+/// for the whole conversation behind it. Reasonix-style agents avoid that by
+/// snapshotting memory per session and only picking up writes on the next one.
+/// We deliberately don't: an agent that records "the user prefers X" and then
+/// ignores it for the rest of the session is a worse product than one that
+/// occasionally pays for a cache miss. The block is emitted late in the system
+/// prompt (see `build_system_snippets`) so at least everything ahead of it
+/// survives. Memory writes are occasional, so the cost is per-write, not
+/// per-turn.
 pub async fn build_memory_block(db: &SqlitePool, chat_id: &str) -> AppResult<Option<String>> {
     let project_id = chat_project_id(db, chat_id).await;
 

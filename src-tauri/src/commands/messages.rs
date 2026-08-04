@@ -2062,15 +2062,18 @@ async fn run_perspective(
 /// number can't be acted on; "Skills catalog 4.1k" can.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
+///
+/// Declaration order is also emission order, and it is chosen deliberately:
+/// most-stable first, most-volatile last. See `build_system_snippets`.
 pub enum SnippetKind {
-    ProjectContext,
-    TagContext,
-    Skills,
     ZonePrompt,
     Continuity,
+    Skills,
+    ProjectContext,
+    TagContext,
     Leader,
-    Memory,
     Identity,
+    Memory,
     CompactHint,
 }
 
@@ -2126,6 +2129,54 @@ pub async fn build_system_snippets(
 ) -> AppResult<Vec<(SnippetKind, String)>> {
     let mut snippets: Vec<(SnippetKind, String)> = Vec::new();
 
+    // ── Ordering: most stable first, most volatile last ──────────────────────
+    //
+    // These are joined into one system message at the front of the request, and
+    // prefix caches (DeepSeek, OpenAI, and every vLLM/SGLang-style local server)
+    // match on a byte-exact prefix: the cache is valid up to the first byte that
+    // differs and no further. A volatile snippet near the front therefore costs
+    // the cache for the entire conversation behind it, not just for itself.
+    //
+    // So the pieces that never move within a session go first (zone prompt,
+    // agent-loop preamble, skills catalog), the ones that change when the user
+    // fiddles with a chat go next (project/tag context, roster, identity), and
+    // the ones that can change on any turn go last (memory, compaction hint).
+    // Reordering is free to do here because nothing downstream depends on the
+    // order — the context meter labels each piece independently.
+
+    // The zone's own prompt is the most stable thing in the request and the
+    // primary instruction, so it leads.
+    if let Some(sys) = &zone.system_prompt {
+        if !sys.trim().is_empty() {
+            snippets.push((SnippetKind::ZonePrompt, sys.clone()));
+        }
+    }
+
+    // How the agentic loop works (0.9.6). A model that doesn't know it will be
+    // called again after a tool result has every reason to stop and wait for the
+    // user — which is exactly what stalls a long task halfway through. Only
+    // zones that actually have tools get this; for the rest it's noise.
+    let zone_tool_ids: Vec<String> = serde_json::from_str(&zone.tools_enabled).unwrap_or_default();
+    if !zone_tool_ids.is_empty() {
+        snippets.push((
+            SnippetKind::Continuity,
+            crate::llm::continuity::multi_step_preamble(
+                max_tool_steps(db).await,
+                zone_tool_ids.iter().any(|t| t == "plan"),
+            ),
+        ));
+    }
+
+    // Skills catalog (Anthropic Agent Skills model): when this zone has the
+    // skills tool, list every enabled skill's name + description so the model
+    // knows what it can load on demand via `load_skill`. The full content is not
+    // injected — the agent requests it only when a request matches.
+    if zone_tool_ids.iter().any(|t| t == "skills") {
+        if let Some(catalog) = crate::tools::skills::build_catalog(db).await? {
+            snippets.push((SnippetKind::Skills, catalog));
+        }
+    }
+
     if let Some(c) = chat {
         // Project context
         if c.project_context_enabled {
@@ -2162,37 +2213,6 @@ pub async fn build_system_snippets(
         );
     }
 
-    // Skills catalog (Anthropic Agent Skills model): when this zone has the
-    // skills tool, list every enabled skill's name + description so the model
-    // knows what it can load on demand via `load_skill`. The full content is not
-    // injected — the agent requests it only when a request matches.
-    let zone_tool_ids: Vec<String> = serde_json::from_str(&zone.tools_enabled).unwrap_or_default();
-    if zone_tool_ids.iter().any(|t| t == "skills") {
-        if let Some(catalog) = crate::tools::skills::build_catalog(db).await? {
-            snippets.push((SnippetKind::Skills, catalog));
-        }
-    }
-
-    if let Some(sys) = &zone.system_prompt {
-        if !sys.trim().is_empty() {
-            snippets.push((SnippetKind::ZonePrompt, sys.clone()));
-        }
-    }
-
-    // How the agentic loop works (0.9.6). A model that doesn't know it will be
-    // called again after a tool result has every reason to stop and wait for the
-    // user — which is exactly what stalls a long task halfway through. Only
-    // zones that actually have tools get this; for the rest it's noise.
-    if !zone_tool_ids.is_empty() {
-        snippets.push((
-            SnippetKind::Continuity,
-            crate::llm::continuity::multi_step_preamble(
-                max_tool_steps(db).await,
-                zone_tool_ids.iter().any(|t| t == "plan"),
-            ),
-        ));
-    }
-
     // Response Leader orchestration preamble (0.6.0): when this zone coordinates
     // sub-agents, inject the delegation protocol and the session's sub-agent
     // roster so the leader knows which zones it can spawn.
@@ -2202,11 +2222,6 @@ pub async fn build_system_snippets(
         }
     }
 
-    // Long-term memory (global → project → chat), injected each turn.
-    if let Some(block) = crate::tools::memory::build_memory_block(db, chat_id).await? {
-        snippets.push((SnippetKind::Memory, block));
-    }
-
     // In a multi-zone chat, tell this model which participant it is (and who the
     // others are) so it can read the labelled transcript correctly and answer as
     // itself on this turn.
@@ -2214,6 +2229,13 @@ pub async fn build_system_snippets(
         if let Some(identity) = build_identity_preamble(db, chat_id, chat, zone).await? {
             snippets.push((SnippetKind::Identity, identity));
         }
+    }
+
+    // Long-term memory (global → project → chat), injected each turn. Late,
+    // because the agent can write a memory mid-session and everything after this
+    // point loses its cache when it does.
+    if let Some(block) = crate::tools::memory::build_memory_block(db, chat_id).await? {
+        snippets.push((SnippetKind::Memory, block));
     }
 
     // Context compaction (0.9.3): once the history is long, nudge the model to
@@ -2375,6 +2397,17 @@ async fn build_message_history(
     // images cuts each to ~85 tokens (~10× cheaper) while leaving the most
     // recent user message at full quality. The stored data is not touched —
     // this only affects the API request body built here.
+    //
+    // This is the one place the request body is deliberately *not* append-only,
+    // so it is worth being explicit about the trade: when a new user message
+    // arrives, the previous one drops from full to low detail, and a prefix
+    // cache breaks at that point. The loss is bounded — everything before the
+    // previous user turn is untouched and stays cached, and nothing happens at
+    // all unless that turn actually carried an image — whereas keeping full
+    // detail forever grows the prefill cost of every future request without
+    // limit. Measured against `cachedInputTokens` in the context meter, the
+    // downgrade still wins on image-heavy chats. Don't "fix" this into
+    // append-only purity without checking that number first.
     let last_user_idx = rows.iter().rposition(|m| m.role == "user");
 
     // OCR fallback (0.4.0): if the resolved model can't accept image input, every
@@ -3052,6 +3085,130 @@ mod tests {
             rows.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
             ["m2", "m3", "m4"],
             "only the tool result with no surviving caller should be dropped",
+        );
+    }
+
+    // ── Prefix-cache stability ────────────────────────────────────────────────
+
+    async fn pool_with_long_chat() -> SqlitePool {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        sqlx::query("INSERT INTO chats (id, title, created_at, updated_at) VALUES ('c1','t',0,0)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool
+    }
+
+    /// Push the chat's history past `COMPACT_HINT_CHARS` by `extra` characters,
+    /// which is what makes the compaction hint appear in the system prompt.
+    async fn grow_history(pool: &SqlitePool, extra: usize) {
+        let filler = "x".repeat(crate::tools::compact::COMPACT_HINT_CHARS + extra);
+        sqlx::query(
+            "INSERT INTO messages (id, chat_id, role, content, created_at)
+             VALUES ('grow', 'c1', 'user', ?1, 1)",
+        )
+        .bind(&filler)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    fn zone_with_compact_tool() -> Zone {
+        Zone {
+            id: "z1".into(),
+            name: "Z".into(),
+            provider_id: None,
+            model: "m".into(),
+            system_prompt: Some("You are a careful engineer.".into()),
+            temperature: 0.7,
+            max_tokens: None,
+            top_p: None,
+            tools_enabled: r#"["compact","read_file"]"#.into(),
+            tool_config: "{}".into(),
+            thinking_enabled: false,
+            include_thinking_in_context: false,
+            icon: None,
+            accent_color: None,
+            is_leader: false,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    async fn system_prompt_for(pool: &SqlitePool, zone: &Zone) -> String {
+        build_system_snippets(pool, "c1", zone, None)
+            .await
+            .unwrap()
+            .iter()
+            .map(|(_, s)| s.as_str())
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    }
+
+    /// The regression this whole exercise was about.
+    ///
+    /// The system prompt is the front of every request and prefix caches match
+    /// a byte-exact prefix, so anything in here that changes as the history
+    /// grows invalidates the cache for the entire conversation behind it — on
+    /// every turn, on exactly the long chats where caching is worth most. The
+    /// compaction hint used to embed a live token count and did precisely that.
+    ///
+    /// Growing the history must leave the system prompt byte-identical.
+    #[tokio::test]
+    async fn the_system_prompt_is_byte_stable_as_the_history_grows() {
+        let pool = pool_with_long_chat().await;
+        let zone = zone_with_compact_tool();
+
+        grow_history(&pool, 0).await;
+        let first = system_prompt_for(&pool, &zone).await;
+
+        // Sanity: the hint really is present, or this test proves nothing.
+        assert!(
+            first.contains("# Context length"),
+            "the compaction hint should be in play for this fixture",
+        );
+
+        // A few more turns' worth of conversation.
+        sqlx::query("DELETE FROM messages WHERE id = 'grow'").execute(&pool).await.unwrap();
+        grow_history(&pool, 9_000).await;
+        let second = system_prompt_for(&pool, &zone).await;
+
+        assert_eq!(
+            first, second,
+            "the system prompt changed as the history grew, so every request \
+             behind it misses the prefix cache",
+        );
+    }
+
+    /// Ordering is load-bearing, not cosmetic: the cache is valid up to the
+    /// first differing byte, so when a volatile piece *does* change, everything
+    /// declared before it still hits. Pin the invariant that the volatile
+    /// snippets sort last.
+    #[tokio::test]
+    async fn volatile_snippets_come_last_in_the_system_prompt() {
+        let pool = pool_with_long_chat().await;
+        grow_history(&pool, 0).await;
+        let snippets = build_system_snippets(&pool, "c1", &zone_with_compact_tool(), None)
+            .await
+            .unwrap();
+
+        let kinds: Vec<SnippetKind> = snippets.iter().map(|(k, _)| *k).collect();
+        let pos = |k: SnippetKind| kinds.iter().position(|x| *x == k);
+
+        let (Some(prompt), Some(hint)) = (pos(SnippetKind::ZonePrompt), pos(SnippetKind::CompactHint))
+        else {
+            panic!("fixture should produce both a zone prompt and a compaction hint: {kinds:?}");
+        };
+        assert!(prompt < hint, "the stable zone prompt must precede the volatile hint: {kinds:?}");
+        assert_eq!(
+            hint,
+            kinds.len() - 1,
+            "the compaction hint is the most volatile piece and must sort last: {kinds:?}",
         );
     }
 }

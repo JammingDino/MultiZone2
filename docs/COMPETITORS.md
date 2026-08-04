@@ -111,6 +111,24 @@ The real problem was in the system prompt, and it was worse than the one I flagg
 
 Note also that **tool schemas can't be reordered into the prefix** — they're a separate `tools` request field, not part of the message array. They are byte-stable and cache fine on their own.
 
+### Measured result
+
+A/B over a 6-turn conversation with a ~2k-token system prompt and growing history, identical in every respect except the volatile tail. Each regime used a per-run nonce so the second run could not inherit the first run's cache.
+
+| | DeepSeek old | DeepSeek new | oMLX old | oMLX new |
+| --- | --- | --- | --- | --- |
+| Prompt tokens sent | 23,619 | 23,565 | 22,356 | 22,302 |
+| Served from cache | 8,832 | 17,536 | 4,096 | 12,288 |
+| **Hit rate** | **37.4%** | **74.4%** | **18.3%** | **55.1%** |
+
+`deepseek-chat` via the hosted API; `Ornith-1.0-35B-4bit` via a self-hosted oMLX server. Two independent stacks, +37.0 and +36.8 points respectively — a doubling on DeepSeek and a tripling on oMLX, worth roughly a 50% cut in input cost at DeepSeek's cached/uncached rates.
+
+The per-turn breakdown shows the mechanism directly. On DeepSeek the new code's cached tokens climb monotonically (0 → 2,048 → 2,816 → 3,456 → 4,224 → 4,992) as history accumulates, which is what a healthy prefix cache looks like; the old code sat flat at 1,280 for three turns. oMLX caches in coarser 2,048-token blocks so its figures step rather than climb, but the shape is the same: the new code starts hitting from turn 2, the old code gets nothing until turn 6.
+
+The clincher is an accident in the fixture. Integer flooring made turns 5 and 6 both render "roughly 4 thousand tokens", so the prefix happened not to change — and turn 6 is the *only* turn where the old regime matched the new one, on **both** providers (4,992 and 4,096 cached, identical in each pair). The old code earned cache hits solely when the rounded number stood still.
+
+Incidental finding: oMLX reports `prompt_tokens_details.cached_tokens`, so the context meter's readout is trustworthy against local MLX servers too — I had expected it to report nothing.
+
 Worth noting this is a differentiator, not just a saving: no competitor in this survey does explicit cache management, and a multi-agent product is exactly where it pays most — every sub-agent turn re-sends a large stable prefix.
 
 ---

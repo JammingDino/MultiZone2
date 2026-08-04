@@ -2038,6 +2038,7 @@ pub enum SnippetKind {
     ZonePrompt,
     Continuity,
     Skills,
+    Knowledge,
     ProjectContext,
     TagContext,
     Leader,
@@ -2053,6 +2054,7 @@ impl SnippetKind {
             Self::ProjectContext => "Project context",
             Self::TagContext => "Tag context",
             Self::Skills => "Skills catalog",
+            Self::Knowledge => "Knowledge index",
             Self::ZonePrompt => "Zone prompt",
             Self::Continuity => "Agent-loop preamble",
             Self::Leader => "Sub-agent roster",
@@ -2143,6 +2145,24 @@ pub async fn build_system_snippets(
     if zone_tool_ids.iter().any(|t| t == "skills") {
         if let Some(catalog) = crate::tools::skills::build_catalog(db).await? {
             snippets.push((SnippetKind::Skills, catalog));
+        }
+    }
+
+    // Knowledge index (0.4.3, told to the model at 1.0). Gated exactly as the
+    // `search_local_files` tool is — the chat opted in and its scope has a
+    // non-empty index — so the prompt can never advertise a tool the turn does
+    // not actually offer, or stay silent about one it does.
+    if let Some(c) = chat {
+        if c.knowledge_enabled {
+            let scope = c
+                .project_id
+                .clone()
+                .unwrap_or_else(|| crate::knowledge::GLOBAL_KB_ID.to_string());
+            if crate::knowledge::has_index(db, &scope).await {
+                if let Some(block) = crate::knowledge::build_knowledge_block(db, &scope).await {
+                    snippets.push((SnippetKind::Knowledge, block));
+                }
+            }
         }
     }
 

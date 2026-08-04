@@ -366,6 +366,66 @@ pub async fn has_index(db: &SqlitePool, project_id: &str) -> bool {
     count > 0
 }
 
+/// The `# Knowledge` system-prompt block for a chat whose scope has an index.
+///
+/// Without this the retrieval tool was effectively dead weight: it was appended
+/// to the tool array and never mentioned anywhere else, so a model saw
+/// `search_local_files` sitting beside `read_file`, `list_directory`,
+/// `find_files` and `search_file_text` with no indication that an index existed,
+/// what was in it, or when to prefer it. It reliably reached for the file tools
+/// it already understood and the embedding index went unused. Every other
+/// context system here (skills, memory, the leader roster, the agent loop) earns
+/// its use through a prompt block; this is knowledge's.
+///
+/// Deliberately free of counts and timestamps. This sits in the system prompt,
+/// which precedes the whole history, and prefix caches match byte-exact — a
+/// document count that ticks up on every re-index would invalidate the cache for
+/// the entire conversation, which is the mistake `compact_hint` made before it
+/// was bucketed (see docs/COMPETITORS.md). What it names — the scope and the
+/// routing rule — changes only when the project itself does.
+pub async fn build_knowledge_block(db: &SqlitePool, project_id: &str) -> Option<String> {
+    let (name, dir): (Option<String>, Option<String>) =
+        sqlx::query_as("SELECT name, directory FROM projects WHERE id = ?1")
+            .bind(project_id)
+            .fetch_optional(db)
+            .await
+            .ok()
+            .flatten()?;
+
+    let scope = if project_id == GLOBAL_KB_ID {
+        "the user's default files folder".to_string()
+    } else {
+        match (name, dir.as_deref().filter(|d| !d.trim().is_empty())) {
+            (Some(n), Some(d)) => format!("the **{n}** project's folder (`{d}`)"),
+            (Some(n), None) => format!("the **{n}** project's folder"),
+            (None, Some(d)) => format!("`{d}`"),
+            (None, None) => "this project's folder".to_string(),
+        }
+    };
+
+    Some(format!(
+        "# Knowledge\n\
+         The documents in {scope} have been indexed for semantic search, and you can query \
+         that index with `search_local_files`. It searches by *meaning*, so you can ask for \
+         what you want in plain language instead of guessing the wording a file uses, and it \
+         returns the matching passages with the file each came from.\n\
+         \n\
+         Use it first whenever the answer might be in the user's own files — before opening \
+         anything by hand. It is faster and cheaper than listing folders and reading files to \
+         find where something is discussed, and it searches documents you have not opened and \
+         would have no reason to guess at.\n\
+         \n\
+         Choose between it and the file tools this way:\n\
+         - Conceptual or open-ended (\"what did we decide about X\", \"how does Y work\", \
+         \"where is Z discussed\") → `search_local_files`.\n\
+         - An exact string, symbol, or error message you already know → `search_file_text`.\n\
+         - A path you already have, or one search just gave you → `read_file`.\n\
+         \n\
+         Cite what you use: the results carry `ref` numbers, so mark a claim drawn from a \
+         passage with its `[n]` the same way you would a web source."
+    ))
+}
+
 /// (Re)index a project's directory. Unchanged files (same content hash) are
 /// skipped; changed/new files are re-embedded; files gone from disk are pruned.
 /// Per-file failures are recorded without aborting the whole run.

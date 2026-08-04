@@ -631,16 +631,6 @@ export interface AppSettings {
    */
   perspectiveLayout: "stacked" | "columns";
   /**
-   * Web search provider used by all zones.
-   * "duckduckgo" (default, no key required) | "searxng" (self-hosted) |
-   * "brave" | "tavily" | "serper" (all key-based).
-   * Legacy "multi"/"marginalia" values are migrated to "duckduckgo" on load.
-   */
-  webSearchProvider: string;
-  /** SearXNG instance URL — only used when webSearchProvider is "searxng". */
-  webSearchEndpoint: string;
-  /** API key — only used for providers that require one (brave, tavily, serper). */
-  webSearchApiKey: string;
   /**
    * The zone that answers a Quick Chat — the app-wide default assistant, and
    * the single answer to "what runs when no zone is chosen?" (0.9.9; the old
@@ -813,9 +803,6 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   exportSubchats: true,
   perspectiveMode: "parallel",
   perspectiveLayout: "stacked",
-  webSearchProvider: "duckduckgo",
-  webSearchEndpoint: "",
-  webSearchApiKey: "",
   baseZoneId: null,
   memoryScopeLimit: 50,
   seededSkills: false,
@@ -925,11 +912,11 @@ export const ALL_TOOLS: ToolInfo[] = [
   { id: "present_file", label: "Show a file in the chat",        category: "Files", safety: 0, description: "Display a file the assistant has produced, inline in the conversation — HTML reports get a live preview with an open-in-browser button; other files get a card that opens them." },
 
   // Web
-  // `web_search` is superseded by `smart_search` — kept (hidden) only so zones
-  // and chat history that still reference it resolve a label. Connect a search
-  // MCP (e.g. Tavily) if you want a paid provider instead.
-  { id: "web_search",   label: "Search the web (legacy)", category: "Web", safety: 1, hidden: true, description: "Legacy single-provider web search, replaced by the built-in multi-engine search. For a paid provider, connect a search MCP instead." },
-  { id: "extract",      label: "Read a web page",     category: "Web", safety: 1, description: "Open one or more web pages and read them in full, not just the search snippet." },
+  // The single-provider `web_search` and the `extract` page reader were removed
+  // at 1.0 — `smart_search` and `smart_fetch` below do the same jobs keylessly
+  // and more reliably. Their ids still resolve (to the replacements) in the Rust
+  // `ToolId::from_str`, so a zone that predates the change keeps its capability;
+  // for a paid provider, connect a search MCP.
   // Hound-based searching tools — https://github.com/dondai1234/master-fetch
   { id: "smart_search", label: "Search the web",      category: "Web", safety: 1, description: "Search several independent engines at once (DuckDuckGo, Bing, Brave, Yandex, Ecosia, Yahoo, Wikipedia) and merge the results, so one engine being rate-limited doesn't come back empty. Keyless — no API key or paid service. For a paid provider like Tavily, connect a search MCP." },
   { id: "smart_fetch",  label: "Fetch a page or PDF", category: "Web", safety: 1, description: "Read one or more web pages or PDFs in full as clean markdown. Handles PDFs, and can focus a long page on a relevance query. HTTP-only — honest when a page needs JavaScript instead of returning it blank." },

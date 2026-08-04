@@ -636,40 +636,15 @@ export const useApp = create<AppStore>((set, get) => ({
     const zones = await api.listZones();
     set({ zones });
 
-    // One-time migration: move web_search config from per-zone tool_config to global app settings.
+    // One-time cleanup: the retired `web_search` tool kept its provider and key
+    // in each zone's `tool_config`. Nothing reads that block any more (the tool
+    // is gone; `smart_search` is keyless), so strip it rather than leave an API
+    // key sitting in a config the user can no longer see or edit.
     const zonesWithWs = zones.filter((z) => {
       try { return JSON.parse(z.toolConfig)?.web_search != null; } catch { return false; }
     });
     if (zonesWithWs.length === 0) return;
 
-    // Promote first non-default zone config to global settings (only if user hasn't configured it yet).
-    // Read directly from DB — do NOT use get().appSettings which may not be loaded yet at startup.
-    let savedSettings: Partial<AppSettings> = {};
-    try {
-      const raw = await api.getSetting("app_settings");
-      if (raw) savedSettings = JSON.parse(raw) as Partial<AppSettings>;
-    } catch { /* ignore */ }
-    const current = { ...DEFAULT_APP_SETTINGS, ...savedSettings };
-    // Retired providers map to DuckDuckGo — see loadAppSettings().
-    const norm = (p: unknown) =>
-      p === "multi" || p === "marginalia" || p == null ? "duckduckgo" : String(p);
-    const unconfigured =
-      norm(current.webSearchProvider) === "duckduckgo" &&
-      !current.webSearchEndpoint &&
-      !current.webSearchApiKey;
-    if (unconfigured) {
-      const firstWs = (JSON.parse(zonesWithWs[0].toolConfig) as Record<string, any>)?.web_search ?? {};
-      // Only promote a zone config that actually says something we'd lose.
-      if (norm(firstWs.provider) !== "duckduckgo" || firstWs.endpoint || firstWs.api_key) {
-        await get().setAppSettings({
-          webSearchProvider: norm(firstWs.provider),
-          webSearchEndpoint: firstWs.endpoint ?? "",
-          webSearchApiKey: firstWs.api_key ?? "",
-        });
-      }
-    }
-
-    // Strip web_search from every zone's tool_config.
     for (const z of zonesWithWs) {
       try {
         const tc = JSON.parse(z.toolConfig) as Record<string, unknown>;
@@ -678,7 +653,7 @@ export const useApp = create<AppStore>((set, get) => ({
       } catch { /* skip */ }
     }
 
-    // Reload after migration so the store reflects cleaned zones.
+    // Reload after cleanup so the store reflects cleaned zones.
     set({ zones: await api.listZones() });
   },
   async refreshChats() {
@@ -1203,12 +1178,11 @@ export const useApp = create<AppStore>((set, get) => ({
         if (typeof merged.fontSize === "string") {
           merged.fontSize = LEGACY_FONT_SIZE[merged.fontSize as string] ?? 14;
         }
-        // The DDG+Marginalia fan-out ("multi") and the standalone Marginalia
-        // engine were removed; both had no API key, so DuckDuckGo is the
-        // like-for-like replacement.
-        if (merged.webSearchProvider === "multi" || merged.webSearchProvider === "marginalia") {
-          merged.webSearchProvider = "duckduckgo";
-        }
+        // The web-search provider settings (`webSearchProvider` / `Endpoint` /
+        // `ApiKey`) were dropped at 1.0 along with the single-provider
+        // `web_search` tool. Stored copies are harmless — the spread above only
+        // keeps keys that exist in DEFAULT_APP_SETTINGS-shaped reads — so no
+        // migration is needed beyond letting them fall out of use.
         set({ appSettings: merged });
         applyAppSettingsToDom(merged);
       }

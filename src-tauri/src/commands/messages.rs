@@ -376,12 +376,7 @@ async fn ocr_language(db: &SqlitePool) -> String {
 ///
 /// Re-applied on a zone switch, because both entries depend on which zone (and
 /// so which model) is now answering.
-async fn inject_global_tool_config(
-    zone_config: &mut Value,
-    global_ws_cfg: &Option<Value>,
-    db: &SqlitePool,
-    model: &str,
-) {
+async fn inject_global_tool_config(zone_config: &mut Value, db: &SqlitePool, model: &str) {
     // A PDF read returns page images by default, which is only useful to a model
     // that can see them. For a vision-incapable one the tool extracts text
     // instead — the same call attachments make, and for the same reason:
@@ -392,9 +387,6 @@ async fn inject_global_tool_config(
     // The language an image read falls back to OCR in, for the same zones.
     if !vision_capable {
         obj.insert("ocr_language".to_string(), Value::String(ocr_language(db).await));
-    }
-    if let Some(ws) = global_ws_cfg {
-        obj.insert("web_search".to_string(), ws.clone());
     }
 }
 
@@ -1407,24 +1399,7 @@ async fn run_participant_turn(
     let mut zone_config: Value =
         serde_json::from_str(&zone.tool_config).unwrap_or(Value::Object(Default::default()));
 
-    // Read global web-search config once; injected into zone_config (and on
-    // zone-switch) so every zone uses the same provider/credentials without
-    // storing them in per-zone tool_config.
-    let global_ws_cfg: Option<Value> = {
-        let raw: Option<String> = sqlx::query_scalar(
-            "SELECT value FROM settings WHERE key = 'app_settings'",
-        )
-        .fetch_optional(&ctx.db)
-        .await?
-        .flatten();
-        raw.and_then(|s| serde_json::from_str::<Value>(&s).ok()).map(|app_cfg| {
-            let provider = app_cfg.get("webSearchProvider").and_then(|v| v.as_str()).unwrap_or("duckduckgo");
-            let endpoint = app_cfg.get("webSearchEndpoint").and_then(|v| v.as_str()).unwrap_or("");
-            let api_key = app_cfg.get("webSearchApiKey").and_then(|v| v.as_str()).unwrap_or("");
-            serde_json::json!({ "provider": provider, "endpoint": endpoint, "api_key": api_key })
-        })
-    };
-    inject_global_tool_config(&mut zone_config, &global_ws_cfg, &ctx.db, &zone.model).await;
+    inject_global_tool_config(&mut zone_config, &ctx.db, &zone.model).await;
 
     // The directory that scopes the filesystem tools. Resolved with the tool
     // context above, so the descriptions the model sees and the roots the tools
@@ -1939,13 +1914,7 @@ async fn run_participant_turn(
                         };
                         zone_config = serde_json::from_str(&zone.tool_config)
                             .unwrap_or(Value::Object(Default::default()));
-                        inject_global_tool_config(
-                            &mut zone_config,
-                            &global_ws_cfg,
-                            &ctx.db,
-                            &zone.model,
-                        )
-                        .await;
+                        inject_global_tool_config(&mut zone_config, &ctx.db, &zone.model).await;
                         client = LlmClient::new(
                             &ctx.http,
                             &provider.base_url,
@@ -2069,6 +2038,7 @@ pub enum SnippetKind {
     ZonePrompt,
     Continuity,
     Skills,
+    Knowledge,
     ProjectContext,
     TagContext,
     Leader,
@@ -2084,6 +2054,7 @@ impl SnippetKind {
             Self::ProjectContext => "Project context",
             Self::TagContext => "Tag context",
             Self::Skills => "Skills catalog",
+            Self::Knowledge => "Knowledge index",
             Self::ZonePrompt => "Zone prompt",
             Self::Continuity => "Agent-loop preamble",
             Self::Leader => "Sub-agent roster",
@@ -2174,6 +2145,24 @@ pub async fn build_system_snippets(
     if zone_tool_ids.iter().any(|t| t == "skills") {
         if let Some(catalog) = crate::tools::skills::build_catalog(db).await? {
             snippets.push((SnippetKind::Skills, catalog));
+        }
+    }
+
+    // Knowledge index (0.4.3, told to the model at 1.0). Gated exactly as the
+    // `search_local_files` tool is — the chat opted in and its scope has a
+    // non-empty index — so the prompt can never advertise a tool the turn does
+    // not actually offer, or stay silent about one it does.
+    if let Some(c) = chat {
+        if c.knowledge_enabled {
+            let scope = c
+                .project_id
+                .clone()
+                .unwrap_or_else(|| crate::knowledge::GLOBAL_KB_ID.to_string());
+            if crate::knowledge::has_index(db, &scope).await {
+                if let Some(block) = crate::knowledge::build_knowledge_block(db, &scope).await {
+                    snippets.push((SnippetKind::Knowledge, block));
+                }
+            }
         }
     }
 

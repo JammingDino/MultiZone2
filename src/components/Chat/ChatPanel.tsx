@@ -87,6 +87,7 @@ export function ChatPanel() {
   const baseZoneId = useApp((s) => s.appSettings.baseZoneId);
 
   const pendingApprovalByChat = useApp((s) => s.pendingApprovalByChat);
+  const setActiveChat = useApp((s) => s.setActiveChat);
   const routingByChat = useApp((s) => s.routingByChat);
   const stageImport = useApp((s) => s.stageImport);
   const pendingApprovals = activeChatId ? (pendingApprovalByChat[activeChatId] ?? []) : [];
@@ -105,6 +106,25 @@ export function ChatPanel() {
     isSubchat && activeChat
       ? zones.find((z) => z.id === activeChat.initiatedByZoneId) ?? null
       : null;
+
+  // Approvals waiting in a chat the user is *not* looking at — almost always a
+  // background sub-agent (0.9.10 let a leader fan out to a whole panel at once).
+  // The store already holds them: the stream listener routes every event by its
+  // own chat id, so a subchat's approval lands correctly whether or not it is on
+  // screen. Nothing surfaced it, though, so the request sat until the ~5-minute
+  // approval timeout auto-denied it and the sub-agent stalled with no visible
+  // cause. Surfacing it here — in the leader's chat, where the user is actually
+  // sitting while the panel works — is what closes that loop.
+  const elsewhereApprovals = useMemo(() => {
+    const out: { chatId: string; title: string; count: number }[] = [];
+    for (const [cid, list] of Object.entries(pendingApprovalByChat)) {
+      if (!list?.length || cid === activeChatId) continue;
+      const chat = chats.find((c) => c.id === cid);
+      if (!chat) continue;
+      out.push({ chatId: cid, title: chat.title || "Untitled chat", count: list.length });
+    }
+    return out;
+  }, [pendingApprovalByChat, activeChatId, chats]);
 
   // A chat with no zone (Quick) or smart routing enabled runs the base zone, or
   // the first provider's default model. Zone chats need their zone configured.
@@ -337,6 +357,29 @@ export function ChatPanel() {
               chat's view state — collapsed rails, edit drafts, scroll position,
               and (before the `useThrottledStreaming` fix) the old answer text. */}
           <MessageThread key={activeChat.id} chatId={activeChat.id} />
+          {elsewhereApprovals.length > 0 && (
+            <div className="border-t border-amber-500/40 bg-amber-500/10 px-4 py-2">
+              <div className="mx-auto flex max-w-3xl flex-col gap-1.5">
+                {elsewhereApprovals.map((e) => (
+                  <div key={e.chatId} className="flex items-center gap-2 text-xs">
+                    <ShieldAlert size={14} className="shrink-0 text-amber-500" />
+                    <span className="text-[var(--color-text)]">
+                      {e.count === 1
+                        ? "A sub-agent is waiting for approval in"
+                        : `${e.count} approvals are waiting in`}{" "}
+                      <span className="font-medium">{e.title}</span>
+                    </span>
+                    <button
+                      onClick={() => void setActiveChat(e.chatId)}
+                      className="ml-auto shrink-0 rounded border border-amber-500/50 px-2 py-0.5 font-medium text-amber-600 transition-colors hover:bg-amber-500/20 dark:text-amber-400"
+                    >
+                      Review
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {pendingApprovals.length > 0 ? (
             <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3">
               <div className="mx-auto flex max-w-3xl flex-col gap-2">

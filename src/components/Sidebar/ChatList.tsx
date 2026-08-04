@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import type { Chat, ChatTagLink } from "@/lib/types";
-import { MessageSquare, Pencil, Trash2, Sparkles, Loader2, FolderInput, FolderMinus, GitBranch, ChevronRight, ChevronDown } from "lucide-react";
+import { MessageSquare, Pencil, Trash2, Sparkles, Loader2, FolderInput, FolderMinus, GitBranch, ChevronRight, ChevronDown, ShieldAlert } from "lucide-react";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { useShallow } from "zustand/react/shallow";
@@ -36,6 +36,7 @@ export function ChatList({ chats, activeId, onSelect, projectId }: Props) {
   );
   const zones = useApp((s) => s.zones);
   const regenerating = useApp((s) => s.regeneratingTitles);
+  const pendingApprovalByChat = useApp((s) => s.pendingApprovalByChat);
   const chatTagLinks = useApp((s) => s.chatTagLinks);
   const [movingTo, setMovingTo] = useState(false);
   // Folded branch groups persist across sessions (keyed by parent chat id).
@@ -125,6 +126,7 @@ export function ChatList({ chats, activeId, onSelect, projectId }: Props) {
     const active = chat.id === activeId;
     const editing = chat.id === editingId;
     const isRegenerating = regenerating.has(chat.id);
+    const awaitingApproval = (pendingApprovalByChat[chat.id]?.length ?? 0) > 0;
     const kids = childrenByParent[chat.id] ?? [];
     const hasKids = kids.length > 0;
     const branchesOpen = !collapsedBranches.has(chat.id);
@@ -191,6 +193,14 @@ export function ChatList({ chats, activeId, onSelect, projectId }: Props) {
                 {isRegenerating && (
                   <span className="ml-2 text-xs text-[var(--color-text-muted)]">renaming…</span>
                 )}
+              </span>
+            )}
+            {/* A tool call waiting on the user in a chat that isn't open. Mostly
+                background sub-agents: without a marker here the request is
+                invisible until it times out and auto-denies. */}
+            {awaitingApproval && (
+              <span title="Waiting for your approval" className="flex-shrink-0">
+                <ShieldAlert size={13} className="animate-pulse text-amber-500" />
               </span>
             )}
           </div>

@@ -2379,25 +2379,26 @@ async fn build_message_history(
     // than next to any single cause.
     drop_orphan_tool_messages(&mut rows);
 
-    // Find the last user message so we can downgrade images in earlier turns.
-    // Qwen2-VL tokenises images at native resolution (~700-1000 tokens each);
-    // with N images accumulated over K turns we'd otherwise pay a growing
-    // prefill cost on every response. Setting detail:"low" for historical
-    // images cuts each to ~85 tokens (~10× cheaper) while leaving the most
-    // recent user message at full quality. The stored data is not touched —
-    // this only affects the API request body built here.
+    // Images are sent at full detail for the whole conversation.
     //
-    // This is the one place the request body is deliberately *not* append-only,
-    // so it is worth being explicit about the trade: when a new user message
-    // arrives, the previous one drops from full to low detail, and a prefix
-    // cache breaks at that point. The loss is bounded — everything before the
-    // previous user turn is untouched and stays cached, and nothing happens at
-    // all unless that turn actually carried an image — whereas keeping full
-    // detail forever grows the prefill cost of every future request without
-    // limit. Measured against `cachedInputTokens` in the context meter, the
-    // downgrade still wins on image-heavy chats. Don't "fix" this into
-    // append-only purity without checking that number first.
-    let last_user_idx = rows.iter().rposition(|m| m.role == "user");
+    // Earlier turns' images used to be rewritten to detail:"low" (~85 tokens
+    // instead of ~700-1000) once a newer user message arrived, to hold down
+    // prefill cost on image-heavy chats. It worked as a cost measure and was
+    // wrong as a product decision: it silently degraded every image the moment
+    // you sent your next message, so following up on a screenshot — "what about
+    // the panel on the left" — asked the model about a picture it could no
+    // longer read properly. The failure was invisible, because the image is
+    // still there in the transcript at full quality; only the copy in the
+    // request was downgraded, and the model just answered worse.
+    //
+    // Being able to reason over an image across a conversation is worth more
+    // than the tokens it costs, so nothing is downgraded now. The cost is real
+    // and unbounded — N images stay in the prefill of every subsequent request
+    // — so if this needs a lid later, make it a user-visible setting that
+    // defaults to full detail, rather than a silent rewrite.
+    //
+    // (It also un-breaks a prefix cache: the request body is now append-only
+    // here, where previously each new user turn rewrote the one before it.)
 
     // OCR fallback (0.4.0): if the resolved model can't accept image input, every
     // image part (uploaded images and PDF page renders) is OCR'd into text so the
@@ -2412,9 +2413,7 @@ async fn build_message_history(
     };
     let ocr_lang = if vision_capable { String::new() } else { ocr_language(db).await };
 
-    for (idx, m) in rows.into_iter().enumerate() {
-        let is_historical = last_user_idx.map_or(false, |li| idx < li);
-
+    for m in rows.into_iter() {
         let mut content_parts: Vec<ContentPart> =
             serde_json::from_str(&m.content).unwrap_or_default();
         // For historical assistant turns, strip inline thinking blocks before
@@ -2427,21 +2426,6 @@ async fn build_message_history(
                 }
             }
         }
-        // Downgrade historical images to low detail to reduce vision-token
-        // prefill cost. Applies to both user messages (uploaded images) and
-        // tool messages (images returned by file-system reads).
-        if is_historical {
-            for part in &mut content_parts {
-                match part {
-                    ContentPart::ImageUrl { image_url }
-                    | ContentPart::HiddenImage { image_url } => {
-                        image_url.detail = Some("low".to_string());
-                    }
-                    _ => {}
-                }
-            }
-        }
-
         // Promote hidden parts to their visible equivalents for the API (the
         // hidden flag is only meaningful to the UI renderer). When the model is
         // vision-incapable, image parts are OCR'd into text here instead.

@@ -2482,13 +2482,6 @@ function MemoryTab() {
 // ─── Search ─────────────────────────────────────────────────────────────────────
 
 function SearchTab() {
-  const appSettings = useApp((s) => s.appSettings);
-  const setAppSettings = useApp((s) => s.setAppSettings);
-
-  const provider = appSettings.webSearchProvider ?? "duckduckgo";
-  const endpoint = appSettings.webSearchEndpoint ?? "";
-  const apiKey = appSettings.webSearchApiKey ?? "";
-
   return (
     <div className="flex flex-col gap-6">
       <section>
@@ -2506,59 +2499,14 @@ function SearchTab() {
         </p>
       </section>
 
-      <details className="rounded border border-[var(--color-border)] px-3 py-2">
-        <summary className="cursor-pointer text-xs text-[var(--color-text-muted)]">
-          Legacy search provider (deprecated)
-        </summary>
-        <div className="mt-3 flex flex-col gap-4">
-          <p className="text-xs text-[var(--color-text-muted)]">
-            Only affects zones that still have the old single-provider <code>web_search</code> tool
-            enabled. New zones use the built-in multi-engine search above; prefer a search MCP for a
-            paid provider.
-          </p>
-          <SettingSelect
-            value={provider}
-            onChange={(v) => setAppSettings({ webSearchProvider: v, webSearchEndpoint: "", webSearchApiKey: "" })}
-          >
-            <option value="duckduckgo">duckduckgo — no key required (default)</option>
-            <option value="searxng">searxng — self-hosted (needs endpoint URL)</option>
-            <option value="brave">brave — Brave Search API (needs key)</option>
-            <option value="tavily">tavily — Tavily API (needs key)</option>
-            <option value="serper">serper — Google via Serper API (needs key)</option>
-          </SettingSelect>
-
-      {provider === "searxng" && (
-        <section>
-          <h3 className="mb-1 text-sm font-medium">SearXNG endpoint URL</h3>
-          <input
-            value={endpoint}
-            onChange={(e) => setAppSettings({ webSearchEndpoint: e.target.value })}
-            className="w-full rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]"
-            placeholder="https://searx.be"
-          />
-        </section>
-      )}
-
-      {["brave", "tavily", "serper"].includes(provider) && (
-        <section>
-          <h3 className="mb-1 text-sm font-medium">API key</h3>
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(e) => setAppSettings({ webSearchApiKey: e.target.value })}
-            className="w-full rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]"
-            placeholder="sk-…"
-          />
-        </section>
-      )}
-
-          {provider === "duckduckgo" && (
-            <p className="text-xs text-[var(--color-text-muted)]">
-              No API key required — results are fetched directly.
-            </p>
-          )}
-        </div>
-      </details>
+      <section>
+        <h3 className="mb-1 text-sm font-medium">Reading pages</h3>
+        <p className="text-xs text-[var(--color-text-muted)]">
+          <strong>Fetch a page or PDF</strong> reads a result in full as clean markdown, and{" "}
+          <strong>Crawl a site</strong> follows links within one site to gather a topic in a single
+          call. Both are keyless too. Enable them per zone alongside search.
+        </p>
+      </section>
     </div>
   );
 }

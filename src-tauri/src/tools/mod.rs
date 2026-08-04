@@ -1,6 +1,4 @@
 pub mod datetime;
-pub mod web_search;
-pub mod extract;
 // Hound-based searching tools — https://github.com/dondai1234/master-fetch
 pub mod web_util;
 pub mod smart_search;
@@ -111,8 +109,6 @@ impl Default for ToolContext {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolId {
     DateTime,
-    WebSearch,
-    Extract,
     /// Hound-based multi-engine keyless search (https://github.com/dondai1234/master-fetch).
     SmartSearch,
     /// Hound-based HTTP-first page/PDF reader.
@@ -159,10 +155,14 @@ impl ToolId {
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "date_time" => Some(Self::DateTime),
-            "web_search" => Some(Self::WebSearch),
-            "extract" => Some(Self::Extract),
-            "smart_search" => Some(Self::SmartSearch),
-            "smart_fetch" => Some(Self::SmartFetch),
+            // 1.0: the single-provider `web_search` and the `extract` page reader
+            // were removed in favour of the keyless multi-engine `smart_search`
+            // and `smart_fetch`, which do the same jobs strictly better. Their
+            // ids stay as aliases so a zone that still lists them (or an imported
+            // zone JSON, or a curated preset predating the change) silently gets
+            // the modern tool instead of losing the capability.
+            "smart_search" | "web_search" => Some(Self::SmartSearch),
+            "smart_fetch" | "extract" => Some(Self::SmartFetch),
             "smart_crawl" => Some(Self::SmartCrawl),
             "code_exec" => Some(Self::CodeExec),
             "file_system" => Some(Self::FileSystem),
@@ -192,8 +192,6 @@ impl ToolId {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::DateTime => "date_time",
-            Self::WebSearch => "web_search",
-            Self::Extract => "extract",
             Self::SmartSearch => "smart_search",
             Self::SmartFetch => "smart_fetch",
             Self::SmartCrawl => "smart_crawl",
@@ -225,8 +223,6 @@ impl ToolId {
     pub fn definitions(self, ctx: &ToolContext) -> Vec<Tool> {
         match self {
             Self::DateTime => vec![datetime::definition()],
-            Self::WebSearch => vec![web_search::definition()],
-            Self::Extract => vec![extract::definition()],
             Self::SmartSearch => vec![smart_search::definition()],
             Self::SmartFetch => vec![smart_fetch::definition()],
             Self::SmartCrawl => vec![smart_crawl::definition()],
@@ -279,10 +275,10 @@ impl ToolId {
             // contents, so it is gated like the other file reads rather than as safe.
             // Compact is a lossy rewrite of what the model can see, so the user
             // approves it rather than having it happen behind their back.
-            // The smart_* web tools read the network like web_search/extract do —
-            // moderate, so they're not in the safe default set but need no per-call
-            // approval once a zone enables them.
-            Self::WebSearch | Self::Extract | Self::SmartSearch | Self::SmartFetch
+            // The smart_* web tools read the network — moderate, so they're not in
+            // the safe default set but need no per-call approval once a zone
+            // enables them.
+            Self::SmartSearch | Self::SmartFetch
             | Self::SmartCrawl | Self::FileSystem | Self::FileSearch
             | Self::SwitchZone | Self::Subchat | Self::Compact => 1,
             // FileManage contains `delete_file`; the group is dangerous so it never
@@ -303,10 +299,8 @@ impl ToolId {
 /// Every built-in tool group. The single source of truth for enumerating tools
 /// (e.g. `list_tool_functions`, which flattens each group into the functions the
 /// model actually sees). Keep in step with the `ToolId` variants.
-pub const ALL_TOOL_IDS: [ToolId; 24] = [
+pub const ALL_TOOL_IDS: [ToolId; 22] = [
     ToolId::DateTime,
-    ToolId::WebSearch,
-    ToolId::Extract,
     ToolId::SmartSearch,
     ToolId::SmartFetch,
     ToolId::SmartCrawl,
@@ -336,8 +330,6 @@ pub const ALL_TOOL_IDS: [ToolId; 24] = [
 pub fn safe_tool_ids() -> Vec<&'static str> {
     [
         ToolId::DateTime,
-        ToolId::WebSearch,
-        ToolId::Extract,
         ToolId::CodeExec,
         ToolId::FileSystem,
         ToolId::RenderGraph,
@@ -454,10 +446,14 @@ pub async fn dispatch(
 
     match name {
         "get_current_datetime" => datetime::run(&args).await,
-        "web_search" => web_search::run(&args, zone_config, http).await,
-        "extract_url" => extract::run(&args, http).await,
-        "smart_search" => smart_search::run(&args).await,
-        "smart_fetch" => smart_fetch::run(&args).await,
+        // The retired `web_search` / `extract_url` names still route here: they
+        // are arg-compatible with their replacements (`query`, and `urls`/`url`
+        // respectively), so a model that reaches for an old name — from a skill,
+        // a hand-written zone prompt, or its own priors — gets the modern tool
+        // rather than an "unknown tool" error. Nothing offers these names in a
+        // definition any more.
+        "smart_search" | "web_search" => smart_search::run(&args).await,
+        "smart_fetch" | "extract_url" => smart_fetch::run(&args).await,
         "smart_crawl" => smart_crawl::run(&args).await,
         "execute_code" => code_exec::run(&args, zone_config).await,
         // `sink` carries the window handle: a PDF's pages are rasterized by the
@@ -516,6 +512,32 @@ pub async fn dispatch(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Retiring a tool must not silently strip a capability from existing zones.
+    ///
+    /// `web_search` and `extract` were removed at 1.0 in favour of `smart_search`
+    /// and `smart_fetch`. A zone's `tools_enabled` is stored data we don't get to
+    /// migrate everywhere (it also arrives via zone JSON imports and old curated
+    /// presets), so the retired ids resolve to their replacements instead of to
+    /// `None` — which would have quietly left a research zone unable to search.
+    #[test]
+    fn retired_web_tool_ids_resolve_to_their_replacements() {
+        assert_eq!(ToolId::from_str("web_search"), Some(ToolId::SmartSearch));
+        assert_eq!(ToolId::from_str("extract"), Some(ToolId::SmartFetch));
+        // The replacements still resolve to themselves.
+        assert_eq!(ToolId::from_str("smart_search"), Some(ToolId::SmartSearch));
+        assert_eq!(ToolId::from_str("smart_fetch"), Some(ToolId::SmartFetch));
+        // An alias is not a round trip: the canonical id is what gets written back.
+        assert_eq!(ToolId::from_str("web_search").unwrap().as_str(), "smart_search");
+        assert_eq!(ToolId::from_str("extract").unwrap().as_str(), "smart_fetch");
+        // Nothing offers the retired names in a definition any more.
+        for id in ALL_TOOL_IDS {
+            for def in id.definitions(&ToolContext::default()) {
+                assert_ne!(def.function.name, "web_search");
+                assert_ne!(def.function.name, "extract_url");
+            }
+        }
+    }
 
     /// A budget on the size of the tool definitions themselves.
     ///

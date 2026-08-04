@@ -9,6 +9,7 @@ import * as api from "@/lib/tauri";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
 import { VisionOverrideSelect } from "@/components/common/VisionOverrideSelect";
 import { Modal, ModalTitle } from "@/components/common/Modal";
+import { UpdateSection } from "@/components/Settings/UpdateSection";
 import { getVersion } from "@tauri-apps/api/app";
 import { saveTextFile } from "@/lib/saveFile";
 import { resolveBaseProvider } from "@/lib/baseZone";
@@ -2749,6 +2750,8 @@ function DataTab() {
 
   return (
     <div className="flex flex-col gap-6">
+      <UpdateSection />
+
       {/* Stats */}
       <section>
         <h3 className="mb-3 text-sm font-medium">Database</h3>

@@ -66,6 +66,13 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signing keys for the auto-updater. Without these the build still
+          # produces installers, but no signed `latest.json` — and the updater
+          # refuses an unsigned manifest, so every existing install silently
+          # stops seeing updates. Generated with `tauri signer generate`; the
+          # public half is baked into tauri.conf.json.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: v${{ needs.check.outputs.version }}
           releaseName: MultiZone v${{ needs.check.outputs.version }}
@@ -77,11 +84,16 @@ jobs:
             | `*_x64_en-US.msi` | Windows MSI installer (recommended) |
             | `*_x64-setup.exe` | NSIS self-contained setup / portable exe |
 
+            Existing installs update themselves — see Settings → Data → Updates.
+
             See the [commit history](https://github.com/${{ github.repository }}/commits/main)
             for a full list of changes since the last release.
           releaseDraft: false
           prerelease: false
-          args: --bundles msi,nsis
+          # `updater` emits the signed bundle + `latest.json` the in-app updater
+          # reads. It must ship in the same release as the installers, since the
+          # endpoint points at this repo's latest release.
+          args: --bundles msi,nsis,updater
 
   # ── Bump patch version and reset the build flag ──────────────────────────
   bump-version:

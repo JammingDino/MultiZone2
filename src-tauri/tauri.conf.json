@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "MultiZone",
-  "version": "0.9.9",
+  "version": "0.9.12",
   "identifier": "com.multizone.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -29,6 +29,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -39,6 +40,17 @@
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/JammingDino/MultiZone2/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEMzQUY4OTRBRTdDOUJCNUIKUldSYnU4bm5Tb212dzNWdEJNVWFiaGFzelo4OXVMMnA4aXUxc3Q0aU14UHFDcUNLb3RNa0ZBb1QK",
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

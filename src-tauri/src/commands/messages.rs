@@ -2397,6 +2397,17 @@ async fn build_message_history(
     // images cuts each to ~85 tokens (~10× cheaper) while leaving the most
     // recent user message at full quality. The stored data is not touched —
     // this only affects the API request body built here.
+    //
+    // This is the one place the request body is deliberately *not* append-only,
+    // so it is worth being explicit about the trade: when a new user message
+    // arrives, the previous one drops from full to low detail, and a prefix
+    // cache breaks at that point. The loss is bounded — everything before the
+    // previous user turn is untouched and stays cached, and nothing happens at
+    // all unless that turn actually carried an image — whereas keeping full
+    // detail forever grows the prefill cost of every future request without
+    // limit. Measured against `cachedInputTokens` in the context meter, the
+    // downgrade still wins on image-heavy chats. Don't "fix" this into
+    // append-only purity without checking that number first.
     let last_user_idx = rows.iter().rposition(|m| m.role == "user");
 
     // OCR fallback (0.4.0): if the resolved model can't accept image input, every

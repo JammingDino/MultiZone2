@@ -26,11 +26,14 @@ export function UpdateSection() {
 
   return (
     <section>
-      <h3 className="mb-1 text-sm font-medium">Updates</h3>
-      <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-        {currentVersion ? `MultiZone ${currentVersion}. ` : ""}Updates are downloaded from the
-        project's GitHub releases and their signature is verified before anything is installed.
-      </p>
+      <h3 className="mb-3 text-sm font-medium">
+        Updates
+        {currentVersion && (
+          <span className="ml-2 text-xs font-normal text-[var(--color-text-muted)]">
+            {currentVersion}
+          </span>
+        )}
+      </h3>
 
       <div className="flex flex-col gap-3 rounded border border-[var(--color-border)] px-3 py-3">
         {u.stage === "available" && (

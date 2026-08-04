@@ -330,7 +330,13 @@ export function ChatPanel() {
             onToggleTagContext={(tagId, e) => toggleChatTagContext(activeChat.id, tagId, e)}
           />
 
-          <MessageThread chatId={activeChat.id} />
+          {/* Keyed by chat id so switching chats remounts the thread instead of
+              reusing the previous chat's component instances. Turns and text
+              blocks inside are keyed by index (a turn has no stable id until it
+              persists), so without this a reused instance could carry the old
+              chat's view state — collapsed rails, edit drafts, scroll position,
+              and (before the `useThrottledStreaming` fix) the old answer text. */}
+          <MessageThread key={activeChat.id} chatId={activeChat.id} />
           {pendingApprovals.length > 0 ? (
             <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3">
               <div className="mx-auto flex max-w-3xl flex-col gap-2">

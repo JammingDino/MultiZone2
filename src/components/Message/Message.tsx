@@ -28,6 +28,15 @@ import { ChevronDown, ChevronRight } from "lucide-react";
  * the entire AST on every prop change, plus KaTeX) doesn't fire on every
  * token. We push the latest value to the renderer on a fixed interval while
  * `streaming` is true, and flush immediately the moment it flips to false.
+ *
+ * The throttled `visible` state is only ever consulted *while streaming*. When
+ * idle we return `source` directly rather than a state copy of it, because a
+ * copy can go stale: this component instance is reused across chat switches
+ * (turns and text blocks are keyed by index), and an effect keyed on
+ * `[streaming]` never re-runs when both the old and new chat are idle. That
+ * left `visible` holding the previous chat's answer — the "chat history
+ * mix-ups" bug, where the prompt updated (user messages are keyed by id) but
+ * the answer under it did not.
  */
 const STREAM_MARKDOWN_THROTTLE_MS = 80;
 
@@ -37,10 +46,7 @@ function useThrottledStreaming(source: string, streaming: boolean): string {
   latestRef.current = source;
 
   useEffect(() => {
-    if (!streaming) {
-      setVisible(latestRef.current);
-      return;
-    }
+    if (!streaming) return;
     setVisible(latestRef.current);
     const id = window.setInterval(
       () => setVisible(latestRef.current),
@@ -49,7 +55,8 @@ function useThrottledStreaming(source: string, streaming: boolean): string {
     return () => window.clearInterval(id);
   }, [streaming]);
 
-  return visible;
+  // Idle: `source` is authoritative and always current.
+  return streaming ? visible : source;
 }
 
 /** Renders a single text chunk, with its own streaming throttle. */

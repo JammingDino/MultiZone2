@@ -2062,15 +2062,18 @@ async fn run_perspective(
 /// number can't be acted on; "Skills catalog 4.1k" can.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
+///
+/// Declaration order is also emission order, and it is chosen deliberately:
+/// most-stable first, most-volatile last. See `build_system_snippets`.
 pub enum SnippetKind {
-    ProjectContext,
-    TagContext,
-    Skills,
     ZonePrompt,
     Continuity,
+    Skills,
+    ProjectContext,
+    TagContext,
     Leader,
-    Memory,
     Identity,
+    Memory,
     CompactHint,
 }
 
@@ -2126,6 +2129,54 @@ pub async fn build_system_snippets(
 ) -> AppResult<Vec<(SnippetKind, String)>> {
     let mut snippets: Vec<(SnippetKind, String)> = Vec::new();
 
+    // ── Ordering: most stable first, most volatile last ──────────────────────
+    //
+    // These are joined into one system message at the front of the request, and
+    // prefix caches (DeepSeek, OpenAI, and every vLLM/SGLang-style local server)
+    // match on a byte-exact prefix: the cache is valid up to the first byte that
+    // differs and no further. A volatile snippet near the front therefore costs
+    // the cache for the entire conversation behind it, not just for itself.
+    //
+    // So the pieces that never move within a session go first (zone prompt,
+    // agent-loop preamble, skills catalog), the ones that change when the user
+    // fiddles with a chat go next (project/tag context, roster, identity), and
+    // the ones that can change on any turn go last (memory, compaction hint).
+    // Reordering is free to do here because nothing downstream depends on the
+    // order — the context meter labels each piece independently.
+
+    // The zone's own prompt is the most stable thing in the request and the
+    // primary instruction, so it leads.
+    if let Some(sys) = &zone.system_prompt {
+        if !sys.trim().is_empty() {
+            snippets.push((SnippetKind::ZonePrompt, sys.clone()));
+        }
+    }
+
+    // How the agentic loop works (0.9.6). A model that doesn't know it will be
+    // called again after a tool result has every reason to stop and wait for the
+    // user — which is exactly what stalls a long task halfway through. Only
+    // zones that actually have tools get this; for the rest it's noise.
+    let zone_tool_ids: Vec<String> = serde_json::from_str(&zone.tools_enabled).unwrap_or_default();
+    if !zone_tool_ids.is_empty() {
+        snippets.push((
+            SnippetKind::Continuity,
+            crate::llm::continuity::multi_step_preamble(
+                max_tool_steps(db).await,
+                zone_tool_ids.iter().any(|t| t == "plan"),
+            ),
+        ));
+    }
+
+    // Skills catalog (Anthropic Agent Skills model): when this zone has the
+    // skills tool, list every enabled skill's name + description so the model
+    // knows what it can load on demand via `load_skill`. The full content is not
+    // injected — the agent requests it only when a request matches.
+    if zone_tool_ids.iter().any(|t| t == "skills") {
+        if let Some(catalog) = crate::tools::skills::build_catalog(db).await? {
+            snippets.push((SnippetKind::Skills, catalog));
+        }
+    }
+
     if let Some(c) = chat {
         // Project context
         if c.project_context_enabled {
@@ -2162,37 +2213,6 @@ pub async fn build_system_snippets(
         );
     }
 
-    // Skills catalog (Anthropic Agent Skills model): when this zone has the
-    // skills tool, list every enabled skill's name + description so the model
-    // knows what it can load on demand via `load_skill`. The full content is not
-    // injected — the agent requests it only when a request matches.
-    let zone_tool_ids: Vec<String> = serde_json::from_str(&zone.tools_enabled).unwrap_or_default();
-    if zone_tool_ids.iter().any(|t| t == "skills") {
-        if let Some(catalog) = crate::tools::skills::build_catalog(db).await? {
-            snippets.push((SnippetKind::Skills, catalog));
-        }
-    }
-
-    if let Some(sys) = &zone.system_prompt {
-        if !sys.trim().is_empty() {
-            snippets.push((SnippetKind::ZonePrompt, sys.clone()));
-        }
-    }
-
-    // How the agentic loop works (0.9.6). A model that doesn't know it will be
-    // called again after a tool result has every reason to stop and wait for the
-    // user — which is exactly what stalls a long task halfway through. Only
-    // zones that actually have tools get this; for the rest it's noise.
-    if !zone_tool_ids.is_empty() {
-        snippets.push((
-            SnippetKind::Continuity,
-            crate::llm::continuity::multi_step_preamble(
-                max_tool_steps(db).await,
-                zone_tool_ids.iter().any(|t| t == "plan"),
-            ),
-        ));
-    }
-
     // Response Leader orchestration preamble (0.6.0): when this zone coordinates
     // sub-agents, inject the delegation protocol and the session's sub-agent
     // roster so the leader knows which zones it can spawn.
@@ -2202,11 +2222,6 @@ pub async fn build_system_snippets(
         }
     }
 
-    // Long-term memory (global → project → chat), injected each turn.
-    if let Some(block) = crate::tools::memory::build_memory_block(db, chat_id).await? {
-        snippets.push((SnippetKind::Memory, block));
-    }
-
     // In a multi-zone chat, tell this model which participant it is (and who the
     // others are) so it can read the labelled transcript correctly and answer as
     // itself on this turn.
@@ -2214,6 +2229,13 @@ pub async fn build_system_snippets(
         if let Some(identity) = build_identity_preamble(db, chat_id, chat, zone).await? {
             snippets.push((SnippetKind::Identity, identity));
         }
+    }
+
+    // Long-term memory (global → project → chat), injected each turn. Late,
+    // because the agent can write a memory mid-session and everything after this
+    // point loses its cache when it does.
+    if let Some(block) = crate::tools::memory::build_memory_block(db, chat_id).await? {
+        snippets.push((SnippetKind::Memory, block));
     }
 
     // Context compaction (0.9.3): once the history is long, nudge the model to

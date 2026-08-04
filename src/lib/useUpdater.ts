@@ -61,6 +61,35 @@ export function useUpdater() {
   }, []);
 
   /**
+   * Turn the plugin's error into something that names a cause.
+   *
+   * The raw message for every non-200 is "Could not fetch a valid release JSON
+   * from the remote", which covers three unrelated situations: there are no
+   * releases yet, the release has no `latest.json` (the build ran without the
+   * signing key), or the manifest is there but not publicly readable because
+   * the repository is private. All three look identical to the client — it just
+   * gets a 404 — so the honest thing is to say so and list them rather than
+   * imply the server returned something malformed.
+   */
+  const explain = (raw: string): string => {
+    if (/valid release JSON|404|not found/i.test(raw)) {
+      return (
+        "No update manifest was found. Either no release has been published yet, " +
+        "the latest release was built without the signing key (so it has no " +
+        "latest.json), or the repository is private — release assets in a private " +
+        "repo aren't publicly downloadable."
+      );
+    }
+    if (/network|dns|connect|timed? ?out|unreachable/i.test(raw)) {
+      return "Couldn't reach GitHub. Check your connection and try again.";
+    }
+    if (/signature|verif/i.test(raw)) {
+      return "The update failed signature verification and was not installed.";
+    }
+    return raw;
+  };
+
+  /**
    * Ask the manifest whether a newer version exists.
    *
    * `silent` suppresses the error state: a startup check that fails because the
@@ -86,7 +115,7 @@ export function useUpdater() {
         }
       } catch (e) {
         if (silent) return;
-        set({ stage: "error", error: e instanceof Error ? e.message : String(e) });
+        set({ stage: "error", error: explain(e instanceof Error ? e.message : String(e)) });
       }
     },
     [set],
@@ -120,7 +149,7 @@ export function useUpdater() {
       });
       set({ stage: "ready" });
     } catch (e) {
-      set({ stage: "error", error: e instanceof Error ? e.message : String(e) });
+      set({ stage: "error", error: explain(e instanceof Error ? e.message : String(e)) });
     }
   }, [set]);
 

@@ -305,10 +305,7 @@ function AppearanceTab() {
             );
           })}
         </div>
-        <div className="mt-1.5 flex items-center justify-between">
-          <p className="text-[10px] text-[var(--color-text-muted)]">
-            Saved per mode — dark and light keep their own palettes.
-          </p>
+        <div className="mt-1.5 flex items-center justify-end">
           {Object.keys(overrides).length > 0 && (
             <button
               onClick={() => setTheme({ [paletteKey]: {} })}
@@ -491,10 +488,7 @@ function AppearanceTab() {
       </section>
 
       <section>
-        <h3 className="mb-1 text-sm font-medium">Perspective layout</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          How additional model responses are arranged beneath the primary answer when a chat runs multiple zones.
-        </p>
+        <h3 className="mb-3 text-sm font-medium">Perspective layout</h3>
         <OptionCards
           value={appSettings.perspectiveLayout}
           onChange={(perspectiveLayout) => setAppSettings({ perspectiveLayout })}
@@ -506,10 +500,7 @@ function AppearanceTab() {
       </section>
 
       <section>
-        <h3 className="mb-1 text-sm font-medium">Zone library page size</h3>
-        <p className="mb-2 text-xs text-[var(--color-text-muted)]">
-          How many zone cards the Zone Library shows per page.
-        </p>
+        <h3 className="mb-2 text-sm font-medium">Zone library page size</h3>
         <OptionCards
           align="center"
           value={appSettings.zoneLibraryPageSize || 6}
@@ -522,10 +513,7 @@ function AppearanceTab() {
           the run it draws and in which theme — so it lives here with the rest of
           the appearance settings rather than under Chat. */}
       <section>
-        <h3 className="mb-1 text-sm font-medium">Chat export</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          How much of a run the chat's PDF export writes down.
-        </p>
+        <h3 className="mb-3 text-sm font-medium">Chat export</h3>
         <OptionCards
           layout="column"
           value={appSettings.pdfExportDetail}
@@ -537,8 +525,7 @@ function AppearanceTab() {
           ]}
         />
         <p className="mb-2 mt-3 text-xs text-[var(--color-text-muted)]">
-          Theme the document is drawn in — for working in one mode and documenting
-          in the other.
+          Theme the document is drawn in.
         </p>
         <OptionCards
           value={appSettings.pdfExportTheme}
@@ -550,8 +537,9 @@ function AppearanceTab() {
           ]}
         />
         <p className="mt-3 text-xs text-[var(--color-text-muted)]">
-          Export opens your print dialog: choose “Save as PDF”, and set Margins to
-          “None” for a single continuous page.
+          Export opens your print dialog: choose “Save as PDF”, set Margins to
+          “None” for a single continuous page, and enable “Background graphics”
+          so the theme’s colours are drawn.
         </p>
 
         <div className="mt-4">
@@ -611,10 +599,7 @@ function ChatTab() {
       </section>
 
       <section>
-        <h3 className="mb-1 text-sm font-medium">Send key</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Shift+Enter always inserts a new line.
-        </p>
+        <h3 className="mb-3 text-sm font-medium">Send key</h3>
         <OptionCards
           value={appSettings.sendKey}
           onChange={(sendKey) => setAppSettings({ sendKey })}
@@ -650,11 +635,7 @@ function ChatTab() {
       </section>
 
       <section>
-        <h3 className="mb-1 text-sm font-medium">Task length</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Tool steps one response may take before it must answer. A step can carry several
-          tool calls; the last two always go to writing the answer.
-        </p>
+        <h3 className="mb-3 text-sm font-medium">Max task length</h3>
         <div className="flex items-center gap-3">
           <input
             type="number"
@@ -692,10 +673,7 @@ function ChatTab() {
       </section>
 
       <section>
-        <h3 className="mb-1 text-sm font-medium">PDF attachments</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          How attached PDFs are sent to the model.
-        </p>
+        <h3 className="mb-3 text-sm font-medium">PDF attachments</h3>
         <OptionCards
           value={appSettings.pdfMode}
           onChange={(pdfMode) => setAppSettings({ pdfMode })}
@@ -724,10 +702,7 @@ function ChatTab() {
       </section>
 
       <section>
-        <h3 className="mb-1 text-sm font-medium">Default file directory</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Where file tools work when a chat has no project directory.
-        </p>
+        <h3 className="mb-3 text-sm font-medium">Default file directory</h3>
         <div className="flex items-center gap-2">
           <button
             onClick={pickDefaultDir}
@@ -753,10 +728,7 @@ function ChatTab() {
       </section>
 
       <section>
-        <h3 className="mb-1 text-sm font-medium">Perspective run mode</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Default for new chats; each chat can override it.
-        </p>
+        <h3 className="mb-3 text-sm font-medium">Perspective run mode</h3>
         <OptionCards
           value={appSettings.perspectiveMode}
           onChange={(perspectiveMode) => setAppSettings({ perspectiveMode })}
@@ -768,10 +740,7 @@ function ChatTab() {
       </section>
 
       <section>
-        <h3 className="mb-1 text-sm font-medium">Subagent depth limit</h3>
-        <p className="mb-2 text-xs text-[var(--color-text-muted)]">
-          How many levels deep zones may spawn subagents. Deeper calls are refused.
-        </p>
+        <h3 className="mb-2 text-sm font-medium">Subagent depth limit</h3>
         <OptionCards
           align="center"
           value={appSettings.subchatDepthLimit || 3}
@@ -848,10 +817,6 @@ function VoiceTab() {
               placeholder="e.g. whisper-1"
               className="input"
             />
-            <p className="text-[11px] text-[var(--color-text-muted)]">
-              The recording is sent to the provider when you stop dictating, and the transcript is
-              inserted once it returns. Audio leaves your machine unless the provider runs locally.
-            </p>
           </div>
         )}
       </section>
@@ -888,10 +853,7 @@ function VoiceTab() {
       </section>
 
       <section>
-        <h3 className="mb-1 text-sm font-medium">Activation mode</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          How the mic button starts and stops a recording.
-        </p>
+        <h3 className="mb-3 text-sm font-medium">Activation mode</h3>
         <OptionCards
           value={appSettings.sttActivationMode}
           onChange={(sttActivationMode) => setAppSettings({ sttActivationMode })}
@@ -903,10 +865,7 @@ function VoiceTab() {
       </section>
 
       <section>
-        <h3 className="mb-1 text-sm font-medium">Insertion mode</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Where the transcript goes relative to text already in the input field.
-        </p>
+        <h3 className="mb-3 text-sm font-medium">Insertion mode</h3>
         <OptionCards
           value={appSettings.sttInsertionMode}
           onChange={(sttInsertionMode) => setAppSettings({ sttInsertionMode })}
@@ -918,10 +877,7 @@ function VoiceTab() {
       </section>
 
       <section>
-        <h3 className="mb-1 text-sm font-medium">Auto-send on silence</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Automatically send the message after you stop speaking.
-        </p>
+        <h3 className="mb-3 text-sm font-medium">Auto-send on silence</h3>
         <ToggleRow
           label="Auto-send after silence"
           checked={appSettings.sttAutoSendSilenceMs > 0}
@@ -2782,15 +2738,7 @@ function DataTab() {
           which is what the provider's bill is actually a total of. */}
       {tokens && tokens.spent.requests > 0 && (
         <section>
-          <h3 className="mb-1 text-sm font-medium">Token usage, all time</h3>
-          <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-            Every request this app has ever sent, counted as it went out and taken from the
-            provider's own figures wherever they were reported
-            {tokens.spent.reportedRequests < tokens.spent.requests &&
-              ` (${formatCount(tokens.spent.reportedRequests)} of ${formatCount(tokens.spent.requests)}; the rest are estimated)`}
-            . Chats you have since deleted are still counted — deleting a transcript doesn't
-            un-spend what it spent.
-          </p>
+          <h3 className="mb-3 text-sm font-medium">Token usage, all time</h3>
           <div className="grid grid-cols-3 gap-2">
             {([
               ["Input", formatTokens(tokens.spent.inputTokens)],

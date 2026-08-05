@@ -888,7 +888,7 @@ function TeamCard({
               </span>
               {m.isLeader && <Crown size={10} className="text-amber-500" />}
               <span className="max-w-[190px] truncate">{m.name}</span>
-              <span className="font-mono text-[10px] text-[var(--color-text-muted)]">{m.temperature.toFixed(1)}</span>
+              <span className="font-mono text-[10px] text-[var(--color-text-muted)]">{m.temperature === null ? "—" : m.temperature.toFixed(1)}</span>
               {on && <Check size={10} className="text-green-500" />}
             </button>
           );
@@ -1127,7 +1127,7 @@ function DetailView({
 
         <div className="mt-6 flex flex-wrap gap-x-8 gap-y-4 border-t border-[var(--color-border)] pt-4">
           <MetaCell label="Model" value={entry.model || "Default model"} mono />
-          <MetaCell label="Temperature" value={entry.temperature.toFixed(2)} mono />
+          <MetaCell label="Temperature" value={entry.temperature === null ? "Provider default" : entry.temperature.toFixed(2)} mono />
           <MetaCell label="Source" value={entry.source || "—"} />
           <MetaCell label="Author" value={entry.author || "—"} />
           <MetaCell label="Version" value={entry.version || "—"} />

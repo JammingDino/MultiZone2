@@ -30,7 +30,7 @@ use crate::state::AppState;
 use crate::commands::chats::CHAT_COLS;
 const MSG_COLS: &str =
     "id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at";
-const ZONE_COLS: &str = "id, name, provider_id, model, system_prompt, temperature, max_tokens, top_p,
+const ZONE_COLS: &str = "id, name, provider_id, model, system_prompt, temperature_override AS temperature, max_tokens, top_p,
     tools_enabled, tool_config, thinking_enabled, include_thinking_in_context,
     icon, accent_color, is_leader, created_at, updated_at";
 

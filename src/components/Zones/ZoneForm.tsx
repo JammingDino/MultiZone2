@@ -355,7 +355,8 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
   const [providerId, setProviderId] = useState<string | null>(null);
   const [model, setModel] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
-  const [temperature, setTemperature] = useState(0.7);
+  // null = leave the field off the request so the provider's own default applies.
+  const [temperature, setTemperature] = useState<number | null>(null);
   const [maxTokens, setMaxTokens] = useState("");
   const [topP, setTopP] = useState("");
   const [tools, setTools] = useState<string[]>([]);
@@ -484,7 +485,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
       setProviderId(providers[0]?.id ?? null);
       setModel("");
       setSystemPrompt("");
-      setTemperature(0.7);
+      setTemperature(null);
       setMaxTokens("");
       setTopP("");
       setTools([]);
@@ -1027,16 +1028,26 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
 
         <Section id="sampling" label="Sampling" refs={sectionRefs}>
         <div className="grid grid-cols-3 gap-3">
-          <Field label={`Temperature: ${temperature.toFixed(2)}`}>
+          <Field
+            label={`Temperature: ${temperature === null ? "provider default" : temperature.toFixed(2)}`}
+          >
             <input
               type="range"
               min={0}
               max={2}
               step={0.05}
-              value={temperature}
+              value={temperature ?? 0.7}
+              disabled={temperature === null}
               onChange={(e) => setTemperature(parseFloat(e.target.value))}
-              className="w-full"
+              className="w-full disabled:opacity-40"
             />
+            <button
+              type="button"
+              onClick={() => setTemperature(temperature === null ? 0.7 : null)}
+              className="mt-0.5 text-[10px] text-[var(--color-text-muted)] underline-offset-2 hover:text-[var(--color-accent)] hover:underline"
+            >
+              {temperature === null ? "Set a temperature" : "Use provider default"}
+            </button>
           </Field>
           <Field label="Max tokens">
             <input

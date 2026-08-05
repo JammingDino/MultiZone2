@@ -21,7 +21,9 @@ pub struct Zone {
     pub provider_id: Option<String>,
     pub model: String,
     pub system_prompt: Option<String>,
-    pub temperature: f64,
+    /// None = no override: the request omits `temperature` and the provider
+    /// applies its own default. Stored in the `temperature_override` column.
+    pub temperature: Option<f64>,
     pub max_tokens: Option<i64>,
     pub top_p: Option<f64>,
     /// JSON array of tool IDs

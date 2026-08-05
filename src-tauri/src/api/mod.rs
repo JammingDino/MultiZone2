@@ -188,7 +188,7 @@ async fn health() -> impl IntoResponse {
     }))
 }
 
-const ZONE_COLS: &str = "id, name, provider_id, model, system_prompt, temperature, max_tokens, top_p,
+const ZONE_COLS: &str = "id, name, provider_id, model, system_prompt, temperature_override AS temperature, max_tokens, top_p,
     tools_enabled, tool_config, thinking_enabled, include_thinking_in_context,
     icon, accent_color, created_at, updated_at";
 

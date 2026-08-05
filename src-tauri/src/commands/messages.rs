@@ -68,7 +68,7 @@ impl TurnOverride {
     }
 }
 
-const ZONE_COLS: &str = "id, name, provider_id, model, system_prompt, temperature, max_tokens, top_p,
+const ZONE_COLS: &str = "id, name, provider_id, model, system_prompt, temperature_override AS temperature, max_tokens, top_p,
     tools_enabled, tool_config, thinking_enabled, include_thinking_in_context,
     icon, accent_color, is_leader, created_at, updated_at";
 // One list, shared with `commands::chats`. It used to be duplicated here, and a
@@ -800,7 +800,7 @@ fn simple_zone(provider: &Provider) -> AppResult<Zone> {
         provider_id: Some(provider.id.clone()),
         model,
         system_prompt: None,
-        temperature: 0.7,
+        temperature: Some(0.7),
         max_tokens: None,
         top_p: None,
         // Quick chat gets every safe tool by default (date/time, ask-user,
@@ -1481,7 +1481,7 @@ async fn run_participant_turn(
         let req = ChatRequest {
             model: zone.model.clone(),
             messages: api_messages.clone(),
-            temperature: Some(zone.temperature),
+            temperature: zone.temperature,
             max_tokens: zone.max_tokens,
             top_p: zone.top_p,
             // Tools are withheld on the final step so the model has no option
@@ -3098,7 +3098,7 @@ mod tests {
             provider_id: None,
             model: "m".into(),
             system_prompt: Some("You are a careful engineer.".into()),
-            temperature: 0.7,
+            temperature: Some(0.7),
             max_tokens: None,
             top_p: None,
             tools_enabled: r#"["compact","read_file"]"#.into(),

@@ -263,7 +263,7 @@ export async function importEntryFromJson(text: string, fallbackName: string): P
     accentColor: raw.accentColor ?? "#7c5cff",
     model: raw.model ?? null,
     systemPrompt: raw.systemPrompt ?? raw.system ?? null,
-    temperature: typeof raw.temperature === "number" ? raw.temperature : 0.7,
+    temperature: typeof raw.temperature === "number" ? raw.temperature : null,
     maxTokens: typeof raw.maxTokens === "number" ? raw.maxTokens : null,
     topP: typeof raw.topP === "number" ? raw.topP : null,
     toolsEnabled,

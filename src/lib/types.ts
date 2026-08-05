@@ -14,7 +14,8 @@ export interface Zone {
   providerId: string | null;
   model: string;
   systemPrompt: string | null;
-  temperature: number;
+  /** null = unset: the request omits it and the provider's own default applies. */
+  temperature: number | null;
   maxTokens: number | null;
   topP: number | null;
   /** JSON-encoded array of tool IDs */
@@ -179,7 +180,8 @@ export interface LibraryEntry {
   accentColor: string | null;
   model: string | null;
   systemPrompt: string | null;
-  temperature: number;
+  /** null = installs with no temperature set, so the provider's default applies. */
+  temperature: number | null;
   maxTokens: number | null;
   topP: number | null;
   /** JSON array string of tool ids. */

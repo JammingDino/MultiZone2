@@ -24,8 +24,9 @@ pub struct LibraryEntry {
     #[serde(default)]
     pub model: Option<String>,
     pub system_prompt: Option<String>,
-    #[serde(default = "default_temp")]
-    pub temperature: f64,
+    /// None = the installed zone leaves temperature unset (provider default).
+    #[serde(default)]
+    pub temperature: Option<f64>,
     pub max_tokens: Option<i64>,
     pub top_p: Option<f64>,
     /// JSON array string of tool ids (mirrors `Zone.tools_enabled`).
@@ -69,9 +70,6 @@ pub struct LibraryEntry {
     pub created_at: i64,
 }
 
-fn default_temp() -> f64 {
-    0.7
-}
 fn empty_array() -> String {
     "[]".to_string()
 }

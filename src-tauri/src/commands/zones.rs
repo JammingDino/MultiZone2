@@ -5,7 +5,7 @@ use crate::state::AppState;
 use serde::Deserialize;
 use tauri::State;
 
-const ZONE_COLS: &str = "id, name, provider_id, model, system_prompt, temperature, max_tokens, top_p,
+const ZONE_COLS: &str = "id, name, provider_id, model, system_prompt, temperature_override AS temperature, max_tokens, top_p,
     tools_enabled, tool_config, thinking_enabled, include_thinking_in_context,
     icon, accent_color, is_leader, created_at, updated_at";
 
@@ -46,7 +46,6 @@ pub struct ZoneInput {
 pub async fn upsert_zone(state: State<'_, AppState>, zone: ZoneInput) -> AppResult<Zone> {
     let id = zone.id.unwrap_or_else(new_id);
     let now = now_ts();
-    let temperature = zone.temperature.unwrap_or(0.7);
     let tools_enabled = zone.tools_enabled.unwrap_or_else(|| "[]".to_string());
     let tool_config = zone.tool_config.unwrap_or_else(|| "{}".to_string());
     let thinking_enabled = zone.thinking_enabled.unwrap_or(false);
@@ -54,7 +53,7 @@ pub async fn upsert_zone(state: State<'_, AppState>, zone: ZoneInput) -> AppResu
     let is_leader = zone.is_leader.unwrap_or(false);
 
     sqlx::query(
-        "INSERT INTO zones (id, name, provider_id, model, system_prompt, temperature,
+        "INSERT INTO zones (id, name, provider_id, model, system_prompt, temperature_override,
                             max_tokens, top_p, tools_enabled, tool_config, thinking_enabled,
                             include_thinking_in_context, icon, accent_color, is_leader, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?16)
@@ -63,7 +62,7 @@ pub async fn upsert_zone(state: State<'_, AppState>, zone: ZoneInput) -> AppResu
            provider_id = excluded.provider_id,
            model = excluded.model,
            system_prompt = excluded.system_prompt,
-           temperature = excluded.temperature,
+           temperature_override = excluded.temperature_override,
            max_tokens = excluded.max_tokens,
            top_p = excluded.top_p,
            tools_enabled = excluded.tools_enabled,
@@ -80,7 +79,7 @@ pub async fn upsert_zone(state: State<'_, AppState>, zone: ZoneInput) -> AppResu
     .bind(&zone.provider_id)
     .bind(&zone.model)
     .bind(&zone.system_prompt)
-    .bind(temperature)
+    .bind(zone.temperature)
     .bind(zone.max_tokens)
     .bind(zone.top_p)
     .bind(&tools_enabled)

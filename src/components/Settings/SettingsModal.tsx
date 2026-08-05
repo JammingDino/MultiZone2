@@ -172,6 +172,24 @@ const ACCENT_PRESETS = ["#4f9cf9", "#22c55e", "#a855f7", "#f97316", "#ec4899", "
 const FONT_PRESETS = ["Inter", "Roboto", "JetBrains Mono", "Fira Code", "Merriweather", "Lato"];
 
 /**
+ * Pulls every preset face down in one request so the dropdown can render each
+ * option in its own font — a name set in Inter tells you nothing about what the
+ * font looks like. Only the regular weight, since it is preview text.
+ */
+function usePresetFontPreviews() {
+  useEffect(() => {
+    const id = "font-preset-previews";
+    if (document.getElementById(id)) return;
+    const families = FONT_PRESETS.map((f) => `family=${encodeURIComponent(f)}`).join("&");
+    const link = document.createElement("link");
+    link.id = id;
+    link.rel = "stylesheet";
+    link.href = `https://fonts.googleapis.com/css2?${families}&display=swap`;
+    document.head.appendChild(link);
+  }, []);
+}
+
+/**
  * The palette each mode falls back to — a mirror of the `:root` / `html.light`
  * blocks in styles.css. Needed here because a colour the user hasn't overridden
  * still has to show its real value in the picker.
@@ -209,6 +227,7 @@ function AppearanceTab() {
   const appSettings = useApp((s) => s.appSettings);
   const setAppSettings = useApp((s) => s.setAppSettings);
   const [fontInput, setFontInput] = useState(appSettings.fontFamily ?? "");
+  usePresetFontPreviews();
 
   const fontSize = typeof appSettings.fontSize === "number" ? appSettings.fontSize : 14;
   const linked = !!appSettings.fontSizeLinked;
@@ -329,14 +348,15 @@ function AppearanceTab() {
                 if (v === "__custom") return;
                 applyFont(v);
               }}
+              style={{ fontFamily: `"${fontInput || "Inter"}", var(--font-family)` }}
               className="w-full rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 text-xs outline-none focus:border-[var(--color-accent)]"
             >
-              <option value="">Default (Inter)</option>
+              <option value="" style={{ fontFamily: "Inter, sans-serif" }}>Default (Inter)</option>
               {FONT_PRESETS.map((f) => (
-                <option key={f} value={f}>{f}</option>
+                <option key={f} value={f} style={{ fontFamily: `"${f}"` }}>{f}</option>
               ))}
               {fontInput && !FONT_PRESETS.includes(fontInput) && (
-                <option value="__custom">{fontInput} (custom)</option>
+                <option value="__custom" style={{ fontFamily: `"${fontInput}"` }}>{fontInput} (custom)</option>
               )}
             </select>
             <div className="mt-2 flex gap-2">

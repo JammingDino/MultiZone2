@@ -4,116 +4,23 @@ A desktop LLM chat application built with Tauri + React + Rust. Supports multipl
 
 ![MultiZone — one prompt, every model, side by side](promo/01-hero.png)
 
-## Requirements
+Everything runs on your machine and talks directly to the providers you configure — there is no MultiZone account, and no server in the middle.
 
-| Tool | Version |
-|------|---------|
-| [Node.js](https://nodejs.org/) | 18+ |
-| [Rust](https://rustup.rs/) | 1.85+ |
-| [CMake](https://cmake.org/download/) | 3.x |
-| [NASM](https://www.nasm.us/) | 2.15+ |
-| [Tauri CLI prerequisites](https://tauri.app/start/prerequisites/) | — |
+## Install
 
-On Windows, Tauri also requires the [WebView2 runtime](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) (pre-installed on Windows 10/11) and the MSVC build tools (via Visual Studio Build Tools or Visual Studio).
+Download the latest MSI or NSIS installer from the [Releases](../../releases) page and run it. Windows 10/11 already ships the WebView2 runtime MultiZone needs.
 
-### Native build dependencies (0.9.7+)
+Prefer to build it yourself? See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-**CMake and NASM must be installed and on `PATH`.** The smart web tools use [`wreq`](https://crates.io/crates/wreq), a browser-impersonating HTTP client that links BoringSSL, which is compiled from C and assembly at build time. Without NASM the build fails in `boring-sys2` with:
+## First run
 
-```
-CMake Error at CMakeLists.txt:50 (enable_language):
-  No CMAKE_ASM_NASM_COMPILER could be found.
-```
-
-On Windows: `choco install nasm` (in an **elevated** shell) or [download it](https://www.nasm.us/) and add the install directory to `PATH`. A C/C++ compiler is also required — on Windows the MSVC build tools above cover it. Upstream additionally lists Perl and pkg-config as prerequisites on some platforms (not needed for a Windows/MSVC build).
-
-This is the one place the project accepts a native toolchain dependency, and it is a deliberate trade: keyless search engines fingerprint an ordinary Rust HTTP client's TLS as "not a browser" and answer it with an anti-bot challenge, so without a real browser fingerprint the web tools return nothing. It buys search that actually works, without shipping a headless browser. `wreq` also raised the minimum Rust version to 1.85.
-
-Voice dictation (0.8.0+) adds **no** build dependencies of its own: microphone capture (`cpal`) and WAV encoding (`hound`) are pure Rust, and transcription is done by a user-configured provider's OpenAI-compatible `/audio/transcriptions` endpoint at runtime (Settings → Voice). On-device transcription is available by pointing that provider at a local server (e.g. LM Studio serving a whisper model), so there is no embedded speech engine.
-
-## Dev
-
-```bash
-npm install
-npm run tauri dev
-```
-
-This starts the Vite dev server on `http://localhost:1420` and launches the Tauri window. Hot-reload is active for the frontend; the Rust backend recompiles and relaunches automatically on file changes.
-
-First run compiles all Rust dependencies, including BoringSSL from source — expect 3–8 minutes. Subsequent runs are much faster (BoringSSL is cached and only rebuilds if you clean the target directory).
-
-## Build
-
-```bash
-npm install
-npm run build          # type-check + bundle frontend only
-npm run tauri build    # full release build (frontend + Rust + installer)
-```
-
-The release installer is written to `src-tauri/target/release/bundle/`.
-
-## Releasing via GitHub Actions
-
-Builds are not triggered on every push. To publish a release:
-
-1. Set `"releaseBuild": true` in `package.json`
-2. Commit and push to `main`
-
-GitHub Actions will build the MSI and NSIS installers, publish a GitHub Release tagged with the current version, then automatically reset `releaseBuild` back to `false` and bump the patch version in the same commit.
+On first launch, go to **Settings** to add a provider (any OpenAI-compatible API endpoint + key), then create a **Zone** pointing at that provider and choosing a model. The zone library also ships curated zones you can install in one action.
 
 ## Perspective mode
 
 Each zone is its own provider, model, system prompt and toolset — a frontier API, a self-hosted endpoint, or a model on your own GPU. Add a zone as a *perspective* and every message you send fans out to all of them in parallel: one shared thread, independent replies you can read side by side. There is no fixed number — one zone or twenty, whatever you configure.
 
 ![How perspective mode works](promo/02-perspectives.png)
-
-## Configuration
-
-On first launch, go to **Settings** to add a provider (any OpenAI-compatible API endpoint + key), then create a **Zone** pointing at that provider and choosing a model.
-
-### Web tools
-
-Web research works out of the box with **no API key and no third-party search service**. Three tools (0.9.7+), based on [Hound](https://github.com/dondai1234/master-fetch):
-
-| Tool | What it does |
-|------|--------------|
-| `smart_search` | Searches **seven keyless engines in parallel** — DuckDuckGo, Bing, Brave, Yandex, Ecosia, Yahoo, Wikipedia — and merges them with Reciprocal Rank Fusion, so a page several engines agree on ranks highest. If one engine is blocked or rate-limited the others still answer, and the result reports which engines contributed and which failed. |
-| `smart_fetch` | Reads one or more pages **or PDFs** in full as clean markdown, boilerplate stripped, with an optional relevance query to trim a long page to what matters. |
-| `smart_crawl` | Follows links within one site and reads several pages in a single call, visiting the most relevant first. |
-
-All three run entirely from your machine, through a browser-emulating HTTP client that carries a real Chrome TLS/HTTP-2 fingerprint (see [native build dependencies](#native-build-dependencies-097) above). There is **no headless browser**, so pages that render entirely via JavaScript — or that sit behind an interactive bot challenge — are reported as such rather than returned blank.
-
-Enable them per-zone in the zone editor; they are on by default in the curated research zones.
-
-### Terminals that stay open
-
-`run_command` runs a command and waits for it to exit, which cannot express *starting* something — a dev server, a REPL, a log to follow, a program that asks a question part-way through. The **terminal** tool group (0.9.11) keeps a process alive between calls instead:
-
-| Tool | What it does |
-|------|--------------|
-| `terminal_start` | Start a process (or a bare shell) and get back a short id (`t1`). Returns immediately; the process keeps running. |
-| `terminal_write` | Type into it — a command, an answer to a prompt, a password. Returns only the output that followed. |
-| `terminal_read` | Read what it has printed. Pass back the `cursor` from a previous call to get only what is new. |
-| `terminal_list` | The conversation's terminals: label, whether each is alive, how much output is waiting. |
-| `terminal_stop` | Stop one (or all) and return the final output. |
-
-Driving an interactive program is a timing problem, so every call that can wait takes `delay_ms` (wait *before* typing — start a server, send the sudo password five seconds later), `wait_for` (a regex to wait for in the new output, with `timeout_ms`, reporting whether it matched), or `wait_ms` (collect for a fixed span).
-
-Reader tasks drain stdout and stderr continuously, so output printed *between* tool calls is still there when you look; ANSI escapes are stripped and a `\r`-redrawn progress line collapses to where it landed. Terminals are visible to the whole session — a leader's dev server is one its own sub-agents can query — and are never reaped on idle: they end when stopped, when the process exits, or when the app closes.
-
-stdin/stdout are **pipes, not a PTY**. Servers, build tools and REPLs work; programs that insist on a real terminal do not — pass `sudo -S`, expect `ssh` password prompts and full-screen TUIs to fail, and stop a process with `terminal_stop` rather than trying to send Ctrl-C. Children block-buffer on a pipe, so unbuffer where it matters (`python -u`, `stdbuf -oL`); `PYTHONUNBUFFERED` is set for you.
-
-#### Legacy `web_search` / `extract_url`
-
-The original single-engine tools are still available, mainly for the key-based providers. Configure under **Settings → Web search provider** (applies to every zone with the tool enabled):
-
-| Provider | Requires | Notes |
-|----------|----------|-------|
-| `duckduckgo` | nothing | **Default.** Single-engine HTML scraping — prone to anti-bot challenges; prefer `smart_search`. |
-| `searxng` | `endpoint` | Self-hosted SearXNG instance URL. |
-| `brave` | `api_key` | [Brave Search API](https://api.search.brave.com/). |
-| `tavily` | `api_key` | [Tavily](https://tavily.com/). |
-| `serper` | `api_key` | [Serper](https://serper.dev/) (Google via API). |
 
 ## Multizone mode — the Response Leader
 
@@ -147,6 +54,76 @@ The shipped **Code Team** is a general codebase collaboration: talk to **Code Te
 Seven zones on one model at seven temperatures: the value comes from independent attempts and adversarial review, not from a bigger model.
 
 Every member is equipped like an agent you'd actually want on the job — web search and full page reads (an unfamiliar library's real API beats a half-remembered one), skills, the code runner, and shared memory at project scope, which is the durable counterpart to the board: how this repo's tests are run, or a trap someone hit, is injected into every agent on the project, including the ones spawned next week. Before a long run, set **Settings → Chat → Tool auto-approval** to *Everything* (a sub-agent cannot show you an approval prompt) and raise **Task length** to 60 or more.
+
+## Web tools
+
+Web research works out of the box with **no API key and no third-party search service**. Three tools (0.9.7+), based on [Hound](https://github.com/dondai1234/master-fetch):
+
+| Tool | What it does |
+|------|--------------|
+| `smart_search` | Searches **seven keyless engines in parallel** — DuckDuckGo, Bing, Brave, Yandex, Ecosia, Yahoo, Wikipedia — and merges them with Reciprocal Rank Fusion, so a page several engines agree on ranks highest. If one engine is blocked or rate-limited the others still answer, and the result reports which engines contributed and which failed. |
+| `smart_fetch` | Reads one or more pages **or PDFs** in full as clean markdown, boilerplate stripped, with an optional relevance query to trim a long page to what matters. |
+| `smart_crawl` | Follows links within one site and reads several pages in a single call, visiting the most relevant first. |
+
+All three run entirely from your machine, through a browser-emulating HTTP client that carries a real Chrome TLS/HTTP-2 fingerprint. There is **no headless browser**, so pages that render entirely via JavaScript — or that sit behind an interactive bot challenge — are reported as such rather than returned blank.
+
+Enable them per-zone in the zone editor; they are on by default in the curated research zones.
+
+### Legacy `web_search` / `extract_url`
+
+The original single-engine tools are still available, mainly for the key-based providers. Configure under **Settings → Web search provider** (applies to every zone with the tool enabled):
+
+| Provider | Requires | Notes |
+|----------|----------|-------|
+| `duckduckgo` | nothing | **Default.** Single-engine HTML scraping — prone to anti-bot challenges; prefer `smart_search`. |
+| `searxng` | `endpoint` | Self-hosted SearXNG instance URL. |
+| `brave` | `api_key` | [Brave Search API](https://api.search.brave.com/). |
+| `tavily` | `api_key` | [Tavily](https://tavily.com/). |
+| `serper` | `api_key` | [Serper](https://serper.dev/) (Google via API). |
+
+## Terminals that stay open
+
+`run_command` runs a command and waits for it to exit, which cannot express *starting* something — a dev server, a REPL, a log to follow, a program that asks a question part-way through. The **terminal** tool group (0.9.11) keeps a process alive between calls instead:
+
+| Tool | What it does |
+|------|--------------|
+| `terminal_start` | Start a process (or a bare shell) and get back a short id (`t1`). Returns immediately; the process keeps running. |
+| `terminal_write` | Type into it — a command, an answer to a prompt, a password. Returns only the output that followed. |
+| `terminal_read` | Read what it has printed. Pass back the `cursor` from a previous call to get only what is new. |
+| `terminal_list` | The conversation's terminals: label, whether each is alive, how much output is waiting. |
+| `terminal_stop` | Stop one (or all) and return the final output. |
+
+Driving an interactive program is a timing problem, so every call that can wait takes `delay_ms` (wait *before* typing — start a server, send the sudo password five seconds later), `wait_for` (a regex to wait for in the new output, with `timeout_ms`, reporting whether it matched), or `wait_ms` (collect for a fixed span).
+
+Reader tasks drain stdout and stderr continuously, so output printed *between* tool calls is still there when you look; ANSI escapes are stripped and a `\r`-redrawn progress line collapses to where it landed. Terminals are visible to the whole session — a leader's dev server is one its own sub-agents can query — and are never reaped on idle: they end when stopped, when the process exits, or when the app closes.
+
+stdin/stdout are **pipes, not a PTY**. Servers, build tools and REPLs work; programs that insist on a real terminal do not — pass `sudo -S`, expect `ssh` password prompts and full-screen TUIs to fail, and stop a process with `terminal_stop` rather than trying to send Ctrl-C. Children block-buffer on a pipe, so unbuffer where it matters (`python -u`, `stdbuf -oL`); `PYTHONUNBUFFERED` is set for you.
+
+## Voice dictation
+
+Dictate instead of typing (0.8.0+). Transcription goes to a provider you configure under **Settings → Voice**, using the OpenAI-compatible `/audio/transcriptions` endpoint — so pointing it at a local server (e.g. LM Studio serving a whisper model) keeps your audio on your machine.
+
+## Appearance
+
+**Settings → Appearance** covers the palette, fonts, bloom and shadows, plus an animated **background effect** — every one of which reacts to your cursor, and none of which need it to keep moving:
+
+| Effect | What it does |
+|--------|--------------|
+| Particles | A drifting field wired together by proximity lines; the cursor pushes them aside. |
+| Orbs | Slow layered colour clouds that swirl, bloom and drift apart under the cursor. |
+| Aurora | Curtains of light rippling across the top of the screen, bending toward the cursor. |
+| Grid | A pulsing grid with a highlight band sweeping across it. |
+| Stars / Shooting stars | A parallax starfield, optionally streaked by meteors. |
+| Waves | Layered sine curves that rise and fall with the pointer. |
+| Fireflies | Wandering lights that pulse and drift gently toward the cursor. |
+| Boids | A flock that aligns, crowds and scatters from the cursor like a predator. |
+| Matrix | Falling glyph rain that fades behind itself; the cursor burns the columns it passes brighter. |
+| Topography | Breathing contour lines of a slowly morphing landscape, with the cursor pushing a hill into it. |
+| Puzzle | An interlocking jigsaw where pieces near the cursor lift, tilt and light up. |
+| Mountains | Parallax ridgelines under a drifting sun or moon, with a starfield above. |
+| Fish | Procedurally animated fish — jointed spines that swim with fins and a trailing tail — schooling, and darting away when you get close. |
+
+Four sliders shape whichever you pick: **Speed**, **Density**, **Opacity**, and **Hue variation**, which spreads each element's colour around your accent instead of painting everything one flat tone. Leave it at 0 for a single-colour look.
 
 ## HTTP API
 
@@ -195,31 +172,10 @@ curl -X POST "http://127.0.0.1:8765/api/chats/<chat-id>/messages?wait=true" \
 
 API-driven activity also updates any matching chat open in the app live.
 
-## Project structure
+## Contributing
 
-```
-src/                    React + TypeScript frontend
-  components/           UI components (Chat, Sidebar, Settings, Zones, ...)
-  lib/                  Tauri IPC bindings, types, utilities
-  store/                Zustand app state
-src-tauri/
-  src/
-    api/                Local HTTP API (axum) -- REST + SSE
-    commands/           Tauri IPC command handlers
-    db/                 SQLite models and migrations
-    llm/                LLM client, streaming, thinking blocks
-    tools/              Tool implementations (smart_search/fetch/crawl, code_exec, ...)
-docs/
-  ROADMAP.md            Vision, principles, and release themes
-  RELEASE_PLAN.md       Detailed per-release work items
-  COMPETITORS.md        Competitive analysis
-```
+Build instructions, project layout and conventions are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Tech stack
+## License
 
-- **Frontend**: React 19, TypeScript, Vite, Tailwind CSS
-- **Desktop**: Tauri 2 (Rust)
-- **State**: Zustand
-- **Database**: SQLite via sqlx
-- **HTTP**: reqwest (rustls) app-wide; [wreq](https://crates.io/crates/wreq) (BoringSSL, browser TLS/HTTP-2 fingerprint) for the smart web tools
-- **Rendering**: react-markdown, KaTeX, Mermaid, PDF.js
+[Apache License 2.0](LICENSE).

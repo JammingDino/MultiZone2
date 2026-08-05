@@ -1,6 +1,10 @@
 {
   "compilerOptions": {
     "composite": true,
+    // Send the emitted .js/.d.ts somewhere ignored. Without this, `tsc -b`
+    // writes vite.config.js next to vite.config.ts — and Vite resolves .js
+    // *before* .ts, so a stale compiled copy silently shadows the real config.
+    "outDir": "./node_modules/.tmp/tsconfig.node",
     "skipLibCheck": true,
     "module": "ESNext",
     "moduleResolution": "bundler",

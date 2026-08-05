@@ -3,6 +3,12 @@ dist/
 .DS_Store
 *.log
 
+# `tsc -b` output and its incremental caches. These were tracked by mistake;
+# committing tsbuildinfo makes builds skip work based on another machine's state.
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+
 # Tauri
 src-tauri/target/
 src-tauri/gen/

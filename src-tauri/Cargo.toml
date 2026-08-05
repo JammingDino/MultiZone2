@@ -41,7 +41,18 @@ sha2 = "0.10"
 uuid = { version = "1.11", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 
-image = "0.25"
+# Every decoder is kept, because attachments are arbitrary user-supplied images
+# — the only things dropped from the default feature set are `avif` and `exr`.
+# `avif` is the AVIF *encoder* (ravif → rav1e → av1-grain), several minutes of
+# build time for a code path that cannot be reached: we only ever encode JPEG
+# (see commands/attachments.rs). AVIF *decoding* needs the separate
+# `avif-native` feature and was never enabled, so no input format is lost here.
+# `exr` is OpenEXR, an HDR film format with no plausible route into a chat app.
+image = { version = "0.25", default-features = false, features = [
+    "rayon",
+    "bmp", "dds", "ff", "gif", "hdr", "ico",
+    "jpeg", "png", "pnm", "qoi", "tga", "tiff", "webp",
+] }
 base64 = "0.22"
 
 # Open files / URLs in the user's default app or browser (0.5.2 file
@@ -79,7 +90,6 @@ cpal = "0.15"
 hound = "3.5"
 
 thiserror = "2.0"
-anyhow = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
@@ -101,3 +111,11 @@ tauri-plugin-process = "2"
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+
+# Release builds default to `incremental = false`, so every `tauri build` used
+# to recompile this crate from scratch even for a one-line change. Turning it on
+# trades a little runtime performance and disk for a much shorter edit → build
+# loop. Deliberately NOT setting `lto`: it shrinks the binary but adds minutes to
+# every build, which is the opposite of what we want here.
+[profile.release]
+incremental = true

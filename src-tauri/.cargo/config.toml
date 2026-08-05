@@ -1,0 +1,12 @@
+# Build-speed settings for local development. These affect how the app is
+# compiled, not what it does — CI is unaffected (it uses its own runners and the
+# GitHub Actions cache), so nothing here changes release output.
+
+[target.x86_64-pc-windows-msvc]
+# Link with LLVM's linker instead of MSVC's `link.exe`. Linking is the serial
+# tail of every build, and this binary is large — BoringSSL (via wreq), sqlx,
+# ocrs/rten and pdf-extract all land in it — so the link step dominates
+# incremental rebuilds. `rust-lld.exe` ships inside the rustup toolchain
+# (lib/rustlib/x86_64-pc-windows-msvc/bin), so there is nothing extra to
+# install; rustc resolves it from the toolchain's own bin directory.
+linker = "rust-lld.exe"

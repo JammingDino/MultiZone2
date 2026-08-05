@@ -2433,7 +2433,6 @@ dependencies = [
  "qoi",
  "ravif",
  "rayon",
- "rgb",
  "tiff",
  "zune-core",
  "zune-jpeg",
@@ -3105,9 +3104,8 @@ dependencies = [
 
 [[package]]
 name = "multizone"
-version = "0.9.12"
+version = "0.9.13"
 dependencies = [
- "anyhow",
  "axum",
  "base64 0.22.1",
  "chrono",

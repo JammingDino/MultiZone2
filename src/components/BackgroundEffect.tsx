@@ -64,6 +64,51 @@ function makeTint(hex: string, spread: number) {
   };
 }
 
+/**
+ * Shortest signed separation on a wrapped axis. Flocks move on a torus — an
+ * agent at x=3 and one at x=width-3 are six pixels apart, not a screen apart.
+ * Measuring them with raw subtraction is what makes a flock lose its
+ * neighbours at the seam and get hauled back inward by cohesion, which piles
+ * everyone into one clump that then hugs an edge.
+ */
+function wrapDelta(d: number, span: number): number {
+  const half = span * 0.5;
+  if (d > half) return d - span;
+  if (d < -half) return d + span;
+  return d;
+}
+
+/**
+ * A slow random walk in heading. Alignment is self-reinforcing: once a flock
+ * agrees on a direction nothing in the three classic rules will ever talk it
+ * out of that, so it cruises one way indefinitely. Each agent steering by its
+ * own drifting heading keeps the consensus perpetually renegotiated.
+ */
+function wanderStep(current: number): number {
+  return current + (Math.random() - 0.5) * 0.3;
+}
+
+/**
+ * A large-scale flow field everyone feels — the "current" the flock swims in.
+ * It varies over both space and time, so a flock parked in one corner is
+ * eventually pushed somewhere else even if it is perfectly happy where it is.
+ */
+function flowAngle(x: number, y: number, t: number): number {
+  return (Math.sin(x * 0.0031 + t * 0.0006) + Math.cos(y * 0.0027 - t * 0.00045)) * Math.PI;
+}
+
+/**
+ * How threatening the cursor currently is, 1 while it is moving and decaying
+ * to a residual once it stops. A predator that never loses interest is a
+ * permanent hole in the screen: a resting cursor would hold the flock off
+ * indefinitely, which is most of why it ends up parked against an edge.
+ */
+function alertness(lastMove: number): number {
+  if (!lastMove) return 0;
+  const idle = performance.now() - lastMove;
+  return Math.max(0.12, 1 - idle / 2600);
+}
+
 /** Deterministic 0..1 hash — stable per (a,b) across frames and resizes. */
 function hash2(a: number, b: number): number {
   const x = Math.sin(a * 127.1 + b * 311.7) * 43758.5453;
@@ -96,7 +141,11 @@ interface Firefly {
   phase: number; phaseY: number; driftSpeed: number;
   pulseSpeed: number; pulsePhase: number;
 }
-interface Boid { x: number; y: number; vx: number; vy: number; size: number; }
+interface Boid {
+  x: number; y: number; vx: number; vy: number; size: number;
+  /** Heading of this agent's private random walk — see `wanderStep`. */
+  wander: number;
+}
 interface Curtain {
   xFrac: number; width: number; amp: number; phase: number;
   speed: number; height: number; k: number; shimmer: number;
@@ -120,6 +169,7 @@ interface Fish {
   x: number; y: number; vx: number; vy: number;
   size: number; k: number;
   phase: number; rate: number;
+  wander: number;
   joints: { x: number; y: number }[];
 }
 interface CanvasData {
@@ -167,7 +217,7 @@ export function BackgroundEffect() {
   const hueSpread = theme.effectHue ?? 0;
   const colorHex = !theme.effectColor || theme.effectColor === "accent" ? theme.accent : theme.effectColor;
 
-  const mouseRef = useRef({ x: 0.5, y: 0.5 });
+  const mouseRef = useRef({ x: 0.5, y: 0.5, lastMove: 0 });
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
   const dataRef = useRef<CanvasData>({ t: 0 });
@@ -178,7 +228,11 @@ export function BackgroundEffect() {
   // Global mouse tracking
   useEffect(() => {
     function onMove(e: MouseEvent) {
-      mouseRef.current = { x: e.clientX / window.innerWidth, y: e.clientY / window.innerHeight };
+      mouseRef.current = {
+        x: e.clientX / window.innerWidth,
+        y: e.clientY / window.innerHeight,
+        lastMove: performance.now(),
+      };
     }
     window.addEventListener("mousemove", onMove, { passive: true });
     return () => window.removeEventListener("mousemove", onMove);
@@ -301,6 +355,7 @@ export function BackgroundEffect() {
             x: Math.random() * w, y: Math.random() * h,
             vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp,
             size: 3.5 + Math.random() * 2.5,
+            wander: Math.random() * Math.PI * 2,
           };
         });
       } else if (effect === "matrix") {
@@ -386,6 +441,7 @@ export function BackgroundEffect() {
             k: count > 1 ? (i / (count - 1)) * 2 - 1 : 0,
             phase: Math.random() * Math.PI * 2,
             rate: 0.14 + Math.random() * 0.07,
+            wander: Math.random() * Math.PI * 2,
             // Start the spine trailing straight behind the head; the follow
             // constraint bends it into shape within a few frames.
             joints: Array.from({ length: joints }, (_, j) => ({
@@ -846,17 +902,20 @@ export function BackgroundEffect() {
       const percep2 = 64 * 64;
       const sep2 = 26 * 26;
       const fleeR = 130;
+      const tt = (t ?? 0) + 1;
+      const alert = alertness(mouseRef.current.lastMove);
 
       for (const b of boids) {
         let alignX = 0, alignY = 0, cohX = 0, cohY = 0, sepX = 0, sepY = 0;
         let n = 0, sn = 0;
         for (const o of boids) {
           if (o === b) continue;
-          const dx = b.x - o.x, dy = b.y - o.y;
+          // Wrapped separation, so neighbours across the seam still count.
+          const dx = wrapDelta(b.x - o.x, w), dy = wrapDelta(b.y - o.y, h);
           const d2 = dx * dx + dy * dy;
           if (d2 < percep2) {
             alignX += o.vx; alignY += o.vy;
-            cohX += o.x; cohY += o.y;
+            cohX -= dx; cohY -= dy;
             n++;
             if (d2 < sep2 && d2 > 0) { sepX += dx / d2; sepY += dy / d2; sn++; }
           }
@@ -868,8 +927,9 @@ export function BackgroundEffect() {
           let al = Math.hypot(alignX, alignY) || 1;
           ax += ((alignX / al) * maxSpeed - b.vx) * 0.6;
           ay += ((alignY / al) * maxSpeed - b.vy) * 0.6;
-          // Cohesion: steer toward the local centre of mass.
-          let cx = cohX / n - b.x, cy = cohY / n - b.y;
+          // Cohesion: steer toward the local centre of mass, which is now an
+          // average of wrapped offsets rather than of absolute positions.
+          const cx = cohX / n, cy = cohY / n;
           const cl = Math.hypot(cx, cy) || 1;
           ax += ((cx / cl) * maxSpeed - b.vx) * 0.5;
           ay += ((cy / cl) * maxSpeed - b.vy) * 0.5;
@@ -877,19 +937,28 @@ export function BackgroundEffect() {
         if (sn > 0) {
           // Separation: steer away from crowding.
           const sl = Math.hypot(sepX, sepY) || 1;
-          ax += ((sepX / sl) * maxSpeed - b.vx) * 1.1;
-          ay += ((sepY / sl) * maxSpeed - b.vy) * 1.1;
+          ax += ((sepX / sl) * maxSpeed - b.vx) * 1.15;
+          ay += ((sepY / sl) * maxSpeed - b.vy) * 1.15;
         }
         const af = Math.hypot(ax, ay);
         if (af > maxForce) { ax = (ax / af) * maxForce; ay = (ay / af) * maxForce; }
         b.vx += ax; b.vy += ay;
+
+        // Each boid's own drifting heading, plus the shared current. Together
+        // they stop the flock settling into one direction forever.
+        b.wander = wanderStep(b.wander);
+        b.vx += Math.cos(b.wander) * maxForce * 0.5;
+        b.vy += Math.sin(b.wander) * maxForce * 0.5;
+        const fa = flowAngle(b.x, b.y, tt * speed);
+        b.vx += Math.cos(fa) * maxForce * 0.9;
+        b.vy += Math.sin(fa) * maxForce * 0.9;
 
         // Flee the cursor like a predator — a stronger, separately-capped force.
         const dmx = b.x - mx, dmy = b.y - my;
         const dm2 = dmx * dmx + dmy * dmy;
         if (dm2 < fleeR * fleeR && dm2 > 0) {
           const dm = Math.sqrt(dm2);
-          const f = (1 - dm / fleeR) * maxForce * 6;
+          const f = (1 - dm / fleeR) * maxForce * 6 * alert;
           b.vx += (dmx / dm) * f;
           b.vy += (dmy / dm) * f;
         }
@@ -1268,17 +1337,19 @@ export function BackgroundEffect() {
       const percep2 = 130 * 130;
       const sep2 = 42 * 42;
       const fleeR = 190;
+      const alert = alertness(mouseRef.current.lastMove);
 
       for (const f of fish) {
         let alignX = 0, alignY = 0, cohX = 0, cohY = 0, sepX = 0, sepY = 0;
         let n = 0, sn = 0;
         for (const o of fish) {
           if (o === f) continue;
-          const dx = f.x - o.x, dy = f.y - o.y;
+          // Wrapped separation, so the school isn't torn in half at the seam.
+          const dx = wrapDelta(f.x - o.x, w), dy = wrapDelta(f.y - o.y, h);
           const d2 = dx * dx + dy * dy;
           if (d2 < percep2) {
             alignX += o.vx; alignY += o.vy;
-            cohX += o.x; cohY += o.y;
+            cohX -= dx; cohY -= dy;
             n++;
             if (d2 < sep2 && d2 > 0) { sepX += dx / d2; sepY += dy / d2; sn++; }
           }
@@ -1288,19 +1359,28 @@ export function BackgroundEffect() {
           const al = Math.hypot(alignX, alignY) || 1;
           ax += ((alignX / al) * maxSpeed - f.vx) * 0.5;
           ay += ((alignY / al) * maxSpeed - f.vy) * 0.5;
-          const cx = cohX / n - f.x, cy = cohY / n - f.y;
+          const cx = cohX / n, cy = cohY / n;
           const cl = Math.hypot(cx, cy) || 1;
           ax += ((cx / cl) * maxSpeed - f.vx) * 0.35;
           ay += ((cy / cl) * maxSpeed - f.vy) * 0.35;
         }
         if (sn > 0) {
           const sl = Math.hypot(sepX, sepY) || 1;
-          ax += ((sepX / sl) * maxSpeed - f.vx) * 1.2;
-          ay += ((sepY / sl) * maxSpeed - f.vy) * 1.2;
+          ax += ((sepX / sl) * maxSpeed - f.vx) * 1.25;
+          ay += ((sepY / sl) * maxSpeed - f.vy) * 1.25;
         }
         const af = Math.hypot(ax, ay);
         if (af > maxForce) { ax = (ax / af) * maxForce; ay = (ay / af) * maxForce; }
         f.vx += ax; f.vy += ay;
+
+        // Private wander plus the shared current, so the school keeps changing
+        // its mind and drifts through the water rather than parking in it.
+        f.wander = wanderStep(f.wander);
+        f.vx += Math.cos(f.wander) * maxForce * 0.5;
+        f.vy += Math.sin(f.wander) * maxForce * 0.5;
+        const fa = flowAngle(f.x, f.y, tt * speed);
+        f.vx += Math.cos(fa) * maxForce * 0.85;
+        f.vy += Math.sin(fa) * maxForce * 0.85;
 
         // Cursor is a predator: a hard dart away, not a drift.
         const dmx = f.x - mx, dmy = f.y - my;
@@ -1308,7 +1388,9 @@ export function BackgroundEffect() {
         let startle = 0;
         if (dm2 < fleeR * fleeR && dm2 > 0) {
           const dm = Math.sqrt(dm2);
-          startle = 1 - dm / fleeR;
+          // A cursor that has gone still stops startling them, so the school
+          // drifts back over it instead of orbiting a permanent dead zone.
+          startle = (1 - dm / fleeR) * alert;
           const force = startle * maxForce * 9;
           f.vx += (dmx / dm) * force;
           f.vy += (dmy / dm) * force;

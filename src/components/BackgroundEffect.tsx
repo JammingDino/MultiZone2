@@ -347,7 +347,9 @@ export function BackgroundEffect() {
           pulsePhase: Math.random() * Math.PI * 2,
         }));
       } else if (effect === "boids") {
-        const count = Math.max(20, Math.min(90, Math.round(density * 0.5)));
+        // Boids and fish are large, sparse shapes, so the same density number
+        // that fills the screen with particles or stars barely populates them.
+        const count = Math.max(30, Math.min(240, Math.round(density * 1.2)));
         dataRef.current.boids = Array.from({ length: count }, () => {
           const ang = Math.random() * Math.PI * 2;
           const sp = 1 + Math.random();
@@ -427,7 +429,10 @@ export function BackgroundEffect() {
           bright: Math.random() < 0.12,
         }));
       } else if (effect === "fish") {
-        const count = Math.max(6, Math.min(28, Math.round(density * 0.2)));
+        // Capped lower than the boids: a fish is ~8 draw calls (body, tail,
+        // two fins, eyes) against a boid's one, so the ceiling is set by the
+        // frame budget rather than by how it looks.
+        const count = Math.max(10, Math.min(58, Math.round(density * 0.32)));
         const joints = 9;
         dataRef.current.fish = Array.from({ length: count }, (_, i) => {
           const ang = Math.random() * Math.PI * 2;

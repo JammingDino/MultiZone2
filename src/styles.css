@@ -527,28 +527,56 @@ input[type="color"]:hover { border-color: var(--color-accent); }
   stroke-width: 2px;
 }
 
-/* ===== Bloom / glow effect ===== */
+/* ===== Bloom / glow effect =====
+ *
+ * Bloom lights up things that are *emitting*: an accent-filled control, and
+ * the frame around whatever currently has focus. Two rules keep it coherent:
+ *
+ *  - The halo goes on the element that draws the visible boundary. A glow on
+ *    a bare, transparent field inside a rounded frame paints a square halo
+ *    inside a round box, which is what made the composer look wrong.
+ *  - It marks state, not structure. Earlier rules keyed off Tailwind utility
+ *    classes (`.rounded-lg:focus-within`, `.cursor-pointer:hover`), so any
+ *    rounded ancestor of a focused field lit up — a whole settings modal
+ *    would glow because an input inside it was focused — and every clickable
+ *    row in the app glowed on hover.
+ */
 html.bloom {
-  --bloom-glow: color-mix(in srgb, var(--color-accent) calc(var(--bloom-intensity, 0.5) * 60%), transparent);
+  --bloom-glow: color-mix(in srgb, var(--color-accent) calc(var(--bloom-intensity, 0.5) * 55%), transparent);
+  --bloom-soft: color-mix(in srgb, var(--color-accent) calc(var(--bloom-intensity, 0.5) * 30%), transparent);
+  --bloom-radius: calc(5px + var(--bloom-intensity, 0.5) * 9px);
 }
-html.bloom button:not(:disabled):hover,
-html.bloom [role="button"]:not([aria-disabled="true"]):hover,
-html.bloom .cursor-pointer:hover {
-  box-shadow: 0 0 calc(8px + var(--bloom-intensity, 0.5) * 12px) var(--bloom-glow);
+
+/* Focus: a field that frames itself glows on its own. */
+html.bloom :is(input, textarea, select):focus {
+  box-shadow: 0 0 var(--bloom-radius) var(--bloom-glow);
 }
-html.bloom input:focus,
-html.bloom textarea:focus,
-html.bloom select:focus {
-  box-shadow: 0 0 calc(6px + var(--bloom-intensity, 0.5) * 10px) var(--bloom-glow);
+/* When the field sits in a bordered frame, that frame is the visible edge, so
+   it takes the halo instead — `> ` keeps this to the frame directly wrapping
+   the field rather than every bordered ancestor up to the dialog. */
+html.bloom [class*="border"]:has(> :is(input, textarea, select):focus) {
+  box-shadow: 0 0 var(--bloom-radius) var(--bloom-glow);
 }
-html.bloom .rounded-lg:focus-within,
-html.bloom .rounded-md:focus-within {
-  box-shadow: 0 0 calc(4px + var(--bloom-intensity, 0.5) * 8px) var(--bloom-glow);
+html.bloom [class*="border"]:has(> :is(input, textarea, select):focus) > :is(input, textarea, select):focus {
+  box-shadow: none;
 }
-html.bloom .text-\[var\(--color-accent\)\],
-html.bloom [class*="text-emerald"],
-html.bloom [class*="text-violet"] {
-  text-shadow: 0 0 calc(4px + var(--bloom-intensity, 0.5) * 8px) currentColor;
+
+/* Accent-filled surfaces are the emissive ones: a soft halo at rest, brighter
+   under the pointer. The `/` guard skips tinted chips (`bg-…/10`), which are
+   backgrounds rather than light sources. */
+html.bloom [class*="bg-[var(--color-accent)]"]:not([class*="bg-[var(--color-accent)]/"]) {
+  box-shadow: 0 0 var(--bloom-radius) var(--bloom-soft);
+}
+html.bloom
+  :is(button, [role="button"], a)[class*="bg-[var(--color-accent)]"]:not([class*="bg-[var(--color-accent)]/"]):not(:disabled):not([aria-disabled="true"]):hover {
+  box-shadow: 0 0 calc(var(--bloom-radius) + 5px) var(--bloom-glow);
+}
+
+/* Accent text. Kept tight: a wide blur on body-sized text reads as a smudge
+   rather than a glow, and the old `[class*="text-emerald"]`-style wildcards
+   caught arbitrary coloured spans throughout the app. */
+html.bloom .text-\[var\(--color-accent\)\] {
+  text-shadow: 0 0 calc(3px + var(--bloom-intensity, 0.5) * 5px) currentColor;
 }
 
 /* ===== Shadows ===== */

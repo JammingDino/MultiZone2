@@ -446,7 +446,10 @@ function freshStreaming(messageId: string): StreamingState {
   };
 }
 
-export type BackgroundEffect = "none" | "particles" | "orbs" | "aurora" | "grid" | "stars" | "shooting" | "waves" | "fireflies" | "boids";
+export type BackgroundEffect =
+  | "none" | "particles" | "orbs" | "aurora" | "grid" | "stars" | "shooting"
+  | "waves" | "fireflies" | "boids"
+  | "matrix" | "topography" | "puzzle" | "mountains" | "fish";
 
 export interface ThemePrefs {
   mode: "dark" | "light";
@@ -456,6 +459,12 @@ export interface ThemePrefs {
   effectDensity: number;
   effectOpacity: number;
   effectColor: string;
+  /**
+   * Degrees of hue spread around the effect colour (0 = every element exactly
+   * the chosen colour). Elements are fanned across ±this range by index, so a
+   * flock or a contour stack reads as a palette rather than one flat tone.
+   */
+  effectHue?: number;
   bloomEnabled: boolean;
   bloomIntensity: number;
   shadowsEnabled: boolean;
@@ -488,6 +497,7 @@ const DEFAULT_THEME: ThemePrefs = {
   effectDensity: 60,
   effectOpacity: 0.5,
   effectColor: "accent",
+  effectHue: 20,
   bloomEnabled: false,
   bloomIntensity: 0.5,
   shadowsEnabled: true,

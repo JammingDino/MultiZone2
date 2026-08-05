@@ -219,6 +219,17 @@ const BACKGROUND_EFFECTS: [BackgroundEffect, string][] = [
   ["waves", "Waves"],
   ["fireflies", "Fireflies"],
   ["boids", "Boids"],
+  ["matrix", "Matrix rain"],
+  ["topography", "Topography"],
+  ["puzzle", "Puzzle"],
+  ["mountains", "Mountains"],
+  ["fish", "Fish"],
+];
+
+/** Effects whose "Density" slider means something. */
+const DENSITY_EFFECTS: BackgroundEffect[] = [
+  "particles", "orbs", "stars", "shooting", "grid", "waves", "fireflies", "boids",
+  "matrix", "topography", "puzzle", "mountains", "fish",
 ];
 
 function AppearanceTab() {
@@ -484,7 +495,7 @@ function AppearanceTab() {
                 display={`${theme.effectSpeed.toFixed(1)}×`}
                 onChange={(v) => setTheme({ effectSpeed: v })}
               />
-              {["particles", "orbs", "stars", "shooting", "grid", "waves", "fireflies", "boids"].includes(theme.backgroundEffect) && (
+              {DENSITY_EFFECTS.includes(theme.backgroundEffect) && (
                 <SliderRow
                   label={theme.backgroundEffect === "grid" ? "Scale" : "Density"}
                   value={theme.effectDensity}
@@ -501,6 +512,13 @@ function AppearanceTab() {
                 min={0.05} max={1} step={0.05}
                 display={`${Math.round(theme.effectOpacity * 100)}%`}
                 onChange={(v) => setTheme({ effectOpacity: v })}
+              />
+              <SliderRow
+                label="Hue variation"
+                value={theme.effectHue ?? 0}
+                min={0} max={180} step={5}
+                display={(theme.effectHue ?? 0) === 0 ? "Off" : `±${theme.effectHue}°`}
+                onChange={(v) => setTheme({ effectHue: v })}
               />
             </div>
           )}

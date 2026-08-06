@@ -1,5 +1,6 @@
 import { X } from "lucide-react";
 import type { ReactNode } from "react";
+import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 
 /**
  * Shared modal shell (0.7.3 consistency pass). Standardises the overlay, panel
@@ -21,9 +22,13 @@ export function Modal({
   children: ReactNode;
   className?: string;
 }) {
+  // Escape closes the modal — or, if a popover inside it is open, that popover
+  // first (see useDismissOnEscape).
+  useDismissOnEscape(true, onClose);
+
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      className="mz-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60"
       onClick={onClose}
     >
       <div

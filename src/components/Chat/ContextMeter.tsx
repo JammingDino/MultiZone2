@@ -4,6 +4,7 @@ import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { formatTokens } from "@/lib/format";
 import { chatContextEstimate } from "@/lib/tokens";
+import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 import type { AgentUsage, Chat, SessionUsage } from "@/lib/types";
 
 const EMPTY: never[] = [];
@@ -77,6 +78,7 @@ function sessionMemberIds(chats: Chat[], chatId: string): Set<string> {
  */
 export function ContextMeter({ chatId }: { chatId: string }) {
   const [open, setOpen] = useState(false);
+  useDismissOnEscape(open, () => setOpen(false));
   const messages = useApp((s) => s.messagesByChat[chatId] ?? EMPTY);
   const chats = useApp((s) => s.chats);
   const setActiveChat = useApp((s) => s.setActiveChat);

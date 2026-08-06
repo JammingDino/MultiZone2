@@ -16,6 +16,7 @@ import {
 } from "@/lib/attachFiles";
 import { resolveVisionCapable } from "@/lib/vision";
 import { resolveBaseModel, resolveBaseProvider } from "@/lib/baseZone";
+import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 
 /** Shared empty result for store selectors. A selector that builds its own `[]`
  *  hands `useSyncExternalStore` a new snapshot on every read, which re-renders
@@ -153,6 +154,7 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
   const [ovModel, setOvModel] = useState("");
   const [ovOpen, setOvOpen] = useState(false);
   const [ovModels, setOvModels] = useState<string[]>([]);
+  useDismissOnEscape(ovOpen, () => setOvOpen(false));
 
   const chat = chats.find((c) => c.id === chatId) ?? null;
   // A Quick turn runs the base zone (Settings → Chat), or the first provider's
@@ -736,11 +738,7 @@ export function AttachmentPreview({
   attachment: PendingAttachment;
   onClose: () => void;
 }) {
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [onClose]);
+  useDismissOnEscape(true, onClose);
 
   let body: React.ReactNode;
 

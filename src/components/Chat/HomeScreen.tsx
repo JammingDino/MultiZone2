@@ -5,6 +5,7 @@ import * as api from "@/lib/tauri";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import type { InputPart, Zone } from "@/lib/types";
 import { renderPdfToJpegs, extractPdfText } from "@/lib/pdf";
+import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 import {
   attachmentKind,
   attachmentToParts,
@@ -94,6 +95,13 @@ export function HomeScreen() {
   // i.e. the first available Response Leader zone).
   const [multizoneLeaderId, setMultizoneLeaderId] = useState<string | null>(null);
   const [leaderMenuOpen, setLeaderMenuOpen] = useState(false);
+  // Escape closes whichever of the composer's menus is open (most recent first).
+  useDismissOnEscape(menuOpen, () => setMenuOpen(false));
+  useDismissOnEscape(projectMenuOpen, () => setProjectMenuOpen(false));
+  useDismissOnEscape(tagMenuOpen, () => setTagMenuOpen(false));
+  useDismissOnEscape(perspMenuOpen, () => setPerspMenuOpen(false));
+  useDismissOnEscape(subagentMenuOpen, () => setSubagentMenuOpen(false));
+  useDismissOnEscape(leaderMenuOpen, () => setLeaderMenuOpen(false));
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   // Dictation (0.8.0) for the new-chat composer — same mic behavior as the

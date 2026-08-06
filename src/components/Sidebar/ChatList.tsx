@@ -6,6 +6,7 @@ import { useApp } from "@/store/app";
 import { useShallow } from "zustand/react/shallow";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import { usePersistentSet } from "@/lib/uiState";
+import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 
 interface Props {
   chats: Chat[];
@@ -182,7 +183,7 @@ export function ChatList({ chats, activeId, onSelect, projectId }: Props) {
                 onBlur={() => commitRename(chat)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") commitRename(chat);
-                  if (e.key === "Escape") setEditingId(null);
+                  if (e.key === "Escape") { e.stopPropagation(); setEditingId(null); }
                 }}
                 onClick={(e) => e.stopPropagation()}
                 className="flex-1 rounded bg-[var(--color-bg)] px-1 text-sm"
@@ -300,6 +301,8 @@ function ContextMenu({
   }[];
   moveRef: React.RefObject<HTMLDivElement | null>;
 }) {
+  useDismissOnEscape(true, onClose);
+
   return (
     <>
       <div

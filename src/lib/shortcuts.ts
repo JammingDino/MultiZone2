@@ -70,7 +70,7 @@ export const CONTEXTUAL_GROUPS: ShortcutGroup[] = [
       { keys: ["Enter"], description: "Send message" },
       { keys: [MOD, "Enter"], description: "Send message (when \"send on Ctrl+Enter\" is set in Settings)" },
       { keys: [MOD, "Enter"], description: "Save an in-progress message edit" },
-      { keys: ["Esc"], description: "Cancel a message edit, or close an open popover/menu" },
+      { keys: ["Esc"], description: "Cancel a message edit" },
     ],
   },
   {
@@ -83,7 +83,7 @@ export const CONTEXTUAL_GROUPS: ShortcutGroup[] = [
     title: "Lists & fields",
     items: [
       { keys: ["Enter"], description: "Confirm a rename or inline text field" },
-      { keys: ["Esc"], description: "Cancel a rename, or close a combobox" },
+      { keys: ["Esc"], description: "Cancel a rename" },
     ],
   },
   {
@@ -101,6 +101,7 @@ export function globalShortcutsGroup(): ShortcutGroup {
     items: [
       ...GLOBAL_SHORTCUTS.map((s) => ({ keys: s.display, description: s.description })),
       { keys: ["?"], description: "Open this shortcuts reference" },
+      { keys: ["Esc"], description: "Close the top-most dialog, menu or popover" },
     ],
   };
 }

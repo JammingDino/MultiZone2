@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Download, FileText, FileType, Loader2 } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
+import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 import {
   exportChatMarkdown,
   exportChatPdf,
@@ -24,6 +25,7 @@ export function ExportMenu({ chatId }: { chatId: string }) {
 
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<null | "md" | "pdf">(null);
+  useDismissOnEscape(open, () => setOpen(false));
 
   /**
    * Every sub-agent conversation descended from this chat, with its transcript

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Check, Plus, Layers, Zap, Brain, Loader2, Crown } from "lucide-react";
 import { useApp } from "@/store/app";
 import { getZoneIcon } from "@/lib/zoneIcons";
+import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 
 type RoutingState =
   | { status: "routing" }
@@ -44,6 +45,8 @@ export function ZonePicker({ chatId, currentZoneId, smartRouting, routingState }
     window.addEventListener("mousedown", onClick);
     return () => window.removeEventListener("mousedown", onClick);
   }, [open]);
+
+  useDismissOnEscape(open, () => setOpen(false));
 
   async function pick(zoneId: string | null) {
     setOpen(false);

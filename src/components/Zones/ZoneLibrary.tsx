@@ -413,7 +413,9 @@ export function ZoneLibrary() {
                         onBlur={() => commitRename(z)}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") commitRename(z);
-                          if (e.key === "Escape") setRenamingId(null);
+                          // Cancelling the rename is all Escape does here — it
+                          // must not also close the library behind it.
+                          if (e.key === "Escape") { e.stopPropagation(); setRenamingId(null); }
                         }}
                         className="min-w-0 flex-1 rounded border border-[var(--color-accent)] bg-[var(--color-bg)] px-1.5 py-0.5 text-[13px] outline-none"
                       />

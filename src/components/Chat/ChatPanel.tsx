@@ -17,6 +17,7 @@ import { ProjectsPanel } from "@/components/Projects/ProjectsPanel";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import { AskUserCard } from "@/components/Message/StepBlock";
 import { resolveBaseModel } from "@/lib/baseZone";
+import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 
 export function ChatPanel() {
   const {
@@ -526,6 +527,9 @@ function ProjectTagStrip({
   const [showTagPicker, setShowTagPicker] = useState(false);
   const [showProjectPicker, setShowProjectPicker] = useState(false);
   const [showContext, setShowContext] = useState(false);
+  useDismissOnEscape(showTagPicker, () => setShowTagPicker(false));
+  useDismissOnEscape(showProjectPicker, () => setShowProjectPicker(false));
+  useDismissOnEscape(showContext, () => setShowContext(false));
   const project = projects.find((p) => p.id === projectId) ?? null;
   const ProjectIcon = project ? getZoneIcon(project.icon) : null;
   const projectColor = project?.accentColor ?? "var(--color-accent)";
@@ -820,6 +824,7 @@ function PerspectiveZonePicker({
   onSetMode: (mode: "sequential" | "parallel" | null) => void;
 }) {
   const [open, setOpen] = useState(false);
+  useDismissOnEscape(open, () => setOpen(false));
   const perspZoneIds = new Set(perspectiveZones.map((z) => z.zoneId));
   const addable = allZones.filter((z) => z.id !== primaryZoneId && !perspZoneIds.has(z.id));
   const count = perspectiveZones.length;

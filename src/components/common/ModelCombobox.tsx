@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
+import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 
 interface Props {
   value: string;
@@ -36,6 +37,11 @@ export function ModelCombobox({ value, onChange, options, placeholder, className
     return () => window.removeEventListener("mousedown", onDown);
   }, [open]);
 
+  // Escape closes the list before it reaches any modal behind it. The input's
+  // own handler covers the common case (focus is in the field); this covers
+  // Escape pressed after focus has moved elsewhere.
+  useDismissOnEscape(open, () => { setOpen(false); setFilter(null); });
+
   const list =
     filter === null || filter.trim() === ""
       ? options
@@ -52,7 +58,7 @@ export function ModelCombobox({ value, onChange, options, placeholder, className
         style={{ paddingRight: 26 }}
         onFocus={() => { if (!disabled) { setOpen(true); setFilter(null); } }}
         onChange={(e) => { onChange(e.target.value); setFilter(e.target.value); setOpen(true); }}
-        onKeyDown={(e) => { if (e.key === "Escape") { setOpen(false); setFilter(null); } }}
+        onKeyDown={(e) => { if (e.key === "Escape" && open) { e.stopPropagation(); setOpen(false); setFilter(null); } }}
       />
       <button
         type="button"

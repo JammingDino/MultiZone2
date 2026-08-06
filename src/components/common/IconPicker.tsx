@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { getZoneIcon, ZONE_ICONS, ZONE_ICON_GROUPS } from "@/lib/zoneIcons";
+import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 
 /**
  * The app's one icon picker.
@@ -40,6 +41,8 @@ export function IconPicker({
   }, [search]);
 
   const SelectedIcon = getZoneIcon(value);
+
+  useDismissOnEscape(open, () => { setOpen(false); setSearch(""); });
 
   function pick(iconId: string) {
     // Clicking the current icon clears it, which is the only way back to the

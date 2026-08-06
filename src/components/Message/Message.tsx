@@ -21,6 +21,7 @@ import { parseFileAttachments } from "@/lib/attachmentParts";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { getZoneIcon } from "@/lib/zoneIcons";
+import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 /**
@@ -200,6 +201,7 @@ function UserMessageImpl({ message }: { message: Message }) {
                 e.preventDefault();
                 commitEdit();
               } else if (e.key === "Escape") {
+                e.stopPropagation();
                 setEditing(false);
                 setDraft(text);
               }
@@ -330,11 +332,7 @@ function MessagePreviewModal({
   preview: MessagePreview;
   onClose: () => void;
 }) {
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [onClose]);
+  useDismissOnEscape(true, onClose);
 
   const title =
     preview.kind === "image" ? "Image preview" : preview.fileName;
@@ -513,6 +511,7 @@ function AssistantEditor({
             e.preventDefault();
             commit();
           } else if (e.key === "Escape") {
+            e.stopPropagation();
             onCancel();
           }
         }}

@@ -28,7 +28,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis"],
     "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
@@ -40,13 +40,16 @@
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installerHooks": "installer-hooks.nsh"
       }
     }
   },
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/JammingDino/MultiZone2/releases/latest/download/latest.json"
+        "https://raw.githubusercontent.com/JammingDino/MultiZone2/main/updater/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEMzQUY4OTRBRTdDOUJCNUIKUldSYnU4bm5Tb212dzNWdEJNVWFiaGFzelo4OXVMMnA4aXUxc3Q0aU14UHFDcUNLb3RNa0ZBb1QK",
       "windows": {

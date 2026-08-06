@@ -1,11 +1,17 @@
 // Auto-update against GitHub Releases (1.0).
 //
-// The release workflow publishes MSI + NSIS bundles and, with
-// `createUpdaterArtifacts` on, a signed `latest.json` manifest beside them. The
-// updater plugin reads that manifest from the repo's *latest* release, compares
-// its version to the running one, and verifies the bundle's signature against
-// the public key baked into `tauri.conf.json` before anything is written to
-// disk. An unsigned or tampered artifact fails the check rather than installing.
+// The release workflow publishes the NSIS installer and, with
+// `createUpdaterArtifacts` on, a signed `latest.json` manifest beside it. Since
+// the repository is private, the workflow then rewrites that manifest to point
+// at token-authenticated asset URLs and commits it to `updater/latest.json`,
+// which is the stable path the plugin polls (see
+// `scripts/rewrite-updater-manifest.mjs` for why it has to work that way).
+//
+// The plugin compares the manifest's version to the running one and verifies
+// the bundle's signature against the public key baked into `tauri.conf.json`
+// before anything is written to disk. An unsigned or tampered artifact fails
+// the check rather than installing — the read token gets the bytes, it is the
+// signature that decides whether they are trusted.
 //
 // Kept as a hook (not a store slice) because update state is entirely local to
 // whatever is displaying it and never needs to survive a remount.
@@ -72,12 +78,21 @@ export function useUpdater() {
    * imply the server returned something malformed.
    */
   const explain = (raw: string): string => {
+    // The repository is private, so every request carries the token compiled in
+    // at build time. A 401/403 therefore means that token is expired, revoked,
+    // or was never baked in — not something the user did, and not something
+    // retrying will fix, so say what actually has to happen.
+    if (/401|403|unauthorized|forbidden|bad credentials/i.test(raw)) {
+      return (
+        "MultiZone isn't authorised to fetch updates. Its access token has most " +
+        "likely expired or been revoked — a new build with a fresh token is needed."
+      );
+    }
     if (/valid release JSON|404|not found/i.test(raw)) {
       return (
         "No update manifest was found. Either no release has been published yet, " +
-        "the latest release was built without the signing key (so it has no " +
-        "latest.json), or the repository is private — release assets in a private " +
-        "repo aren't publicly downloadable."
+        "or the latest release was built without the signing key (so it has no " +
+        "latest.json)."
       );
     }
     if (/network|dns|connect|timed? ?out|unreachable/i.test(raw)) {

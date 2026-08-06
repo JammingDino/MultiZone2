@@ -14,6 +14,7 @@ mod state;
 mod error;
 mod stt_api;
 mod tts_api;
+mod updater_token;
 
 use state::AppState;
 use tauri::Manager;
@@ -32,6 +33,38 @@ fn install_panic_hook(path: std::path::PathBuf) {
         let _ = std::fs::write(&path, &entry);
         tracing::error!("panic: {info}");
     }));
+}
+
+/// The updater plugin, authenticated against the private repository.
+///
+/// A missing or malformed token is not fatal — the plugin is still installed so
+/// the Settings → Updates UI keeps working, it just reports that no manifest
+/// could be reached. That is the same failure the user sees when offline, and
+/// it beats the app refusing to start over a credential it only needs for an
+/// optional background check.
+fn build_updater_plugin<R: tauri::Runtime>(
+) -> tauri::plugin::TauriPlugin<R, tauri_plugin_updater::Config> {
+    let builder = tauri_plugin_updater::Builder::new();
+
+    let builder = match updater_token::updater_token() {
+        // `header` consumes the builder, so the error arm starts a fresh one
+        // rather than trying to hand back the value it just moved.
+        Some(token) => match builder.header("Authorization", format!("Bearer {token}")) {
+            Ok(authenticated) => authenticated,
+            Err(e) => {
+                tracing::error!("updater auth header rejected, updates will fail: {e}");
+                tauri_plugin_updater::Builder::new()
+            }
+        },
+        None => {
+            tracing::warn!(
+                "no updater token compiled in; update checks against the private repo will fail"
+            );
+            builder
+        }
+    };
+
+    builder.build()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -71,7 +104,16 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         // Auto-update from GitHub Releases (1.0). `process` is what lets the app
         // relaunch itself once an update is installed.
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        //
+        // The repository is private, so neither the manifest nor the installer
+        // is publicly readable — both requests carry a compiled-in read-only
+        // token. Only `Authorization` is set here on purpose: the plugin picks
+        // the right `Accept` per request (`application/json` for the manifest,
+        // `application/octet-stream` for the download, which is what makes
+        // GitHub's asset API return bytes rather than metadata) and only fills
+        // it in when we have not already, so setting it ourselves would break
+        // one of the two requests.
+        .plugin(build_updater_plugin())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let handle = app.handle().clone();

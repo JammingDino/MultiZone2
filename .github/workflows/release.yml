@@ -73,6 +73,12 @@ jobs:
           # public half is baked into tauri.conf.json.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Read-only token the shipped app authenticates its update checks
+          # with, since a private repo serves neither the manifest nor the
+          # installers anonymously. `build.rs` bakes it into the binary; it is
+          # never written to the working tree. Deliberately NOT the workflow's
+          # GITHUB_TOKEN, which expires when the job ends.
+          MULTIZONE_UPDATER_TOKEN: ${{ secrets.UPDATER_READ_TOKEN }}
         with:
           tagName: v${{ needs.check.outputs.version }}
           releaseName: MultiZone v${{ needs.check.outputs.version }}
@@ -81,8 +87,7 @@ jobs:
 
             | Installer | Description |
             |-----------|-------------|
-            | `*_x64_en-US.msi` | Windows MSI installer (recommended) |
-            | `*_x64-setup.exe` | NSIS self-contained setup / portable exe |
+            | `*_x64-setup.exe` | Windows installer |
 
             Existing installs update themselves — see Settings → Data → Updates.
 
@@ -91,9 +96,16 @@ jobs:
           releaseDraft: false
           prerelease: false
           # `updater` emits the signed bundle + `latest.json` the in-app updater
-          # reads. It must ship in the same release as the installers, since the
-          # endpoint points at this repo's latest release.
-          args: --bundles msi,nsis,updater
+          # reads; the `bump-version` job rewrites that manifest for private
+          # access and commits it.
+          #
+          # NSIS only, no MSI. Shipping both installed the same app twice into
+          # the same directory, and the MSI's Start Menu shortcut takes its icon
+          # from `C:\Windows\Installer\{ProductCode}\ProductIcon`. WiX mints a
+          # new ProductCode per version, so each upgrade deleted the folder the
+          # existing shortcut pointed at and the icon fell back to the generic
+          # one. NSIS shortcuts reference the exe itself, which cannot go stale.
+          args: --bundles nsis,updater
 
   # ── Bump patch version and reset the build flag ──────────────────────────
   bump-version:
@@ -156,11 +168,21 @@ jobs:
             fs.writeFileSync('src-tauri/tauri.conf.json', JSON.stringify(cfg, null, 2) + '\n');
           "
 
+      # Point the manifest's download URLs at token-authenticated asset
+      # endpoints and commit it to the path the updater polls. Runs in this job
+      # rather than its own so the manifest and the version bump land in one
+      # commit — two jobs pushing to main would race.
+      - name: Rewrite updater manifest for private access
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: v${{ steps.bump.outputs.old }}
+        run: node scripts/rewrite-updater-manifest.mjs
+
       - name: Commit and push
         shell: bash
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json
+          git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json updater/latest.json
           git commit -m "chore: bump version to ${{ steps.bump.outputs.new }} [skip ci]"
           git push origin main

@@ -235,6 +235,8 @@ pub fn run() {
             commands::messages::list_tool_functions,
             commands::tool_usage::get_tool_usage,
             commands::tool_usage::reset_tool_usage,
+            commands::checkpoints::list_checkpoints,
+            commands::checkpoints::restore_checkpoint,
             commands::usage::session_context_usage,
             commands::usage::lifetime_token_usage,
             commands::messages::send_message,

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { DEFAULT_APP_SETTINGS, type AppSettings, type Chat, type ChatTagEntry, type ChatTagLink, type ChatZone, type McpServerView, type Memory, type Message, type PendingMessage, type PendingMode, type Project, type Provider, type Skill, type SkillPack, type Tag, type Zone } from "@/lib/types";
+import { DEFAULT_APP_SETTINGS, type AppSettings, type Chat, type Checkpoint, type RestoreReport, type ChatTagEntry, type ChatTagLink, type ChatZone, type McpServerView, type Memory, type Message, type PendingMessage, type PendingMode, type Project, type Provider, type Skill, type SkillPack, type Tag, type Zone } from "@/lib/types";
 import * as api from "@/lib/tauri";
 import type { SettingsBundle } from "@/lib/settingsBundle";
 
@@ -279,6 +279,18 @@ interface AppStore {
   clearImport: () => void;
   /** Per-message generation stats, keyed by message id. */
   statsByMessage: Record<string, MessageStats>;
+  /** Turns that changed files, per chat — what "revert this turn" acts on (0.10.1).
+   *  Refreshed when a chat opens and when a turn finishes, because whether a
+   *  path has diverged is a fact about the disk now, not when it was written. */
+  checkpointsByChat: Record<string, Checkpoint[]>;
+  loadCheckpoints: (chatId: string) => Promise<void>;
+  /** Put a checkpoint's paths back. Returns what actually happened to each. */
+  revertCheckpoint: (
+    chatId: string,
+    checkpointId: string,
+    paths?: string[],
+    force?: boolean,
+  ) => Promise<RestoreReport>;
   /** Current visual theme. Persisted via the backend settings table. */
   theme: ThemePrefs;
   setTheme: (theme: Partial<ThemePrefs>) => Promise<void>;
@@ -624,6 +636,7 @@ export const useApp = create<AppStore>((set, get) => ({
   errorsByChat: {},
   pendingImport: null,
   statsByMessage: {},
+  checkpointsByChat: {},
   theme: DEFAULT_THEME,
   appSettings: DEFAULT_APP_SETTINGS,
   appSettingsLoaded: false,
@@ -729,6 +742,21 @@ export const useApp = create<AppStore>((set, get) => ({
   async loadMessages(chatId) {
     const messages = await api.getMessages(chatId);
     set((s) => ({ messagesByChat: { ...s.messagesByChat, [chatId]: messages } }));
+    // Opening a chat is also when its revertible turns are read.
+    get().loadCheckpoints(chatId).catch(console.error);
+  },
+
+  async loadCheckpoints(chatId) {
+    const checkpoints = await api.listCheckpoints(chatId);
+    set((s) => ({ checkpointsByChat: { ...s.checkpointsByChat, [chatId]: checkpoints } }));
+  },
+
+  async revertCheckpoint(chatId, checkpointId, paths, force) {
+    const report = await api.restoreCheckpoint(checkpointId, paths, force);
+    // Re-read rather than patch: a restore changes what is on disk, which is
+    // what decides whether the remaining paths still read as revertible.
+    await get().loadCheckpoints(chatId);
+    return report;
   },
   applyStreamEvent(chatId, event, perspectiveZoneId) {
     // Route perspective events to the separate perspective streams map. A
@@ -1067,6 +1095,13 @@ export const useApp = create<AppStore>((set, get) => ({
         pendingByChat,
       };
     });
+
+    // A finished turn may have changed files. Re-read what is revertible
+    // rather than inferring it: whether a path has diverged is a fact about
+    // the disk, and the tool results alone don't say.
+    if (event.type === "done") {
+      get().loadCheckpoints(chatId).catch(console.error);
+    }
 
     // ── Auto-titling the chat's opening turn ──────────────────────────────
     //

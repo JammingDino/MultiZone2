@@ -1647,6 +1647,17 @@ async fn run_participant_turn(
             .fetch_one(&ctx.db)
             .await?;
             sink.emit_for(chat_id, persp, StreamPayload::AssistantSaved { message: &saved });
+
+            // Anchor this turn's checkpoint, if it took one, to the message the
+            // transcript will hang "revert what this turn did" on (0.10.1).
+            // Only the first assistant message of the turn wins — a turn that
+            // took five steps offers one revert, at the top, not five.
+            if let Err(e) =
+                crate::checkpoints::link_message(&ctx.db, chat_id, &turn_id, persp, &assistant_msg_id)
+                    .await
+            {
+                tracing::warn!("checkpoint message link failed: {e}");
+            }
         }
 
         if agg.cancelled {

@@ -8,6 +8,8 @@ import type {
   ChatTagLink,
   ChatZone,
   LibraryEntry,
+  Checkpoint,
+  RestoreReport,
   DbStats,
   IndexSummary,
   InputPart,
@@ -167,6 +169,26 @@ export const getToolUsage = (zoneId?: string) =>
   invoke<ToolUsage[]>("get_tool_usage", { zoneId: zoneId ?? null });
 export const resetToolUsage = (zoneId?: string) =>
   invoke<void>("reset_tool_usage", { zoneId: zoneId ?? null });
+
+/** Every turn in this chat that changed files, newest first (0.10.1). */
+export const listCheckpoints = (chatId: string) =>
+  invoke<Checkpoint[]>("list_checkpoints", { chatId });
+
+/**
+ * Put a checkpoint's paths back. `paths` restores a subset; `force` proceeds
+ * past a file that changed after the assistant left it, which is otherwise
+ * reported as a conflict and left exactly as found.
+ */
+export const restoreCheckpoint = (
+  checkpointId: string,
+  paths?: string[],
+  force?: boolean,
+) =>
+  invoke<RestoreReport>("restore_checkpoint", {
+    checkpointId,
+    paths: paths ?? null,
+    force: force ?? false,
+  });
 
 /**
  * Estimated context carried by every chat in this chat's sub-agent session —

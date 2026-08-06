@@ -10,6 +10,7 @@ import { PerspectiveStatusLine, PrimaryStatusLine } from "./StatusLine";
 import { MessageActions } from "./MessageActions";
 import { CitationSources } from "./CitationSources";
 import { StackTrace, spawnedSubchatIdsFromBlocks } from "./StackTrace";
+import { TurnChanges } from "./TurnChanges";
 import type { BotTurn, PerspectiveTurn, Step, TurnBlock } from "@/lib/grouping";
 import {
   citationKey,
@@ -738,6 +739,9 @@ function BotTurnViewImpl({ turn, isLatest = false }: { turn: BotTurn; isLatest?:
                 />
               )}
               {!isStreaming && <CitationSources used={citations} all={allCitations} />}
+              {!isStreaming && (
+                <TurnChanges chatId={chatId} messageIds={turn.messageIds} />
+              )}
               {!isStreaming && (
                 <StackTrace
                   chatId={chatId}

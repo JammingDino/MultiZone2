@@ -652,8 +652,10 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [x] Per-file restore, so a run that got three edits right and one wrong doesn't have to be thrown away whole — engine (`only` argument)
 - [x] Revert is itself a checkpoint — undo is undoable — engine, and covered by a test that reverts a revert
 - [x] Conflict handling when a file was edited outside the app since the checkpoint: reported as a conflict and left exactly as found, with an explicit `force` for a user who has been told and insists — engine. This is the one failure the feature must not have, so it is the test written first
-- [ ] Tauri commands: list a chat's checkpoints, restore one, restore selected paths
-- [ ] "Revert to here" on any turn that changed files, with the changed paths listed and individually revertible
+- [x] Tauri commands: `list_checkpoints` (with each path's change type and whether it has diverged *now*, computed at read time rather than stored) and `restore_checkpoint` (optional path subset, optional force)
+- [x] A turn that changed files shows what it changed, under the answer: each path with its change type, click-to-reveal, per-file revert, and a "Revert turn" action ([TurnChanges.tsx](../src/components/Message/TurnChanges.tsx)). A diverged path is marked "edited since" and its revert becomes a two-step "Revert anyway…" → "Confirm revert", so overwriting the user's own edit is never one click
+- [x] Checkpoints are anchored to the assistant message the turn opened with (migration [030](../src-tauri/migrations/030_checkpoint_message.sql)), so a five-step turn offers one revert at the top rather than five
+- [ ] Runtime-test the whole path: a real turn that edits a file, then revert it from the transcript
 - [ ] The existing "Branch from here" and a revert compose: branching a chat at a reverted point starts from the restored tree
 
 ### 0.10.2 — Review before apply

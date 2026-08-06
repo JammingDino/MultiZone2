@@ -1,6 +1,7 @@
 pub mod api;
 pub mod providers;
 pub mod zones;
+pub mod checkpoints;
 pub mod chats;
 pub mod diagram;
 pub mod messages;

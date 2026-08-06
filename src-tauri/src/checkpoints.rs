@@ -289,6 +289,126 @@ async fn open_checkpoint(
     Ok(id)
 }
 
+/// Anchor this turn's checkpoint to the assistant message the turn opened with.
+///
+/// The turn id is internal to the agentic loop; the transcript is addressed by
+/// message. Only the first assistant message of a turn wins, because that is
+/// where "revert what this turn did" belongs — a turn that took five steps
+/// should offer one revert, at the top, not five.
+///
+/// A no-op when the turn changed nothing, which is nearly every turn: the
+/// checkpoint it would anchor was never created.
+pub async fn link_message(
+    db: &SqlitePool,
+    chat_id: &str,
+    turn_id: &str,
+    zone_id: Option<&str>,
+    message_id: &str,
+) -> AppResult<()> {
+    sqlx::query(
+        "UPDATE checkpoints SET message_id = ?1
+          WHERE chat_id = ?2 AND turn_id = ?3
+            AND COALESCE(zone_id, '') = COALESCE(?4, '')
+            AND message_id IS NULL",
+    )
+    .bind(message_id)
+    .bind(chat_id)
+    .bind(turn_id)
+    .bind(zone_id)
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// One path a checkpoint covers, as the transcript lists it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckpointFile {
+    pub path: String,
+    pub display_path: String,
+    /// What the turn did to it: `created` (nothing was there before),
+    /// `changed`, or `deleted`.
+    pub change: String,
+    /// Set when the prior contents could not be captured, and why.
+    pub unstorable: Option<String>,
+    /// True when what is on disk now is not what the assistant left — someone
+    /// has edited it since, so restoring would discard that edit.
+    pub diverged: bool,
+}
+
+/// A turn's worth of file changes, addressed by the message it belongs to.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Checkpoint {
+    pub id: String,
+    pub chat_id: String,
+    pub message_id: Option<String>,
+    pub zone_id: Option<String>,
+    pub created_at: i64,
+    pub label: Option<String>,
+    pub restored_at: Option<i64>,
+    pub files: Vec<CheckpointFile>,
+}
+
+/// Every checkpoint in a chat, newest first, each with the paths it covers.
+///
+/// `diverged` is computed here rather than stored: it is a fact about the disk
+/// right now, and a file the user edited two minutes ago must not still read as
+/// safely revertible because that was true when the row was written.
+pub async fn list_for_chat(db: &SqlitePool, chat_id: &str) -> AppResult<Vec<Checkpoint>> {
+    let heads: Vec<(String, String, Option<String>, Option<String>, i64, Option<String>, Option<i64>)> =
+        sqlx::query_as(
+            "SELECT id, chat_id, message_id, zone_id, created_at, label, restored_at
+               FROM checkpoints WHERE chat_id = ?1 ORDER BY created_at DESC",
+        )
+        .bind(chat_id)
+        .fetch_all(db)
+        .await?;
+
+    let mut out = Vec::with_capacity(heads.len());
+    for (id, chat_id, message_id, zone_id, created_at, label, restored_at) in heads {
+        let rows: Vec<(String, String, i64, Option<String>, Option<String>, Option<String>)> =
+            sqlx::query_as(
+                "SELECT path, display_path, existed, before_hash, after_hash, unstorable
+                   FROM checkpoint_files WHERE checkpoint_id = ?1 ORDER BY display_path",
+            )
+            .bind(&id)
+            .fetch_all(db)
+            .await?;
+
+        let files = rows
+            .into_iter()
+            .map(|(path, display_path, existed, _before, after_hash, unstorable)| {
+                let now = current_hash(Path::new(&path));
+                let change = match (existed == 1, now.is_some()) {
+                    (false, _) => "created",
+                    (true, false) => "deleted",
+                    (true, true) => "changed",
+                };
+                CheckpointFile {
+                    path,
+                    display_path,
+                    change: change.to_string(),
+                    unstorable,
+                    diverged: after_hash.is_some_and(|a| now.as_deref() != Some(a.as_str())),
+                }
+            })
+            .collect();
+
+        out.push(Checkpoint {
+            id,
+            chat_id,
+            message_id,
+            zone_id,
+            created_at,
+            label,
+            restored_at,
+            files,
+        });
+    }
+    Ok(out)
+}
+
 /// One path's fate in a restore, for the report the user reads.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -665,6 +785,62 @@ mod tests {
         let undo = report.undo_checkpoint_id.unwrap();
         restore(&db, &undo, None, true).await.unwrap();
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "agent version");
+    }
+
+    /// A turn that took five steps offers one revert, anchored at the message
+    /// it opened with — not one per step, and not moving to the last step's
+    /// message as the turn goes on.
+    #[tokio::test]
+    async fn a_turn_is_anchored_to_its_first_assistant_message() {
+        let dir = workspace("a_turn_is_anchored_to_its_first_assistant_message");
+        let db = pool().await;
+
+        let file = dir.join("a.txt");
+        std::fs::write(&file, "before").unwrap();
+        capture(&db, "c", "t", None, "edit_file", &json!({ "path": file.to_string_lossy() }), None)
+            .await
+            .unwrap();
+
+        link_message(&db, "c", "t", None, "msg-step-1").await.unwrap();
+        link_message(&db, "c", "t", None, "msg-step-2").await.unwrap();
+
+        let list = list_for_chat(&db, "c").await.unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].message_id.as_deref(), Some("msg-step-1"));
+
+        // A turn that changed nothing has no checkpoint to anchor, and saying so
+        // must not be an error — that is the overwhelming majority of turns.
+        link_message(&db, "c", "quiet-turn", None, "msg").await.unwrap();
+        assert_eq!(list_for_chat(&db, "c").await.unwrap().len(), 1);
+    }
+
+    /// The listing tells the transcript what each path's state is *now*, so a
+    /// file the user edited since the turn is flagged before they click revert
+    /// rather than after.
+    #[tokio::test]
+    async fn listing_flags_a_path_that_diverged_since_the_turn() {
+        let dir = workspace("listing_flags_a_path_that_diverged_since_the_turn");
+        let db = pool().await;
+
+        let calm = dir.join("calm.txt");
+        let touched = dir.join("touched.txt");
+        std::fs::write(&calm, "before").unwrap();
+        std::fs::write(&touched, "before").unwrap();
+        for f in [&calm, &touched] {
+            let args = json!({ "path": f.to_string_lossy() });
+            capture(&db, "c", "t", None, "edit_file", &args, None).await.unwrap();
+            std::fs::write(f, "the agent's version").unwrap();
+            record_after(&db, "c", "t", None, "edit_file", &args, None).await.unwrap();
+        }
+        std::fs::write(&touched, "and then the user's own edit").unwrap();
+
+        let list = list_for_chat(&db, "c").await.unwrap();
+        let files = &list[0].files;
+        assert_eq!(files.len(), 2);
+        let by_name = |n: &str| files.iter().find(|f| f.display_path.ends_with(n)).unwrap();
+        assert!(!by_name("calm.txt").diverged);
+        assert!(by_name("touched.txt").diverged);
+        assert_eq!(by_name("calm.txt").change, "changed");
     }
 
     /// Identical bytes are stored once however many checkpoints see them.

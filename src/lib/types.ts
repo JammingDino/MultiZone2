@@ -883,6 +883,52 @@ export interface ToolUsage {
   lastUsedAt: number;
 }
 
+/** One path a checkpoint covers (0.10.1). */
+export interface CheckpointFile {
+  /** Absolute, normalised — the key a restore is addressed by. */
+  path: string;
+  /** The path as the assistant wrote it, which is what the user recognises. */
+  displayPath: string;
+  /** What the turn did: `created` · `changed` · `deleted`. */
+  change: "created" | "changed" | "deleted";
+  /** Set when the prior contents could not be captured, and why. */
+  unstorable: string | null;
+  /** The file has been edited since the assistant left it — restoring would
+   *  discard that edit, so the UI says so before offering the button. */
+  diverged: boolean;
+}
+
+/** A turn's worth of file changes, revertible as one (0.10.1). */
+export interface Checkpoint {
+  id: string;
+  chatId: string;
+  /** The assistant message the turn opened with — where the revert hangs. */
+  messageId: string | null;
+  /** The participant that did the mutating; null in a single-zone chat. */
+  zoneId: string | null;
+  createdAt: number;
+  /** The tool that opened the checkpoint. */
+  label: string | null;
+  restoredAt: number | null;
+  files: CheckpointFile[];
+}
+
+/** What a restore actually did to each path it was asked about. */
+export interface RestoredFile {
+  path: string;
+  displayPath: string;
+  /** `restored` · `deleted` · `unchanged` · `conflict` · `skipped`. */
+  outcome: string;
+  detail: string | null;
+}
+
+export interface RestoreReport {
+  checkpointId: string;
+  files: RestoredFile[];
+  /** The checkpoint taken of the restore itself, so undo is undoable. */
+  undoCheckpointId: string | null;
+}
+
 /** Groups the zone editor's tool list is sorted into, in display order (0.9.0). */
 export const TOOL_CATEGORIES = ["Files", "Web", "Knowledge", "Agents", "System"] as const;
 export type ToolCategory = (typeof TOOL_CATEGORIES)[number];

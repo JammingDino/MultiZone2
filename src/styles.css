@@ -590,49 +590,73 @@ html.bloom .text-\[var\(--color-accent\)\] {
  * as well is expensive and reads as fog — a card inside a blurred modal already
  * sits on a blurred backdrop, so tinting it is enough.
  *
- * Selectors match the Tailwind arbitrary-value classes the app paints with; the
- * `/` guards skip surfaces that already chose their own alpha (`bg-…/70`),
- * which are deliberate scrims and shouldn't be doubled up.
+ * Selectors match the Tailwind arbitrary-value classes the app paints with, and
+ * two guards keep them honest:
+ *
+ *  - The class has to start a token (`^=` or a leading space). A plain
+ *    `*=` also matches `hover:bg-[var(--color-panel-hover)]`, which painted the
+ *    hover background onto every button at rest — the whole UI looked hovered.
+ *  - The `/` guard skips surfaces that already chose their own alpha
+ *    (`bg-…/70`); those are deliberate scrims and shouldn't be doubled up.
  */
 html.glass {
   --glass-blur: calc(4px + var(--glass-strength, 0.5) * 22px);
   /* Never fully transparent: text needs a ground. ~86% at the lightest
      setting down to ~43% at the strongest. */
   --glass-alpha: calc(88% - var(--glass-strength, 0.5) * 45%);
-  --glass-panel: color-mix(in srgb, var(--color-panel) var(--glass-alpha), transparent);
-  --glass-base: color-mix(in srgb, var(--color-bg) var(--glass-alpha), transparent);
+  --glass-tint: var(--color-panel);
+  --glass-tint-base: var(--color-bg);
+  --glass-panel: color-mix(in srgb, var(--glass-tint) var(--glass-alpha), transparent);
+  --glass-base: color-mix(in srgb, var(--glass-tint-base) var(--glass-alpha), transparent);
   --glass-hover: color-mix(in srgb, var(--color-panel-hover) calc(var(--glass-alpha) + 8%), transparent);
   --glass-saturate: 1.35;
 }
 
-/* Clear: see the background sharply, with only the tint holding the text. */
+/* Frosted: a milky film over a heavy blur. The film is what makes frosted read
+   as frosted — with a plain tint the blur alone is invisible over a background
+   that has no fine detail (a sparse effect, or none at all), which made this
+   indistinguishable from Clear. Mixing toward the *text* colour lightens the
+   film in dark mode and darkens it in light, which is the right direction for
+   both. */
+html.glass.glass-frosted {
+  --glass-blur: calc(8px + var(--glass-strength, 0.5) * 30px);
+  --glass-tint: color-mix(in srgb, var(--color-text) 8%, var(--color-panel));
+  --glass-tint-base: color-mix(in srgb, var(--color-text) 6%, var(--color-bg));
+  --glass-saturate: 1.2;
+}
+
+/* Clear: no blur, no film, and further through — the point is to see the
+   background sharply, with only enough tint to hold the text. */
 html.glass.glass-clear {
   --glass-blur: 0px;
+  --glass-alpha: calc(80% - var(--glass-strength, 0.5) * 48%);
   --glass-saturate: 1;
 }
 
 /* Tinted: the accent bleeds into the glass. */
 html.glass.glass-tinted {
-  --glass-panel: color-mix(
-    in srgb,
-    color-mix(in srgb, var(--color-accent) 14%, var(--color-panel)) var(--glass-alpha),
-    transparent
-  );
-  --glass-base: color-mix(
-    in srgb,
-    color-mix(in srgb, var(--color-accent) 10%, var(--color-bg)) var(--glass-alpha),
-    transparent
-  );
+  --glass-blur: calc(6px + var(--glass-strength, 0.5) * 26px);
+  --glass-tint: color-mix(in srgb, var(--color-accent) 14%, var(--color-panel));
+  --glass-tint-base: color-mix(in srgb, var(--color-accent) 10%, var(--color-bg));
   --glass-saturate: 1.6;
 }
 
-html.glass [class*="bg-[var(--color-panel)]"]:not([class*="bg-[var(--color-panel)]/"]) {
+html.glass :is([class^="bg-[var(--color-panel)]"], [class*=" bg-[var(--color-panel)]"]):not([class*="bg-[var(--color-panel)]/"]) {
   background-color: var(--glass-panel);
 }
-html.glass [class*="bg-[var(--color-bg)]"]:not([class*="bg-[var(--color-bg)]/"]) {
+html.glass :is([class^="bg-[var(--color-bg)]"], [class*=" bg-[var(--color-bg)]"]):not([class*="bg-[var(--color-bg)]/"]) {
   background-color: var(--glass-base);
 }
-html.glass [class*="bg-[var(--color-panel-hover)]"]:not([class*="bg-[var(--color-panel-hover)]/"]) {
+html.glass :is([class^="bg-[var(--color-panel-hover)]"], [class*=" bg-[var(--color-panel-hover)]"]):not([class*="bg-[var(--color-panel-hover)]/"]) {
+  background-color: var(--glass-hover);
+}
+
+/* The hover state itself, restated: the rules above are specific enough to beat
+   Tailwind's `hover:` utilities, so without this a glass surface would stop
+   responding to the pointer entirely. Hover sits a notch more opaque than rest,
+   which is what makes it read as a highlight through glass. */
+html.glass :is([class*=" hover:bg-[var(--color-panel-hover)]"], [class^="hover:bg-[var(--color-panel-hover)]"]):hover,
+html.glass :is([class*=" hover:bg-[var(--color-panel)]"], [class^="hover:bg-[var(--color-panel)]"]):hover {
   background-color: var(--glass-hover);
 }
 

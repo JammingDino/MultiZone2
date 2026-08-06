@@ -1430,6 +1430,11 @@ async fn run_participant_turn(
     // the same turn would both tell the model to write `[1]`. See
     // `tools::citations`.
     let mut next_citation_ref = 1u32;
+    // Groups every tool call of this turn, so the checkpoint taken before the
+    // turn's first file change is the one every later change extends (0.10.0).
+    // Per turn rather than per step: the user reverts "what the assistant just
+    // did", which spans the whole agentic loop, not one iteration of it.
+    let turn_id = new_id();
 
     for step in 0..max_steps {
         if cancel.load(Ordering::Relaxed) {
@@ -1771,6 +1776,7 @@ async fn run_participant_turn(
                     &zone_config,
                     &ctx.db,
                     chat_id,
+                    &turn_id,
                     project_dir.as_deref(),
                     &ctx.http,
                     ctx,

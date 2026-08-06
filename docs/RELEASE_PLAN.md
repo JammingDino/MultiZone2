@@ -633,18 +633,27 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ### 0.10.0 — Checkpoints
 
-- [ ] A checkpoint is taken automatically before the first file-mutating tool call of a turn — content snapshots of every path the turn touches, not a whole-directory copy
-- [ ] Snapshot store on disk (`app_data_dir/checkpoints/<chat_id>/`), content-addressed so an unchanged file across many turns is stored once; deletions and creations recorded as such so both directions restore
+*Status: the engine is built and unit-tested ([checkpoints.rs](../src-tauri/src/checkpoints.rs), migration [029](../src-tauri/migrations/029_checkpoints.sql), `cargo test --lib` 123 passing). Nothing is wired to a button yet — that is 0.10.1.*
+
+- [x] A checkpoint is taken automatically before the first file-mutating tool call of a turn — content snapshots of every path the turn touches, not a whole-directory copy. Hooked in `tools::dispatch` rather than in each tool, so every caller is covered (GUI, HTTP API, sub-agents) and a new file tool is covered the day it is added
+- [x] One checkpoint per turn, extended by each later mutating call: reverting is one action however many files a turn touched, and the state kept is the state before the *turn*, not before the second edit of the same file
+- [x] Snapshot store on disk (`app_data_dir/checkpoints/blobs/<xx>/<hash>`), content-addressed so an unchanged file across many turns is stored once; creations recorded as "did not exist" so restoring one removes it rather than leaving the agent's file behind
+- [x] The restore records what the tool *left behind* as well as what it found, so it can tell "the agent wrote this" from "somebody edited it afterwards"
+- [x] Best-effort in both directions — a checkpoint that cannot be taken is logged and the tool still runs, because refusing to edit a file because we could not back it up is a worse failure than the one it guards against
+- [x] Works for sub-agent and perspective turns too — checkpoints key on chat + turn + participant zone, so each zone in a teamwork run has its own revertible unit
 - [ ] Retention policy with a size ceiling, surfaced in Settings → Data alongside the other storage categories
-- [ ] Binary and large files recorded by hash + size only, with the restore honestly reporting what it cannot bring back
-- [ ] Works for sub-agent and perspective turns too — checkpoints key on the chat, so a teamwork run across several zones restores as one unit
+- [x] What cannot be captured is named rather than glossed: a directory, a file over the 32 MB ceiling, or an unreadable path is recorded with the reason and reported by the restore instead of silently succeeding
 
 ### 0.10.1 — Undo in the transcript
 
-- [ ] "Revert to here" on any turn that changed files: restores every path that turn touched to its pre-turn contents
-- [ ] The turn shows what it changed as a list of paths with per-file undo, so a run that got three edits right and one wrong doesn't have to be thrown away whole
-- [ ] Revert is itself a checkpoint — undo is undoable
-- [ ] Conflict handling when a file was edited outside the app since the checkpoint: name the divergence and let the user choose, never silently overwrite
+*The restore engine landed with 0.10.0 (`restore()`, with per-path selection, conflict detection and an undo-of-the-undo checkpoint, all unit-tested). What remains is the Tauri commands and the UI.*
+
+- [x] Restoring puts every path a turn touched back to its pre-turn contents — engine
+- [x] Per-file restore, so a run that got three edits right and one wrong doesn't have to be thrown away whole — engine (`only` argument)
+- [x] Revert is itself a checkpoint — undo is undoable — engine, and covered by a test that reverts a revert
+- [x] Conflict handling when a file was edited outside the app since the checkpoint: reported as a conflict and left exactly as found, with an explicit `force` for a user who has been told and insists — engine. This is the one failure the feature must not have, so it is the test written first
+- [ ] Tauri commands: list a chat's checkpoints, restore one, restore selected paths
+- [ ] "Revert to here" on any turn that changed files, with the changed paths listed and individually revertible
 - [ ] The existing "Branch from here" and a revert compose: branching a chat at a reverted point starts from the restored tree
 
 ### 0.10.2 — Review before apply

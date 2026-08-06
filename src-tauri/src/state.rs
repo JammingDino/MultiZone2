@@ -52,6 +52,10 @@ impl AppState {
         // are told to write, and the first root scanned for folder-backed skills.
         crate::skillpacks::set_managed_root(app_data_dir.join("skills"));
 
+        // Where checkpoints keep the prior contents of files an agent changed,
+        // so an edit the user dislikes can be put back (0.10.0).
+        crate::checkpoints::set_store_root(app_data_dir.join("checkpoints"));
+
         let db = db::init(&app_data_dir).await?;
 
         // The settings backup lives a level up from the bundle-identifier app

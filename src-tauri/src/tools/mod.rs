@@ -409,9 +409,57 @@ pub fn definition_sizes(ctx: &ToolContext) -> Vec<(&'static str, usize)> {
 /// Dispatch a tool call by name to the appropriate handler. `db` and `chat_id`
 /// are only used by tools that touch app state (e.g. `tag_chat`). `ctx`, `sink`
 /// and `caller_zone_id` are used by the subchat tools, which run nested turns.
+///
+/// `turn_id` groups every call of one turn, so the checkpoint taken before the
+/// turn's first file change is the one every later change in that turn extends —
+/// "revert this turn" is then one action however many files it touched.
 pub async fn dispatch(
     name: &str,
     arguments: &str,
+    zone_config: &Value,
+    db: &SqlitePool,
+    chat_id: &str,
+    turn_id: &str,
+    project_dir: Option<&str>,
+    http: &reqwest::Client,
+    ctx: &EngineCtx,
+    sink: &StreamSink,
+    caller_zone_id: Option<&str>,
+) -> AppResult<String> {
+    let args: Value = serde_json::from_str(arguments).unwrap_or(Value::Null);
+
+    // Checkpoint the paths this call is about to change, before it changes them
+    // (0.10.0). A no-op for every tool that doesn't write, which is nearly all
+    // of them. Best-effort in both directions: a checkpoint that cannot be
+    // taken is logged and the tool still runs, because refusing to edit a file
+    // because we could not back it up would be a worse failure than the one it
+    // guards against.
+    if let Err(e) = crate::checkpoints::capture(
+        db, chat_id, turn_id, caller_zone_id, name, &args, project_dir,
+    )
+    .await
+    {
+        tracing::warn!("checkpoint capture failed for {name}: {e}");
+    }
+    let out = dispatch_inner(
+        name, &args, zone_config, db, chat_id, project_dir, http, ctx, sink, caller_zone_id,
+    )
+    .await;
+    // What the tool left behind, so a later restore can tell "the agent wrote
+    // this" from "somebody edited it afterwards".
+    if let Err(e) = crate::checkpoints::record_after(
+        db, chat_id, turn_id, caller_zone_id, name, &args, project_dir,
+    )
+    .await
+    {
+        tracing::warn!("checkpoint post-state failed for {name}: {e}");
+    }
+    out
+}
+
+async fn dispatch_inner(
+    name: &str,
+    args: &Value,
     zone_config: &Value,
     db: &SqlitePool,
     chat_id: &str,
@@ -421,15 +469,13 @@ pub async fn dispatch(
     sink: &StreamSink,
     caller_zone_id: Option<&str>,
 ) -> AppResult<String> {
-    let args: Value = serde_json::from_str(arguments).unwrap_or(Value::Null);
-
     // MCP tools (`mcp__<server>__<tool>`) route through the global MCP manager,
     // which connects lazily and forwards `tools/call`.
     if crate::mcp::is_mcp_tool(name) {
         let call_args = if args.is_null() {
             Value::Object(Default::default())
         } else {
-            args
+            args.clone()
         };
         return crate::mcp::manager().call(name, call_args).await;
     }
@@ -439,70 +485,70 @@ pub async fn dispatch(
     // clobbering it, and an unclaimed write takes an implicit claim so the writer
     // is protected in turn. A no-op for an ordinary single-zone chat.
     if let Some(refusal) =
-        teamwork::guard_write(name, &args, db, chat_id, caller_zone_id, project_dir).await?
+        teamwork::guard_write(name, args, db, chat_id, caller_zone_id, project_dir).await?
     {
         return Ok(refusal);
     }
 
     match name {
-        "get_current_datetime" => datetime::run(&args).await,
+        "get_current_datetime" => datetime::run(args).await,
         // The retired `web_search` / `extract_url` names still route here: they
         // are arg-compatible with their replacements (`query`, and `urls`/`url`
         // respectively), so a model that reaches for an old name — from a skill,
         // a hand-written zone prompt, or its own priors — gets the modern tool
         // rather than an "unknown tool" error. Nothing offers these names in a
         // definition any more.
-        "smart_search" | "web_search" => smart_search::run(&args).await,
-        "smart_fetch" | "extract_url" => smart_fetch::run(&args).await,
-        "smart_crawl" => smart_crawl::run(&args).await,
-        "execute_code" => code_exec::run(&args, zone_config).await,
+        "smart_search" | "web_search" => smart_search::run(args).await,
+        "smart_fetch" | "extract_url" => smart_fetch::run(args).await,
+        "smart_crawl" => smart_crawl::run(args).await,
+        "execute_code" => code_exec::run(args, zone_config).await,
         // `sink` carries the window handle: a PDF's pages are rasterized by the
         // frontend's PDF.js (see `pdf_bridge`).
-        "read_file" => filesystem::read_file(&args, zone_config, project_dir, sink).await,
-        "list_directory" => filesystem::list_directory(&args, zone_config, project_dir).await,
-        "create_file" => filesystem::create_file(&args, zone_config, project_dir).await,
-        "edit_file" => filesystem::edit_file(&args, zone_config, project_dir).await,
-        "present_file" => filesystem::present_file(&args, project_dir).await,
-        "plot_function" => render_graph::plot(&args).await,
-        "draw_diagram" => render_graph::draw(&args).await,
-        "ask_user" => ask_user::run(&args).await,
-        "tag_chat" => tags::run(&args, db, chat_id).await,
+        "read_file" => filesystem::read_file(args, zone_config, project_dir, sink).await,
+        "list_directory" => filesystem::list_directory(args, zone_config, project_dir).await,
+        "create_file" => filesystem::create_file(args, zone_config, project_dir).await,
+        "edit_file" => filesystem::edit_file(args, zone_config, project_dir).await,
+        "present_file" => filesystem::present_file(args, project_dir).await,
+        "plot_function" => render_graph::plot(args).await,
+        "draw_diagram" => render_graph::draw(args).await,
+        "ask_user" => ask_user::run(args).await,
+        "tag_chat" => tags::run(args, db, chat_id).await,
         "list_zones" => zone::list_zones(db).await,
-        "change_zone" => zone::change_zone(&args, db, chat_id).await,
-        "run_command" => shell::run(&args, zone_config, project_dir).await,
-        "wsl_exec" => wsl::run(&args, chat_id).await,
-        "save_memory" => memory::save(&args, db, chat_id).await,
-        "read_memory" => memory::read(&args, db, chat_id).await,
-        "delete_memory" => memory::delete(&args, db).await,
-        "load_skill" => skills::run(&args, db).await,
-        "create_skill" => skills::create(&args, db, caller_zone_id).await,
-        "update_skill" => skills::update(&args, db).await,
+        "change_zone" => zone::change_zone(args, db, chat_id).await,
+        "run_command" => shell::run(args, zone_config, project_dir).await,
+        "wsl_exec" => wsl::run(args, chat_id).await,
+        "save_memory" => memory::save(args, db, chat_id).await,
+        "read_memory" => memory::read(args, db, chat_id).await,
+        "delete_memory" => memory::delete(args, db).await,
+        "load_skill" => skills::run(args, db).await,
+        "create_skill" => skills::create(args, db, caller_zone_id).await,
+        "update_skill" => skills::update(args, db).await,
         // `search_knowledge` is the pre-0.9.0 name; kept so a zone or a replayed
         // tool call written before the rename still dispatches.
-        "search_local_files" | "search_knowledge" => knowledge::run(&args, db, chat_id, http).await,
-        "move_file" => filesystem::move_file(&args, zone_config, project_dir).await,
-        "copy_file" => filesystem::copy_file(&args, zone_config, project_dir).await,
-        "delete_file" => filesystem::delete_file(&args, zone_config, project_dir).await,
-        "create_folder" => filesystem::create_folder(&args, zone_config, project_dir).await,
-        "find_files" => filesystem::find_files(&args, zone_config, project_dir).await,
-        "search_file_text" => filesystem::search_file_text(&args, zone_config, project_dir).await,
-        "update_plan" => plan::run(&args).await,
-        "http_request" => http::run(&args, http).await,
-        "compact_context" => compact::run(&args, db, chat_id).await,
-        "spawn_subagent" => subchat::spawn(&args, ctx, sink, caller_zone_id, chat_id).await,
-        "send_subchat_message" => subchat::send(&args, ctx, sink).await,
-        "collect_subagents" => subchat::collect(&args, db, chat_id).await,
+        "search_local_files" | "search_knowledge" => knowledge::run(args, db, chat_id, http).await,
+        "move_file" => filesystem::move_file(args, zone_config, project_dir).await,
+        "copy_file" => filesystem::copy_file(args, zone_config, project_dir).await,
+        "delete_file" => filesystem::delete_file(args, zone_config, project_dir).await,
+        "create_folder" => filesystem::create_folder(args, zone_config, project_dir).await,
+        "find_files" => filesystem::find_files(args, zone_config, project_dir).await,
+        "search_file_text" => filesystem::search_file_text(args, zone_config, project_dir).await,
+        "update_plan" => plan::run(args).await,
+        "http_request" => http::run(args, http).await,
+        "compact_context" => compact::run(args, db, chat_id).await,
+        "spawn_subagent" => subchat::spawn(args, ctx, sink, caller_zone_id, chat_id).await,
+        "send_subchat_message" => subchat::send(args, ctx, sink).await,
+        "collect_subagents" => subchat::collect(args, db, chat_id).await,
         "list_subchats" => subchat::list(db, chat_id).await,
-        "read_subchat" => subchat::read(&args, db).await,
-        "terminal_start" => terminal::start(&args, db, chat_id, project_dir).await,
-        "terminal_write" => terminal::write(&args, db, chat_id).await,
-        "terminal_read" => terminal::read(&args, db, chat_id).await,
+        "read_subchat" => subchat::read(args, db).await,
+        "terminal_start" => terminal::start(args, db, chat_id, project_dir).await,
+        "terminal_write" => terminal::write(args, db, chat_id).await,
+        "terminal_read" => terminal::read(args, db, chat_id).await,
         "terminal_list" => terminal::list(db, chat_id).await,
-        "terminal_stop" => terminal::stop(&args, db, chat_id).await,
+        "terminal_stop" => terminal::stop(args, db, chat_id).await,
         "team_status" => teamwork::status(db, chat_id).await,
-        "claim_files" => teamwork::claim(&args, db, chat_id, caller_zone_id, project_dir).await,
-        "release_files" => teamwork::release(&args, db, chat_id, caller_zone_id, project_dir).await,
-        "post_note" => teamwork::note(&args, db, chat_id, caller_zone_id).await,
+        "claim_files" => teamwork::claim(args, db, chat_id, caller_zone_id, project_dir).await,
+        "release_files" => teamwork::release(args, db, chat_id, caller_zone_id, project_dir).await,
+        "post_note" => teamwork::note(args, db, chat_id, caller_zone_id).await,
         other => Ok(serde_json::json!({
             "error": format!("unknown tool: {other}")
         }).to_string()),

@@ -108,6 +108,11 @@ wreq-util = "2.2.6"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 
+[dev-dependencies]
+# Checkpoint tests write real files and restore them — the behaviour under test
+# is filesystem behaviour, so a mock of it would prove nothing.
+tempfile = "3"
+
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]

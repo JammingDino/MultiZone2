@@ -1,5 +1,6 @@
 mod api;
 mod audio;
+mod checkpoints;
 mod db;
 mod knowledge;
 mod llm;

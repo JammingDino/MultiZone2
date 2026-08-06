@@ -451,6 +451,14 @@ export type BackgroundEffect =
   | "waves" | "fireflies" | "boids"
   | "matrix" | "topography" | "puzzle" | "mountains" | "fish";
 
+/**
+ * How a translucent surface treats what is behind it:
+ *  - `frosted` — blurred and desaturated, the classic frosted pane.
+ *  - `clear`   — no blur, so the background effect stays legible through it.
+ *  - `tinted`  — frosted, with the accent colour bled into the glass.
+ */
+export type GlassStyle = "frosted" | "clear" | "tinted";
+
 export interface ThemePrefs {
   mode: "dark" | "light";
   accent: string;
@@ -468,6 +476,15 @@ export interface ThemePrefs {
   bloomEnabled: boolean;
   bloomIntensity: number;
   shadowsEnabled: boolean;
+  /**
+   * Glass / transparency (0.9.15). Off by default — a translucent UI is a taste,
+   * and it only makes sense over something worth seeing, so it pairs with the
+   * background effect. `glassStyle` picks how the light behaves; `glassStrength`
+   * is how far through it you can see.
+   */
+  glassEnabled?: boolean;
+  glassStyle?: GlassStyle;
+  glassStrength?: number;
   /**
    * Per-mode overrides of the base palette (0.9.4). Kept separate for dark and
    * light so a blue background chosen for dark doesn't follow you into light,
@@ -501,6 +518,9 @@ const DEFAULT_THEME: ThemePrefs = {
   bloomEnabled: false,
   bloomIntensity: 0.5,
   shadowsEnabled: true,
+  glassEnabled: false,
+  glassStyle: "frosted",
+  glassStrength: 0.5,
 };
 
 const LEGACY_FONT_SIZE: Record<string, number> = { normal: 14, large: 16, xl: 18 };
@@ -552,6 +572,15 @@ function applyThemeToDom(theme: ThemePrefs) {
   html.classList.toggle("bloom", !!theme.bloomEnabled);
   html.classList.toggle("shadows", !!theme.shadowsEnabled);
   html.style.setProperty("--bloom-intensity", String(theme.bloomIntensity ?? 0.5));
+
+  // Glass: one class for "on", one for which style, and a strength variable the
+  // stylesheet derives blur and opacity from.
+  const glass = !!theme.glassEnabled;
+  html.classList.toggle("glass", glass);
+  for (const s of ["frosted", "clear", "tinted"] as const) {
+    html.classList.toggle(`glass-${s}`, glass && (theme.glassStyle ?? "frosted") === s);
+  }
+  html.style.setProperty("--glass-strength", String(theme.glassStrength ?? 0.5));
 
   // Palette overrides for the mode being shown. Every key is cleared first, so
   // switching modes (or resetting a colour) drops back to the stylesheet value

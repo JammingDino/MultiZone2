@@ -579,6 +579,97 @@ html.bloom .text-\[var\(--color-accent\)\] {
   text-shadow: 0 0 calc(3px + var(--bloom-intensity, 0.5) * 5px) currentColor;
 }
 
+/* ===== Glass / transparency (optional) =====
+ *
+ * Off unless the user turns it on in Settings → Appearance. Two things happen:
+ * surfaces painted with the panel/background colours become translucent, and
+ * the pieces of chrome that float above everything else (sidebar, modals,
+ * popovers, menus) blur what shows through them.
+ *
+ * Only the *floating* layers get `backdrop-filter`. Blurring every nested card
+ * as well is expensive and reads as fog — a card inside a blurred modal already
+ * sits on a blurred backdrop, so tinting it is enough.
+ *
+ * Selectors match the Tailwind arbitrary-value classes the app paints with; the
+ * `/` guards skip surfaces that already chose their own alpha (`bg-…/70`),
+ * which are deliberate scrims and shouldn't be doubled up.
+ */
+html.glass {
+  --glass-blur: calc(4px + var(--glass-strength, 0.5) * 22px);
+  /* Never fully transparent: text needs a ground. ~86% at the lightest
+     setting down to ~43% at the strongest. */
+  --glass-alpha: calc(88% - var(--glass-strength, 0.5) * 45%);
+  --glass-panel: color-mix(in srgb, var(--color-panel) var(--glass-alpha), transparent);
+  --glass-base: color-mix(in srgb, var(--color-bg) var(--glass-alpha), transparent);
+  --glass-hover: color-mix(in srgb, var(--color-panel-hover) calc(var(--glass-alpha) + 8%), transparent);
+  --glass-saturate: 1.35;
+}
+
+/* Clear: see the background sharply, with only the tint holding the text. */
+html.glass.glass-clear {
+  --glass-blur: 0px;
+  --glass-saturate: 1;
+}
+
+/* Tinted: the accent bleeds into the glass. */
+html.glass.glass-tinted {
+  --glass-panel: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--color-accent) 14%, var(--color-panel)) var(--glass-alpha),
+    transparent
+  );
+  --glass-base: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--color-accent) 10%, var(--color-bg)) var(--glass-alpha),
+    transparent
+  );
+  --glass-saturate: 1.6;
+}
+
+html.glass [class*="bg-[var(--color-panel)]"]:not([class*="bg-[var(--color-panel)]/"]) {
+  background-color: var(--glass-panel);
+}
+html.glass [class*="bg-[var(--color-bg)]"]:not([class*="bg-[var(--color-bg)]/"]) {
+  background-color: var(--glass-base);
+}
+html.glass [class*="bg-[var(--color-panel-hover)]"]:not([class*="bg-[var(--color-panel-hover)]/"]) {
+  background-color: var(--glass-hover);
+}
+
+/* The floating layers, which are the ones that do the blurring. */
+html.glass aside,
+html.glass .mz-overlay > *,
+html.glass [class*="shadow-lg"],
+html.glass [class*="shadow-xl"],
+html.glass [class*="shadow-2xl"] {
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+}
+
+/* A modal backdrop that blurs instead of dimming — with a translucent dialog on
+   top, the flat 60% scrim was the only opaque thing left on screen. */
+html.glass .mz-overlay {
+  background-color: color-mix(in srgb, black calc(20% + var(--glass-strength, 0.5) * 20%), transparent);
+  backdrop-filter: blur(calc(var(--glass-blur) * 0.5));
+  -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.5));
+}
+
+/* Settings' shared text field keeps a near-solid ground: a translucent input on
+   a translucent panel over an animated background is not a field you can read.
+   Fields that draw no background of their own (the composer) are left alone —
+   they read against whatever frame holds them. */
+html.glass .input {
+  background-color: color-mix(in srgb, var(--color-panel) 88%, transparent);
+}
+
+/* Blur is a per-frame full-surface repaint; when the user has asked for less
+   motion, keep the translucency and drop the expensive part. */
+@media (prefers-reduced-motion: reduce) {
+  html.glass {
+    --glass-blur: calc(2px + var(--glass-strength, 0.5) * 6px);
+  }
+}
+
 /* ===== Shadows ===== */
 html:not(.shadows) [class*="shadow"] {
   box-shadow: none !important;

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { X, Plus, Trash2, RefreshCw, Server, Palette, MessageSquare, Database, AlertTriangle, Loader2, Folder, FolderOpen, Globe, Copy, Check, Search, Brain, Sparkles, FileUp, FileDown, Plug, Wifi, WifiOff, Library, ChevronDown, ChevronRight, Mic, Volume2, AudioLines } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useApp } from "@/store/app";
-import type { BackgroundEffect, ThemeColorKey } from "@/store/app";
+import type { BackgroundEffect, GlassStyle, ThemeColorKey } from "@/store/app";
 import { THEME_COLOR_KEYS } from "@/store/app";
 import { useShallow } from "zustand/react/shallow";
 import * as api from "@/lib/tauri";
@@ -230,6 +230,12 @@ const BACKGROUND_EFFECTS: [BackgroundEffect, string][] = [
   ["fish", "Fish"],
 ];
 
+const GLASS_STYLES: [GlassStyle, string, string][] = [
+  ["frosted", "Frosted", "Blurred and desaturated — the classic frosted pane"],
+  ["clear", "Clear", "No blur, so the background stays sharp through the glass"],
+  ["tinted", "Tinted", "Frosted, with your accent colour bled into the glass"],
+];
+
 /** Effects whose "Density" slider means something. */
 const DENSITY_EFFECTS: BackgroundEffect[] = [
   "particles", "orbs", "stars", "shooting", "grid", "waves", "fireflies", "boids",
@@ -446,6 +452,47 @@ function AppearanceTab() {
                 display={`${Math.round((theme.bloomIntensity ?? 0.5) * 100)}%`}
                 onChange={(v) => setTheme({ bloomIntensity: v })}
               />
+            </div>
+          )}
+          <ToggleRow
+            label="Glass / transparency"
+            description="Panels, menus and dialogs let the background show through"
+            checked={!!theme.glassEnabled}
+            onChange={(v) => setTheme({ glassEnabled: v })}
+          />
+          {theme.glassEnabled && (
+            <div className="ml-3 flex flex-col gap-3 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+              <div>
+                <div className="mb-1.5 text-xs text-[var(--color-text-muted)]">Style</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {GLASS_STYLES.map(([val, label, hint]) => (
+                    <button
+                      key={val}
+                      title={hint}
+                      onClick={() => setTheme({ glassStyle: val })}
+                      className={`rounded border px-2.5 py-1 text-xs ${
+                        (theme.glassStyle ?? "frosted") === val
+                          ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]"
+                          : "border-[var(--color-border)] hover:border-[var(--color-accent)]"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <SliderRow
+                label="Transparency"
+                value={theme.glassStrength ?? 0.5}
+                min={0.1} max={1} step={0.05}
+                display={`${Math.round((theme.glassStrength ?? 0.5) * 100)}%`}
+                onChange={(v) => setTheme({ glassStrength: v })}
+              />
+              {theme.backgroundEffect === "none" && (
+                <p className="text-[11px] text-[var(--color-text-muted)]">
+                  With no background effect there's little behind the glass to see — pick one below.
+                </p>
+              )}
             </div>
           )}
         </div>

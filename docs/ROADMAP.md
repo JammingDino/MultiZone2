@@ -32,8 +32,11 @@ Semantic versioning. Each release is tagged `vMAJOR.MINOR.PATCH`.
 | **0.7.x** | Settings rework, UI/UX polish, DB/Markdown toggle | Planned |
 | **0.8.x** | Voice I/O — STT dictation, TTS, hands-free mode | Planned |
 | **0.9.x** | Tool Improvements — naming clarity, file management, self-authored skills, reliability pass | In progress |
+| **0.10.x** | Reversible work — checkpoints, undo, review before apply | Planned |
+| **0.11.x** | Planning & task control — plan mode, live task state, replay | Planned |
 | **1.0.0** | Hardening & Public Release | Planned |
-| **Post-1.0** | Code interface, Diffusion LLM, Mobile | Backlog |
+| **1.1.x** | In-chat rendering — charts from data, richer artifacts | Planned |
+| **Post-1.0** | Code interface + edit engine, Diffusion LLM, Mobile | Backlog |
 
 ---
 
@@ -119,11 +122,35 @@ Finally, the release takes on the tool that fixing everything else exposed as th
 
 ---
 
+### 0.10.x — Reversible work
+
+The app can write, move and delete files, and has never been able to take any of it back. The user's only protection is the approval prompt — which asks before a change and offers nothing after it, so approving an edit currently means living with it. A checkpoint is taken before the first file-mutating call of a turn, snapshotting only the paths that turn touches; any turn that changed files can then be reverted whole or file by file, and the revert is itself checkpointed. Alongside it, approval gets the information it has always been missing: an edit is presented as a diff rather than as a wall of proposed content, approvable hunk by hunk. This is the single largest capability gap against every coding agent in the survey, and it costs nothing conceptually — it makes the tools that already exist safe to say yes to.
+
+**Done when:** a user can approve an agent's file changes, dislike the result, and put the tree back exactly as it was in one action — including after a multi-zone teamwork run — and no approval prompt asks for a decision the user has not been shown enough to make.
+
+---
+
+### 0.11.x — Planning & task control
+
+The `plan` tool gives a model a checklist. What it does not give the user is a say. Plan mode makes planning a chat mode rather than a tool: mutating tools are withheld, read-only tools stay so the plan is grounded in real files, and the result is a structured artifact — ordered steps, expected files, risk per step — that the user edits before approving. An approved plan becomes the executing turn's task list, rendering live as steps tick off, with the ability to strike, add, or stop after the current step instead of cancelling the whole turn. The Multizone leader gets the same surface: leader plan and sub-agent plans in one tree, which is the first time that orchestration has had anywhere to hold a task. The release closes with the record: a session event log and a replay view, so what an agent did is inspectable after the fact and not only while it scrolls past.
+
+**Done when:** a user can ask for a plan, rewrite it, watch it execute step by step, intervene mid-run without losing the turn, and afterwards replay exactly what happened.
+
+---
+
 ### 1.0.0 — Hardening & Public Release
 
 Performance audit (startup time, large chat scroll, streaming), installer polish, auto-updater integration, cross-platform smoke tests (Windows, macOS, Linux), and a REQUIREMENTS.md written for onboarding contributors. No new features — this is a quality and release-infrastructure milestone.
 
-**Done when:** a new user can install, run, and use the app end to end without opening a terminal; all 0.1.x–0.7.x test checklists pass; no P0/P1 issues are open.
+**Done when:** a new user can install, run, and use the app end to end without opening a terminal; all 0.1.x–0.11.x test checklists pass; no P0/P1 issues are open.
+
+---
+
+### 1.1.x — In-chat rendering
+
+`render_graph` draws diagrams and plots functions. It cannot draw *data* — the case where a model has numbers and wants to show them — so models fall back to Mermaid approximations or hand-written SVG, and the app looks thinner in chat than tools with a fraction of its capability. A charting renderer takes a data spec rather than a diagram source, themed from the active app theme so it reads correctly in light and dark and never distinguishes series by colour alone. Tables the model has already produced offer to become charts, because the common case is that the numbers exist and only the presentation is missing. Charts survive export rather than degrading to a placeholder.
+
+**Done when:** a model that has numbers can show them, in any of the ordinary chart types, without writing markup by hand — and the result is still there in the exported PDF.
 
 ---
 
@@ -131,7 +158,7 @@ Performance audit (startup time, large chat scroll, streaming), installer polish
 
 | Feature | Notes |
 | --- | --- |
-| Code interface | Claude Code-style chat window for local models working on codebases; uses RAG/embeddings from 0.4.x for repo understanding |
+| Code interface + edit engine | Claude Code-style chat window for local models working on codebases; uses RAG/embeddings from 0.4.x for repo understanding. Scoped with it: replacing whole-file `write_file` with a real edit engine (diff hunks validated against the file as it currently is, fuzzy anchoring, syntax check before the write lands). Cursor and Antigravity are categorically better here and the gap is structural, not a missing feature — but the parts worth pulling forward are 0.10.x's checkpoints and diff review, which help every existing file tool immediately |
 | Diffusion LLM support | Text generation via diffusion-first models (e.g. Mercury Coder); architecturally distinct from autoregressive — isolated pipeline |
 | Mobile app | Tauri mobile target (iOS/Android); post-desktop-stable |
 | Multi-user/team | Shared zones, shared projects, access control |

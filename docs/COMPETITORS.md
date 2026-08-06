@@ -135,6 +135,16 @@ Worth noting this is a differentiator, not just a saving: no competitor in this 
 
 ## Other gaps
 
+**Undo (Reasonix, Cursor, Antigravity) — the largest one.** Reasonix takes auto-checkpoints; Cursor and Antigravity make reverting a bad agent run a single click. We have `write_file`, `move_file` and `delete_file` and no way back from any of them — the approval prompt asks before the change and offers nothing after it. This is a capability gap, not a polish gap, and it makes every file tool we already ship more usable rather than adding a new one. Scheduled as **0.10.x**.
+
+**Planning as a mode, not a tool (Reasonix `/apply` + plan mode, Askimo "plans").** Our `plan` tool is a checklist the model keeps for itself. What we lack is a mode where the model plans and is not yet permitted to act, a plan the *user* can edit before it runs, and live task state during execution. The Multizone leader has never had anywhere to hold a task, which is the sharpest version of this gap. Scheduled as **0.11.x**.
+
+**Session replay and event log (Reasonix `replay`, `events`).** Everything needed is already in SQLite; none of it is exposed as a timeline. Cheap relative to its value for a multi-agent product, where "what did it actually do" is the hardest question to answer. Folded into **0.11.2**.
+
+**Data charts (AIRouterDesktop, Claude).** `render_graph` draws diagrams and plots functions but cannot draw data, so models fall back to Mermaid approximations. Both comparisons make in-chat charting look like table stakes. Scheduled as **1.1.0**, after 1.0.
+
+**Whole-file writes vs. an edit engine (Cursor, Antigravity).** They apply diff hunks validated against the file as it currently is; we rewrite a whole file from whatever the model remembers of it. Structural, and correctly scoped with the code interface in the post-1.0 backlog rather than pulled forward on its own.
+
 **Cost analytics (AIRouter).** Per-provider monthly cost, token volume, routing decisions. We have the data; the presentation is thinner. Natural home for the cache-hit metric above.
 
 **Mobile (Chatbox, Msty).** No client. Out of scope for a Tauri desktop app in the near term, but the local HTTP API makes a thin remote client plausible later.

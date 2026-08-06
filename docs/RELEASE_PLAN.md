@@ -614,6 +614,77 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+### 0.9.16 — Streaming that stays smooth
+
+*Two zones answering one arithmetic question made the whole app jitter — not the model's fault and not the machine's. Three separate costs were multiplying: a store write and a React pass per token, a full markdown re-parse per repaint whose cost grew with the length of the answer, and one timer per streaming block so concurrent zones never repainted together.*
+
+- [x] **Stream events are applied in batches** — arrivals are queued and drained on a 16 ms timer ([ChatPanel.tsx](../src/components/Chat/ChatPanel.tsx)), same events in the same order, but React coalesces a burst of tokens into one render instead of one render each. A timer rather than `requestAnimationFrame` so a minimised window still drains; the queue is flushed on unmount so a chat can't be stranded mid-stream
+- [x] **Finished text is parsed once** — [`splitMarkdownBlocks`](../src/lib/markdownBlocks.ts) cuts an answer at top-level blank lines and [`StreamingMarkdown`](../src/components/Renderers/StreamingMarkdown.tsx) renders each group through its own memoized renderer, so a repaint re-parses only the group still being written. Cost per repaint stops depending on how much has already been written. The split is conservative: never inside a code fence or a display-math region (`$$…$$`, `\[…\]`, `\begin{align}…`), and adjacent groups are re-joined where splitting would change meaning (loose lists renumbering, indented list continuations, broken blockquotes). Documents using reference-style link or footnote definitions opt out entirely, since those change how text above them renders
+- [x] **One shared repaint tick** — [streamTick.ts](../src/lib/streamTick.ts) replaces the per-block `setInterval`; every live view repaints in the same task (one render pass, not N staggered ones) and the interval widens with the number of concurrent streams (60 ms → +40 ms each, capped at 200 ms), so an extra participant costs a slightly coarser repaint rather than a proportional drop in frame rate
+- [x] **Reasoning is throttled too** — a long think streamed into a `<pre>` at token rate was the same jitter for a cheaper node; it now rides the shared tick ([useThrottledStreaming.ts](../src/lib/useThrottledStreaming.ts), lifted out of `Message.tsx` so both consumers share it)
+- [x] Group wrappers keep the answer's spacing — the first/last-child margin reset is scoped to the whole answer rather than to each group ([styles.css](../src/styles.css))
+- [ ] Measure it: frame timings for one stream and for four, before and after, on a long answer — the fix is reasoned from where the cost is, not yet from a profile
+
+---
+
+## 0.10.x — Reversible work
+
+*The one thing every coding agent has that we don't: a way back. `write_file`, `move_file` and `delete_file` are one-way doors — the user's only protection is the approval prompt, which asks before the change and offers nothing after it. Approving an edit should not mean living with it. Prompted by Reasonix's auto-checkpoints and by Cursor/Antigravity, where reverting a bad run is a single click.*
+
+### 0.10.0 — Checkpoints
+
+- [ ] A checkpoint is taken automatically before the first file-mutating tool call of a turn — content snapshots of every path the turn touches, not a whole-directory copy
+- [ ] Snapshot store on disk (`app_data_dir/checkpoints/<chat_id>/`), content-addressed so an unchanged file across many turns is stored once; deletions and creations recorded as such so both directions restore
+- [ ] Retention policy with a size ceiling, surfaced in Settings → Data alongside the other storage categories
+- [ ] Binary and large files recorded by hash + size only, with the restore honestly reporting what it cannot bring back
+- [ ] Works for sub-agent and perspective turns too — checkpoints key on the chat, so a teamwork run across several zones restores as one unit
+
+### 0.10.1 — Undo in the transcript
+
+- [ ] "Revert to here" on any turn that changed files: restores every path that turn touched to its pre-turn contents
+- [ ] The turn shows what it changed as a list of paths with per-file undo, so a run that got three edits right and one wrong doesn't have to be thrown away whole
+- [ ] Revert is itself a checkpoint — undo is undoable
+- [ ] Conflict handling when a file was edited outside the app since the checkpoint: name the divergence and let the user choose, never silently overwrite
+- [ ] The existing "Branch from here" and a revert compose: branching a chat at a reverted point starts from the restored tree
+
+### 0.10.2 — Review before apply
+
+- [ ] Diff preview in the approval prompt for `write_file` / `edit_file`: the change as a unified diff rather than a wall of proposed content, so approval is an informed act
+- [ ] Approve / reject per hunk for multi-hunk edits
+- [ ] A "review queue" mode where a zone's edits stage rather than land, and the user applies the batch after reading it
+
+---
+
+## 0.11.x — Planning & task control
+
+*We have a `plan` tool — a checklist the model keeps. That is the smallest version of this. The competitors that feel controllable have three things we don't: a mode where the model plans and is not yet allowed to act, a plan the **user** can edit before it runs, and a record of what actually happened that can be re-read afterwards.*
+
+### 0.11.0 — Plan mode
+
+- [ ] A per-chat mode where mutating tools are withheld and the model's job is to produce a plan — read-only tools stay available so the plan is grounded in the actual files
+- [ ] The plan lands as a structured artifact, not prose: ordered steps, each with intent, the files it expects to touch, and its risk level
+- [ ] The user edits the plan — reorder, delete, rewrite, annotate a step — before approving it
+- [ ] Approving a plan hands it to the executing zone as the turn's task list; the model cannot silently substitute a different plan
+- [ ] Plan mode is a first-class chat mode alongside Quick / Smart / Zone / Multizone, not a tool a zone may or may not have enabled
+
+### 0.11.1 — Live task state
+
+- [ ] The plan renders as a live checklist in the chat, steps ticking off as the turn executes them, with the current step marked
+- [ ] Steps can fail without failing the run: a failed step is marked, its error kept, and the model decides whether to continue or stop
+- [ ] Mid-run the user can strike a step, add one, or stop after the current step — control that doesn't require cancelling the whole turn
+- [ ] Plan state persists with the chat, so a long task can be closed and re-opened
+- [ ] Multizone leader gets the same surface: the leader's plan and each sub-agent's plan render in one tree
+
+### 0.11.2 — Replay & the event log
+
+*Reasonix keeps a session event log and can replay a transcript; we keep everything in SQLite already and expose none of it as a timeline.*
+
+- [ ] Session event log: every tool call, approval, error, model switch and file mutation as an ordered, queryable record
+- [ ] Replay view — step through a past session at your own pace to see what the agent did and when, distinct from re-reading the finished transcript
+- [ ] Export a session's event log with the existing trace export
+
+---
+
 ## 1.0.0 — Hardening & Public Release
 
 - [ ] Performance: measure and optimize startup time, first message render, large chat (500+ messages) scroll — fixed the main structural cause of wasted re-renders: `Sidebar`/`ChatPanel`/`MessageThread`/`ChatList`/`ZoneEditor`/`ProjectsPanel`/`SettingsModal` subscribed to the whole zustand store unfiltered, so *any* state change anywhere re-rendered all of them; converted to shallow/per-field selectors, and `UserMessage`/`BotTurnView` are now memoized (with a custom comparator for `BotTurnView` since `groupMessages` rebuilds turn objects each call) so a streaming token only re-renders the turn actually generating, not the whole history. Still open: no virtualization for very long (500+) message lists, and no measured before/after startup or first-paint numbers.
@@ -629,9 +700,30 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## 1.1.x — In-chat rendering & tools
+
+*`render_graph` covers Mermaid and function plots. What it does not cover is data — the case where a model has numbers and wants to show them. AIRouterDesktop and Claude both make chart rendering an obvious in-chat capability; ours is a diagram tool that happens to plot functions.*
+
+### 1.1.0 — Charts from data
+
+- [ ] A charting renderer taking a data spec (series, labels, axes, chart type) rather than a diagram source: bar, line, area, scatter, pie, stacked variants
+- [ ] Theme-aware and accessible by construction — the palette comes from the active app theme, works in light and dark, and does not rely on colour alone to distinguish series
+- [ ] The model calls it with data it already has (a query result, a table it just read, numbers from a document) instead of hand-writing SVG or a Mermaid approximation
+- [ ] Charts survive export: PDF and Markdown export render them rather than dropping to a placeholder
+- [ ] A table in a model's markdown answer offers "chart this" — the common case is the model already produced the numbers and only the presentation is missing
+
+### 1.1.1 — Richer in-chat artifacts
+
+- [ ] Interactive tables: sort, filter, and copy from a rendered markdown table without leaving the chat
+- [ ] Inline results are addressable — a chart or table can be referenced by a later turn rather than re-derived
+- [ ] Audit what the existing renderers (Mermaid, mathplot, HTML report) cost during streaming, now that block-level parsing (0.9.16) has changed when they re-render
+
+---
+
 ## Backlog — unscheduled
 
 - [ ] Code interface: chat window for local models working on codebases; uses RAG from 0.4.3; requires design session
+- [ ] **File editing as an engine, not a tool.** Cursor and Antigravity handle multi-file editing categorically better than we do, and the gap is structural rather than a missing feature: they apply *edits* (search/replace or diff hunks, validated against the file as it currently is) where our `write_file` rewrites a whole file from whatever the model remembers of it. A real edit engine means a hunk format, fuzzy anchoring that survives a file having moved on, a syntax check before the write lands, and a failure that reports "the anchor no longer matches" instead of silently clobbering. This is the prerequisite for the code interface above and is scoped with it, not before it. 0.10.x's checkpoints and 0.10.2's diff review are the parts of this problem worth solving early, because they help every existing file tool immediately
 - [ ] Mobile: Tauri mobile target (iOS/Android)
 - [ ] Deep research mode: multi-step sourced research using subchats; requires design session before scheduling
 - [ ] Zone snapshot/versioning: save zone config at chat creation time so editing a zone does not alter historical context

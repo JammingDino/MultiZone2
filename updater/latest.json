@@ -1,0 +1,15 @@
+{
+  "version": "0.9.14",
+  "notes": "## MultiZone v0.9.14\n\n| Installer | Description |\n|-----------|-------------|\n| `*_x64-setup.exe` | Windows installer |\n\nExisting installs update themselves — see Settings → Data → Updates.\n\nSee the [commit history](https://github.com/JammingDino/MultiZone2/commits/main)\nfor a full list of changes since the last release.",
+  "pub_date": "2026-08-06T02:46:08.600Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSYnU4bm5Tb212dzhySVZCVkNPSmUzT2pPNDNXVFpIbTVuRkpqWmdIRG0yK0UzWkZlSTFkU2NnaEJ2SHgxOWVmMnovYXVnRnh5SVl4WXJPenBmeW1iUFBkaDk2bHY4MEFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg1OTg0MzY0CWZpbGU6TXVsdGlab25lXzAuOS4xNF94NjQtc2V0dXAuZXhlCldPNUMxWEwvdjZWajNMWDBiR3dneklubldUa2N3dW9sc3RndFlETUx1SjhjNkF4a3FWVzloaXova2QxMkZBeG9QNDgxSzIzR1hVVXpxbEFoN05UUUNRPT0K",
+      "url": "https://api.github.com/repos/JammingDino/MultiZone2/releases/assets/503375155"
+    },
+    "windows-x86_64-nsis": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSYnU4bm5Tb212dzhySVZCVkNPSmUzT2pPNDNXVFpIbTVuRkpqWmdIRG0yK0UzWkZlSTFkU2NnaEJ2SHgxOWVmMnovYXVnRnh5SVl4WXJPenBmeW1iUFBkaDk2bHY4MEFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg1OTg0MzY0CWZpbGU6TXVsdGlab25lXzAuOS4xNF94NjQtc2V0dXAuZXhlCldPNUMxWEwvdjZWajNMWDBiR3dneklubldUa2N3dW9sc3RndFlETUx1SjhjNkF4a3FWVzloaXova2QxMkZBeG9QNDgxSzIzR1hVVXpxbEFoN05UUUNRPT0K",
+      "url": "https://api.github.com/repos/JammingDino/MultiZone2/releases/assets/503375155"
+    }
+  }
+}

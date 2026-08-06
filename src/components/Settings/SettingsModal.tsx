@@ -13,6 +13,7 @@ import { UpdateSection } from "@/components/Settings/UpdateSection";
 import { getVersion } from "@tauri-apps/api/app";
 import { saveTextFile } from "@/lib/saveFile";
 import { resolveBaseProvider } from "@/lib/baseZone";
+import { PROVIDER_PRESETS, presetForBaseUrl, type ProviderPreset } from "@/lib/providerPresets";
 import {
   DEFAULT_EXPORT_SELECTION,
   type ExportSelection,
@@ -118,12 +119,23 @@ function ProvidersTab() {
       <div className="mb-3 flex items-center justify-between">
         <h3 className="text-sm font-medium">Providers</h3>
         <button
-          onClick={() => setEditing({ name: "", baseUrl: "http://localhost:11434/v1", apiKey: "" })}
+          onClick={() => setEditing({ name: "", baseUrl: "", apiKey: "" })}
           className="flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1 text-xs hover:border-[var(--color-accent)]"
         >
           <Plus size={12} /> Add provider
         </button>
       </div>
+
+      {/* The form sits above the list: when you add a provider on an install
+          that already has several, a form appended below the list opens
+          off-screen and looks like nothing happened. */}
+      {editing && (
+        <ProviderForm
+          value={editing}
+          onClose={() => setEditing(null)}
+          onSaved={async () => { await refreshProviders(); setEditing(null); }}
+        />
+      )}
 
       <div className="flex flex-col gap-2">
         {providers.map((p) => (
@@ -153,14 +165,6 @@ function ProvidersTab() {
           the first provider here when no base zone is set. Change it by pointing your base zone at
           a different provider.
         </p>
-      )}
-
-      {editing && (
-        <ProviderForm
-          value={editing}
-          onClose={() => setEditing(null)}
-          onSaved={async () => { await refreshProviders(); setEditing(null); }}
-        />
       )}
     </>
   );
@@ -3361,6 +3365,7 @@ function ProviderForm({ value, onClose, onSaved }: { value: Partial<Provider>; o
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [presetId, setPresetId] = useState<string | null>(null);
 
   // Auto-load the model list when editing an existing provider.
   useEffect(() => {
@@ -3434,17 +3439,69 @@ function ProviderForm({ value, onClose, onSaved }: { value: Partial<Provider>; o
     } finally { setTesting(false); }
   }
 
+  /** Fill the form from a known service, leaving anything the user typed. */
+  function applyPreset(p: ProviderPreset) {
+    setPresetId(p.id);
+    setName(p.name);
+    setBaseUrl(p.baseUrl);
+    if (p.suggestedModel && !defaultModel.trim()) setDefaultModel(p.suggestedModel);
+  }
+
+  const preset = PROVIDER_PRESETS.find((p) => p.id === presetId) ?? presetForBaseUrl(baseUrl);
+
   return (
-    <div className="mt-4 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+    <div className="mb-4 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+      {!value.id && (
+        <div className="mb-3">
+          <div className="mb-1.5 text-xs text-[var(--color-text-muted)]">
+            Start from a known service, or fill the fields in yourself
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {PROVIDER_PRESETS.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                title={`${p.blurb} — ${p.baseUrl}`}
+                onClick={() => applyPreset(p)}
+                className={`rounded-full border px-2.5 py-1 text-xs ${
+                  preset?.id === p.id
+                    ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]"
+                    : "border-[var(--color-border)] hover:border-[var(--color-accent)]"
+                }`}
+              >
+                {p.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <Field label="Name">
         <input value={name} onChange={(e) => setName(e.target.value)} className="input" placeholder="Ollama local" />
       </Field>
       <Field label="Base URL">
-        <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} className="input" placeholder="http://localhost:11434/v1" />
+        <input
+          value={baseUrl}
+          onChange={(e) => { setPresetId(null); setBaseUrl(e.target.value); }}
+          className="input"
+          placeholder="http://localhost:11434/v1"
+        />
       </Field>
-      <Field label="API key (optional)">
+      <Field label={preset && !preset.needsKey ? "API key (not needed for a local server)" : "API key (optional)"}>
         <input value={apiKey} onChange={(e) => setApiKey(e.target.value)} type="password" className="input" placeholder="sk-..." />
       </Field>
+      {preset?.keyUrl && (
+        <p className="-mt-1 mb-2 text-[11px] text-[var(--color-text-muted)]">
+          Get a {preset.name} key at{" "}
+          <a
+            href={preset.keyUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="text-[var(--color-accent)] underline underline-offset-2"
+          >
+            {preset.keyUrl.replace(/^https:\/\//, "")}
+          </a>
+        </p>
+      )}
       <Field label="Default model">
         <ModelCombobox
           value={defaultModel}

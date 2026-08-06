@@ -5,6 +5,7 @@ import * as api from "@/lib/tauri";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
 import { seedDefaultZones } from "@/lib/defaultZones";
 import { claimSettingsDrop, pickBundleFile } from "@/lib/importSettings";
+import { PROVIDER_PRESETS, presetForBaseUrl } from "@/lib/providerPresets";
 
 /**
  * First-run setup: connect a provider and pick a default model, the minimum
@@ -195,6 +196,28 @@ export function Onboarding() {
 
         {step === "provider" ? (
           <div className="flex flex-col gap-3">
+            <div>
+              <div className="mb-1.5 text-[11px] text-[var(--color-text-muted)]">
+                Pick your service and we'll fill in the address
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {PROVIDER_PRESETS.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    title={`${p.blurb} — ${p.baseUrl}`}
+                    onClick={() => { setName(p.name); setBaseUrl(p.baseUrl); }}
+                    className={`rounded-full border px-2.5 py-1 text-xs ${
+                      presetForBaseUrl(baseUrl)?.id === p.id
+                        ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]"
+                        : "border-[var(--color-border)] hover:border-[var(--color-accent)]"
+                    }`}
+                  >
+                    {p.name}
+                  </button>
+                ))}
+              </div>
+            </div>
             <FieldRow label="Name">
               <input value={name} onChange={(e) => setName(e.target.value)} className="ob-input" placeholder="Local (Ollama)" />
             </FieldRow>

@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import type { Step, ToolStep, ThinkingStep } from "@/lib/grouping";
 import { analyzeToolStep } from "@/lib/stepSummary";
+import { useThrottledStreaming } from "@/lib/useThrottledStreaming";
 import { MathPlotBlock, toMathPlotData } from "@/components/Renderers/MathPlotBlock";
 import { MermaidBlock, type MermaidAutoFix } from "@/components/Renderers/MermaidBlock";
 import { HtmlReportBlock } from "@/components/Renderers/HtmlReportBlock";
@@ -87,6 +88,10 @@ function ThinkingStepView({ step, index }: { step: ThinkingStep; index: number }
   const expandByDefault = useApp((s) => s.appSettings.expandThinkingByDefault);
   // Open while streaming, or if the user has opted into default-expanded.
   const [open, setOpen] = useState(step.streaming || expandByDefault);
+  // Reasoning arrives token by token like the answer does, and a long think
+  // repainted per token is the same jitter for a cheaper node — throttle it
+  // onto the shared stream tick so it repaints with everything else.
+  const text = useThrottledStreaming(step.text, Boolean(step.streaming));
 
   return (
     <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-panel)]">
@@ -111,7 +116,7 @@ function ThinkingStepView({ step, index }: { step: ThinkingStep; index: number }
         <div className="border-t border-[var(--color-border)] p-3">
           <div className="max-h-[280px] overflow-y-auto pr-1">
             <pre className="whitespace-pre-wrap text-xs leading-relaxed text-[var(--color-text-muted)]">
-              {step.text}
+              {text}
               {step.streaming && (
                 <span className="animate-pulse text-violet-400">▌</span>
               )}

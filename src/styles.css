@@ -358,10 +358,22 @@ input[type="color"]:hover { border-color: var(--color-accent); }
   background: color-mix(in srgb, var(--color-accent) 18%, transparent);
 }
 
-.markdown > *:first-child {
+/* A streamed answer is rendered as several independently-parsed groups
+   (StreamingMarkdown), each in its own `.markdown` wrapper. Only the outer
+   edges of the whole answer should lose their margin — a group in the middle
+   dropping its first/last margin would jam the answer together. Margins
+   collapse through the group wrappers (no border/padding), so the spacing
+   between groups matches a single-renderer answer. */
+.markdown:not(.markdown-part) > *:first-child {
   margin-top: 0;
 }
-.markdown > *:last-child {
+.markdown:not(.markdown-part) > *:last-child {
+  margin-bottom: 0;
+}
+.markdown-stream > .markdown-part:first-child > *:first-child {
+  margin-top: 0;
+}
+.markdown-stream > .markdown-part:last-child > *:last-child {
   margin-bottom: 0;
 }
 

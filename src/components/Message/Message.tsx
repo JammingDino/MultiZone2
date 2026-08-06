@@ -1,6 +1,8 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { ContentPart, Message, InputPart } from "@/lib/types";
 import { Markdown } from "@/components/Renderers/Markdown";
+import { StreamingMarkdown } from "@/components/Renderers/StreamingMarkdown";
+import { useThrottledStreaming } from "@/lib/useThrottledStreaming";
 import { User, Check, X, FileType, ZoomIn } from "lucide-react";
 import { StepBlock } from "./StepBlock";
 import { ActivityRail } from "./ActivityRail";
@@ -24,42 +26,6 @@ import { getZoneIcon } from "@/lib/zoneIcons";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
-/**
- * Throttles a streaming text source so the Markdown renderer (which re-parses
- * the entire AST on every prop change, plus KaTeX) doesn't fire on every
- * token. We push the latest value to the renderer on a fixed interval while
- * `streaming` is true, and flush immediately the moment it flips to false.
- *
- * The throttled `visible` state is only ever consulted *while streaming*. When
- * idle we return `source` directly rather than a state copy of it, because a
- * copy can go stale: this component instance is reused across chat switches
- * (turns and text blocks are keyed by index), and an effect keyed on
- * `[streaming]` never re-runs when both the old and new chat are idle. That
- * left `visible` holding the previous chat's answer — the "chat history
- * mix-ups" bug, where the prompt updated (user messages are keyed by id) but
- * the answer under it did not.
- */
-const STREAM_MARKDOWN_THROTTLE_MS = 80;
-
-function useThrottledStreaming(source: string, streaming: boolean): string {
-  const [visible, setVisible] = useState(source);
-  const latestRef = useRef(source);
-  latestRef.current = source;
-
-  useEffect(() => {
-    if (!streaming) return;
-    setVisible(latestRef.current);
-    const id = window.setInterval(
-      () => setVisible(latestRef.current),
-      STREAM_MARKDOWN_THROTTLE_MS,
-    );
-    return () => window.clearInterval(id);
-  }, [streaming]);
-
-  // Idle: `source` is authoritative and always current.
-  return streaming ? visible : source;
-}
-
 /** Renders a single text chunk, with its own streaming throttle. */
 function TextBlockView({
   text,
@@ -73,7 +39,7 @@ function TextBlockView({
   const visible = useThrottledStreaming(text, streaming);
   return (
     <div>
-      <Markdown source={visible} citations={citations} />
+      <StreamingMarkdown source={visible} citations={citations} />
       {streaming && <span className="animate-pulse">▌</span>}
     </div>
   );

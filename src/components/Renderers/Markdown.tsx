@@ -61,7 +61,17 @@ const MD_COMPONENTS: Components = {
 const REMARK_PLUGINS = [remarkGfm, remarkMath];
 const REHYPE_PLUGINS = [rehypeKatex];
 
-export function Markdown({ source, citations }: { source: string; citations?: Citation[] }) {
+export function Markdown({
+  source,
+  citations,
+  part,
+}: {
+  source: string;
+  citations?: Citation[];
+  /** One group of a document split across several renderers (StreamingMarkdown):
+   *  the first/last-child margin reset belongs to the document, not the group. */
+  part?: boolean;
+}) {
   // Append the citation plugin only when there are citations to map, so ordinary
   // messages keep the stable module-level plugin array (no needless re-parse).
   const remarkPlugins = useMemo(
@@ -90,7 +100,7 @@ export function Markdown({ source, citations }: { source: string; citations?: Ci
 
   return (
     <div
-      className="markdown"
+      className={part ? "markdown markdown-part" : "markdown"}
       style={{ fontSize: "var(--font-size-message, 14px)" }}
       onClick={onClick}
     >

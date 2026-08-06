@@ -18,6 +18,10 @@ import { getZoneIcon } from "@/lib/zoneIcons";
 import { AskUserCard } from "@/components/Message/StepBlock";
 import { resolveBaseModel } from "@/lib/baseZone";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
+import type { StreamEnvelope } from "@/lib/types";
+
+/** How long stream events are collected before being applied as one batch. */
+const STREAM_DRAIN_MS = 16;
 
 export function ChatPanel() {
   const {
@@ -226,8 +230,26 @@ export function ChatPanel() {
     let unlistenZone: (() => void) | undefined;
     let unlistenChats: (() => void) | undefined;
     let unlistenFileSync: (() => void) | undefined;
+    // Stream events arrive one per token, and applying each on arrival meant a
+    // store write and a React pass per token — with two zones answering at once
+    // the app spent its whole frame budget re-rendering and visibly stuttered.
+    // Buffer arrivals and drain the queue in one task instead: the same events
+    // in the same order, but React coalesces the burst into a single render.
+    // A timer rather than requestAnimationFrame, so a minimised window still
+    // drains (rAF stops entirely when the window isn't painting).
+    let queue: StreamEnvelope[] = [];
+    let drainTimer: number | undefined;
+    const drain = () => {
+      drainTimer = undefined;
+      const batch = queue;
+      queue = [];
+      for (const env of batch) {
+        actionsRef.current.applyStreamEvent(env.chatId, env.event, env.perspectiveZoneId);
+      }
+    };
     api.onStream((env) => {
-      actionsRef.current.applyStreamEvent(env.chatId, env.event, env.perspectiveZoneId);
+      queue.push(env);
+      if (drainTimer === undefined) drainTimer = window.setTimeout(drain, STREAM_DRAIN_MS);
     }).then((u) => {
       if (cancelled) u();
       else unlistenStream = u;
@@ -275,6 +297,10 @@ export function ChatPanel() {
     });
     return () => {
       cancelled = true;
+      // Apply anything still queued — the store outlives this component, and a
+      // dropped batch would strand a chat mid-stream.
+      if (drainTimer !== undefined) window.clearTimeout(drainTimer);
+      drain();
       unlistenStream?.();
       unlistenTitle?.();
       unlistenTags?.();

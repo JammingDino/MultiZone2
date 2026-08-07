@@ -32,6 +32,54 @@ fn read_api_config(app_settings_json: Option<&str>) -> ApiConfig {
     }
 }
 
+/// What happened the last time the app tried to bind the API socket (0.11.0).
+///
+/// Previously the bind result was reported once, synchronously, to whoever
+/// called `apply_api_settings` — and then forgotten. A port already in use left
+/// the Settings toggle reading "on" with nothing behind it, and neither a
+/// script nor a model could find out. It is a settings row now, so `/api/health`
+/// and the Settings panel read the same answer.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BindState {
+    pub ok: bool,
+    pub port: u16,
+    /// Why the bind failed, in the OS's own words.
+    pub error: Option<String>,
+    pub at: i64,
+}
+
+const BIND_STATE_KEY: &str = "api_bind_state";
+
+pub async fn read_bind_state(db: &sqlx::SqlitePool) -> Option<BindState> {
+    let raw: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key = ?1")
+        .bind(BIND_STATE_KEY)
+        .fetch_optional(db)
+        .await
+        .ok()
+        .flatten();
+    raw.and_then(|s| serde_json::from_str(&s).ok())
+}
+
+async fn write_bind_state(db: &sqlx::SqlitePool, state: &BindState) {
+    let Ok(json) = serde_json::to_string(state) else { return };
+    let _ = sqlx::query(
+        "INSERT INTO settings (key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    )
+    .bind(BIND_STATE_KEY)
+    .bind(json)
+    .execute(db)
+    .await;
+}
+
+/// The bind outcome, for the Settings panel — the same row `/api/health`
+/// reports, so the two can't tell different stories.
+#[tauri::command]
+pub async fn api_bind_state(state: State<'_, AppState>) -> AppResult<Option<BindState>> {
+    Ok(read_bind_state(&state.db).await)
+}
+
 /// Stop the running server (if any).
 async fn stop_running(state: &AppState) {
     if let Some(handle) = state.api_server.lock().await.take() {
@@ -52,13 +100,20 @@ pub async fn apply_api_settings(
     stop_running(&state).await;
 
     if !enabled {
+        // Off is not a failed bind — record it as such rather than leaving the
+        // last run's outcome sitting there looking current.
+        write_bind_state(
+            &state.db,
+            &BindState { ok: false, port, error: Some("disabled in settings".into()), at: crate::commands::now_ts() },
+        )
+        .await;
         return Ok(());
     }
     if token.trim().is_empty() {
         return Err(AppError::Invalid("API token must not be empty".into()));
     }
 
-    let handle = crate::api::start(
+    let started = crate::api::start(
         app.clone(),
         state.db.clone(),
         state.http.clone(),
@@ -67,9 +122,26 @@ pub async fn apply_api_settings(
         port,
         token,
     )
-    .await
-    .map_err(|e| AppError::Other(format!("failed to start API server: {e}")))?;
+    .await;
 
+    let handle = match started {
+        Ok(handle) => handle,
+        Err(e) => {
+            let message = e.to_string();
+            write_bind_state(
+                &state.db,
+                &BindState { ok: false, port, error: Some(message.clone()), at: crate::commands::now_ts() },
+            )
+            .await;
+            return Err(AppError::Other(format!("failed to start API server: {message}")));
+        }
+    };
+
+    write_bind_state(
+        &state.db,
+        &BindState { ok: true, port, error: None, at: crate::commands::now_ts() },
+    )
+    .await;
     *state.api_server.lock().await = Some(handle);
     Ok(())
 }
@@ -93,6 +165,12 @@ pub async fn start_if_enabled(app: &AppHandle) {
 
     let cfg = read_api_config(raw.as_deref());
     if !cfg.enabled || cfg.token.trim().is_empty() {
+        let why = if cfg.enabled { "no API token is set" } else { "disabled in settings" };
+        write_bind_state(
+            &state.db,
+            &BindState { ok: false, port: cfg.port, error: Some(why.into()), at: crate::commands::now_ts() },
+        )
+        .await;
         return;
     }
 
@@ -108,8 +186,28 @@ pub async fn start_if_enabled(app: &AppHandle) {
     .await
     {
         Ok(handle) => {
+            write_bind_state(
+                &state.db,
+                &BindState { ok: true, port: cfg.port, error: None, at: crate::commands::now_ts() },
+            )
+            .await;
             *state.api_server.lock().await = Some(handle);
         }
-        Err(e) => tracing::error!("API server failed to start on launch: {e}"),
+        Err(e) => {
+            // The failure a user actually hits: the port is taken, and until
+            // now the only trace was a log line nobody reads while the toggle
+            // still said "on".
+            tracing::error!("API server failed to start on launch: {e}");
+            write_bind_state(
+                &state.db,
+                &BindState {
+                    ok: false,
+                    port: cfg.port,
+                    error: Some(e.to_string()),
+                    at: crate::commands::now_ts(),
+                },
+            )
+            .await;
+        }
     }
 }

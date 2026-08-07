@@ -133,12 +133,25 @@ Enable it under **Settings → API**: toggle it on, optionally change the port, 
 
 Base URL: `http://127.0.0.1:8765` (default port).
 
+**The API describes itself, so this table cannot be the only record of it.** Two routes answer without a token, because a caller working out why nothing else responds should not have to authenticate to find out that its token is the problem:
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/health` | Liveness check (no auth required). |
-| `GET` | `/api/zones` | List zones. |
-| `GET` | `/api/projects` | List projects. |
-| `GET` | `/api/tags` | List tags. |
+| `GET` | `/api/routes` | Every route this build serves, with a one-line description each. |
+| `GET` | `/api/health` | `enabled` · `bound` · `answering` · `tokenPresent` · `tokenAccepted`, plus the app version and route-set version. Five separate questions with five separate answers — if you cannot reach the app, this tells you which one is false. |
+
+Everything else needs the bearer token. Rather than reproduce the whole surface here — where it would go stale, as it did — ask the app:
+
+```bash
+curl http://127.0.0.1:8765/api/routes | jq -r '.routes[] | "\(.method)\t\(.path)\t\(.description)"'
+```
+
+The surface covers chats and messages, zones, providers, projects, tags, perspectives and sub-agents, skills, memory, MCP servers, knowledge indexes, checkpoints and the review queue, tool and token usage, settings, and the markdown mirror — reads and writes both, so a script can provision the app rather than only drive it. A test pairs every Tauri command with either a route or an explicit "GUI-only" reason, so a new capability cannot ship API-invisible without failing the build.
+
+The most-used handful:
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
 | `GET` | `/api/chats` | List chats. |
 | `POST` | `/api/chats` | Create a chat. Body: `{ "zoneId"?, "projectId"? }`. |
 | `GET` | `/api/chats/:id/messages` | List a chat's messages. |
@@ -146,7 +159,9 @@ Base URL: `http://127.0.0.1:8765` (default port).
 | `POST` | `/api/chats/:id/regenerate` | Re-run the last turn. |
 | `POST` | `/api/chats/:id/cancel` | Cancel the in-flight stream. |
 | `POST` | `/api/chats/:id/zone` | Set the primary zone. Body: `{ "zoneId" }`. |
+| `POST` | `/api/chats/:id/approval` | Answer a pending tool approval. Body: `{ "approved", "zoneId"?, "hunks"? }`. |
 | `GET`/`POST`/`DELETE` | `/api/chats/:id/perspectives` | List/add/remove perspective zones. Body for add/remove: `{ "zoneId" }`. |
+| `GET` | `/api/zones` · `/api/projects` · `/api/tags` | List each. `POST` to create or update; `DELETE /:id` to remove. |
 
 Sending a message accepts either `{ "text": "..." }` or `{ "parts": [...] }` (the same content parts the GUI uses). By default the response is a [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events) stream of the same events the GUI receives (tokens, tool calls, etc.). Append `?wait=true` to instead block until the turn finishes and return the final messages as JSON.
 

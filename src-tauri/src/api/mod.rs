@@ -37,19 +37,21 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::{oneshot, RwLock};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
+pub mod routes;
+
 use crate::commands::chats::CHAT_COLS;
 const MSG_COLS: &str =
     "id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at";
 
 /// Cheap-to-clone state shared by every request handler.
 #[derive(Clone)]
-struct ApiState {
-    db: SqlitePool,
-    http: reqwest::Client,
-    active_streams: Arc<RwLock<HashMap<String, Arc<AtomicBool>>>>,
-    tool_approvals: Arc<tokio::sync::Mutex<HashMap<String, oneshot::Sender<crate::commands::messages::ApprovalAnswer>>>>,
-    app: AppHandle,
-    token: String,
+pub(crate) struct ApiState {
+    pub(crate) db: SqlitePool,
+    pub(crate) http: reqwest::Client,
+    pub(crate) active_streams: Arc<RwLock<HashMap<String, Arc<AtomicBool>>>>,
+    pub(crate) tool_approvals: Arc<tokio::sync::Mutex<HashMap<String, oneshot::Sender<crate::commands::messages::ApprovalAnswer>>>>,
+    pub(crate) app: AppHandle,
+    pub(crate) token: String,
 }
 
 impl ApiState {
@@ -111,24 +113,119 @@ pub async fn start(
 
 fn build_router(state: ApiState) -> Router {
     use tower_http::cors::CorsLayer;
+    use routes as h;
 
     let protected = Router::new()
-        .route("/api/zones", get(list_zones))
-        .route("/api/projects", get(list_projects))
-        .route("/api/tags", get(list_tags))
+        // Providers, zones, library
+        .route("/api/providers", get(h::list_providers).post(h::upsert_provider))
+        .route("/api/providers/:id", axum::routing::delete(h::delete_provider))
+        .route("/api/providers/:id/models", get(h::provider_models))
+        .route("/api/zones", get(list_zones).post(h::upsert_zone))
+        .route("/api/zones/:id", axum::routing::delete(h::delete_zone))
+        .route("/api/zone-library", get(h::list_library).post(h::upsert_library))
+        .route("/api/zone-library/:id", axum::routing::delete(h::delete_library))
+        // Projects, tags
+        .route("/api/projects", get(list_projects).post(h::upsert_project))
+        .route("/api/projects/:id", axum::routing::delete(h::delete_project))
+        .route("/api/tags", get(list_tags).post(h::upsert_tag))
+        .route("/api/tags/:id", axum::routing::delete(h::delete_tag))
+        .route("/api/chat-tags", get(h::all_chat_tags))
+        // Chats
         .route("/api/chats", get(list_chats).post(create_chat))
+        .route("/api/chats/:id", axum::routing::delete(h::delete_chat))
         .route("/api/chats/:id/messages", get(get_messages).post(send_message))
+        .route("/api/chats/:id/messages/:messageId", axum::routing::patch(h::update_message))
+        .route("/api/chats/:id/messages/from", axum::routing::delete(h::delete_messages_from))
+        .route(
+            "/api/chats/:id/participant-messages",
+            axum::routing::delete(h::delete_participant_messages),
+        )
         .route("/api/chats/:id/zone", post(set_chat_zone))
-        .route("/api/chats/:id/regenerate", post(regenerate))
-        .route("/api/chats/:id/cancel", post(cancel))
+        .route("/api/chats/:id/smart", post(h::set_chat_smart))
+        .route("/api/chats/:id/title", post(h::rename_chat))
+        .route("/api/chats/:id/generate-title", post(h::generate_title))
+        .route("/api/chats/:id/project", post(h::set_chat_project))
+        .route("/api/chats/:id/project-context", post(h::set_chat_project_context))
+        .route("/api/chats/:id/knowledge", post(h::set_chat_knowledge))
+        .route("/api/chats/:id/tags", get(h::chat_tags).post(h::add_chat_tag))
+        .route("/api/chats/:id/tags/:tagId", axum::routing::delete(h::remove_chat_tag))
+        .route("/api/chats/:id/tags/:tagId/context", post(h::set_chat_tag_context))
         .route(
             "/api/chats/:id/perspectives",
             get(list_perspectives).post(add_perspective).delete(remove_perspective),
         )
+        .route("/api/chats/:id/perspective-mode", post(h::set_perspective_mode))
+        .route("/api/chats/:id/subagents", get(h::list_subagents).post(h::set_subagents))
+        .route("/api/chats/:id/subchats", get(h::subchat_tree))
+        .route("/api/chats/:id/branch", post(h::branch_chat))
+        .route("/api/chats/:id/regenerate", post(regenerate))
+        .route("/api/chats/:id/regenerate-participant", post(h::regenerate_participant))
+        .route("/api/chats/:id/cancel", post(cancel))
+        .route("/api/chats/:id/approval", post(h::respond_approval))
+        .route("/api/chats/:id/queue", post(h::queue_message))
+        .route("/api/chats/:id/queue/:messageId", axum::routing::delete(h::cancel_queued))
+        .route("/api/chats/:id/fix-diagram", post(h::fix_diagram))
+        .route("/api/chats/:id/usage", get(h::chat_usage))
+        // Reversible work
+        .route("/api/chats/:id/checkpoints", get(h::list_checkpoints))
+        .route("/api/chats/:id/checkpoints/since/:messageId", get(h::checkpoints_since))
+        .route("/api/chats/:id/restore-to/:messageId", post(h::restore_to_message))
+        .route("/api/checkpoints/:id/restore", post(h::restore_checkpoint))
+        .route("/api/checkpoints/usage", get(h::checkpoint_usage))
+        .route("/api/checkpoints/prune", post(h::prune_checkpoints))
+        .route(
+            "/api/chats/:id/staged-edits",
+            get(h::list_staged).delete(h::discard_all_staged),
+        )
+        .route("/api/chats/:id/staged-edits/apply", post(h::apply_all_staged))
+        .route("/api/staged-edits/:id/apply", post(h::apply_staged))
+        .route("/api/staged-edits/:id", axum::routing::delete(h::discard_staged))
+        // Skills, memory, MCP
+        .route("/api/skills", get(h::list_skills).post(h::upsert_skill))
+        .route("/api/skills/:id", axum::routing::delete(h::delete_skill))
+        .route("/api/skills/:id/enabled", post(h::set_skill_enabled))
+        .route("/api/skill-packs", get(h::list_skill_packs))
+        .route("/api/skill-packs/root", get(h::skill_packs_root))
+        .route("/api/memories", get(h::list_memories).post(h::upsert_memory))
+        .route("/api/memories/:id", axum::routing::delete(h::delete_memory))
+        .route("/api/mcp/servers", get(h::list_mcp_servers).post(h::upsert_mcp_server))
+        .route("/api/mcp/servers/:id", axum::routing::delete(h::delete_mcp_server))
+        .route("/api/mcp/servers/:id/connect", post(h::connect_mcp_server))
+        .route("/api/mcp/servers/:id/disconnect", post(h::disconnect_mcp_server))
+        .route("/api/mcp/tools/:toolId/danger", post(h::set_mcp_tool_danger))
+        // Knowledge
+        .route("/api/knowledge", get(h::global_kb).delete(h::clear_global_kb))
+        .route("/api/knowledge/config", post(h::set_global_kb_config))
+        .route("/api/knowledge/index", post(h::index_global_kb))
+        .route("/api/knowledge/documents", get(h::global_kb_documents))
+        .route(
+            "/api/knowledge/documents/:documentId",
+            axum::routing::delete(h::remove_kb_document),
+        )
+        .route(
+            "/api/projects/:id/knowledge",
+            get(h::project_kb_status).delete(h::clear_project_kb),
+        )
+        .route("/api/projects/:id/knowledge/config", post(h::set_project_kb_config))
+        .route("/api/projects/:id/knowledge/index", post(h::index_project_kb))
+        .route("/api/projects/:id/knowledge/default", post(h::set_project_kb_default))
+        .route("/api/projects/:id/knowledge/documents", get(h::project_kb_documents))
+        // Tools, usage, settings, storage
+        .route("/api/tools", get(h::list_tools))
+        .route("/api/tool-usage", get(h::tool_usage).delete(h::reset_tool_usage))
+        .route("/api/usage", get(h::lifetime_usage))
+        .route("/api/stats", get(h::db_stats))
+        .route("/api/settings/:key", get(h::get_setting).put(h::set_setting))
+        .route("/api/mirror", post(h::mirror_all))
+        .route("/api/mirror/import", post(h::import_markdown))
         .route_layer(middleware::from_fn_with_state(state.clone(), auth_mw));
 
     Router::new()
+        // Both discovery routes are unauthenticated on purpose: a caller trying
+        // to work out why nothing answers must not have to authenticate to find
+        // out that its token is the thing that is wrong.
         .route("/api/health", get(health))
+        .route("/api/routes", get(routes::routes))
         .merge(protected)
         .layer(CorsLayer::permissive())
         .with_state(state)
@@ -157,7 +254,7 @@ async fn auth_mw(
 
 // ─── Error mapping ────────────────────────────────────────────────────────────
 
-struct ApiError(AppError);
+pub(crate) struct ApiError(pub AppError);
 
 impl From<AppError> for ApiError {
     fn from(e: AppError) -> Self {
@@ -176,15 +273,58 @@ impl IntoResponse for ApiError {
     }
 }
 
-type ApiResult<T> = Result<T, ApiError>;
+pub(crate) type ApiResult<T> = Result<T, ApiError>;
 
 // ─── Read endpoints ───────────────────────────────────────────────────────────
 
-async fn health() -> impl IntoResponse {
+/// What the API can honestly say about itself (0.11.0).
+///
+/// The old answer was `{status: "ok"}`, which proves a socket and nothing else
+/// — and only in the case where you didn't need to ask. These are five separate
+/// questions with five separate answers, and a caller that cannot reach the app
+/// needs to know *which one* is false:
+///
+/// - `enabled` — the user has switched the API on in Settings.
+/// - `bound` — the socket actually bound. A port already in use used to leave
+///   the toggle reading "on" with no server behind it.
+/// - `answering` — trivially true here; if you are reading this, it answered.
+/// - `tokenPresent` — a token is configured at all.
+/// - `tokenAccepted` — *your* token is the right one. Reported without
+///   requiring auth, because "is my token wrong" is exactly the question you
+///   cannot ask through a door your token has to open.
+async fn health(State(st): State<ApiState>, req: axum::extract::Request) -> impl IntoResponse {
+    let token_accepted = req
+        .headers()
+        .get(AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v == format!("Bearer {}", st.token))
+        .unwrap_or(false);
+
+    let raw: Option<String> =
+        sqlx::query_scalar("SELECT value FROM settings WHERE key = 'app_settings'")
+            .fetch_optional(&st.db)
+            .await
+            .ok()
+            .flatten();
+    let settings: serde_json::Value = raw
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or(serde_json::Value::Null);
+    let enabled = settings.get("apiEnabled").and_then(|b| b.as_bool()).unwrap_or(false);
+
+    let bind = crate::commands::api::read_bind_state(&st.db).await;
+
     Json(json!({
         "status": "ok",
         "name": "MultiZone",
         "version": env!("CARGO_PKG_VERSION"),
+        "routeSetVersion": routes::ROUTE_SET_VERSION,
+        "enabled": enabled,
+        "bound": bind.as_ref().map(|b| b.ok).unwrap_or(true),
+        "bindError": bind.as_ref().and_then(|b| b.error.clone()),
+        "port": bind.as_ref().map(|b| b.port),
+        "answering": true,
+        "tokenPresent": !st.token.trim().is_empty(),
+        "tokenAccepted": token_accepted,
     }))
 }
 

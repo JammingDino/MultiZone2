@@ -8,6 +8,7 @@ import type {
   ChatTagLink,
   ChatZone,
   LibraryEntry,
+  ApiBindState,
   ApplyOutcome,
   Checkpoint,
   CheckpointUsage,
@@ -209,6 +210,12 @@ export const checkpointsSinceMessage = (chatId: string, messageId: string) =>
  */
 export const restoreToMessage = (chatId: string, messageId: string, force?: boolean) =>
   invoke<RestoreReport[]>("restore_to_message", { chatId, messageId, force: force ?? false });
+
+/**
+ * The last bind outcome — the same row `/api/health` reports, so the panel and
+ * the API cannot tell different stories about whether the server is up.
+ */
+export const apiBindState = () => invoke<ApiBindState | null>("api_bind_state");
 
 /** What the checkpoint store is holding, for Settings → Data (0.10.0). */
 export const checkpointUsage = () => invoke<CheckpointUsage>("checkpoint_usage");

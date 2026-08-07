@@ -24,7 +24,7 @@ import {
 } from "@/lib/settingsBundle";
 import { pickBundleFile } from "@/lib/importSettings";
 import { type SkillSeed, serializeSkill, parseSkill } from "@/lib/skillFile";
-import type { CheckpointUsage, DbStats, GlobalKbView, IndexSummary, KbDocument, LifetimeUsage, McpServerView, McpTool, Provider, Skill, SkillPack } from "@/lib/types";
+import type { ApiBindState, CheckpointUsage, DbStats, GlobalKbView, IndexSummary, KbDocument, LifetimeUsage, McpServerView, McpTool, Provider, Skill, SkillPack } from "@/lib/types";
 import { formatBytes, formatCount, formatTokens } from "@/lib/format";
 
 type Tab = "providers" | "appearance" | "chat" | "voice" | "speech" | "search" | "skills" | "mcp" | "knowledge" | "memory" | "api" | "data";
@@ -2581,8 +2581,15 @@ function ApiTab() {
 
   const [portInput, setPortInput] = useState(String(appSettings.apiPort ?? 8765));
   const [status, setStatus] = useState<string | null>(null);
+  // The last bind outcome, persisted rather than reported once and forgotten
+  // (0.11.0). A port already in use used to leave this toggle reading "on" with
+  // no server behind it and nothing anywhere that said so.
+  const [bind, setBind] = useState<ApiBindState | null>(null);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  const refreshBind = () => api.apiBindState().then(setBind).catch(console.error);
+  useEffect(() => { void refreshBind(); }, []);
 
   const baseUrl = `http://127.0.0.1:${appSettings.apiPort ?? 8765}`;
   const parsedPort = parseInt(portInput, 10);
@@ -2605,10 +2612,12 @@ function ApiTab() {
         apiToken: merged.apiToken,
       });
       setStatus(merged.apiEnabled ? `Running on ${`http://127.0.0.1:${merged.apiPort}`}` : "Stopped.");
+      await refreshBind();
     } catch (e: any) {
       setStatus(`Error: ${e?.message || String(e)}`);
       // Roll the toggle back if start failed.
       if (next.apiEnabled) await setAppSettings({ apiEnabled: false });
+      await refreshBind();
     } finally {
       setBusy(false);
     }
@@ -2660,6 +2669,25 @@ function ApiTab() {
             {busy && <Loader2 size={12} className="animate-spin" />}
             {status}
           </div>
+        )}
+        {/* The bind outcome as it stands, including from a previous launch —
+            "enabled" and "actually listening" are different facts and only one
+            of them used to be visible. */}
+        {appSettings.apiEnabled && bind && !bind.ok && (
+          <div className="mt-2 flex items-start gap-2 rounded border border-[var(--color-danger)]/50 bg-[var(--color-danger)]/5 px-2.5 py-2 text-xs">
+            <AlertTriangle size={13} className="mt-0.5 shrink-0 text-[var(--color-danger)]" />
+            <span>
+              The server is switched on but is not listening on port {bind.port}
+              {bind.error ? <>: <span className="font-mono">{bind.error}</span></> : "."}
+            </span>
+          </div>
+        )}
+        {appSettings.apiEnabled && bind?.ok && (
+          <p className="mt-2 text-xs text-[var(--color-text-muted)]">
+            Listening on port {bind.port}. Ask it about itself:{" "}
+            <span className="font-mono">GET {baseUrl}/api/health</span> and{" "}
+            <span className="font-mono">/api/routes</span> — both answer without a token.
+          </p>
         )}
       </section>
 

@@ -287,6 +287,7 @@ pub fn run() {
             commands::attachments::get_attachment_images,
             commands::api::apply_api_settings,
             commands::api::generate_api_token,
+            commands::api::api_bind_state,
             commands::voice::list_voice_input_devices,
             commands::voice::start_dictation,
             commands::voice::stop_dictation,

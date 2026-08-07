@@ -2,7 +2,7 @@
 
 Notes behind the 0.11.x and 1.2.x entries in [RELEASE_PLAN.md](RELEASE_PLAN.md). Two questions that turned out to be the same question: *can the app set itself up, so that connecting it to things is not a job for someone who reads code?*
 
-Written August 2026, against 0.10.1.
+Written August 2026, against 0.10.1. **Part 1 was built as 0.11.0** — the route index, the honest health check, the persisted bind outcome and the drift test all landed, and the ten routes became 105. What remains open here is the API tool (0.11.1) and connectors (0.11.2).
 
 ---
 

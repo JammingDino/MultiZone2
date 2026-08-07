@@ -1002,6 +1002,19 @@ export interface ApplyOutcome {
   detail: string | null;
 }
 
+/**
+ * What happened the last time the app tried to bind the API socket (0.11.0).
+ * Persisted rather than reported once, so "enabled" and "actually listening"
+ * stop being the same claim.
+ */
+export interface ApiBindState {
+  ok: boolean;
+  port: number;
+  /** Why the bind failed, in the OS's own words. */
+  error: string | null;
+  at: number;
+}
+
 /** What the checkpoint store is holding, for Settings → Data (0.10.0). */
 export interface CheckpointUsage {
   checkpoints: number;

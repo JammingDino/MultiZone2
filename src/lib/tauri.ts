@@ -192,6 +192,22 @@ export const restoreCheckpoint = (
     force: force ?? false,
   });
 
+/**
+ * The turns that changed files after this message — what rewinding to it would
+ * undo. Read before offering the choice, so "branch from here" can say how many
+ * turns and files are involved instead of asking in the abstract.
+ */
+export const checkpointsSinceMessage = (chatId: string, messageId: string) =>
+  invoke<Checkpoint[]>("checkpoints_since_message", { chatId, messageId });
+
+/**
+ * Put the working tree back to how it stood at `messageId` — the file-side
+ * counterpart to branching from a message. Restores newest-first; a file edited
+ * outside the app is still reported as a conflict and left as found.
+ */
+export const restoreToMessage = (chatId: string, messageId: string, force?: boolean) =>
+  invoke<RestoreReport[]>("restore_to_message", { chatId, messageId, force: force ?? false });
+
 /** What the checkpoint store is holding, for Settings → Data (0.10.0). */
 export const checkpointUsage = () => invoke<CheckpointUsage>("checkpoint_usage");
 

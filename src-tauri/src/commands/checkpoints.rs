@@ -42,6 +42,35 @@ pub async fn restore_checkpoint(
     .await
 }
 
+/// The turns that changed files *after* this message — what a rewind to it
+/// would have to undo. Read before offering the choice, so "branch from here"
+/// can say how many turns and how many files are involved rather than asking a
+/// question in the abstract.
+#[tauri::command]
+pub async fn checkpoints_since_message(
+    state: State<'_, AppState>,
+    chat_id: String,
+    message_id: String,
+) -> AppResult<Vec<checkpoints::Checkpoint>> {
+    checkpoints::since_message(&state.db, &chat_id, &message_id).await
+}
+
+/// Put the working tree back to how it stood at `message_id`.
+///
+/// The file-side counterpart to "Branch from here": a branch taken three turns
+/// back otherwise starts with history from then and a tree from now. Restores
+/// newest-first so each turn hands the one before it the state it expects; a
+/// file edited outside the app still reports a conflict and is left as found.
+#[tauri::command]
+pub async fn restore_to_message(
+    state: State<'_, AppState>,
+    chat_id: String,
+    message_id: String,
+    force: Option<bool>,
+) -> AppResult<Vec<checkpoints::RestoreReport>> {
+    checkpoints::restore_to_message(&state.db, &chat_id, &message_id, force.unwrap_or(false)).await
+}
+
 /// What the checkpoint store is holding, for Settings → Data.
 #[tauri::command]
 pub async fn checkpoint_usage(state: State<'_, AppState>) -> AppResult<checkpoints::CheckpointUsage> {

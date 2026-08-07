@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Copy, Check, RotateCcw, BarChart3, Pencil, GitBranch, Volume2, Pause, Play, Square } from "lucide-react";
+import { Copy, Check, RotateCcw, BarChart3, Pencil, GitBranch, Volume2, Pause, Play, Square, TriangleAlert } from "lucide-react";
+import type { Checkpoint } from "@/lib/types";
 import { useApp } from "@/store/app";
 import { useTts, zoneVoice } from "@/store/tts";
 import * as api from "@/lib/tauri";
@@ -63,6 +64,9 @@ export function MessageActions({
 }: Props) {
   const [copied, setCopied] = useState(false);
   const [branching, setBranching] = useState(false);
+  /** Later turns that changed files, when a branch has to ask about them. */
+  const [rewind, setRewind] = useState<Checkpoint[] | null>(null);
+  const [rewindNote, setRewindNote] = useState<string | null>(null);
   const [showStats, setShowStats] = useState(false);
   const stats = useApp((s) => (messageId ? s.statsByMessage[messageId] : undefined));
   // Busy if any participant (primary or a perspective) is streaming in this
@@ -82,11 +86,52 @@ export function MessageActions({
     setTimeout(() => setCopied(false), 1500);
   }
 
+  /**
+   * Branching forks the conversation at this message. Later turns may also have
+   * changed files, and until 0.10.1 the branch said nothing about them — so a
+   * branch taken three turns back started with history from then and a working
+   * tree from now, which is true of no moment that ever existed. When there is
+   * anything to rewind, the choice is put to the user rather than guessed:
+   * silently reverting their files would be worse than either option.
+   */
   async function onBranch() {
     if (isBusy || branching || !branchFromMessageId) return;
+    try {
+      const later = await api.checkpointsSinceMessage(chatId, branchFromMessageId);
+      if (later.length > 0) {
+        setRewind(later);
+        return;
+      }
+    } catch (e) {
+      // The count is a courtesy; failing to get it must not block a branch.
+      console.error(e);
+    }
+    void runBranch(false);
+  }
+
+  async function runBranch(restoreFiles: boolean) {
+    if (!branchFromMessageId) return;
+    setRewind(null);
     setBranching(true);
     try {
-      await branchFromMessage(chatId, branchFromMessageId, branchSolo, branchSoloZoneId);
+      const reports = await branchFromMessage(
+        chatId,
+        branchFromMessageId,
+        branchSolo,
+        branchSoloZoneId,
+        restoreFiles,
+      );
+      // A file edited outside the app is left exactly as found; the branch
+      // still happened, so say which paths didn't come back rather than
+      // letting the user assume the tree matches the history.
+      const conflicts = reports
+        .flatMap((r) => r.files)
+        .filter((f) => f.outcome === "conflict");
+      setRewindNote(
+        conflicts.length > 0
+          ? `${conflicts.length} file${conflicts.length === 1 ? " was" : "s were"} edited outside the app and left as found.`
+          : null,
+      );
     } catch (e) {
       console.error(e);
     } finally {
@@ -155,13 +200,33 @@ export function MessageActions({
       )}
 
       {branchFromMessageId && (
-        <ActionButton
-          onClick={onBranch}
-          label={branching ? "Branching…" : "Branch"}
-          disabled={isBusy || branching}
+        <div className="relative">
+          <ActionButton
+            onClick={onBranch}
+            label={branching ? "Branching…" : "Branch"}
+            disabled={isBusy || branching}
+          >
+            <GitBranch size={11} />
+          </ActionButton>
+          {rewind && (
+            <RewindPrompt
+              checkpoints={rewind}
+              onChoose={(restoreFiles) => void runBranch(restoreFiles)}
+              onCancel={() => setRewind(null)}
+            />
+          )}
+        </div>
+      )}
+
+      {rewindNote && (
+        <span
+          className="max-w-[420px] truncate text-[11px] text-amber-500"
+          title={rewindNote}
+          onClick={() => setRewindNote(null)}
+          role="button"
         >
-          <GitBranch size={11} />
-        </ActionButton>
+          {rewindNote}
+        </span>
       )}
 
       {variant !== "user" && stats && (
@@ -222,6 +287,66 @@ export function MessageActions({
           edited
         </span>
       )}
+    </div>
+  );
+}
+
+/**
+ * The choice a branch has to put to the user when later turns changed files
+ * (0.10.1): keep the tree as it stands, or rewind it to match the history the
+ * branch is about to copy. Neither is the obvious default — the files may be
+ * work the user wants to keep — so it is asked rather than assumed, and only
+ * when there is actually something to undo.
+ */
+function RewindPrompt({
+  checkpoints,
+  onChoose,
+  onCancel,
+}: {
+  checkpoints: Checkpoint[];
+  onChoose: (restoreFiles: boolean) => void;
+  onCancel: () => void;
+}) {
+  const paths = new Set(checkpoints.flatMap((c) => c.files.map((f) => f.path)));
+  const diverged = checkpoints
+    .flatMap((c) => c.files)
+    .filter((f) => f.diverged).length;
+
+  return (
+    <div className="absolute bottom-full left-0 z-40 mb-1 w-[300px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] p-2.5 text-xs shadow-lg">
+      <p className="text-[var(--color-text)]">
+        {checkpoints.length} later turn{checkpoints.length === 1 ? "" : "s"} changed {paths.size} file
+        {paths.size === 1 ? "" : "s"}.
+      </p>
+      <p className="mt-1 text-[var(--color-text-muted)]">
+        The branch copies the conversation up to this point. Put those files back to match it?
+      </p>
+      {diverged > 0 && (
+        <p className="mt-1 flex items-start gap-1 text-amber-500">
+          <TriangleAlert size={12} className="mt-0.5 shrink-0" />
+          {diverged} {diverged === 1 ? "has" : "have"} been edited outside the app and will be left as found.
+        </p>
+      )}
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        <button
+          onClick={() => onChoose(true)}
+          className="rounded border border-[var(--color-border)] px-2 py-1 hover:border-[var(--color-accent)]"
+        >
+          Branch and rewind files
+        </button>
+        <button
+          onClick={() => onChoose(false)}
+          className="rounded border border-[var(--color-border)] px-2 py-1 hover:border-[var(--color-accent)]"
+        >
+          Branch only
+        </button>
+        <button
+          onClick={onCancel}
+          className="rounded px-2 py-1 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+        >
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }

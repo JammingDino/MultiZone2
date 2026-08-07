@@ -335,13 +335,22 @@ interface AppStore {
   refreshZones: () => Promise<void>;
   refreshChats: () => Promise<void>;
   setActiveChat: (id: string | null) => Promise<void>;
-  /** Fork a chat at a message into a new chat and switch to it. */
+  /**
+   * Fork a chat at a message into a new chat and switch to it.
+   *
+   * `restoreFiles` rewinds the working tree to the same point (0.10.1), so the
+   * branch starts from the tree the copied history describes rather than from
+   * whatever three later turns left behind. Returns the restore reports so
+   * conflicts — a file edited outside the app — can be shown rather than
+   * swallowed.
+   */
   branchFromMessage: (
     chatId: string,
     messageId: string,
     solo?: boolean,
     zoneId?: string | null,
-  ) => Promise<void>;
+    restoreFiles?: boolean,
+  ) => Promise<import("@/lib/types").RestoreReport[]>;
   /** Hand-edit an assistant message's text in place (persists + flags edited). */
   editMessage: (chatId: string, messageId: string, text: string) => Promise<void>;
   loadMessages: (chatId: string) => Promise<void>;
@@ -729,10 +738,17 @@ export const useApp = create<AppStore>((set, get) => ({
       await get().loadChatZones(id);
     }
   },
-  async branchFromMessage(chatId, messageId, solo = false, zoneId = null) {
+  async branchFromMessage(chatId, messageId, solo = false, zoneId = null, restoreFiles = false) {
+    // Rewind first, on the source chat: the checkpoints belong to it, and a
+    // branch that failed to be created should not leave a half-restored tree.
+    const reports = restoreFiles ? await api.restoreToMessage(chatId, messageId) : [];
     const branch = await api.branchChat(chatId, messageId, solo, zoneId);
     await get().refreshChats();
     await get().setActiveChat(branch.id);
+    // The source chat's revert offers have changed shape — a rewound turn now
+    // reads as restored — so its list is no longer what the UI is holding.
+    if (restoreFiles) get().loadCheckpoints(chatId).catch(console.error);
+    return reports;
   },
   async editMessage(chatId, messageId, text) {
     await api.updateMessage(chatId, messageId, text);

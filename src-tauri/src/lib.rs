@@ -253,6 +253,8 @@ pub fn run() {
             commands::tool_usage::reset_tool_usage,
             commands::checkpoints::list_checkpoints,
             commands::checkpoints::restore_checkpoint,
+            commands::checkpoints::checkpoints_since_message,
+            commands::checkpoints::restore_to_message,
             commands::checkpoints::checkpoint_usage,
             commands::checkpoints::prune_checkpoints,
             commands::usage::session_context_usage,

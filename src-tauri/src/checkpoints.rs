@@ -599,6 +599,83 @@ pub async fn restore(
     })
 }
 
+// ─── Rewinding to a point in the conversation ─────────────────────────────────
+//
+// "Branch from here" forks the conversation at a message; it has never had
+// anything to say about the *files*, so a branch taken three turns back started
+// its life with history from then and a working tree from now — which is the
+// one combination that is true of no moment that ever existed.
+
+/// The checkpoints for turns that came *after* `message_id` in this chat,
+/// newest first — everything a rewind to that message would have to undo.
+///
+/// A checkpoint anchors to the assistant message its turn opened with; one that
+/// never got anchored (a turn cancelled before it saved) is matched on its own
+/// creation time instead, so a rewind doesn't step over it.
+pub async fn since_message(
+    db: &SqlitePool,
+    chat_id: &str,
+    message_id: &str,
+) -> AppResult<Vec<Checkpoint>> {
+    let pivot: Option<(i64,)> =
+        sqlx::query_as("SELECT created_at FROM messages WHERE id = ?1 AND chat_id = ?2")
+            .bind(message_id)
+            .bind(chat_id)
+            .fetch_optional(db)
+            .await?;
+    let Some((pivot_ts,)) = pivot else {
+        return Err(AppError::NotFound(format!("message {message_id}")));
+    };
+
+    let all = list_for_chat(db, chat_id).await?;
+    let mut keep = Vec::new();
+    for cp in all {
+        let anchor_ts = match &cp.message_id {
+            Some(mid) => {
+                let ts: Option<(i64,)> =
+                    sqlx::query_as("SELECT created_at FROM messages WHERE id = ?1")
+                        .bind(mid)
+                        .fetch_optional(db)
+                        .await?;
+                // An anchor message that no longer exists (its turn was deleted)
+                // falls back to the checkpoint's own clock rather than vanishing
+                // from the rewind.
+                ts.map(|(t,)| t).unwrap_or(cp.created_at)
+            }
+            None => cp.created_at,
+        };
+        if anchor_ts > pivot_ts {
+            keep.push(cp);
+        }
+    }
+    // `list_for_chat` is already newest-first; the filter preserves that.
+    Ok(keep)
+}
+
+/// Put the working tree back to how it stood at `message_id`.
+///
+/// Restores every later turn's checkpoint **newest first**, which is what makes
+/// this work at all: each restore returns a file to the state the turn before it
+/// left, so conflict detection stays meaningful the whole way down instead of
+/// tripping on the app's own later edits. Only a file touched by something
+/// *outside* the app reports a conflict, and it is left exactly as found unless
+/// `force`.
+///
+/// Each restore is itself checkpointed by [`restore`], so a rewind is undoable
+/// turn by turn like any other.
+pub async fn restore_to_message(
+    db: &SqlitePool,
+    chat_id: &str,
+    message_id: &str,
+    force: bool,
+) -> AppResult<Vec<RestoreReport>> {
+    let mut reports = Vec::new();
+    for cp in since_message(db, chat_id, message_id).await? {
+        reports.push(restore(db, &cp.id, None, force).await?);
+    }
+    Ok(reports)
+}
+
 // ─── Retention ────────────────────────────────────────────────────────────────
 //
 // A checkpoint store is the one part of the app that grows without anybody
@@ -1051,6 +1128,95 @@ mod tests {
         assert!(!by_name("calm.txt").diverged);
         assert!(by_name("touched.txt").diverged);
         assert_eq!(by_name("calm.txt").change, "changed");
+    }
+
+    /// Insert a message row, since a rewind is addressed by message and the
+    /// engine reads their timestamps to order the turns.
+    async fn message(db: &SqlitePool, chat: &str, id: &str, ts: i64) {
+        // `messages` keys to `chats`, so the row has to exist first.
+        sqlx::query(
+            "INSERT OR IGNORE INTO chats (id, title, created_at, updated_at)
+             VALUES (?1, 'test', ?2, ?2)",
+        )
+        .bind(chat)
+        .bind(ts)
+        .execute(db)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO messages (id, chat_id, role, content, created_at)
+             VALUES (?1, ?2, 'assistant', '', ?3)",
+        )
+        .bind(id)
+        .bind(chat)
+        .bind(ts)
+        .execute(db)
+        .await
+        .unwrap();
+    }
+
+    /// Branching three turns back and rewinding to that point puts the tree
+    /// where the copied history says it was. The reason this needs its own test
+    /// rather than falling out of `restore`: the turns have to be undone
+    /// newest-first, and getting that backwards leaves the file holding the
+    /// *middle* turn's work while reporting success.
+    #[tokio::test]
+    async fn rewinding_to_a_message_undoes_every_later_turn_in_order() {
+        let dir = workspace("rewinding_to_a_message_undoes_every_later_turn_in_order");
+        let db = pool().await;
+
+        let file = dir.join("draft.md");
+        std::fs::write(&file, "the state at the branch point").unwrap();
+        let args = json!({ "path": file.to_string_lossy() });
+
+        message(&db, "c", "msg-pivot", 100).await;
+
+        // Three later turns, each rewriting the same file.
+        for (i, text) in ["first rewrite", "second rewrite", "third rewrite"].iter().enumerate() {
+            let turn = format!("t{i}");
+            capture(&db, "c", &turn, None, "edit_file", &args, None).await.unwrap();
+            std::fs::write(&file, text).unwrap();
+            record_after(&db, "c", &turn, None, "edit_file", &args, None).await.unwrap();
+            let mid = format!("msg-{i}");
+            message(&db, "c", &mid, 200 + i as i64).await;
+            link_message(&db, "c", &turn, None, &mid).await.unwrap();
+        }
+
+        let later = since_message(&db, "c", "msg-pivot").await.unwrap();
+        assert_eq!(later.len(), 3, "every turn after the pivot");
+
+        let reports = restore_to_message(&db, "c", "msg-pivot", false).await.unwrap();
+        assert_eq!(reports.len(), 3);
+        assert!(
+            reports.iter().all(|r| r.files.iter().all(|f| f.outcome == "restored")),
+            "no conflicts: each turn hands the one before it the state it expects",
+        );
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            "the state at the branch point",
+        );
+    }
+
+    /// A rewind to the newest message is a no-op — there is nothing after it —
+    /// so "branch from the latest answer" never touches the disk.
+    #[tokio::test]
+    async fn rewinding_to_the_latest_message_changes_nothing() {
+        let dir = workspace("rewinding_to_the_latest_message_changes_nothing");
+        let db = pool().await;
+
+        let file = dir.join("current.txt");
+        std::fs::write(&file, "before").unwrap();
+        let args = json!({ "path": file.to_string_lossy() });
+
+        capture(&db, "c", "t", None, "edit_file", &args, None).await.unwrap();
+        std::fs::write(&file, "after").unwrap();
+        record_after(&db, "c", "t", None, "edit_file", &args, None).await.unwrap();
+        message(&db, "c", "msg-latest", 500).await;
+        link_message(&db, "c", "t", None, "msg-latest").await.unwrap();
+
+        assert!(since_message(&db, "c", "msg-latest").await.unwrap().is_empty());
+        assert!(restore_to_message(&db, "c", "msg-latest", false).await.unwrap().is_empty());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "after");
     }
 
     /// A size ceiling drops the oldest checkpoints and takes their blobs with

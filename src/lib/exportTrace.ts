@@ -353,6 +353,7 @@ export type ToolIcon =
   | "brain"
   | "users"
   | "database"
+  | "settings"
   | "clock";
 
 export interface ToolDescription {
@@ -391,6 +392,8 @@ const LABELS: Record<string, { label: string; icon: ToolIcon }> = {
   terminal_read: { label: "Read terminal", icon: "terminal" },
   terminal_list: { label: "Listed terminals", icon: "terminal" },
   terminal_stop: { label: "Closed terminal", icon: "terminal" },
+  app_read: { label: "Read app state", icon: "settings" },
+  app_control: { label: "Changed the app", icon: "settings" },
   update_plan: { label: "Plan", icon: "checklist" },
   draw_diagram: { label: "Diagram", icon: "diagram" },
   plot_function: { label: "Plot", icon: "chart" },

@@ -52,7 +52,7 @@ const fn open(method: &'static str, path: &'static str, description: &'static st
 
 /// Bumped whenever a route is added, removed or changes shape, so a caller can
 /// tell "the app is older than my script" from "my script is wrong".
-pub const ROUTE_SET_VERSION: u32 = 2;
+pub const ROUTE_SET_VERSION: u32 = 3;
 
 pub const ROUTES: &[RouteDef] = &[
     // Discovery — deliberately unauthenticated. A caller debugging a broken
@@ -171,6 +171,7 @@ pub const ROUTES: &[RouteDef] = &[
     r("GET", "/api/stats", "Row counts: chats, messages, zones, projects, tags"),
     r("GET", "/api/settings/:key", "Read one settings row"),
     r("PUT", "/api/settings/:key", "Write one settings row"),
+    r("PATCH", "/api/settings/:key", "Merge fields into a JSON settings row (e.g. {\"mode\":\"dark\"} on `theme`)"),
     r("POST", "/api/mirror", "Re-write every chat to the markdown mirror folder"),
     r("POST", "/api/mirror/import", "Import a markdown chat file as a new chat"),
 ];
@@ -1109,8 +1110,36 @@ pub async fn set_setting(
     Path(key): Path<String>,
     Json(body): Json<Value>,
 ) -> ApiResult<StatusCode> {
-    commands::settings::set_setting(app_state(&st), key, required(&body, "value")?).await?;
+    commands::settings::set_setting(
+        st.app.clone(),
+        app_state(&st),
+        key,
+        required(&body, "value")?,
+    )
+    .await?;
     Ok(NO_CONTENT)
+}
+
+/// Merge fields into a JSON settings row — the one-call form of "change this
+/// preference", and the reason a caller can turn on dark mode without having to
+/// re-send every other appearance setting alongside it.
+pub async fn patch_setting(
+    State(st): State<ApiState>,
+    Path(key): Path<String>,
+    Json(body): Json<Value>,
+) -> ApiResult<Response> {
+    let patch = match body {
+        Value::Object(map) => map,
+        _ => {
+            return Err(ApiError(crate::error::AppError::Invalid(
+                "body must be a JSON object of the fields to merge".into(),
+            )))
+        }
+    };
+    let value =
+        commands::settings::patch_setting(st.app.clone(), app_state(&st), key.clone(), patch)
+            .await?;
+    Ok(Json(json!({ "key": key, "value": value })).into_response())
 }
 
 pub async fn mirror_all(State(st): State<ApiState>) -> ApiResult<Response> {

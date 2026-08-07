@@ -445,8 +445,47 @@ export function onPdfReadRequest(
 // Settings
 export const getSetting = (key: string) =>
   invoke<string | null>("get_setting", { key });
-export const setSetting = (key: string, value: string) =>
-  invoke<void>("set_setting", { key, value });
+/**
+ * When this window last wrote each key. The `settings-updated` event fires for
+ * every write including our own, and re-reading the row behind a write the user
+ * is still making (dragging a slider, typing in a field) would fight them with
+ * a value one keystroke old. An echo of our own write within [`ECHO_MS`] is
+ * therefore ignored — the state it would restore is the state we already have.
+ */
+const lastLocalWrite = new Map<string, number>();
+const ECHO_MS = 1500;
+
+/** True when this event is this window hearing its own recent write back. */
+export function isOwnSettingsEcho(key: string): boolean {
+  const at = lastLocalWrite.get(key);
+  return at !== undefined && Date.now() - at < ECHO_MS;
+}
+
+export const setSetting = (key: string, value: string) => {
+  lastLocalWrite.set(key, Date.now());
+  return invoke<void>("set_setting", { key, value });
+};
+/**
+ * Emitted after any settings row is written — including by the HTTP API or the
+ * `app_control` tool, which is the case this exists for. Without it a model
+ * asked to switch to dark mode changes the database and nothing else, and the
+ * window overwrites the change the next time the user touches a preference.
+ */
+export function onSettingsUpdated(
+  handler: (e: { key: string }) => void,
+): Promise<UnlistenFn> {
+  return listen<{ key: string }>("settings-updated", (e) => handler(e.payload));
+}
+/**
+ * Emitted after any write through the HTTP API or the `app_control` tool, with
+ * the route that did it. The window reads the path to decide what to re-fetch,
+ * so a zone a model creates appears in the sidebar the moment it exists.
+ */
+export function onAppDataChanged(
+  handler: (e: { method: string; path: string }) => void,
+): Promise<UnlistenFn> {
+  return listen<{ method: string; path: string }>("app-data-changed", (e) => handler(e.payload));
+}
 export const getDbStats = () => invoke<DbStats>("get_db_stats");
 export const resetDatabase = () => invoke<void>("reset_database");
 /** Re-write every chat's markdown mirror (used after enabling it / changing the dir). Returns the count. */

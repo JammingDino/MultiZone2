@@ -22,6 +22,7 @@ pub mod citations;
 pub mod compact;
 pub mod wsl;
 pub mod terminal;
+pub mod app_control;
 
 use crate::commands::messages::{EngineCtx, StreamSink};
 use crate::error::AppResult;
@@ -145,6 +146,10 @@ pub enum ToolId {
     /// 0.9.11 — terminals that keep running between calls, so an agent can start
     /// a server or a REPL and go on typing into it.
     Terminal,
+    /// 0.11.0 — MultiZone driving itself through its own API: appearance, zones,
+    /// providers, projects, skills, settings. Everything the user can do in the
+    /// app, because it is served by the same router the API is.
+    AppControl,
 }
 
 impl ToolId {
@@ -182,6 +187,7 @@ impl ToolId {
             "wsl_exec" => Some(Self::Wsl),
             "teamwork" => Some(Self::Teamwork),
             "terminal" => Some(Self::Terminal),
+            "app_control" => Some(Self::AppControl),
             // `save_output` is the legacy id for this group (briefly shipped as a
             // write+present tool); it now maps to the present-only tool.
             "present_file" | "save_output" => Some(Self::PresentFile),
@@ -214,6 +220,7 @@ impl ToolId {
             Self::Wsl => "wsl_exec",
             Self::Teamwork => "teamwork",
             Self::Terminal => "terminal",
+            Self::AppControl => "app_control",
         }
     }
 
@@ -253,6 +260,7 @@ impl ToolId {
             Self::Compact => vec![compact::definition()],
             Self::Teamwork => teamwork::definitions(),
             Self::Terminal => terminal::definitions(),
+            Self::AppControl => app_control::definitions(),
         }
     }
 
@@ -290,8 +298,13 @@ impl ToolId {
             // and drive arbitrary programs; the group is dangerous so it never
             // lands in a default toolset, and per-call gating keeps watching a
             // terminal cheap while starting or typing into one prompts.
+            // AppControl groups `app_read` (moderate — it reads the user's own
+            // app, including provider settings) with `app_control`, which
+            // rewrites it: the group is dangerous so it never lands in a default
+            // toolset, and per-call gating keeps reading the route table cheap
+            // while every change prompts.
             Self::CodeExec | Self::Shell | Self::FileManage | Self::HttpRequest | Self::Wsl
-            | Self::Terminal => 2,
+            | Self::Terminal | Self::AppControl => 2,
         }
     }
 }
@@ -299,7 +312,7 @@ impl ToolId {
 /// Every built-in tool group. The single source of truth for enumerating tools
 /// (e.g. `list_tool_functions`, which flattens each group into the functions the
 /// model actually sees). Keep in step with the `ToolId` variants.
-pub const ALL_TOOL_IDS: [ToolId; 22] = [
+pub const ALL_TOOL_IDS: [ToolId; 23] = [
     ToolId::DateTime,
     ToolId::SmartSearch,
     ToolId::SmartFetch,
@@ -322,6 +335,7 @@ pub const ALL_TOOL_IDS: [ToolId; 22] = [
     ToolId::Subchat,
     ToolId::Teamwork,
     ToolId::Terminal,
+    ToolId::AppControl,
 ];
 
 /// Tool ids classified as "safe" (safety level 0). Used as the default toolset
@@ -378,8 +392,12 @@ pub fn tool_safety_by_name(name: &str) -> u8 {
         | "find_files" | "search_file_text"
         | "move_file" | "copy_file" | "create_folder"
         | "compact_context"
+        // Reading the app's own state is a read like any other; changing it is
+        // the user's app being rewritten, so it prompts.
+        | "app_read"
         | "terminal_stop" => 1,
         "execute_code" | "run_command" | "delete_file" | "http_request"
+        | "app_control"
         | "terminal_start" | "terminal_write" => 2,
         _ => 1,
     }
@@ -579,6 +597,8 @@ async fn dispatch_inner(
         "terminal_read" => terminal::read(args, db, chat_id).await,
         "terminal_list" => terminal::list(db, chat_id).await,
         "terminal_stop" => terminal::stop(args, db, chat_id).await,
+        "app_read" => app_control::read(args, ctx, sink).await,
+        "app_control" => app_control::control(args, ctx, sink).await,
         "team_status" => teamwork::status(db, chat_id).await,
         "claim_files" => teamwork::claim(args, db, chat_id, caller_zone_id, project_dir).await,
         "release_files" => teamwork::release(args, db, chat_id, caller_zone_id, project_dir).await,

@@ -111,6 +111,69 @@ pub async fn start(
     Ok(ApiHandle { port, shutdown: Some(shutdown_tx) })
 }
 
+/// Call the API from inside the process, without a socket.
+///
+/// This is how the `app_control` tool reaches the app (0.11.0). It could have
+/// called the Tauri commands directly, or spoken HTTP to `127.0.0.1` — the
+/// first would have grown a third copy of the surface to keep in step with the
+/// route table, and the second would have made a model's ability to change a
+/// setting depend on whether the user had switched on a *remote* access server
+/// and on a port being free. Serving the request through the same [`Router`]
+/// means the tool cannot do anything the API cannot, and cannot fall behind it.
+///
+/// Auth is satisfied with a token minted for this one call: the bearer token
+/// exists to keep strangers off the socket, and there is no socket here.
+pub(crate) async fn call_in_process(
+    app: AppHandle,
+    ctx: &EngineCtx,
+    method: &str,
+    path_and_query: &str,
+    body: Option<serde_json::Value>,
+) -> crate::error::AppResult<(u16, String)> {
+    use tower::ServiceExt;
+
+    let token = new_id();
+    let state = ApiState {
+        db: ctx.db.clone(),
+        http: ctx.http.clone(),
+        active_streams: ctx.active_streams.clone(),
+        tool_approvals: ctx.tool_approvals.clone(),
+        app,
+        token: token.clone(),
+    };
+
+    let method = axum::http::Method::from_bytes(method.to_uppercase().as_bytes())
+        .map_err(|_| AppError::Invalid(format!("'{method}' is not an HTTP method")))?;
+    let request = axum::http::Request::builder()
+        .method(method)
+        .uri(path_and_query)
+        .header(AUTHORIZATION, format!("Bearer {token}"))
+        .header(axum::http::header::CONTENT_TYPE, "application/json")
+        .body(axum::body::Body::from(
+            body.unwrap_or(serde_json::Value::Object(Default::default())).to_string(),
+        ))
+        .map_err(|e| AppError::Invalid(format!("could not build the request: {e}")))?;
+
+    let response = build_router(state)
+        .oneshot(request)
+        .await
+        .map_err(|e| AppError::Other(format!("api call failed: {e}")))?;
+    let status = response.status().as_u16();
+
+    // Bounded, because a tool result is context the model pays for: a caller
+    // that asks for every message in every chat gets told to narrow it rather
+    // than filling the window with the answer.
+    const MAX_BODY: usize = 96 * 1024;
+    let bytes = axum::body::to_bytes(response.into_body(), MAX_BODY)
+        .await
+        .map_err(|_| {
+            AppError::Invalid(format!(
+                "the response is larger than {MAX_BODY} bytes — ask for a narrower slice"
+            ))
+        })?;
+    Ok((status, String::from_utf8_lossy(&bytes).into_owned()))
+}
+
 fn build_router(state: ApiState) -> Router {
     use tower_http::cors::CorsLayer;
     use routes as h;
@@ -215,7 +278,10 @@ fn build_router(state: ApiState) -> Router {
         .route("/api/tool-usage", get(h::tool_usage).delete(h::reset_tool_usage))
         .route("/api/usage", get(h::lifetime_usage))
         .route("/api/stats", get(h::db_stats))
-        .route("/api/settings/:key", get(h::get_setting).put(h::set_setting))
+        .route(
+            "/api/settings/:key",
+            get(h::get_setting).put(h::set_setting).patch(h::patch_setting),
+        )
         .route("/api/mirror", post(h::mirror_all))
         .route("/api/mirror/import", post(h::import_markdown))
         .route_layer(middleware::from_fn_with_state(state.clone(), auth_mw));
@@ -227,8 +293,38 @@ fn build_router(state: ApiState) -> Router {
         .route("/api/health", get(health))
         .route("/api/routes", get(routes::routes))
         .merge(protected)
+        .layer(middleware::from_fn_with_state(state.clone(), notify_gui_mw))
         .layer(CorsLayer::permissive())
         .with_state(state)
+}
+
+/// Tell an open window that a request changed something.
+///
+/// A handful of routes already emitted their own targeted event and the rest
+/// changed the database silently, which was survivable while the API's only
+/// caller was a script driving a headless app. It stops being survivable once a
+/// model can create a zone mid-conversation (`app_control`): the zone exists,
+/// the sidebar does not show it, and the user is told about work they cannot
+/// see. One event carrying the path, emitted for every write that succeeded,
+/// leaves the window to decide what that path means for what it is displaying.
+///
+/// Writes only, successes only — a GET changes nothing, and a rejected write
+/// changed nothing either.
+async fn notify_gui_mw(
+    State(st): State<ApiState>,
+    req: axum::extract::Request,
+    next: Next,
+) -> Response {
+    let method = req.method().clone();
+    let path = req.uri().path().to_string();
+    let response = next.run(req).await;
+    if method != axum::http::Method::GET && response.status().is_success() {
+        let _ = st.app.emit(
+            "app-data-changed",
+            json!({ "method": method.as_str(), "path": path }),
+        );
+    }
+    response
 }
 
 // ─── Auth ───────────────────────────────────────────────────────────────────

@@ -2,7 +2,9 @@
 
 Notes behind the 0.11.x and 1.2.x entries in [RELEASE_PLAN.md](RELEASE_PLAN.md). Two questions that turned out to be the same question: *can the app set itself up, so that connecting it to things is not a job for someone who reads code?*
 
-Written August 2026, against 0.10.1. **Part 1 was built as 0.11.0** — the route index, the honest health check, the persisted bind outcome and the drift test all landed, and the ten routes became 105. What remains open here is the API tool (0.11.1) and connectors (0.11.2).
+Written August 2026, against 0.10.1. **Part 1 was built as 0.11.0** — the route index, the honest health check, the persisted bind outcome and the drift test all landed, and the ten routes became 105.
+
+**The API tool landed too**, as `app_read` / `app_control`. It went one step further than the design below asked for: rather than attaching the token in Rust, it serves the request through the same `axum` router in-process, so there is no socket, no port, and no token *anywhere* in the path — and the tool works whether or not the user has switched the HTTP server on, which is the common case for someone who has never wanted remote access. The write side of the API also learned to tell an open window what it changed, so a preference or a zone changed by a model or a script is visible in the app immediately instead of at the next restart. What remains open here is connectors (0.11.2).
 
 ---
 

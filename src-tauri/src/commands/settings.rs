@@ -4,7 +4,7 @@ use serde::Serialize;
 use sqlx::SqlitePool;
 use std::collections::HashMap;
 use std::path::Path;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 
 /// Settings keys mirrored to the installer-safe backup file. These are the
 /// user-facing preferences (not seeding flags or transient state) that must
@@ -82,8 +82,18 @@ pub async fn get_setting(
     Ok(row.map(|(v,)| v))
 }
 
+/// Write one settings row.
+///
+/// `app` is here for the emit: a settings row is not only the window's own
+/// state any more. The API and the `app_control` tool write these rows too, and
+/// a theme the user asked a model to change has to actually change — otherwise
+/// the write lands in the database and the open window keeps rendering the old
+/// value until it is restarted, and then overwrites it on the next preference
+/// the user touches. The window reloads the key it is told about; a write the
+/// window itself made re-reads the value it just wrote, so there is no loop.
 #[tauri::command]
 pub async fn set_setting(
+    app: AppHandle,
     state: State<'_, AppState>,
     key: String,
     value: String,
@@ -112,7 +122,55 @@ pub async fn set_setting(
             tracing::warn!("settings backup failed: {e}");
         }
     }
+    let _ = app.emit("settings-updated", serde_json::json!({ "key": key }));
     Ok(())
+}
+
+/// Merge a JSON object into a settings row that already holds one, and return
+/// the merged value.
+///
+/// Every user-facing preference lives in one of three JSON blobs (`theme`,
+/// `app_settings`, and the per-key scalars), so "switch to dark mode" through
+/// [`set_setting`] means read the blob, parse it, change one field, and write
+/// the whole thing back — three round trips in which a preference the user
+/// changes in the window is silently reverted by the stale copy the caller
+/// started from. A merge is one call and only claims the keys it names.
+///
+/// Top-level merge only: a named key replaces its old value outright rather
+/// than being merged into recursively. Deep-merging would make it impossible to
+/// *remove* anything from a nested map (`colorsDark`, `visionOverrides`), and
+/// "set this sub-map to exactly this" is the commoner intent.
+pub async fn patch_setting(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    key: String,
+    patch: serde_json::Map<String, serde_json::Value>,
+) -> AppResult<serde_json::Value> {
+    let existing: Option<(String,)> = sqlx::query_as("SELECT value FROM settings WHERE key = ?1")
+        .bind(&key)
+        .fetch_optional(&state.db)
+        .await?;
+
+    // An absent row starts from `{}` — the app's own defaults are applied on
+    // read by whoever owns the blob, and inventing them here would be a second
+    // copy of them.
+    let mut merged = match existing.as_ref().map(|(v,)| serde_json::from_str(v)) {
+        Some(Ok(serde_json::Value::Object(map))) => map,
+        None => serde_json::Map::new(),
+        Some(_) => {
+            return Err(crate::error::AppError::Invalid(format!(
+                "settings row '{key}' does not hold a JSON object, so it cannot be merged into; \
+                 write it whole instead"
+            )))
+        }
+    };
+    for (k, v) in patch {
+        merged.insert(k, v);
+    }
+
+    let value = serde_json::Value::Object(merged);
+    set_setting(app, state, key, value.to_string()).await?;
+    Ok(value)
 }
 
 #[derive(Debug, Serialize)]

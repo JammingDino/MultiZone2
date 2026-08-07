@@ -107,6 +107,37 @@ export function Sidebar() {
   }, [refreshProviders, refreshZones, refreshChats, refreshProjects, refreshTags,
       refreshSkills, loadThemeFromBackend, loadDefaultZone, loadAppSettings]);
 
+  // A preference can now be changed from outside this window — over the HTTP
+  // API, or by a model calling `app_control`. Re-read the key that changed so
+  // "switch to dark mode" is a thing that happens rather than a row in the
+  // database the window learns about on its next restart.
+  useEffect(() => {
+    const unlisten = api.onSettingsUpdated(({ key }) => {
+      if (api.isOwnSettingsEcho(key)) return;
+      if (key === "theme") loadThemeFromBackend();
+      else if (key === "app_settings") loadAppSettings();
+      else if (key === "default_zone_id") loadDefaultZone();
+    });
+    return () => { unlisten.then((fn) => fn()); };
+  }, [loadThemeFromBackend, loadAppSettings, loadDefaultZone]);
+
+  // Same idea, one level up: any write through the API or `app_control` says
+  // which route made it, and the lists that route could have changed re-fetch.
+  // Settings rows are handled above, by key.
+  useEffect(() => {
+    const unlisten = api.onAppDataChanged(({ path }) => {
+      if (path.startsWith("/api/zones") || path.startsWith("/api/zone-library")) refreshZones();
+      else if (path.startsWith("/api/providers")) refreshProviders();
+      else if (path.startsWith("/api/projects")) refreshProjects();
+      else if (path.startsWith("/api/tags")) refreshTags();
+      else if (path.startsWith("/api/skills")) refreshSkills();
+      // A chat route can move a chat between projects or retag it, so the chat
+      // list and its tag links both have to come back.
+      else if (path.startsWith("/api/chats")) { refreshChats(); refreshTags(); }
+    });
+    return () => { unlisten.then((fn) => fn()); };
+  }, [refreshZones, refreshProviders, refreshProjects, refreshTags, refreshSkills, refreshChats]);
+
   async function onNewChat(projectId?: string) {
     triggerNewChat(projectId ?? null);
     await setActiveChat(null);
@@ -251,36 +282,39 @@ export function Sidebar() {
 
       {/* Tag filter bar */}
       {tags.length > 0 && (
-        <div className="mx-2 mb-1 flex flex-wrap items-center gap-1">
+        <div className="mx-2 mb-1 flex items-center gap-1">
           <TagIcon size={11} className="mr-0.5 shrink-0 text-[var(--color-text-muted)]" />
-          {tags.map((t) => {
-            const active = tagFilter.has(t.id);
-            return (
-              <button
-                key={t.id}
-                onClick={() => toggleTagFilter(t.id)}
-                className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition ${
-                  active ? "text-white" : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-                }`}
-                style={
-                  active
-                    ? { background: t.color ?? "var(--color-accent)", borderColor: "transparent" }
-                    : { borderColor: t.color ?? "var(--color-border)" }
-                }
-                title={active ? `Filtering by “${t.name}”` : `Filter by “${t.name}”`}
-              >
-                <span
-                  className="h-1.5 w-1.5 rounded-full"
-                  style={{ background: active ? "white" : t.color ?? "var(--color-text-muted)" }}
-                />
-                {t.name}
-              </button>
-            );
-          })}
+          {/* One scrolling strip so a long tag list never grows the sidebar header. */}
+          <div className="hide-scrollbar flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+            {tags.map((t) => {
+              const active = tagFilter.has(t.id);
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => toggleTagFilter(t.id)}
+                  className={`flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] transition ${
+                    active ? "text-white" : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                  }`}
+                  style={
+                    active
+                      ? { background: t.color ?? "var(--color-accent)", borderColor: "transparent" }
+                      : { borderColor: t.color ?? "var(--color-border)" }
+                  }
+                  title={active ? `Filtering by “${t.name}”` : `Filter by “${t.name}”`}
+                >
+                  <span
+                    className="h-1.5 w-1.5 rounded-full"
+                    style={{ background: active ? "white" : t.color ?? "var(--color-text-muted)" }}
+                  />
+                  {t.name}
+                </button>
+              );
+            })}
+          </div>
           {filtering && (
             <button
               onClick={() => setTagFilter(new Set())}
-              className="flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+              className="flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
               title="Clear tag filter"
             >
               <X size={10} /> clear

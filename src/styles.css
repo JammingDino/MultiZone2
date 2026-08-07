@@ -64,6 +64,16 @@ body {
   background: var(--color-text-muted);
 }
 
+/* Horizontal strips (tag bars, chip rows) that scroll without a visible bar. */
+.hide-scrollbar {
+  scrollbar-width: none;
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  height: 0;
+  width: 0;
+}
+
 button {
   cursor: pointer;
   font-family: inherit;

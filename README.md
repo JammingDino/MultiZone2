@@ -162,6 +162,7 @@ The most-used handful:
 | `POST` | `/api/chats/:id/approval` | Answer a pending tool approval. Body: `{ "approved", "zoneId"?, "hunks"? }`. |
 | `GET`/`POST`/`DELETE` | `/api/chats/:id/perspectives` | List/add/remove perspective zones. Body for add/remove: `{ "zoneId" }`. |
 | `GET` | `/api/zones` · `/api/projects` · `/api/tags` | List each. `POST` to create or update; `DELETE /:id` to remove. |
+| `PATCH` | `/api/settings/:key` | Merge fields into a JSON settings row — `PATCH /api/settings/theme -d '{"mode":"dark"}'` switches to dark mode without re-sending every other appearance setting. `PUT` still writes a row whole. |
 
 Sending a message accepts either `{ "text": "..." }` or `{ "parts": [...] }` (the same content parts the GUI uses). By default the response is a [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events) stream of the same events the GUI receives (tokens, tool calls, etc.). Append `?wait=true` to instead block until the turn finishes and return the final messages as JSON.
 
@@ -185,7 +186,20 @@ curl -X POST "http://127.0.0.1:8765/api/chats/<chat-id>/messages?wait=true" \
   -d '{"text":"Hello"}'
 ```
 
-API-driven activity also updates any matching chat open in the app live.
+API-driven activity also updates any matching chat open in the app live — and so does everything else it writes. A zone created over the API appears in the sidebar, and a theme changed over it is the theme you are looking at, without a restart.
+
+### Letting the assistant drive the app
+
+The **Change MultiZone itself** tool group (`app_control`, 0.11.0) gives the model the same surface:
+
+| Tool | What it does |
+|------|--------------|
+| `app_read` | `GET` any API path. Start with `/api/routes` — that is the model's catalog of what it can do. |
+| `app_control` | `POST` / `PUT` / `PATCH` / `DELETE` any API path. Every call goes through an approval prompt. |
+
+Both serve the request through the same router the socket does, in-process — so the tool needs no port, works whether or not the HTTP API is switched on, and cannot reach anything the API cannot. "Switch to dark mode", "make me a zone for code review", "file this chat under the Rewrite project" are then things the assistant does rather than describes.
+
+Two routes are refused from inside a turn: sending or regenerating a message (a turn calling itself — that is what the `subchat` tool is for, under your supervision), and answering a tool approval (the model granting itself permission). The group is classed dangerous, so it never lands in a default toolset.
 
 ## Contributing
 

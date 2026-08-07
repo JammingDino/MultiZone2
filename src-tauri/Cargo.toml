@@ -28,6 +28,10 @@ futures-util = "0.3"
 
 axum = "0.7"
 tower-http = { version = "0.6", features = ["cors"] }
+# `ServiceExt::oneshot`, so the `app_control` tool can serve a request through
+# the same axum router the socket does instead of re-implementing the surface.
+# Already in the tree under axum; this only makes it a direct dependency.
+tower = { version = "0.5", features = ["util"] }
 
 reqwest = { version = "0.12", features = ["json", "stream", "multipart", "rustls-tls"], default-features = false }
 eventsource-stream = "0.2"

@@ -145,6 +145,10 @@ Worth noting this is a differentiator, not just a saving: no competitor in this 
 
 **Whole-file writes vs. an edit engine (Cursor, Antigravity).** They apply diff hunks validated against the file as it currently is; we rewrite a whole file from whatever the model remembers of it. Structural, and correctly scoped with the code interface in the post-1.0 backlog rather than pulled forward on its own.
 
+**Hosted connectors (everyone).** Our MCP support speaks stdio and HTTP/SSE, but the HTTP transport sends no `Authorization` header and `McpServer` has nowhere to hold one — so every *remote* MCP server, which is where the ecosystem has moved, is unreachable. Atomic Chat ships Gmail/Slack/Telegram/Figma; Open WebUI and Askimo both take hosted servers. The stdio path already works for the same services, which makes this a one-column gap with a whole-ecosystem consequence rather than a missing capability. Scheduled **0.12.2**; signed-in OAuth connectors **1.2.x**. See [CONNECTIVITY.md](CONNECTIVITY.md).
+
+**A connector catalog (Atomic Chat, Open WebUI, Msty).** Competitors ship a browsable list of ready-made connections; ours is a settings panel that asks for a command line. The zone library already solves exactly this problem for zones, so the machinery exists. Scheduled **0.12.2**.
+
 **Cost analytics (AIRouter).** Per-provider monthly cost, token volume, routing decisions. We have the data; the presentation is thinner. Natural home for the cache-hit metric above.
 
 **Mobile (Chatbox, Msty).** No client. Out of scope for a Tauri desktop app in the near term, but the local HTTP API makes a thin remote client plausible later.

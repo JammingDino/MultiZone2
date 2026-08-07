@@ -696,6 +696,35 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## 0.12.x — The app sets itself up
+
+*Two problems that turn out to be one. The local HTTP API is the 0.5.x app — ten routes written alongside subchats, with nothing added since, so skills, memory, MCP, knowledge, checkpoints, terminals, usage and settings are all invisible to it; and nothing about it is discoverable, so "is it even running" is a question neither a script nor a model can answer. Meanwhile MCP servers and connectors are configured by hand in a settings panel that assumes you know what a stdio transport is. A zone that can read the app's own configuration, check what is reachable, and say why something is not, is a setup wizard that happens to be a conversation — which is what non-technical users are actually missing. Full write-up in [CONNECTIVITY.md](CONNECTIVITY.md).*
+
+### 0.12.0 — The API tells the truth about itself
+
+- [ ] `GET /api/routes` — method, path and one-line description for every route, generated from the router rather than hand-written, so the README table and the API cannot disagree
+- [ ] `/api/health` answers the questions a caller actually has, separately: enabled in settings · socket bound · answering · token present · token accepted · app version and route-set version. Today it returns `{status:"ok"}`, which proves a socket and nothing else — and only when you didn't need to ask
+- [ ] The bind outcome is persisted, not just shown once in Settings. A port already in use currently leaves the toggle reading "on" with no server behind it
+- [ ] Drift test: every Tauri command has either a route or an explicit "GUI-only" exemption, so the next omission fails the build instead of being found six releases later. **This is the item that keeps the rest of the release from rotting the same way**
+- [ ] Fill the gaps the drift test finds — skills, memory, MCP, knowledge, subchats, checkpoints, terminals, usage, settings, and zones/providers as writes so a script can provision the app rather than only drive it
+
+### 0.12.1 — A tool for the app's own API
+
+- [ ] `app_api` tool: the model names a route and a body; the tool makes the call in Rust and attaches the token itself
+- [ ] **The token is never returned to the model.** The obvious design — a tool that hands over port and token so the model can `http_request` its way around — puts a live bearer credential into the context, one prompt injection away from leaving the machine, in an app whose whole premise is that nothing leaves unless the user sends it. Proxying costs one indirection and removes the whole class
+- [ ] Self-diagnosis: asked why the API is unreachable, the tool reports which of the health checks is false, not a generic failure
+- [ ] Writes go through the same approval pipeline as any dangerous tool; reads are safe-level
+
+### 0.12.2 — Connectors without a config file
+
+- [ ] Connector catalog: curated MCP server entries — command, args, required environment variables, and a link to where each credential comes from — installable in one action. The zone library pattern applied to `McpServer` rows; no protocol work at all
+- [ ] Catalog entries are JSON files on disk and importable from a URL, so the set is community-extensible rather than something we alone curate
+- [ ] `headers` on `McpServer`, applied in `HttpConn::send`. The HTTP/SSE transport currently sends `Content-Type`, `Accept` and `Mcp-Session-Id` and has nowhere to put an `Authorization` header, which makes **every** hosted remote MCP server unreachable — a one-column gap with a whole-ecosystem consequence
+- [ ] Connection diagnosis worth reading: "`npx` ran, the server exited, `GOOGLE_CREDENTIALS_PATH` is not set" rather than "failed to connect"
+- [ ] The model may propose and diagnose a connector; the user approves the write. Silently adding an MCP server that launches a process is precisely what an injected prompt would ask for
+
+---
+
 ## 1.0.0 — Hardening & Public Release
 
 - [ ] Performance: measure and optimize startup time, first message render, large chat (500+ messages) scroll — fixed the main structural cause of wasted re-renders: `Sidebar`/`ChatPanel`/`MessageThread`/`ChatList`/`ZoneEditor`/`ProjectsPanel`/`SettingsModal` subscribed to the whole zustand store unfiltered, so *any* state change anywhere re-rendered all of them; converted to shallow/per-field selectors, and `UserMessage`/`BotTurnView` are now memoized (with a custom comparator for `BotTurnView` since `groupMessages` rebuilds turn objects each call) so a streaming token only re-renders the turn actually generating, not the whole history. Still open: no virtualization for very long (500+) message lists, and no measured before/after startup or first-paint numbers.
@@ -728,6 +757,18 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [ ] Interactive tables: sort, filter, and copy from a rendered markdown table without leaving the chat
 - [ ] Inline results are addressable — a chart or table can be referenced by a later turn rather than re-derived
 - [ ] Audit what the existing renderers (Mermaid, mathplot, HTML report) cost during streaming, now that block-level parsing (0.9.16) has changed when they re-render
+
+---
+
+## 1.2.x — Signed-in connectors
+
+*The "Connect Google" button, and the same again per provider. Deliberately after 1.0: 0.12.2's catalog and static-token headers already get a non-technical user most of the way — "Gmail: paste the token from here" is a different experience from "configure a stdio MCP server" and needs no OAuth at all. This release is what makes it one click, and it is mostly not MCP work.*
+
+- [ ] OAuth client with a loopback redirect listener, token exchange and refresh
+- [ ] Refresh tokens in the OS keychain rather than SQLite — a long-lived credential for someone's mailbox is not app data
+- [ ] Per-scope consent UI: the user grants Calendar without granting Gmail, and can see and revoke what was granted
+- [ ] Google first (Gmail, Calendar, Drive, Maps), then the pattern generalised
+- [ ] **Sizing note, so this isn't picked up lightly:** Google requires a Cloud project and a *verified* consent screen for restricted scopes like Gmail. That verification is a review process measured in weeks, not a sprint, and it applies to us as the OAuth client — which is a distribution question for a local-first app, not only an engineering one. See [CONNECTIVITY.md](CONNECTIVITY.md#the-three-routes-to-google-honestly-sized)
 
 ---
 

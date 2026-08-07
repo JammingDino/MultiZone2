@@ -34,8 +34,10 @@ Semantic versioning. Each release is tagged `vMAJOR.MINOR.PATCH`.
 | **0.9.x** | Tool Improvements — naming clarity, file management, self-authored skills, reliability pass | In progress |
 | **0.10.x** | Reversible work — checkpoints, undo, review before apply | Planned |
 | **0.11.x** | Planning & task control — plan mode, live task state, replay | Planned |
+| **0.12.x** | The app sets itself up — API refresh, an API tool, connector catalog | Planned |
 | **1.0.0** | Hardening & Public Release | Planned |
 | **1.1.x** | In-chat rendering — charts from data, richer artifacts | Planned |
+| **1.2.x** | Signed-in connectors — OAuth, keychain, per-scope consent | Planned |
 | **Post-1.0** | Code interface + edit engine, Diffusion LLM, Mobile | Backlog |
 
 ---
@@ -138,11 +140,19 @@ The `plan` tool gives a model a checklist. What it does not give the user is a s
 
 ---
 
+### 0.12.x — The app sets itself up
+
+Two problems that turn out to be one. The local HTTP API is still the 0.5.x app: ten routes written alongside subchats, with nothing added since, so skills, memory, MCP, knowledge, checkpoints, terminals, usage and settings are all invisible to it — and nothing about it is discoverable, so "is it even running on the right port" is a question neither a script nor a model can answer. Meanwhile connectors are configured by hand in a panel that assumes the reader knows what a stdio transport is. The API learns to describe itself (a generated route index, a health check that separates *enabled* from *bound* from *answering* from *authorised*, and a drift test that fails the build when a new command ships without a route). A zone gets a tool that calls that API on the user's behalf — proxying the request in Rust rather than handing the model a bearer token, because a live credential in the context is one prompt injection away from leaving a machine it was never supposed to leave. And connectors get a catalog: curated MCP entries with their command, their environment and a link to where the credential comes from, installable in one action, plus the missing `Authorization` header that today makes every hosted remote MCP server unreachable. Together these are a setup wizard that happens to be a conversation, which is the thing non-technical users are missing — not another settings panel. Detail in [CONNECTIVITY.md](CONNECTIVITY.md).
+
+**Done when:** someone who has never opened a terminal can connect a service by talking to a zone; a model asked why the API is unreachable names which check failed rather than shrugging; and adding a Tauri command without a route fails CI.
+
+---
+
 ### 1.0.0 — Hardening & Public Release
 
 Performance audit (startup time, large chat scroll, streaming), installer polish, auto-updater integration, cross-platform smoke tests (Windows, macOS, Linux), and a REQUIREMENTS.md written for onboarding contributors. No new features — this is a quality and release-infrastructure milestone.
 
-**Done when:** a new user can install, run, and use the app end to end without opening a terminal; all 0.1.x–0.11.x test checklists pass; no P0/P1 issues are open.
+**Done when:** a new user can install, run, and use the app end to end without opening a terminal; all 0.1.x–0.12.x test checklists pass; no P0/P1 issues are open.
 
 ---
 
@@ -151,6 +161,14 @@ Performance audit (startup time, large chat scroll, streaming), installer polish
 `render_graph` draws diagrams and plots functions. It cannot draw *data* — the case where a model has numbers and wants to show them — so models fall back to Mermaid approximations or hand-written SVG, and the app looks thinner in chat than tools with a fraction of its capability. A charting renderer takes a data spec rather than a diagram source, themed from the active app theme so it reads correctly in light and dark and never distinguishes series by colour alone. Tables the model has already produced offer to become charts, because the common case is that the numbers exist and only the presentation is missing. Charts survive export rather than degrading to a placeholder.
 
 **Done when:** a model that has numbers can show them, in any of the ordinary chart types, without writing markup by hand — and the result is still there in the exported PDF.
+
+---
+
+### 1.2.x — Signed-in connectors
+
+The "Connect Google" button, and the same again per provider: an OAuth client with a loopback redirect, refresh tokens in the OS keychain rather than SQLite — a long-lived credential for someone's mailbox is not app data — and per-scope consent so Calendar can be granted without Gmail. Deliberately after 1.0, because 0.12.x's catalog and static-token headers already carry a non-technical user most of the way: "Gmail — paste the token from here" is a different experience from "configure a stdio MCP server" and needs no OAuth. What this release adds is the single click. It is also mostly not MCP work, and Google's verified-consent review for restricted scopes is a process measured in weeks that applies to us as the OAuth client — a distribution question for a local-first app, not only an engineering one.
+
+**Done when:** a user can connect Gmail, Calendar and Drive from a button, see exactly which scopes were granted, and revoke them — with no credential ever stored in the database or shown to a model.
 
 ---
 

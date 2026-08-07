@@ -56,7 +56,7 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ---
 
-### 0.1.9 — Perspective mode polish (current — release)
+### 0.1.9 — Perspective mode polish
 
 - [x] Perspective zones can use tools (tool calls execute the same way as for the primary zone) — primary and perspectives now run the same shared agentic loop
 - [x] Perspective zone responses render with identical styling to primary zone responses; zone avatar and accent color are the only visual differentiator — shared `TurnBody` block renderer
@@ -203,7 +203,7 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [x] OCR language hint setting in Settings (`ocrLanguage`, default `eng`) — plumbed to the OCR call (note: bundled `ocrs` models are English/Latin-centric, so the hint has limited effect until language-specific models are added)
 - [~] *Limitations:* OCR fallback applies on the single-zone history path; multi-model/perspective chats are not yet OCR'd. Message-header (post-send) OCR indicator deferred — the input-bar indicator covers the pre-send case.
 
-### 0.4.1 — Inline citations (current — release)
+### 0.4.1 — Inline citations
 
 *Citations are derived per bot turn: web_search results (numbered with a `ref` + source URL in the tool output) plus the round's file attachments are collected into one ordered, de-duplicated list (`lib/citations.ts`). A remark plugin (`lib/remarkCitations.ts`) rewrites inline `[n]` markers in the answer into clickable superscript links (web) or styled markers (file); a collapsible "Sources" list (`CitationSources`) renders the full list at the foot of the message, numbered to match. The same path serves the primary and every perspective card.*
 
@@ -644,7 +644,7 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [ ] Retention policy with a size ceiling, surfaced in Settings → Data alongside the other storage categories
 - [x] What cannot be captured is named rather than glossed: a directory, a file over the 32 MB ceiling, or an unreadable path is recorded with the reason and reported by the restore instead of silently succeeding
 
-### 0.10.1 — Undo in the transcript
+### 0.10.1 — Undo in the transcript (current — release)
 
 *The restore engine landed with 0.10.0 (`restore()`, with per-path selection, conflict detection and an undo-of-the-undo checkpoint, all unit-tested). What remains is the Tauri commands and the UI.*
 

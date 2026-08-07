@@ -23,7 +23,7 @@ pub struct AppState {
     /// Running HTTP API server, if enabled. Replaced on settings change.
     pub api_server: Mutex<Option<crate::api::ApiHandle>>,
     /// Pending tool-approval gates: chatId → oneshot sender for the approval answer.
-    pub tool_approvals: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>>,
+    pub tool_approvals: Arc<Mutex<HashMap<String, oneshot::Sender<crate::commands::messages::ApprovalAnswer>>>>,
     /// Live dictation sessions (0.8.0): sessionId → capture handle, from
     /// `start_dictation` until `stop_dictation`/`cancel_dictation` removes it.
     pub voice_sessions: Arc<Mutex<HashMap<String, crate::audio::CaptureHandle>>>,

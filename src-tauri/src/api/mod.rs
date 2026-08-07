@@ -47,7 +47,7 @@ struct ApiState {
     db: SqlitePool,
     http: reqwest::Client,
     active_streams: Arc<RwLock<HashMap<String, Arc<AtomicBool>>>>,
-    tool_approvals: Arc<tokio::sync::Mutex<HashMap<String, oneshot::Sender<bool>>>>,
+    tool_approvals: Arc<tokio::sync::Mutex<HashMap<String, oneshot::Sender<crate::commands::messages::ApprovalAnswer>>>>,
     app: AppHandle,
     token: String,
 }
@@ -85,7 +85,7 @@ pub async fn start(
     db: SqlitePool,
     http: reqwest::Client,
     active_streams: Arc<RwLock<HashMap<String, Arc<AtomicBool>>>>,
-    tool_approvals: Arc<tokio::sync::Mutex<HashMap<String, oneshot::Sender<bool>>>>,
+    tool_approvals: Arc<tokio::sync::Mutex<HashMap<String, oneshot::Sender<crate::commands::messages::ApprovalAnswer>>>>,
     port: u16,
     token: String,
 ) -> crate::error::AppResult<ApiHandle> {

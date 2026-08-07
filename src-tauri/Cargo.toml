@@ -107,6 +107,7 @@ wreq = "5.3.0"
 wreq-util = "2.2.6"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+similar = { version = "3.1.2", default-features = false, features = ["text"] }
 
 [dev-dependencies]
 # Checkpoint tests write real files and restore them — the behaviour under test

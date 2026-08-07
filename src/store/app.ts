@@ -182,6 +182,12 @@ export interface PendingApproval {
   index: number;
   name: string;
   arguments: string;
+  /**
+   * The change a file-writing tool proposes, as a diff (0.10.2) — so approval
+   * is an informed act rather than a judgement on a wall of proposed content.
+   * Null for every other tool, and for a proposal with nothing to show.
+   */
+  diff: import("@/lib/types").FileDiff | null;
   /** Perspective zone awaiting approval; undefined = the primary turn. */
   zoneId?: string;
 }
@@ -361,7 +367,16 @@ interface AppStore {
   /** Re-title a chat. `wholeConversation` (a user-forced regenerate) titles the
    *  chat as it now stands rather than from its opening message alone. */
   regenerateTitle: (chatId: string, wholeConversation?: boolean) => Promise<void>;
-  respondApproval: (chatId: string, zoneId: string | undefined, approved: boolean) => Promise<void>;
+  /**
+   * `hunks` approves only part of a previewed file change (0.10.2): the call
+   * still runs, against exactly the content the user agreed to.
+   */
+  respondApproval: (
+    chatId: string,
+    zoneId: string | undefined,
+    approved: boolean,
+    hunks?: number[],
+  ) => Promise<void>;
 
   openSettings: () => void;
   closeSettings: () => void;
@@ -855,7 +870,7 @@ export const useApp = create<AppStore>((set, get) => ({
           case "tool_approval_required":
             pendingApprovalByChat[chatId] = [
               ...dropApproval(pendingApprovalByChat[chatId], perspectiveZoneId),
-              { index: event.index, name: event.name, arguments: event.arguments, zoneId: perspectiveZoneId },
+              { index: event.index, name: event.name, arguments: event.arguments, diff: event.diff, zoneId: perspectiveZoneId },
             ];
             break;
           case "tool_call_executing":
@@ -1025,7 +1040,7 @@ export const useApp = create<AppStore>((set, get) => ({
         case "tool_approval_required":
           pendingApprovalByChat[chatId] = [
             ...dropApproval(pendingApprovalByChat[chatId], undefined),
-            { index: event.index, name: event.name, arguments: event.arguments },
+            { index: event.index, name: event.name, arguments: event.arguments, diff: event.diff },
           ];
           break;
 
@@ -1224,14 +1239,14 @@ export const useApp = create<AppStore>((set, get) => ({
       });
     }
   },
-  async respondApproval(chatId, zoneId, approved) {
+  async respondApproval(chatId, zoneId, approved, hunks) {
     set((s) => ({
       pendingApprovalByChat: {
         ...s.pendingApprovalByChat,
         [chatId]: dropApproval(s.pendingApprovalByChat[chatId], zoneId),
       },
     }));
-    await api.respondToolApproval(chatId, zoneId ?? null, approved);
+    await api.respondToolApproval(chatId, zoneId ?? null, approved, hunks);
   },
   async setTheme(partial) {
     const next = { ...get().theme, ...partial };

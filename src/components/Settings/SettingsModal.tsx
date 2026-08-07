@@ -762,6 +762,22 @@ function ChatTab() {
       </section>
 
       <section>
+        <h3 className="mb-1 text-sm font-medium">Review file edits before they land</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          Queue every file a zone writes instead of writing it, and read the batch as a diff before
+          applying it — whole, file by file, or hunk by hunk. The model carries on as if the change
+          had landed (reading the file gives it back its own queued version), so a long task still
+          works; nothing reaches disk until you say so.
+        </p>
+        <ToggleRow
+          label="Stage file edits for review"
+          description="Applies to create and edit calls in every chat. Approval prompts and checkpoints keep working as they do now."
+          checked={appSettings.reviewQueue}
+          onChange={(v) => setAppSettings({ reviewQueue: v })}
+        />
+      </section>
+
+      <section>
         <h3 className="mb-3 text-sm font-medium">PDF attachments</h3>
         <OptionCards
           value={appSettings.pdfMode}

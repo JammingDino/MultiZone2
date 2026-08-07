@@ -402,7 +402,7 @@ export type StreamEvent =
   | { type: "tool_call_args_delta"; index: number; delta: string }
   | { type: "routing_started" }
   | { type: "routing_done"; zoneId: string; zoneName: string }
-  | { type: "tool_approval_required"; index: number; name: string; arguments: string }
+  | { type: "tool_approval_required"; index: number; name: string; arguments: string; diff: FileDiff | null }
   | { type: "tool_call_executing"; index: number; name: string }
   | { type: "tool_call_result"; index: number; name: string; result: string }
   | { type: "tool_message_saved"; message: Message }
@@ -711,6 +711,14 @@ export interface AppSettings {
    * always revertible.
    */
   checkpointRetentionDays: number;
+  /**
+   * Review before apply (0.10.2). When on, a zone's `create_file` / `edit_file`
+   * writes stage in a review queue instead of landing, and the user applies the
+   * batch after reading it. Reads are served the staged version, so an agent
+   * editing one file repeatedly works against its own last version rather than
+   * silently against the stale disk.
+   */
+  reviewQueue: boolean;
   /** Size ceiling for the checkpoint store, in MB. 0 = no ceiling. */
   checkpointMaxMb: number;
   /**
@@ -829,6 +837,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   markdownMirrorEnabled: false,
   markdownMirrorDir: "",
   checkpointRetentionDays: 30,
+  reviewQueue: false,
   checkpointMaxMb: 512,
   visionOverrides: {},
   onboardingSkipped: false,
@@ -931,6 +940,65 @@ export interface RestoredFile {
   displayPath: string;
   /** `restored` · `deleted` · `unchanged` · `conflict` · `skipped`. */
   outcome: string;
+  detail: string | null;
+}
+
+// ─── Review before apply (0.10.2) ────────────────────────────────────────────
+
+/** One line of a diff. */
+export interface DiffLine {
+  kind: "context" | "add" | "remove";
+  /** 1-based old-side line number; absent for an addition. */
+  oldLine: number | null;
+  /** 1-based new-side line number; absent for a removal. */
+  newLine: number | null;
+  text: string;
+}
+
+/** A run of changes plus its context — what a reviewer takes or leaves whole. */
+export interface Hunk {
+  index: number;
+  oldStart: number;
+  oldLen: number;
+  newStart: number;
+  newLen: number;
+  added: number;
+  removed: number;
+  lines: DiffLine[];
+}
+
+/** A proposed change to one path, as the approval prompt shows it. */
+export interface FileDiff {
+  path: string;
+  displayPath: string;
+  change: "create" | "modify" | "delete" | "rename";
+  hunks: Hunk[];
+  added: number;
+  removed: number;
+  /** Why there is no diff: binary, too large, or nothing changed. */
+  note: string | null;
+}
+
+/** A change queued by review mode, waiting for the user to apply or discard. */
+export interface StagedEdit {
+  id: string;
+  chatId: string;
+  zoneId: string | null;
+  path: string;
+  displayPath: string;
+  /** The tool that proposed it: `create_file` or `edit_file`. */
+  tool: string;
+  createdAt: number;
+  /** The file changed on disk after this was queued — applying discards that. */
+  diverged: boolean;
+  diff: FileDiff;
+}
+
+/** What applying a queued change did. */
+export interface ApplyOutcome {
+  id: string;
+  displayPath: string;
+  outcome: "applied" | "conflict" | "failed";
   detail: string | null;
 }
 

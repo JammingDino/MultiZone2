@@ -2,10 +2,12 @@ mod api;
 mod audio;
 mod checkpoints;
 mod db;
+mod diffs;
 mod knowledge;
 mod llm;
 mod mcp;
 mod ocr;
+mod review;
 mod pdf_bridge;
 mod skillpacks;
 mod tools;
@@ -255,6 +257,11 @@ pub fn run() {
             commands::checkpoints::restore_checkpoint,
             commands::checkpoints::checkpoints_since_message,
             commands::checkpoints::restore_to_message,
+            commands::review::list_staged_edits,
+            commands::review::apply_staged_edit,
+            commands::review::discard_staged_edit,
+            commands::review::apply_all_staged_edits,
+            commands::review::discard_all_staged_edits,
             commands::checkpoints::checkpoint_usage,
             commands::checkpoints::prune_checkpoints,
             commands::usage::session_context_usage,

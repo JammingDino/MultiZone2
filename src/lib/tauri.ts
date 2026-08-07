@@ -8,8 +8,10 @@ import type {
   ChatTagLink,
   ChatZone,
   LibraryEntry,
+  ApplyOutcome,
   Checkpoint,
   CheckpointUsage,
+  StagedEdit,
   PruneOutcome,
   RestoreReport,
   DbStats,
@@ -379,11 +381,36 @@ export const queueChatMessage = (
 /** Drop a queued message that hasn't reached the model yet. */
 export const cancelPendingMessage = (chatId: string, id: string) =>
   invoke<boolean>("cancel_pending_message", { chatId, id });
+/**
+ * `hunks` (0.10.2) approves only part of a previewed file change: the call still
+ * runs, with its arguments rewritten to exactly the content the user agreed to.
+ */
 export const respondToolApproval = (
   chatId: string,
   zoneId: string | null,
   approved: boolean,
-) => invoke<void>("respond_tool_approval", { chatId, zoneId, approved });
+  hunks?: number[],
+) => invoke<void>("respond_tool_approval", { chatId, zoneId, approved, hunks: hunks ?? null });
+
+// ─── Review queue (0.10.2) ───────────────────────────────────────────────────
+
+/** Every change queued in this chat, each diffed against the disk right now. */
+export const listStagedEdits = (chatId: string) =>
+  invoke<StagedEdit[]>("list_staged_edits", { chatId });
+
+/** Write one queued change to disk; `hunks` applies only part of it. */
+export const applyStagedEdit = (id: string, hunks?: number[], force?: boolean) =>
+  invoke<ApplyOutcome>("apply_staged_edit", { id, hunks: hunks ?? null, force: force ?? false });
+
+export const discardStagedEdit = (id: string) =>
+  invoke<void>("discard_staged_edit", { id });
+
+/** Apply the whole batch, in the order the changes were proposed. */
+export const applyAllStagedEdits = (chatId: string, force?: boolean) =>
+  invoke<ApplyOutcome[]>("apply_all_staged_edits", { chatId, force: force ?? false });
+
+export const discardAllStagedEdits = (chatId: string) =>
+  invoke<void>("discard_all_staged_edits", { chatId });
 
 // PDF reads for the `read_file` tool (1.0). Rasterizing is PDF.js's job, so the
 // backend asks the window to do it and waits for `resolve_pdf_read`.

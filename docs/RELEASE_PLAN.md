@@ -641,12 +641,12 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [x] The restore records what the tool *left behind* as well as what it found, so it can tell "the agent wrote this" from "somebody edited it afterwards"
 - [x] Best-effort in both directions — a checkpoint that cannot be taken is logged and the tool still runs, because refusing to edit a file because we could not back it up is a worse failure than the one it guards against
 - [x] Works for sub-agent and perspective turns too — checkpoints key on chat + turn + participant zone, so each zone in a teamwork run has its own revertible unit
-- [ ] Retention policy with a size ceiling, surfaced in Settings → Data alongside the other storage categories
+- [x] Retention policy with a size ceiling, surfaced in Settings → Data alongside the other storage categories — 512 MB / 30 days by default (`0` on either = no limit), applied at startup and after any turn that took a checkpoint, plus an "Apply limits now" button beside a turns-kept / files / bytes-on-disk readout. **The newest checkpoint is never pruned** whatever the limits say — a ceiling of one byte should mean "keep almost nothing", not "the turn that just ran is already irreversible" — and blob collection is reference-counted, so content shared between checkpoints outlives the pruning of one referrer
 - [x] What cannot be captured is named rather than glossed: a directory, a file over the 32 MB ceiling, or an unreadable path is recorded with the reason and reported by the restore instead of silently succeeding
 
-### 0.10.1 — Undo in the transcript (current — release)
+### 0.10.1 — Undo in the transcript
 
-*The restore engine landed with 0.10.0 (`restore()`, with per-path selection, conflict detection and an undo-of-the-undo checkpoint, all unit-tested). What remains is the Tauri commands and the UI.*
+*The restore engine landed with 0.10.0 (`restore()`, with per-path selection, conflict detection and an undo-of-the-undo checkpoint, all unit-tested); the Tauri commands and the transcript UI followed. One item is left, and it is a manual one: a real turn edited and reverted in the running app.*
 
 - [x] Restoring puts every path a turn touched back to its pre-turn contents — engine
 - [x] Per-file restore, so a run that got three edits right and one wrong doesn't have to be thrown away whole — engine (`only` argument)
@@ -656,13 +656,16 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [x] A turn that changed files shows what it changed, under the answer: each path with its change type, click-to-reveal, per-file revert, and a "Revert turn" action ([TurnChanges.tsx](../src/components/Message/TurnChanges.tsx)). A diverged path is marked "edited since" and its revert becomes a two-step "Revert anyway…" → "Confirm revert", so overwriting the user's own edit is never one click
 - [x] Checkpoints are anchored to the assistant message the turn opened with (migration [030](../src-tauri/migrations/030_checkpoint_message.sql)), so a five-step turn offers one revert at the top rather than five
 - [ ] Runtime-test the whole path: a real turn that edits a file, then revert it from the transcript
-- [ ] The existing "Branch from here" and a revert compose: branching a chat at a reverted point starts from the restored tree
+- [x] The existing "Branch from here" and a revert compose: branching a chat at a reverted point starts from the restored tree — `restore_to_message` undoes every later turn's checkpoint **newest first**, which is what makes it work at all (each restore hands the turn before it the state it expects, so conflict detection keeps meaning "somebody edited this outside the app" instead of tripping on our own later writes). The branch button asks rather than assumes, and only when there is something to undo: *N later turns changed M files*, rewind or not, with diverged paths named up front and reported as left-as-found after
 
 ### 0.10.2 — Review before apply
 
-- [ ] Diff preview in the approval prompt for `write_file` / `edit_file`: the change as a unified diff rather than a wall of proposed content, so approval is an informed act
-- [ ] Approve / reject per hunk for multi-hunk edits
-- [ ] A "review queue" mode where a zone's edits stage rather than land, and the user applies the batch after reading it
+*Status: built & tested (`cargo test --lib` 143 passing, `npm run build` green); not yet runtime-tested. Checkpoints answer the half of "approving an edit shouldn't mean living with it" that comes after the change; this is the half that comes before. The line diff is the pure-Rust `similar` crate ([diffs.rs](../src-tauri/src/diffs.rs)); the tool-facing layer — what a pending call would write, narrowing it to a hunk selection, and the staging queue — is [review.rs](../src-tauri/src/review.rs) with migration [031](../src-tauri/migrations/031_staged_edits.sql). One [DiffView](../src/components/common/DiffView.tsx) serves both the approval prompt and the queue, since both ask the same question and shouldn't answer it in two visual languages.*
+
+- [x] Diff preview in the approval prompt for `create_file` / `edit_file`: the change as added and removed lines rather than a wall of proposed content, so approval is an informed act. Computed from the file as it stands (not from what the model remembers), and best-effort — a preview that can't be rendered never blocks an approval
+- [x] Approve / reject per hunk for multi-hunk edits — the selection **rewrites the call's arguments** so the tool writes exactly what was agreed to. Per-hunk approval that only recorded a preference would be a worse lie than not offering it. The tool's *name* is left alone, so history, checkpoints and the usage counters stay coherent
+- [x] A "review queue" mode where a zone's edits stage rather than land, and the user applies the batch after reading it (Settings → Chat, off by default) — apply/discard whole, per file, or per hunk; each apply is checkpointed so it stays revertible; a file edited on disk since queueing is reported as a conflict and left as found unless the user insists
+- [x] The queue is usable by an agent, not just visible to a user: `read_file` serves the staged version, so a model that edits one file three times builds on its own last version rather than silently on the stale disk — and the staged tool result tells it the change is queued, not written, so it doesn't report to the user that a file has been saved when it hasn't
 
 ---
 

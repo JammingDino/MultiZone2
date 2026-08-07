@@ -9,6 +9,8 @@ import { ZonePicker } from "./ZonePicker";
 import { ExportMenu } from "./ExportMenu";
 import { ConversationIndicator } from "./ConversationIndicator";
 import { ContextMeter } from "./ContextMeter";
+import { ReviewQueue } from "./ReviewQueue";
+import { DiffView } from "@/components/common/DiffView";
 import { HomeScreen } from "./HomeScreen";
 import { SettingsModal } from "@/components/Settings/SettingsModal";
 import { ZoneEditor } from "@/components/Zones/ZoneEditor";
@@ -18,7 +20,7 @@ import { getZoneIcon } from "@/lib/zoneIcons";
 import { AskUserCard } from "@/components/Message/StepBlock";
 import { resolveBaseModel } from "@/lib/baseZone";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
-import type { StreamEnvelope } from "@/lib/types";
+import type { FileDiff, StreamEnvelope } from "@/lib/types";
 
 /** How long stream events are collected before being applied as one batch. */
 const STREAM_DRAIN_MS = 16;
@@ -407,6 +409,10 @@ export function ChatPanel() {
               </div>
             </div>
           )}
+          {/* Review queue (0.10.2): staged writes waiting to be read and
+              applied. Renders nothing when nothing is queued, which is every
+              chat unless review mode is on. */}
+          <ReviewQueue chatId={activeChat.id} />
           {pendingApprovals.length > 0 ? (
             <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3">
               <div className="mx-auto flex max-w-3xl flex-col gap-2">
@@ -416,12 +422,13 @@ export function ChatPanel() {
                     key={pa.zoneId ?? "__primary__"}
                     toolName={pa.name}
                     toolArguments={pa.arguments}
+                    diff={pa.diff}
                     zoneName={
                       pa.zoneId
                         ? zones.find((z) => z.id === pa.zoneId)?.name ?? "Perspective"
                         : null
                     }
-                    onApprove={() => respondApproval(activeChatId!, pa.zoneId, true)}
+                    onApprove={(hunks) => respondApproval(activeChatId!, pa.zoneId, true, hunks)}
                     onDeny={() => respondApproval(activeChatId!, pa.zoneId, false)}
                   />
                 ))}
@@ -972,21 +979,37 @@ function PerspectiveZonePicker({
   );
 }
 
+/**
+ * The approval prompt. For a file write it leads with the diff (0.10.2): the
+ * question "may I write this" is unanswerable when what you are shown is a wall
+ * of proposed content, and every reviewer in the world already reads changes as
+ * added and removed lines. Hunks are individually takeable — the call still
+ * runs, against exactly the content that was agreed to.
+ */
 function ToolApprovalBanner({
   toolName,
   toolArguments,
+  diff,
   zoneName,
   onApprove,
   onDeny,
 }: {
   toolName: string;
   toolArguments: string;
+  diff: FileDiff | null;
   /** Perspective zone the approval belongs to, or null for the primary turn. */
   zoneName: string | null;
-  onApprove: () => void;
+  /** `hunks` narrows the approval to a subset; omitted means the whole change. */
+  onApprove: (hunks?: number[]) => void;
   onDeny: () => void;
 }) {
   const [showArgs, setShowArgs] = useState(false);
+  // Everything is taken by default: the prompt asks whether to run the model's
+  // call, and starting with hunks deselected would quietly make "Approve" mean
+  // something the user never chose.
+  const [taken, setTaken] = useState<Set<number>>(
+    () => new Set((diff?.hunks ?? []).map((h) => h.index)),
+  );
 
   let argsDisplay = toolArguments;
   try {
@@ -994,6 +1017,17 @@ function ToolApprovalBanner({
   } catch { /* leave as-is */ }
 
   const displayName = toolName.replace(/_/g, " ");
+  const hunkCount = diff?.hunks.length ?? 0;
+  const partial = hunkCount > 0 && taken.size < hunkCount;
+
+  function toggle(index: number) {
+    setTaken((s) => {
+      const next = new Set(s);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  }
 
   return (
     <div className="rounded border border-[var(--color-accent)]/40 bg-[var(--color-panel)] p-3">
@@ -1010,11 +1044,25 @@ function ToolApprovalBanner({
             {zoneName ? `${zoneName} wants to run ` : "The model wants to run "}
             <span className="font-mono font-medium text-[var(--color-text)]">{displayName}</span>
           </p>
+          {diff && (
+            <div className="mb-2">
+              <DiffView
+                diff={diff}
+                selected={hunkCount > 1 ? taken : undefined}
+                onToggleHunk={hunkCount > 1 ? toggle : undefined}
+              />
+              {hunkCount > 1 && (
+                <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+                  Untick a hunk to leave it out — the rest is written as proposed.
+                </p>
+              )}
+            </div>
+          )}
           <button
             onClick={() => setShowArgs((v) => !v)}
             className="mb-2 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
           >
-            {showArgs ? "Hide" : "Show"} arguments
+            {showArgs ? "Hide" : "Show"} {diff ? "raw arguments" : "arguments"}
           </button>
           {showArgs && (
             <pre className="mb-3 overflow-x-auto rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-2 text-[11px] font-mono leading-relaxed text-[var(--color-text-muted)]">
@@ -1023,10 +1071,13 @@ function ToolApprovalBanner({
           )}
           <div className="flex gap-2">
             <button
-              onClick={onApprove}
-              className="rounded bg-[var(--color-accent)] px-4 py-1.5 text-xs text-white hover:opacity-90"
+              // A narrowed approval sends the selection; an untouched one sends
+              // nothing, so the call runs exactly as the model wrote it.
+              onClick={() => onApprove(partial ? [...taken].sort((a, b) => a - b) : undefined)}
+              disabled={partial && taken.size === 0}
+              className="rounded bg-[var(--color-accent)] px-4 py-1.5 text-xs text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Approve
+              {partial ? `Apply ${taken.size} of ${hunkCount} hunks` : "Approve"}
             </button>
             <button
               onClick={onDeny}

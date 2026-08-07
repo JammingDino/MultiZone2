@@ -490,6 +490,40 @@ async fn dispatch_inner(
         return Ok(refusal);
     }
 
+    // Review queue (0.10.2). With review mode on, a content write is staged for
+    // the user to read rather than landing, and a read is served the staged
+    // version — so an agent that edits one file three times is working against
+    // its own last version instead of silently against the stale disk. Off by
+    // default, and one settings read decides, so an ordinary chat pays nothing.
+    if crate::review::queue_enabled(db).await {
+        if crate::review::is_reviewable(name) {
+            match crate::review::proposal(db, chat_id, name, args, project_dir).await {
+                Some(Ok(p)) => {
+                    return crate::review::stage(db, chat_id, caller_zone_id, name, &p).await;
+                }
+                // A proposal that can't be computed (the file is binary, or the
+                // text to replace isn't there) falls through to the tool, which
+                // reports the same problem in its own words.
+                Some(Err(_)) | None => {}
+            }
+        }
+        if name == "read_file" {
+            if let Some(path) = args.get("path").and_then(|v| v.as_str()) {
+                let resolved = filesystem::resolve_path(path, project_dir);
+                if let Some(text) = crate::review::staged_content(db, chat_id, &resolved).await {
+                    return Ok(serde_json::json!({
+                        "path": resolved.to_string_lossy(),
+                        "content": text,
+                        "staged": true,
+                        "note": "This is your queued version of the file, awaiting the \
+                                 user's review — it is not yet what is on disk.",
+                    })
+                    .to_string());
+                }
+            }
+        }
+    }
+
     match name {
         "get_current_datetime" => datetime::run(args).await,
         // The retired `web_search` / `extract_url` names still route here: they

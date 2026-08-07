@@ -103,7 +103,16 @@ pub enum StreamPayload<'a> {
     /// Emitted once the router has resolved a zone for this turn.
     RoutingDone { zone_id: String, zone_name: String },
     /// Emitted when a tool requires user approval before it can run.
-    ToolApprovalRequired { index: usize, name: String, arguments: String },
+    ///
+    /// `diff` carries the change a file-writing tool proposes (0.10.2), so the
+    /// prompt can show a reviewable diff instead of a wall of proposed content.
+    /// `None` for every other tool, and for a proposal with nothing to show.
+    ToolApprovalRequired {
+        index: usize,
+        name: String,
+        arguments: String,
+        diff: Option<crate::diffs::FileDiff>,
+    },
     ToolCallExecuting { index: usize, name: String },
     ToolCallResult { index: usize, name: String, result: String },
     ToolMessageSaved { message: &'a Message },
@@ -130,7 +139,25 @@ pub struct EngineCtx {
     pub db: SqlitePool,
     pub http: reqwest::Client,
     pub active_streams: Arc<RwLock<HashMap<String, Arc<AtomicBool>>>>,
-    pub tool_approvals: Arc<tokio::sync::Mutex<HashMap<String, oneshot::Sender<bool>>>>,
+    pub tool_approvals: Arc<tokio::sync::Mutex<HashMap<String, oneshot::Sender<ApprovalAnswer>>>>,
+}
+
+/// What the user said when asked to approve a tool call.
+///
+/// `hunks` is the 0.10.2 addition: a subset of the previewed diff's hunks the
+/// user is willing to take. `None` means the call runs as the model wrote it —
+/// the answer every non-file tool gives, and the one "Approve" gives when the
+/// user didn't narrow anything.
+#[derive(Debug, Clone, Default)]
+pub struct ApprovalAnswer {
+    pub approved: bool,
+    pub hunks: Option<Vec<usize>>,
+}
+
+impl ApprovalAnswer {
+    fn denied() -> Self {
+        Self { approved: false, hunks: None }
+    }
 }
 
 impl EngineCtx {
@@ -249,10 +276,34 @@ pub async fn cancel_stream(state: State<'_, AppState>, chat_id: String) -> AppRe
         .collect();
     for k in keys {
         if let Some(tx) = approvals.remove(&k) {
-            let _ = tx.send(false);
+            let _ = tx.send(ApprovalAnswer::denied());
         }
     }
     Ok(())
+}
+
+/// Rewrite a file-writing call's arguments to only the hunks the user took.
+///
+/// Best-effort by design: if the proposal can no longer be computed (the file
+/// moved under us between the prompt and the answer), the original arguments
+/// are returned and the tool reports the problem in its own words — which is a
+/// better failure than silently writing a partial file built from stale state.
+async fn narrowed_arguments(
+    db: &SqlitePool,
+    chat_id: &str,
+    name: &str,
+    arguments: &str,
+    project_dir: Option<&str>,
+    hunks: &[usize],
+) -> String {
+    let args: serde_json::Value = match serde_json::from_str(arguments) {
+        Ok(v) => v,
+        Err(_) => return arguments.to_string(),
+    };
+    match crate::review::proposal(db, chat_id, name, &args, project_dir).await {
+        Some(Ok(p)) => crate::review::narrow_arguments(name, &args, &p, hunks).to_string(),
+        _ => arguments.to_string(),
+    }
 }
 
 /// The approval-map key for a participant: the chat id for the primary, or
@@ -274,16 +325,20 @@ fn approval_key_belongs_to_chat(key: &str, chat_id: &str) -> bool {
 /// `zone_id` targets a specific perspective zone's pending approval; `None`
 /// targets the primary turn.
 #[tauri::command]
+/// `hunks` (0.10.2) approves only part of a previewed file change: the call
+/// still runs, with its arguments rewritten to exactly the content the user
+/// agreed to. Omitted, the call runs as the model wrote it.
 pub async fn respond_tool_approval(
     state: State<'_, AppState>,
     chat_id: String,
     zone_id: Option<String>,
     approved: bool,
+    hunks: Option<Vec<usize>>,
 ) -> AppResult<()> {
     let key = approval_key(&chat_id, zone_id.as_deref());
     let mut map = state.tool_approvals.lock().await;
     if let Some(tx) = map.remove(&key) {
-        let _ = tx.send(approved);
+        let _ = tx.send(ApprovalAnswer { approved, hunks });
     }
     Ok(())
 }
@@ -1765,14 +1820,29 @@ async fn run_participant_turn(
                 .unwrap_or_else(|| tools::tool_safety_by_name(&tc.function.name));
             let needs_approval = approval_needed(&auto_approve_level, tool_safety);
 
-            let approved = if needs_approval {
-                let (tx, rx) = oneshot::channel::<bool>();
+            let answer = if needs_approval {
+                let (tx, rx) = oneshot::channel::<ApprovalAnswer>();
                 ctx.tool_approvals.lock().await.insert(approval_key.clone(), tx);
+
+                // What this call would actually do to the file, as a diff
+                // (0.10.2). `None` for every tool that isn't a content write —
+                // and best-effort, because failing to render a preview must
+                // never be the reason a tool can't be approved.
+                let diff = crate::review::preview(
+                    &ctx.db,
+                    chat_id,
+                    &tc.function.name,
+                    &tc.function.arguments,
+                    project_dir.as_deref(),
+                )
+                .await
+                .unwrap_or(None);
 
                 sink.emit_for(chat_id, persp, StreamPayload::ToolApprovalRequired {
                     index: 0,
                     name: tc.function.name.clone(),
                     arguments: tc.function.arguments.clone(),
+                    diff,
                 });
 
                 // Wait up to 5 minutes for the user to approve or deny.
@@ -1781,13 +1851,32 @@ async fn run_participant_turn(
                     rx,
                 )
                 .await
-                .unwrap_or(Ok(false))
-                .unwrap_or(false);
+                .unwrap_or(Ok(ApprovalAnswer::denied()))
+                .unwrap_or(ApprovalAnswer::denied());
 
                 ctx.tool_approvals.lock().await.remove(&approval_key);
                 result
             } else {
-                true
+                ApprovalAnswer { approved: true, hunks: None }
+            };
+            let approved = answer.approved;
+
+            // Approving part of a diff rewrites the call to exactly the content
+            // the user agreed to, so a rejected hunk is a real outcome rather
+            // than a preference we recorded and then ignored. The tool's *name*
+            // is left alone — history, checkpoints and the usage counters all
+            // key on it.
+            let call_arguments = match &answer.hunks {
+                Some(hunks) => narrowed_arguments(
+                    &ctx.db,
+                    chat_id,
+                    &tc.function.name,
+                    &tc.function.arguments,
+                    project_dir.as_deref(),
+                    hunks,
+                )
+                .await,
+                None => tc.function.arguments.clone(),
             };
 
             let result = if approved {
@@ -1801,7 +1890,7 @@ async fn run_participant_turn(
                 );
                 let out = tools::dispatch(
                     &tc.function.name,
-                    &tc.function.arguments,
+                    &call_arguments,
                     &zone_config,
                     &ctx.db,
                     chat_id,
@@ -3023,7 +3112,7 @@ async fn load_tool_context(
 /// the app-level default when the chat has no project. Resolved once per turn
 /// and used twice — to execute the file tools, and to tell the model in each
 /// tool's description which directory its paths resolve against.
-async fn resolve_working_dir(db: &SqlitePool, chat_id: &str) -> AppResult<Option<String>> {
+pub(crate) async fn resolve_working_dir(db: &SqlitePool, chat_id: &str) -> AppResult<Option<String>> {
     let from_project: Option<String> = sqlx::query_scalar(
         "SELECT p.directory FROM projects p
          JOIN chats c ON c.project_id = p.id

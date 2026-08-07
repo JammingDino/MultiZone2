@@ -41,3 +41,19 @@ pub async fn restore_checkpoint(
     )
     .await
 }
+
+/// What the checkpoint store is holding, for Settings → Data.
+#[tauri::command]
+pub async fn checkpoint_usage(state: State<'_, AppState>) -> AppResult<checkpoints::CheckpointUsage> {
+    checkpoints::usage(&state.db).await
+}
+
+/// Apply the configured retention limits now.
+///
+/// The same prune that runs at startup and after a turn that changed files —
+/// exposed as a button because a user who has just lowered the ceiling wants to
+/// see the number move, not wait for their next agentic turn to trigger it.
+#[tauri::command]
+pub async fn prune_checkpoints(state: State<'_, AppState>) -> AppResult<checkpoints::PruneOutcome> {
+    checkpoints::prune_to_settings(&state.db).await
+}

@@ -24,8 +24,8 @@ import {
 } from "@/lib/settingsBundle";
 import { pickBundleFile } from "@/lib/importSettings";
 import { type SkillSeed, serializeSkill, parseSkill } from "@/lib/skillFile";
-import type { DbStats, GlobalKbView, IndexSummary, KbDocument, LifetimeUsage, McpServerView, McpTool, Provider, Skill, SkillPack } from "@/lib/types";
-import { formatCount, formatTokens } from "@/lib/format";
+import type { CheckpointUsage, DbStats, GlobalKbView, IndexSummary, KbDocument, LifetimeUsage, McpServerView, McpTool, Provider, Skill, SkillPack } from "@/lib/types";
+import { formatBytes, formatCount, formatTokens } from "@/lib/format";
 
 type Tab = "providers" | "appearance" | "chat" | "voice" | "speech" | "search" | "skills" | "mcp" | "knowledge" | "memory" | "api" | "data";
 
@@ -2920,6 +2920,8 @@ function DataTab() {
         </div>
       </section>
 
+      <CheckpointStorageSection />
+
       <SettingsTransferSection />
 
       {/* Reset */}
@@ -2974,6 +2976,112 @@ function DataTab() {
         )}
       </section>
     </div>
+  );
+}
+
+// ─── Checkpoint storage ───────────────────────────────────────────────────────
+
+/**
+ * Retention for the checkpoint store (0.10.0).
+ *
+ * This is the one part of the app that grows without anybody asking it to:
+ * every turn that writes a file adds the prior contents of those files, and
+ * until now nothing ever took anything away. The ceiling is a size rather than
+ * a count of turns because size is the resource the user actually cares about —
+ * one turn that rewrote a 20 MB export costs more disk than two hundred that
+ * touched a config file.
+ *
+ * Both limits also apply automatically (at startup, and after any turn that
+ * changed files); the button is here because someone who has just lowered the
+ * ceiling wants the number to move now.
+ */
+function CheckpointStorageSection() {
+  const appSettings = useApp((s) => s.appSettings);
+  const setAppSettings = useApp((s) => s.setAppSettings);
+
+  const [usage, setUsage] = useState<CheckpointUsage | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const refresh = () => api.checkpointUsage().then(setUsage).catch(console.error);
+  useEffect(() => { void refresh(); }, []);
+
+  async function runPrune() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const out = await api.pruneCheckpoints();
+      setMsg(
+        out.removedCheckpoints > 0
+          ? `Removed ${out.removedCheckpoints} checkpoint${out.removedCheckpoints === 1 ? "" : "s"}, freeing ${formatBytes(out.freedBytes)}.`
+          : "Nothing to clean up — the store is already within its limits.",
+      );
+      await refresh();
+    } catch (e) {
+      console.error(e);
+      setMsg("Clean-up failed — see console.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section>
+      <h3 className="mb-1 text-sm font-medium">File checkpoints</h3>
+      <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+        Before a turn changes a file, its previous contents are kept so the turn can be reverted from the
+        transcript. Content shared between turns is stored once. The newest checkpoint is never removed, whatever
+        the limits below say — the turn that just ran stays revertible.
+      </p>
+
+      {usage && (
+        <div className="mb-3 grid grid-cols-3 gap-2">
+          {([
+            ["Turns kept", formatCount(usage.checkpoints)],
+            ["Files", formatCount(usage.files)],
+            ["On disk", formatBytes(usage.bytes)],
+          ] as const).map(([label, value]) => (
+            <div key={label} className="rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3 text-center">
+              <div className="text-2xl font-semibold tabular-nums text-[var(--color-text)]">{value}</div>
+              <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">{label}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-start gap-6">
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-[var(--color-text-muted)]">Size ceiling (MB) — 0 for no limit</span>
+          <NumberField
+            value={appSettings.checkpointMaxMb}
+            min={0}
+            max={100_000}
+            onCommit={(v) => setAppSettings({ checkpointMaxMb: v })}
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-[var(--color-text-muted)]">Keep for (days) — 0 to keep forever</span>
+          <NumberField
+            value={appSettings.checkpointRetentionDays}
+            min={0}
+            max={3650}
+            onCommit={(v) => setAppSettings({ checkpointRetentionDays: v })}
+          />
+        </label>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <button
+          onClick={runPrune}
+          disabled={busy}
+          className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:border-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {busy ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+          Apply limits now
+        </button>
+        {msg && <span className="text-xs text-[var(--color-text-muted)]">{msg}</span>}
+      </div>
+    </section>
   );
 }
 

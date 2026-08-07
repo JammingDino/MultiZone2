@@ -1,6 +1,6 @@
 # Connectivity — the local API and connectors
 
-Notes behind the 0.12.x and 1.2.x entries in [RELEASE_PLAN.md](RELEASE_PLAN.md). Two questions that turned out to be the same question: *can the app set itself up, so that connecting it to things is not a job for someone who reads code?*
+Notes behind the 0.11.x and 1.2.x entries in [RELEASE_PLAN.md](RELEASE_PLAN.md). Two questions that turned out to be the same question: *can the app set itself up, so that connecting it to things is not a job for someone who reads code?*
 
 Written August 2026, against 0.10.1.
 

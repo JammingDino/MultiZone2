@@ -704,6 +704,16 @@ export interface AppSettings {
   /** Output directory for the markdown mirror. Empty = unset (mirror is a no-op). */
   markdownMirrorDir: string;
   /**
+   * Checkpoint retention (0.10.0). The store grows on every turn that writes a
+   * file and nothing ever took anything away, so both limits ship with a real
+   * value rather than "keep forever". `0` on either means no limit; the newest
+   * checkpoint is never pruned whatever these say, so the turn that just ran is
+   * always revertible.
+   */
+  checkpointRetentionDays: number;
+  /** Size ceiling for the checkpoint store, in MB. 0 = no ceiling. */
+  checkpointMaxMb: number;
+  /**
    * Per-model manual override for image input (0.7.4), keyed by exact model
    * name. "on" = always send images, "off" = always OCR to text. Models absent
    * from the map use the automatic name heuristic (lib/vision.ts).
@@ -818,6 +828,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   teamContextMeter: true,
   markdownMirrorEnabled: false,
   markdownMirrorDir: "",
+  checkpointRetentionDays: 30,
+  checkpointMaxMb: 512,
   visionOverrides: {},
   onboardingSkipped: false,
   sttProviderId: null,
@@ -920,6 +932,23 @@ export interface RestoredFile {
   /** `restored` · `deleted` · `unchanged` · `conflict` · `skipped`. */
   outcome: string;
   detail: string | null;
+}
+
+/** What the checkpoint store is holding, for Settings → Data (0.10.0). */
+export interface CheckpointUsage {
+  checkpoints: number;
+  files: number;
+  /** Bytes on disk, counting content shared between checkpoints once. */
+  bytes: number;
+  /** Creation time of the oldest checkpoint held; null when the store is empty. */
+  oldestAt: number | null;
+}
+
+/** What a retention pass took away. */
+export interface PruneOutcome {
+  removedCheckpoints: number;
+  removedBlobs: number;
+  freedBytes: number;
 }
 
 export interface RestoreReport {

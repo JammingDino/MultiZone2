@@ -25,6 +25,23 @@ export function formatCount(n: number): string {
   return Math.round(n).toLocaleString();
 }
 
+/**
+ * A size on disk in the unit a person would use: 0 → "0 B", 2048 → "2 KB",
+ * 5_400_000 → "5.4 MB". Binary units, since that is what a filesystem reports.
+ */
+export function formatBytes(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let v = n;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  // Bytes and kilobytes are never worth a decimal place.
+  return `${i < 2 ? Math.round(v) : trimDecimal(v)} ${units[i]}`;
+}
+
 /** One decimal place, with a trailing ".0" removed (1.0 → "1", 1.2 → "1.2"). */
 function trimDecimal(v: number): string {
   return v.toFixed(1).replace(/\.0$/, "");

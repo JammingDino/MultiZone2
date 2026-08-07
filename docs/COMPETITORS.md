@@ -137,9 +137,9 @@ Worth noting this is a differentiator, not just a saving: no competitor in this 
 
 **Undo (Reasonix, Cursor, Antigravity) — the largest one.** Reasonix takes auto-checkpoints; Cursor and Antigravity make reverting a bad agent run a single click. We have `write_file`, `move_file` and `delete_file` and no way back from any of them — the approval prompt asks before the change and offers nothing after it. This is a capability gap, not a polish gap, and it makes every file tool we already ship more usable rather than adding a new one. Scheduled as **0.10.x**.
 
-**Planning as a mode, not a tool (Reasonix `/apply` + plan mode, Askimo "plans").** Our `plan` tool is a checklist the model keeps for itself. What we lack is a mode where the model plans and is not yet permitted to act, a plan the *user* can edit before it runs, and live task state during execution. The Multizone leader has never had anywhere to hold a task, which is the sharpest version of this gap. Scheduled as **0.11.x**.
+**Planning as a mode, not a tool (Reasonix `/apply` + plan mode, Askimo "plans").** Our `plan` tool is a checklist the model keeps for itself. What we lack is a mode where the model plans and is not yet permitted to act, a plan the *user* can edit before it runs, and live task state during execution. The Multizone leader has never had anywhere to hold a task, which is the sharpest version of this gap. Scheduled as **0.12.x**.
 
-**Session replay and event log (Reasonix `replay`, `events`).** Everything needed is already in SQLite; none of it is exposed as a timeline. Cheap relative to its value for a multi-agent product, where "what did it actually do" is the hardest question to answer. Folded into **0.11.2**.
+**Session replay and event log (Reasonix `replay`, `events`).** Everything needed is already in SQLite; none of it is exposed as a timeline. Cheap relative to its value for a multi-agent product, where "what did it actually do" is the hardest question to answer. Folded into **0.12.2**.
 
 **Data charts (AIRouterDesktop, Claude).** `render_graph` draws diagrams and plots functions but cannot draw data, so models fall back to Mermaid approximations. Both comparisons make in-chat charting look like table stakes. Scheduled as **1.1.0**, after 1.0.
 
@@ -147,7 +147,7 @@ Worth noting this is a differentiator, not just a saving: no competitor in this 
 
 **Hosted connectors (everyone).** Our MCP support speaks stdio and HTTP/SSE, but the HTTP transport sends no `Authorization` header and `McpServer` has nowhere to hold one — so every *remote* MCP server, which is where the ecosystem has moved, is unreachable. Atomic Chat ships Gmail/Slack/Telegram/Figma; Open WebUI and Askimo both take hosted servers. The stdio path already works for the same services, which makes this a one-column gap with a whole-ecosystem consequence rather than a missing capability. Scheduled **0.12.2**; signed-in OAuth connectors **1.2.x**. See [CONNECTIVITY.md](CONNECTIVITY.md).
 
-**A connector catalog (Atomic Chat, Open WebUI, Msty).** Competitors ship a browsable list of ready-made connections; ours is a settings panel that asks for a command line. The zone library already solves exactly this problem for zones, so the machinery exists. Scheduled **0.12.2**.
+**A connector catalog (Atomic Chat, Open WebUI, Msty).** Competitors ship a browsable list of ready-made connections; ours is a settings panel that asks for a command line. The zone library already solves exactly this problem for zones, so the machinery exists. Scheduled **0.11.2**.
 
 **Cost analytics (AIRouter).** Per-provider monthly cost, token volume, routing decisions. We have the data; the presentation is thinner. Natural home for the cache-hit metric above.
 

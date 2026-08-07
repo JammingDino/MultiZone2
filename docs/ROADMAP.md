@@ -33,8 +33,8 @@ Semantic versioning. Each release is tagged `vMAJOR.MINOR.PATCH`.
 | **0.8.x** | Voice I/O — STT dictation, TTS, hands-free mode | Planned |
 | **0.9.x** | Tool Improvements — naming clarity, file management, self-authored skills, reliability pass | In progress |
 | **0.10.x** | Reversible work — checkpoints, undo, review before apply | Planned |
-| **0.11.x** | Planning & task control — plan mode, live task state, replay | Planned |
-| **0.12.x** | The app sets itself up — API refresh, an API tool, connector catalog | Planned |
+| **0.11.x** | The app sets itself up — API refresh, an API tool, connector catalog | Planned |
+| **0.12.x** | Planning & task control — plan mode, live task state, replay | Planned |
 | **1.0.0** | Hardening & Public Release | Planned |
 | **1.1.x** | In-chat rendering — charts from data, richer artifacts | Planned |
 | **1.2.x** | Signed-in connectors — OAuth, keychain, per-scope consent | Planned |
@@ -132,19 +132,19 @@ The app can write, move and delete files, and has never been able to take any of
 
 ---
 
-### 0.11.x — Planning & task control
-
-The `plan` tool gives a model a checklist. What it does not give the user is a say. Plan mode makes planning a chat mode rather than a tool: mutating tools are withheld, read-only tools stay so the plan is grounded in real files, and the result is a structured artifact — ordered steps, expected files, risk per step — that the user edits before approving. An approved plan becomes the executing turn's task list, rendering live as steps tick off, with the ability to strike, add, or stop after the current step instead of cancelling the whole turn. The Multizone leader gets the same surface: leader plan and sub-agent plans in one tree, which is the first time that orchestration has had anywhere to hold a task. The release closes with the record: a session event log and a replay view, so what an agent did is inspectable after the fact and not only while it scrolls past.
-
-**Done when:** a user can ask for a plan, rewrite it, watch it execute step by step, intervene mid-run without losing the turn, and afterwards replay exactly what happened.
-
----
-
-### 0.12.x — The app sets itself up
+### 0.11.x — The app sets itself up
 
 Two problems that turn out to be one. The local HTTP API is still the 0.5.x app: ten routes written alongside subchats, with nothing added since, so skills, memory, MCP, knowledge, checkpoints, terminals, usage and settings are all invisible to it — and nothing about it is discoverable, so "is it even running on the right port" is a question neither a script nor a model can answer. Meanwhile connectors are configured by hand in a panel that assumes the reader knows what a stdio transport is. The API learns to describe itself (a generated route index, a health check that separates *enabled* from *bound* from *answering* from *authorised*, and a drift test that fails the build when a new command ships without a route). A zone gets a tool that calls that API on the user's behalf — proxying the request in Rust rather than handing the model a bearer token, because a live credential in the context is one prompt injection away from leaving a machine it was never supposed to leave. And connectors get a catalog: curated MCP entries with their command, their environment and a link to where the credential comes from, installable in one action, plus the missing `Authorization` header that today makes every hosted remote MCP server unreachable. Together these are a setup wizard that happens to be a conversation, which is the thing non-technical users are missing — not another settings panel. Detail in [CONNECTIVITY.md](CONNECTIVITY.md).
 
 **Done when:** someone who has never opened a terminal can connect a service by talking to a zone; a model asked why the API is unreachable names which check failed rather than shrugging; and adding a Tauri command without a route fails CI.
+
+---
+
+### 0.12.x — Planning & task control
+
+The `plan` tool gives a model a checklist. What it does not give the user is a say. Plan mode makes planning a chat mode rather than a tool: mutating tools are withheld, read-only tools stay so the plan is grounded in real files, and the result is a structured artifact — ordered steps, expected files, risk per step — that the user edits before approving. An approved plan becomes the executing turn's task list, rendering live as steps tick off, with the ability to strike, add, or stop after the current step instead of cancelling the whole turn. The Multizone leader gets the same surface: leader plan and sub-agent plans in one tree, which is the first time that orchestration has had anywhere to hold a task. The release closes with the record: a session event log and a replay view, so what an agent did is inspectable after the fact and not only while it scrolls past.
+
+**Done when:** a user can ask for a plan, rewrite it, watch it execute step by step, intervene mid-run without losing the turn, and afterwards replay exactly what happened.
 
 ---
 
@@ -166,7 +166,7 @@ Performance audit (startup time, large chat scroll, streaming), installer polish
 
 ### 1.2.x — Signed-in connectors
 
-The "Connect Google" button, and the same again per provider: an OAuth client with a loopback redirect, refresh tokens in the OS keychain rather than SQLite — a long-lived credential for someone's mailbox is not app data — and per-scope consent so Calendar can be granted without Gmail. Deliberately after 1.0, because 0.12.x's catalog and static-token headers already carry a non-technical user most of the way: "Gmail — paste the token from here" is a different experience from "configure a stdio MCP server" and needs no OAuth. What this release adds is the single click. It is also mostly not MCP work, and Google's verified-consent review for restricted scopes is a process measured in weeks that applies to us as the OAuth client — a distribution question for a local-first app, not only an engineering one.
+The "Connect Google" button, and the same again per provider: an OAuth client with a loopback redirect, refresh tokens in the OS keychain rather than SQLite — a long-lived credential for someone's mailbox is not app data — and per-scope consent so Calendar can be granted without Gmail. Deliberately after 1.0, because 0.11.x's catalog and static-token headers already carry a non-technical user most of the way: "Gmail — paste the token from here" is a different experience from "configure a stdio MCP server" and needs no OAuth. What this release adds is the single click. It is also mostly not MCP work, and Google's verified-consent review for restricted scopes is a process measured in weeks that applies to us as the OAuth client — a distribution question for a local-first app, not only an engineering one.
 
 **Done when:** a user can connect Gmail, Calendar and Drive from a button, see exactly which scopes were granted, and revoke them — with no credential ever stored in the database or shown to a model.
 

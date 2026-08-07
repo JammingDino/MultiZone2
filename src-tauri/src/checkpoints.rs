@@ -297,15 +297,16 @@ async fn open_checkpoint(
 /// should offer one revert, at the top, not five.
 ///
 /// A no-op when the turn changed nothing, which is nearly every turn: the
-/// checkpoint it would anchor was never created.
+/// checkpoint it would anchor was never created. Returns whether it linked
+/// anything, so the caller can prune the store only on the turns that grew it.
 pub async fn link_message(
     db: &SqlitePool,
     chat_id: &str,
     turn_id: &str,
     zone_id: Option<&str>,
     message_id: &str,
-) -> AppResult<()> {
-    sqlx::query(
+) -> AppResult<bool> {
+    let done = sqlx::query(
         "UPDATE checkpoints SET message_id = ?1
           WHERE chat_id = ?2 AND turn_id = ?3
             AND COALESCE(zone_id, '') = COALESCE(?4, '')
@@ -317,7 +318,7 @@ pub async fn link_message(
     .bind(zone_id)
     .execute(db)
     .await?;
-    Ok(())
+    Ok(done.rows_affected() > 0)
 }
 
 /// One path a checkpoint covers, as the transcript lists it.
@@ -598,6 +599,215 @@ pub async fn restore(
     })
 }
 
+// ─── Retention ────────────────────────────────────────────────────────────────
+//
+// A checkpoint store is the one part of the app that grows without anybody
+// asking it to: every turn that writes a file adds to it, and nothing ever
+// took anything away. The ceiling is a size rather than a count because that
+// is the resource the user actually cares about — one turn that rewrote a
+// 20 MB export is worth more disk than two hundred that touched a config file.
+
+/// Keep-forever defaults would be dishonest, so both limits have a real value.
+/// 30 days and 512 MB are generous for the case this feature exists for —
+/// "I don't like what that run did, put it back" is a decision measured in
+/// minutes, not months.
+pub const DEFAULT_RETENTION_DAYS: i64 = 30;
+pub const DEFAULT_MAX_MB: i64 = 512;
+
+/// What the store is currently holding, for Settings → Data.
+#[derive(Debug, Clone, Serialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckpointUsage {
+    pub checkpoints: i64,
+    pub files: i64,
+    /// Bytes on disk, counting shared content once — the store is
+    /// content-addressed, so summing every row would report a number the disk
+    /// does not agree with.
+    pub bytes: i64,
+    /// Creation time of the oldest checkpoint held, or `None` when empty.
+    pub oldest_at: Option<i64>,
+}
+
+/// What a prune took away.
+#[derive(Debug, Clone, Serialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PruneOutcome {
+    pub removed_checkpoints: i64,
+    pub removed_blobs: i64,
+    pub freed_bytes: i64,
+}
+
+/// Distinct-blob bytes: what the store costs, not what the rows add up to.
+async fn stored_bytes(db: &SqlitePool) -> AppResult<i64> {
+    let total: Option<i64> = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(before_size), 0) FROM
+           (SELECT DISTINCT before_hash, before_size FROM checkpoint_files
+             WHERE before_hash IS NOT NULL)",
+    )
+    .fetch_one(db)
+    .await?;
+    Ok(total.unwrap_or(0))
+}
+
+pub async fn usage(db: &SqlitePool) -> AppResult<CheckpointUsage> {
+    let checkpoints: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM checkpoints")
+        .fetch_one(db)
+        .await?;
+    let files: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM checkpoint_files")
+        .fetch_one(db)
+        .await?;
+    let oldest_at: Option<i64> = sqlx::query_scalar("SELECT MIN(created_at) FROM checkpoints")
+        .fetch_optional(db)
+        .await?
+        .flatten();
+    Ok(CheckpointUsage { checkpoints, files, bytes: stored_bytes(db).await?, oldest_at })
+}
+
+/// Drop checkpoints past the retention limits and garbage-collect their blobs.
+///
+/// Age first, then size, oldest first — the order a user would expect, and the
+/// one that keeps the most recent (most likely to be reverted) work. **The
+/// newest checkpoint is never pruned**, whatever the limits say: a ceiling of
+/// zero should mean "keep almost nothing", not "the turn that just ran is
+/// already irreversible".
+///
+/// `max_bytes` and `max_age_days` of `0` (or negative) mean no limit.
+pub async fn prune(db: &SqlitePool, max_bytes: i64, max_age_days: i64) -> AppResult<PruneOutcome> {
+    let ordered: Vec<(String, i64)> =
+        sqlx::query_as("SELECT id, created_at FROM checkpoints ORDER BY created_at DESC")
+            .fetch_all(db)
+            .await?;
+    // Nothing to do, and — with one checkpoint — nothing we are willing to do.
+    if ordered.len() <= 1 {
+        return Ok(PruneOutcome::default());
+    }
+
+    let cutoff = (max_age_days > 0).then(|| now_ts() - max_age_days * 86_400_000);
+    let ceiling = (max_bytes > 0).then_some(max_bytes);
+
+    // Walk newest → oldest, keeping until a limit is crossed. Sizes are summed
+    // per checkpoint over blobs not already counted, so shared content is
+    // charged to the newest checkpoint holding it — the one that would survive.
+    let mut seen_hashes: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut running: i64 = 0;
+    let mut doomed: Vec<String> = Vec::new();
+
+    for (i, (id, created_at)) in ordered.iter().enumerate() {
+        let rows: Vec<(Option<String>, Option<i64>)> = sqlx::query_as(
+            "SELECT before_hash, before_size FROM checkpoint_files WHERE checkpoint_id = ?1",
+        )
+        .bind(id)
+        .fetch_all(db)
+        .await?;
+        let mut own = 0i64;
+        let mut hashes = Vec::new();
+        for (hash, size) in rows {
+            if let Some(h) = hash {
+                if !seen_hashes.contains(&h) {
+                    own += size.unwrap_or(0);
+                    hashes.push(h);
+                }
+            }
+        }
+
+        let too_old = cutoff.is_some_and(|c| *created_at < c);
+        let too_big = ceiling.is_some_and(|c| running + own > c);
+        // `i > 0` is the newest-survives rule.
+        if i > 0 && (too_old || too_big) {
+            doomed.push(id.clone());
+            continue;
+        }
+        running += own;
+        seen_hashes.extend(hashes);
+    }
+
+    if doomed.is_empty() {
+        return Ok(PruneOutcome::default());
+    }
+
+    // Candidate blobs: everything the doomed checkpoints referenced. Deleting
+    // the rows first means the "still referenced?" question is asked of the
+    // store as it will be, not as it was.
+    let mut candidates: std::collections::HashSet<(String, i64)> = std::collections::HashSet::new();
+    for id in &doomed {
+        let rows: Vec<(String, Option<i64>)> = sqlx::query_as(
+            "SELECT before_hash, before_size FROM checkpoint_files
+              WHERE checkpoint_id = ?1 AND before_hash IS NOT NULL",
+        )
+        .bind(id)
+        .fetch_all(db)
+        .await?;
+        for (hash, size) in rows {
+            candidates.insert((hash, size.unwrap_or(0)));
+        }
+        // `checkpoint_files` cascades on the foreign key, but the pragma is not
+        // guaranteed on, so the child rows are deleted explicitly.
+        sqlx::query("DELETE FROM checkpoint_files WHERE checkpoint_id = ?1")
+            .bind(id)
+            .execute(db)
+            .await?;
+        sqlx::query("DELETE FROM checkpoints WHERE id = ?1")
+            .bind(id)
+            .execute(db)
+            .await?;
+    }
+
+    let mut removed_blobs = 0i64;
+    let mut freed_bytes = 0i64;
+    for (hash, size) in candidates {
+        let still: Option<(i64,)> =
+            sqlx::query_as("SELECT 1 FROM checkpoint_files WHERE before_hash = ?1 LIMIT 1")
+                .bind(&hash)
+                .fetch_optional(db)
+                .await?;
+        if still.is_some() {
+            continue;
+        }
+        if let Some(path) = blob_path(&hash) {
+            if std::fs::remove_file(&path).is_ok() {
+                removed_blobs += 1;
+                freed_bytes += size;
+            }
+        }
+    }
+
+    Ok(PruneOutcome {
+        removed_checkpoints: doomed.len() as i64,
+        removed_blobs,
+        freed_bytes,
+    })
+}
+
+/// The user's configured limits, from the `app_settings` JSON the rest of the
+/// app reads. Absent keys fall back to the defaults; an explicit `0` is "no
+/// limit" and is honoured as written.
+pub async fn configured_limits(db: &SqlitePool) -> (i64, i64) {
+    let raw: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key = ?1")
+        .bind("app_settings")
+        .fetch_optional(db)
+        .await
+        .ok()
+        .flatten();
+    let v = raw.and_then(|s| serde_json::from_str::<Value>(&s).ok());
+    let read = |key: &str, default: i64| -> i64 {
+        v.as_ref()
+            .and_then(|v| v.get(key))
+            .and_then(|n| n.as_i64())
+            .filter(|n| *n >= 0)
+            .unwrap_or(default)
+    };
+    let mb = read("checkpointMaxMb", DEFAULT_MAX_MB);
+    (mb.saturating_mul(1024 * 1024), read("checkpointRetentionDays", DEFAULT_RETENTION_DAYS))
+}
+
+/// Prune to the user's configured limits. Called at startup and after a turn
+/// that took a checkpoint, so the store stays bounded without the user ever
+/// having to visit Settings.
+pub async fn prune_to_settings(db: &SqlitePool) -> AppResult<PruneOutcome> {
+    let (max_bytes, max_age_days) = configured_limits(db).await;
+    prune(db, max_bytes, max_age_days).await
+}
+
 async fn chat_of(db: &SqlitePool, checkpoint_id: &str) -> AppResult<String> {
     let row: Option<(String,)> = sqlx::query_as("SELECT chat_id FROM checkpoints WHERE id = ?1")
         .bind(checkpoint_id)
@@ -841,6 +1051,153 @@ mod tests {
         assert!(!by_name("calm.txt").diverged);
         assert!(by_name("touched.txt").diverged);
         assert_eq!(by_name("calm.txt").change, "changed");
+    }
+
+    /// A size ceiling drops the oldest checkpoints and takes their blobs with
+    /// them — a store that pruned rows but left the files behind would report a
+    /// number the disk disagrees with, which is the failure worth testing.
+    #[tokio::test]
+    async fn a_size_ceiling_drops_the_oldest_and_collects_its_blobs() {
+        let dir = workspace("a_size_ceiling_drops_the_oldest_and_collects_its_blobs");
+        let db = pool().await;
+
+        // Three turns, each editing its own file with distinct contents so
+        // nothing is shared and the accounting is unambiguous.
+        let mut blobs = Vec::new();
+        for (i, name) in ["old.txt", "middle.txt", "new.txt"].iter().enumerate() {
+            let file = dir.join(name);
+            std::fs::write(&file, format!("contents of {name} — unique to this test")).unwrap();
+            let args = json!({ "path": file.to_string_lossy() });
+            let turn = format!("t{i}");
+            capture(&db, "c", &turn, None, "edit_file", &args, None).await.unwrap();
+            std::fs::write(&file, "the agent's version").unwrap();
+            record_after(&db, "c", &turn, None, "edit_file", &args, None).await.unwrap();
+            // created_at is millisecond-resolution and these run inside one
+            // millisecond, so the ordering is set explicitly.
+            let id = find_checkpoint(&db, "c", &turn, None).await.unwrap().unwrap();
+            sqlx::query("UPDATE checkpoints SET created_at = ?1 WHERE id = ?2")
+                .bind(1_000i64 + i as i64)
+                .bind(&id)
+                .execute(&db)
+                .await
+                .unwrap();
+            let hash: (String,) = sqlx::query_as(
+                "SELECT before_hash FROM checkpoint_files WHERE checkpoint_id = ?1",
+            )
+            .bind(&id)
+            .fetch_one(&db)
+            .await
+            .unwrap();
+            blobs.push(blob_path(&hash.0).unwrap());
+        }
+
+        let before = usage(&db).await.unwrap();
+        assert_eq!(before.checkpoints, 3);
+        assert!(before.bytes > 0);
+
+        // A ceiling that fits roughly one checkpoint: the newest survives on the
+        // budget, the two older ones go.
+        let one = before.bytes / 3;
+        let out = prune(&db, one, 0).await.unwrap();
+        assert_eq!(out.removed_checkpoints, 2);
+        assert_eq!(out.removed_blobs, 2);
+        assert!(out.freed_bytes > 0);
+
+        let after = usage(&db).await.unwrap();
+        assert_eq!(after.checkpoints, 1);
+        assert!(after.bytes < before.bytes);
+        assert!(!blobs[0].exists(), "the pruned checkpoint's blob is gone from disk");
+        assert!(!blobs[1].exists());
+        assert!(blobs[2].exists(), "the surviving checkpoint keeps its content");
+    }
+
+    /// The newest checkpoint is never pruned, whatever the limits say. A
+    /// ceiling of one byte means "keep almost nothing", not "the turn that just
+    /// ran is already irreversible".
+    #[tokio::test]
+    async fn the_newest_checkpoint_always_survives() {
+        let dir = workspace("the_newest_checkpoint_always_survives");
+        let db = pool().await;
+
+        for (i, name) in ["a.txt", "b.txt"].iter().enumerate() {
+            let file = dir.join(name);
+            std::fs::write(&file, format!("something {name}")).unwrap();
+            let args = json!({ "path": file.to_string_lossy() });
+            capture(&db, "c", &format!("t{i}"), None, "edit_file", &args, None).await.unwrap();
+            let id = find_checkpoint(&db, "c", &format!("t{i}"), None).await.unwrap().unwrap();
+            sqlx::query("UPDATE checkpoints SET created_at = ?1 WHERE id = ?2")
+                .bind(i as i64)
+                .bind(&id)
+                .execute(&db)
+                .await
+                .unwrap();
+        }
+
+        // Both limits at their harshest: one byte, and everything older than
+        // "now" (these are stamped at epoch).
+        prune(&db, 1, 1).await.unwrap();
+        assert_eq!(usage(&db).await.unwrap().checkpoints, 1);
+
+        // And a store with a single checkpoint is left entirely alone.
+        prune(&db, 1, 1).await.unwrap();
+        assert_eq!(usage(&db).await.unwrap().checkpoints, 1);
+    }
+
+    /// A blob two checkpoints share outlives the pruning of one of them —
+    /// content addressing means deleting a file because *a* referrer went away
+    /// would silently break the other's restore.
+    #[tokio::test]
+    async fn shared_content_survives_pruning_one_of_its_referrers() {
+        let dir = workspace("shared_content_survives_pruning_one_of_its_referrers");
+        let db = pool().await;
+
+        let a = dir.join("shared_a.txt");
+        let b = dir.join("shared_b.txt");
+        // Identical bytes → one blob, referenced by two checkpoints.
+        for f in [&a, &b] {
+            std::fs::write(f, "identical bytes across two turns").unwrap();
+        }
+        for (i, f) in [&a, &b].iter().enumerate() {
+            let args = json!({ "path": f.to_string_lossy() });
+            capture(&db, "c", &format!("t{i}"), None, "edit_file", &args, None).await.unwrap();
+            let id = find_checkpoint(&db, "c", &format!("t{i}"), None).await.unwrap().unwrap();
+            sqlx::query("UPDATE checkpoints SET created_at = ?1 WHERE id = ?2")
+                .bind(i as i64)
+                .bind(&id)
+                .execute(&db)
+                .await
+                .unwrap();
+        }
+        let hash: (String,) =
+            sqlx::query_as("SELECT DISTINCT before_hash FROM checkpoint_files WHERE before_hash IS NOT NULL")
+                .fetch_one(&db)
+                .await
+                .unwrap();
+        let blob = blob_path(&hash.0).unwrap();
+
+        let out = prune(&db, 1, 0).await.unwrap();
+        assert_eq!(out.removed_checkpoints, 1);
+        assert_eq!(out.removed_blobs, 0, "still referenced by the surviving checkpoint");
+        assert!(blob.is_file(), "the survivor can still be restored");
+    }
+
+    /// Zero means no limit — the setting a user picks when they want the store
+    /// to keep everything, and the one an off-by-one would turn into "delete
+    /// everything".
+    #[tokio::test]
+    async fn zero_limits_prune_nothing() {
+        let dir = workspace("zero_limits_prune_nothing");
+        let db = pool().await;
+
+        for (i, name) in ["p.txt", "q.txt", "r.txt"].iter().enumerate() {
+            let file = dir.join(name);
+            std::fs::write(&file, format!("keep {name}")).unwrap();
+            let args = json!({ "path": file.to_string_lossy() });
+            capture(&db, "c", &format!("t{i}"), None, "edit_file", &args, None).await.unwrap();
+        }
+        let out = prune(&db, 0, 0).await.unwrap();
+        assert_eq!(out, PruneOutcome::default());
+        assert_eq!(usage(&db).await.unwrap().checkpoints, 3);
     }
 
     /// Identical bytes are stored once however many checkpoints see them.

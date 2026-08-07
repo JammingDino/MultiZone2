@@ -1652,11 +1652,29 @@ async fn run_participant_turn(
             // transcript will hang "revert what this turn did" on (0.10.1).
             // Only the first assistant message of the turn wins — a turn that
             // took five steps offers one revert, at the top, not five.
-            if let Err(e) =
-                crate::checkpoints::link_message(&ctx.db, chat_id, &turn_id, persp, &assistant_msg_id)
-                    .await
+            match crate::checkpoints::link_message(
+                &ctx.db,
+                chat_id,
+                &turn_id,
+                persp,
+                &assistant_msg_id,
+            )
+            .await
             {
-                tracing::warn!("checkpoint message link failed: {e}");
+                // The turn grew the store, so this is the moment to bring it
+                // back under the user's ceiling. Detached: retention is
+                // housekeeping and must never sit between a turn and its next
+                // step, and it is best-effort in the same way a checkpoint is.
+                Ok(true) => {
+                    let db = ctx.db.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = crate::checkpoints::prune_to_settings(&db).await {
+                            tracing::warn!("checkpoint prune failed: {e}");
+                        }
+                    });
+                }
+                Ok(false) => {}
+                Err(e) => tracing::warn!("checkpoint message link failed: {e}"),
             }
         }
 

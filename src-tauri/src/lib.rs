@@ -152,6 +152,22 @@ pub fn run() {
                     // Markdown two-way sync watcher (0.7.2): pulls external `.md`
                     // edits in the mirror folder back into the DB.
                     commands::mirror::init(st.db.clone(), handle.clone());
+                    // Bring the checkpoint store back under its retention
+                    // limits (0.10.0). Detached: a store with thousands of
+                    // blobs is a few hundred milliseconds of file deletion,
+                    // which the first window paint should not wait for.
+                    let db = st.db.clone();
+                    tauri::async_runtime::spawn(async move {
+                        match checkpoints::prune_to_settings(&db).await {
+                            Ok(out) if out.removed_checkpoints > 0 => tracing::info!(
+                                "checkpoint retention: dropped {} checkpoint(s), freed {} bytes",
+                                out.removed_checkpoints,
+                                out.freed_bytes
+                            ),
+                            Ok(_) => {}
+                            Err(e) => tracing::warn!("checkpoint prune failed: {e}"),
+                        }
+                    });
                 }
                 knowledge::watcher::resync().await;
                 commands::mirror::resync().await;
@@ -237,6 +253,8 @@ pub fn run() {
             commands::tool_usage::reset_tool_usage,
             commands::checkpoints::list_checkpoints,
             commands::checkpoints::restore_checkpoint,
+            commands::checkpoints::checkpoint_usage,
+            commands::checkpoints::prune_checkpoints,
             commands::usage::session_context_usage,
             commands::usage::lifetime_token_usage,
             commands::messages::send_message,

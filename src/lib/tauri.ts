@@ -9,6 +9,8 @@ import type {
   ChatZone,
   LibraryEntry,
   Checkpoint,
+  CheckpointUsage,
+  PruneOutcome,
   RestoreReport,
   DbStats,
   IndexSummary,
@@ -189,6 +191,17 @@ export const restoreCheckpoint = (
     paths: paths ?? null,
     force: force ?? false,
   });
+
+/** What the checkpoint store is holding, for Settings → Data (0.10.0). */
+export const checkpointUsage = () => invoke<CheckpointUsage>("checkpoint_usage");
+
+/**
+ * Apply the configured retention limits now. The same prune that runs at
+ * startup and after a turn that changed files — exposed as a button because a
+ * user who has just lowered the ceiling wants the number to move now, not on
+ * their next agentic turn.
+ */
+export const pruneCheckpoints = () => invoke<PruneOutcome>("prune_checkpoints");
 
 /**
  * Estimated context carried by every chat in this chat's sub-agent session —

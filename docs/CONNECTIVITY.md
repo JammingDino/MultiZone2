@@ -4,7 +4,14 @@ Notes behind the 0.11.x and 1.2.x entries in [RELEASE_PLAN.md](RELEASE_PLAN.md).
 
 Written August 2026, against 0.10.1. **Part 1 was built as 0.11.0** — the route index, the honest health check, the persisted bind outcome and the drift test all landed, and the ten routes became 105.
 
-**The API tool landed too**, as `app_read` / `app_control`. It went one step further than the design below asked for: rather than attaching the token in Rust, it serves the request through the same `axum` router in-process, so there is no socket, no port, and no token *anywhere* in the path — and the tool works whether or not the user has switched the HTTP server on, which is the common case for someone who has never wanted remote access. The write side of the API also learned to tell an open window what it changed, so a preference or a zone changed by a model or a script is visible in the app immediately instead of at the next restart. What remains open here is connectors (0.11.2).
+**The API tool landed too**, as `app_read` / `app_control`. It went one step further than the design below asked for: rather than attaching the token in Rust, it serves the request through the same `axum` router in-process, so there is no socket, no port, and no token *anywhere* in the path — and the tool works whether or not the user has switched the HTTP server on, which is the common case for someone who has never wanted remote access. The write side of the API also learned to tell an open window what it changed, so a preference or a zone changed by a model or a script is visible in the app immediately instead of at the next restart. **Connectors were built as 0.11.2**, and the catalog turned out to matter more than the header
+column did. Routes 1 and 2 below both landed: `headers` is a column applied in `HttpConn::send`, and
+the catalog is a compiled-in JSON file plus anything in `<app_data_dir>/connectors/`, importable from
+a URL. The third piece was not in the original sizing — a *diagnosis*, which runs the checks in the
+order they can fail and reports the first false one. That is what makes a catalog entry survive
+contact with a real machine: the entry knows what `TAVILY_API_KEY` is for, so the app can say it is
+missing instead of reporting a child process that exited. What remains open is route 3, real OAuth,
+which is still 1.2.x and still a verification process rather than a sprint.
 
 ---
 
@@ -74,7 +81,7 @@ MCP support ([mcp/mod.rs](../src-tauri/src/mcp/mod.rs)) speaks two transports:
 
 **The stdio path already works for Google today.** Community Google MCP servers (Gmail, Calendar, Drive) are overwhelmingly stdio processes launched with `npx`, taking credentials through environment variables or a credentials file path. Everything they need — the command, the args, the env — is already a field on `McpServer`, and the Windows `npx`/PATHEXT resolution problem was fixed in 0.9.5. Someone who can get through Google Cloud Console can wire Gmail into a zone right now.
 
-**The HTTP path cannot authenticate at all.** `HttpConn::send` sets `Content-Type`, `Accept` and `Mcp-Session-Id` and nothing else — there is no `Authorization` header, and `McpServer` has no field to hold one. Every hosted/remote MCP connector, which is where the ecosystem has been moving, is therefore unreachable. This is a small gap with a large consequence and is the single highest-value thing in this document.
+**The HTTP path cannot authenticate at all.** *(Fixed in 0.11.2 — recorded as written, because it was the single highest-value thing in this document and worth remembering as a shape of bug.)* `HttpConn::send` set `Content-Type`, `Accept` and `Mcp-Session-Id` and nothing else — there was no `Authorization` header, and `McpServer` had no field to hold one. Every hosted/remote MCP connector, which is where the ecosystem has been moving, was therefore unreachable. A one-column gap with a whole-ecosystem consequence.
 
 ### The three routes to Google, honestly sized
 

@@ -125,6 +125,41 @@ Dictate instead of typing (0.8.0+). Transcription goes to a provider you configu
 
 Four sliders shape whichever you pick: **Speed**, **Density**, **Opacity**, and **Hue variation**, which spreads each element's colour around your accent instead of painting everything one flat tone. Leave it at 0 for a single-colour look.
 
+## Connectors (MCP)
+
+**Settings → MCP → Browse catalog.** A catalog entry carries everything about a Model Context
+Protocol server except the part only you have: the command or URL, the environment variables or
+headers it needs, what has to be installed first, and a link to the page each credential comes
+from. Installing one writes the server and stops — nothing is launched or contacted until you
+press **Connect**, and then you set a danger level per tool and enable the ones you want per zone.
+
+The shipped set covers Gmail, GitHub, Context7, Tavily search, the reference filesystem server and
+Playwright. It is a JSON file, not code: **Import entries from a URL** adds more (one entry, a list,
+or `{ "entries": [...] }`), they land as files in the app's `connectors/` folder, and an imported
+entry sharing an id with a shipped one replaces it.
+
+Hosted servers authenticate. MultiZone sends the **Headers** you configure with every request on the
+sse/http transport, which is where an `Authorization: Bearer …` goes — catalog entries fill it in
+from a pasted token, and the manual editor has the field. Google's
+[Gmail MCP server](https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server) is
+the worked example: enable the two APIs on a Cloud project, set up the consent screen with the
+`gmail.readonly` and `gmail.compose` scopes, then paste an access token from
+`gcloud auth print-access-token` into the catalog entry. Google's tokens last about an hour, so this
+is paste-again-when-it-expires until signed-in connectors (OAuth with refresh, per-scope consent,
+tokens in the OS keychain) land after 1.0.
+
+**Diagnose** answers the question "why isn't this working" properly. It runs the checks in the order
+they can fail — is the server enabled, is there a command, is that program on the PATH the app
+inherited, are the values the catalog marks required actually filled in, and only then the handshake
+— and reports the first false one with what to do about it. A stdio server's own stderr is captured
+and quoted, so "the command ran, the server exited, `GOOGLE_CREDENTIALS_PATH` is not set" replaces
+"failed to connect".
+
+The assistant can do all of this except the writes: `app_read` reaches the catalog and the
+diagnosis, so "why can't you see my email?" is answerable, while installing a connector goes through
+`app_control` and therefore through an approval prompt. Silently adding a server that launches a
+process is exactly what an injected instruction would ask for.
+
 ## HTTP API
 
 MultiZone can expose a local HTTP API so external tools or scripts can drive it like a CLI — listing and creating chats, picking zones/projects, and sending messages with the same agentic loop the GUI uses.

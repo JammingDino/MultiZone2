@@ -9,7 +9,8 @@ import { useTts } from "@/store/tts";
  * button's toggle/hold gesture to the store's capture session and splices the
  * final transcript into `setText` per the user's sttInsertionMode. Both the
  * in-chat InputBar and the new-chat HomeScreen composer use this so dictation
- * behaves identically wherever a message is typed.
+ * behaves identically wherever a message is typed — including over a selection,
+ * which the transcript replaces exactly as typed characters would.
  *
  * Transcription runs when recording stops (there are no live partials): the
  * recording is uploaded to the configured provider and the returned transcript
@@ -45,16 +46,34 @@ export function useDictation({
   const [transcribing, setTranscribing] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   // Where the transcript is spliced in — captured at record start so later
-  // typing/selection changes don't move the insertion point.
-  const dictationCursorRef = useRef<number | null>(null);
+  // typing/selection changes don't move the insertion point. A range rather than
+  // a caret (0.11.3): text selected when recording began is *replaced* by what
+  // was said, which is what typing over a selection does and therefore what the
+  // gesture already means to everyone using it.
+  const dictationRangeRef = useRef<{ start: number; end: number } | null>(null);
 
   function commitTranscript(finalText: string) {
     if (!finalText) return;
-    const pos = dictationCursorRef.current;
-    if (sttInsertionMode === "replace" || pos == null) {
+    const range = dictationRangeRef.current;
+    if (sttInsertionMode === "replace" || range == null) {
       setText(finalText);
     } else {
-      setText((prev) => prev.slice(0, pos) + finalText + prev.slice(pos));
+      setText((prev) => prev.slice(0, range.start) + finalText + prev.slice(range.end));
+      // Leave the caret after the words just spoken, collapsed — again, where
+      // typing would have left it. The field re-renders with the new value
+      // first, so the move waits a frame.
+      const el = taRef.current;
+      if (el) {
+        const caret = range.start + finalText.length;
+        requestAnimationFrame(() => {
+          try {
+            el.setSelectionRange(caret, caret);
+          } catch {
+            // Not every field supports a selection range (a number input, say);
+            // the text landed either way.
+          }
+        });
+      }
     }
   }
 
@@ -63,7 +82,13 @@ export function useDictation({
     // so the user isn't talking over the assistant.
     useTts.getState().stop();
     const el = taRef.current;
-    dictationCursorRef.current = el?.selectionStart ?? el?.value.length ?? 0;
+    const end = el?.value.length ?? 0;
+    dictationRangeRef.current = {
+      start: el?.selectionStart ?? end,
+      // A collapsed caret has start === end, so the ordinary insert falls out of
+      // the same expression with nothing selected to remove.
+      end: el?.selectionEnd ?? el?.selectionStart ?? end,
+    };
     setVoiceError(null);
     try {
       await startDictation();

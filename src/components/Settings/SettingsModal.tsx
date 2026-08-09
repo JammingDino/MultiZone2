@@ -3,7 +3,7 @@ import { X, Plus, Trash2, RefreshCw, Server, Palette, MessageSquare, Database, A
 import { open } from "@tauri-apps/plugin-dialog";
 import { useApp } from "@/store/app";
 import type { BackgroundEffect, GlassStyle, ThemeColorKey } from "@/store/app";
-import { THEME_COLOR_KEYS } from "@/store/app";
+import { MAX_CUSTOM_CSS, THEME_COLOR_KEYS } from "@/store/app";
 import { useShallow } from "zustand/react/shallow";
 import * as api from "@/lib/tauri";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
@@ -576,6 +576,8 @@ function AppearanceTab() {
         </div>
       </section>
 
+      <CustomCssSection />
+
       <section>
         <h3 className="mb-3 text-sm font-medium">Perspective layout</h3>
         <OptionCards
@@ -642,6 +644,102 @@ function AppearanceTab() {
       </section>
 
     </div>
+  );
+}
+
+/**
+ * Custom CSS (0.11.3) — the escape hatch under the appearance settings.
+ *
+ * Everything above it is a control we chose to build; this is for the change we
+ * didn't. It edits into local state and commits on a short idle, because the
+ * theme row is written to the database on every commit and a write per keystroke
+ * would be both wasteful and, through the settings-updated echo, jumpy.
+ *
+ * The variable list is not decoration: a stylesheet that hardcodes `#14171c`
+ * breaks the moment the user switches to light mode, and `var(--color-panel)`
+ * doesn't. Showing the names is the difference between an escape hatch and a
+ * support question.
+ */
+function CustomCssSection() {
+  const theme = useApp((s) => s.theme);
+  const setTheme = useApp((s) => s.setTheme);
+  const [draft, setDraft] = useState(theme.customCss ?? "");
+  const [expanded, setExpanded] = useState(!!theme.customCss);
+  const enabled = !!theme.customCssEnabled;
+
+  // Follow the stored value when it changes underneath us — a model editing the
+  // sheet over `app_control` is the case this exists for — but never while the
+  // user is mid-edit, which is what the pending-commit ref rules out.
+  const pending = useRef(false);
+  const stored = theme.customCss ?? "";
+  useEffect(() => {
+    if (!pending.current) setDraft(stored);
+  }, [stored]);
+
+  useEffect(() => {
+    if (draft === stored) return;
+    pending.current = true;
+    const id = setTimeout(() => {
+      pending.current = false;
+      setTheme({ customCss: draft.slice(0, MAX_CUSTOM_CSS) });
+    }, 400);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft, stored]);
+
+  const tooLong = draft.length > MAX_CUSTOM_CSS;
+
+  return (
+    <section>
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="mb-2 flex items-center gap-1 text-sm font-medium hover:text-[var(--color-accent)]"
+      >
+        {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        Custom CSS
+      </button>
+      {expanded && (
+        <div className="flex flex-col gap-2">
+          <ToggleRow
+            label="Apply custom CSS"
+            description="Your own stylesheet, loaded after the app's own so it wins. Switch it off to get the stock look back without deleting what you wrote."
+            checked={enabled}
+            onChange={(customCssEnabled) => setTheme({ customCssEnabled })}
+          />
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            spellCheck={false}
+            rows={10}
+            placeholder={`/* e.g. */\n.sidebar { width: 220px; }\nbutton { border-radius: 2px; }`}
+            className={`w-full resize-y rounded border bg-[var(--color-bg)] px-2.5 py-2 font-mono text-xs outline-none focus:border-[var(--color-accent)] ${
+              tooLong ? "border-red-500/60" : "border-[var(--color-border)]"
+            } ${enabled ? "" : "opacity-60"}`}
+          />
+          <div className="flex items-center justify-between gap-3 text-[11px] text-[var(--color-text-muted)]">
+            <span>
+              Use the theme variables so the rules survive a mode switch:{" "}
+              <code className="font-mono">
+                {Object.values(THEME_COLOR_KEYS).join(", ")}, --color-accent
+              </code>
+            </span>
+            <span className={`shrink-0 tabular-nums ${tooLong ? "text-red-500" : ""}`}>
+              {formatCount(draft.length)}/{formatCount(MAX_CUSTOM_CSS)}
+            </span>
+          </div>
+          {tooLong && (
+            <p className="text-[11px] text-red-500">
+              Only the first {formatCount(MAX_CUSTOM_CSS)} characters are applied.
+            </p>
+          )}
+          {!enabled && draft.trim() !== "" && (
+            <p className="text-[11px] text-[var(--color-text-muted)]">
+              Saved, but not applied — turn “Apply custom CSS” on to see it.
+            </p>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 

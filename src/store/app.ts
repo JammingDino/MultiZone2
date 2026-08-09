@@ -528,7 +528,27 @@ export interface ThemePrefs {
    */
   colorsDark?: Partial<Record<ThemeColorKey, string>>;
   colorsLight?: Partial<Record<ThemeColorKey, string>>;
+  /**
+   * A stylesheet the user (or a model, over the API) appends to the app's own
+   * (0.11.3). Six palette colours and a set of toggles cannot express "make the
+   * sidebar narrower" or "square off every corner", and the alternative to a
+   * text box is an ever-growing settings panel chasing requests one at a time.
+   *
+   * It is injected last, so it wins on equal specificity, and it is kept behind
+   * `customCssEnabled` so a rule that hides something important can be switched
+   * off without first finding it in the text.
+   */
+  customCss?: string;
+  customCssEnabled?: boolean;
 }
+
+/**
+ * How much custom CSS is allowed. Not a security boundary — the sheet is the
+ * user's own and already runs in their window — but a stylesheet this long is a
+ * mistake (a paste of the wrong buffer, a model in a loop), and re-parsing it on
+ * every theme write is the kind of thing that makes an app feel broken.
+ */
+export const MAX_CUSTOM_CSS = 100_000;
 
 /** The palette entries a user may override, and the CSS variable each drives. */
 export const THEME_COLOR_KEYS = {
@@ -557,6 +577,8 @@ const DEFAULT_THEME: ThemePrefs = {
   glassEnabled: false,
   glassStyle: "frosted",
   glassStrength: 0.5,
+  customCss: "",
+  customCssEnabled: false,
 };
 
 const LEGACY_FONT_SIZE: Record<string, number> = { normal: 14, large: 16, xl: 18 };
@@ -631,6 +653,39 @@ function applyThemeToDom(theme: ThemePrefs) {
   // for something no one wants to tune independently.
   if (overrides.border) html.style.setProperty("--color-border-strong", overrides.border);
   else html.style.removeProperty("--color-border-strong");
+
+  applyCustomCss(theme);
+}
+
+const CUSTOM_CSS_ELEMENT_ID = "multizone-custom-css";
+
+/**
+ * Keep the user's stylesheet in one `<style>` element at the end of `<head>`.
+ *
+ * Last in the document is the point: the app's own rules and Tailwind's
+ * utilities are already there, so an equally specific rule written here is the
+ * one that applies, and the user does not have to discover `!important` to
+ * change a colour. The element is created on first use and its text swapped
+ * afterwards — replacing the node would make the browser re-resolve every style
+ * in the app on each keystroke in the editor.
+ */
+function applyCustomCss(theme: ThemePrefs) {
+  const css = theme.customCssEnabled ? (theme.customCss ?? "").slice(0, MAX_CUSTOM_CSS) : "";
+  let el = document.getElementById(CUSTOM_CSS_ELEMENT_ID) as HTMLStyleElement | null;
+  if (!css) {
+    el?.remove();
+    return;
+  }
+  if (!el) {
+    el = document.createElement("style");
+    el.id = CUSTOM_CSS_ELEMENT_ID;
+    document.head.appendChild(el);
+  } else if (el !== document.head.lastElementChild) {
+    // A font link injected after it would otherwise sit downstream of the user's
+    // rules; move it back to the end.
+    document.head.appendChild(el);
+  }
+  if (el.textContent !== css) el.textContent = css;
 }
 
 export const useApp = create<AppStore>((set, get) => ({

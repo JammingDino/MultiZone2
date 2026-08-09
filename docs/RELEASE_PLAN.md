@@ -707,6 +707,18 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [ ] Runtime-test the whole path: install a catalog entry, connect it, break it deliberately, and read what Diagnose says
 - [~] Gmail specifically is reachable but not yet *comfortable* — Google's access tokens last about an hour, so the entry is paste-again-when-it-expires. Refresh, per-scope consent and keychain storage are 1.2.x, as scoped there
 
+### 0.11.3 — Appearance the model can actually reach
+
+*Status: built & tested (`cargo test --lib` 160 passing, `npm run build` green); not yet runtime-tested. The theme blob is now described in Rust — [theme.rs](../src-tauri/src/theme.rs) — and served by two routes in [api/routes.rs](../src-tauri/src/api/routes.rs). 0.11.1 gave the model the whole API and 0.11.0 gave it a route index; what neither gave it was any idea what a **body** should contain. `PATCH /api/settings/theme` accepted `{"colour":"#fff"}` as happily as `{"accent":"#fff"}`, wrote it, and returned 200 — so the model told the user the theme had changed and nothing had. That is the failure mode this release closes, on the appearance surface first because it is the one users ask for by voice.*
+
+- [x] **Custom CSS** on the theme (Settings → Appearance → Custom CSS), injected as one `<style>` element kept last in `<head>` so an equally specific rule wins without anyone having to discover `!important`. Behind its own toggle, because the whole point of the escape hatch is that it can write a rule that hides the control you would need to undo it — switching the sheet off has to be possible without first finding the offending line. Capped at 100 000 characters, which is a runaway paste rather than a preference
+- [x] `GET /api/theme` — the resolved theme (defaults filled in, so a reader sees what is *in force* rather than only what happens to have been written) alongside a schema: every field with its type, range, default and a line on what it is for, plus the palette-key ↔ CSS-variable table with both base palettes. The same self-description principle as `/api/routes`, one level down, which is why the tool description gets a pointer to it and not a copy that would rot
+- [x] `PATCH /api/theme` — validated, and the validation is the entire reason it exists next to the settings route: an unknown field, a colour that isn't hex, an effect that doesn't exist or a number out of range comes back named (`unknown theme field \`colour\` — the fields are: …`) instead of being written and ignored. One retry the model can act on, rather than a success it reports to the user
+- [x] The palette section — background · panels · hover · borders · text · muted text, per mode — is reachable and documented as such, which was the specific ask. `colorsDark` / `colorsLight` replace their map whole (the merge is top-level), so `{}` is how a caller resets one
+- [x] The tool-facing `ThemePalette` reads the user's own palette overrides rather than the stock ones, so `render_graph`'s "pick colours readable against the background" guidance is finally about the background on screen
+- [x] Dictation over a selection replaces it, as typing does. Starting a recording with text highlighted used to splice the transcript in at the left edge of the selection and leave the highlighted text sitting there — the one behaviour no one expects, since every other way of putting characters into a selected field overwrites it. The caret lands after the spoken words
+- [ ] Runtime-test: ask a zone to repaint the palette and write a custom sheet, and confirm both land in the open window without a restart
+
 ---
 
 ## 0.12.x — Planning & task control

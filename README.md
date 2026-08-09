@@ -103,6 +103,8 @@ stdin/stdout are **pipes, not a PTY**. Servers, build tools and REPLs work; prog
 
 Dictate instead of typing (0.8.0+). Transcription goes to a provider you configure under **Settings → Voice**, using the OpenAI-compatible `/audio/transcriptions` endpoint — so pointing it at a local server (e.g. LM Studio serving a whisper model) keeps your audio on your machine.
 
+Dictation behaves like typing: start a recording with text selected and what you say **replaces the selection**, leaving the caret after it. With nothing selected, the transcript is inserted at the cursor — unless **Settings → Voice → Insertion mode** is set to *Replace field*, which always overwrites the whole composer.
+
 ## Appearance
 
 **Settings → Appearance** covers the palette, fonts, bloom and shadows, plus an animated **background effect** — every one of which reacts to your cursor, and none of which need it to keep moving:
@@ -124,6 +126,19 @@ Dictate instead of typing (0.8.0+). Transcription goes to a provider you configu
 | Fish | Procedurally animated fish — jointed spines that swim with fins and a trailing tail — schooling, and darting away when you get close. |
 
 Four sliders shape whichever you pick: **Speed**, **Density**, **Opacity**, and **Hue variation**, which spreads each element's colour around your accent instead of painting everything one flat tone. Leave it at 0 for a single-colour look.
+
+### Custom CSS
+
+**Settings → Appearance → Custom CSS** (0.11.3) takes a stylesheet of your own, loaded after the app's — so an equally specific rule wins and you don't have to reach for `!important`. It has its own on/off switch, which matters more than it sounds: a rule that hides the wrong thing can be switched off without first finding it in the text.
+
+Write colours as the theme's variables (`--color-bg`, `--color-panel`, `--color-panel-hover`, `--color-border`, `--color-text`, `--color-text-muted`, `--color-accent`) rather than as literals, or the sheet breaks the moment you switch between light and dark.
+
+```css
+.sidebar { width: 220px; }
+button { border-radius: 2px; }
+```
+
+Everything in this section — the palette, the effects and the custom sheet — is also reachable over the API and by the assistant itself; see [`/api/theme`](#http-api) below.
 
 ## Connectors (MCP)
 
@@ -198,6 +213,7 @@ The most-used handful:
 | `GET`/`POST`/`DELETE` | `/api/chats/:id/perspectives` | List/add/remove perspective zones. Body for add/remove: `{ "zoneId" }`. |
 | `GET` | `/api/zones` · `/api/projects` · `/api/tags` | List each. `POST` to create or update; `DELETE /:id` to remove. |
 | `PATCH` | `/api/settings/:key` | Merge fields into a JSON settings row — `PATCH /api/settings/theme -d '{"mode":"dark"}'` switches to dark mode without re-sending every other appearance setting. `PUT` still writes a row whole. |
+| `GET`/`PATCH` | `/api/theme` | The appearance settings in force, plus a schema for them: every field with its type, range, default and meaning, and the palette-key ↔ CSS-variable table. `PATCH` validates what you send and names what is wrong with a patch it rejects, rather than writing a misspelled field and reporting success. |
 
 Sending a message accepts either `{ "text": "..." }` or `{ "parts": [...] }` (the same content parts the GUI uses). By default the response is a [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events) stream of the same events the GUI receives (tokens, tool calls, etc.). Append `?wait=true` to instead block until the turn finishes and return the final messages as JSON.
 

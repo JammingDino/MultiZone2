@@ -69,6 +69,9 @@ export interface BundleMcpServer {
   command: string | null;
   url: string | null;
   env: string | null;
+  /** Travels with the server: a remote connector without its headers is a row that cannot connect. */
+  headers: string | null;
+  catalogId: string | null;
   enabled: boolean;
 }
 
@@ -243,6 +246,8 @@ export async function buildSettingsBundle(
       command: s.command,
       url: s.url,
       env: s.env,
+      headers: s.headers,
+      catalogId: s.catalogId,
       enabled: s.enabled,
     })),
     memories: allMemories

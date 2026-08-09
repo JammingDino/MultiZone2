@@ -286,9 +286,68 @@ export interface McpServer {
   url: string | null;
   /** stdio: JSON object string of env vars. */
   env: string | null;
+  /** sse/http: JSON object string of headers — where `Authorization` lives. */
+  headers: string | null;
+  /** The catalog entry this was installed from, if it wasn't typed in by hand. */
+  catalogId: string | null;
   enabled: boolean;
   createdAt: number;
   updatedAt: number;
+}
+
+/** One value a connector needs from the user: an env var or an HTTP header. */
+export interface ConnectorField {
+  key: string;
+  label: string;
+  description?: string | null;
+  /** The page this value comes from — the most useful line in the form. */
+  credentialUrl?: string | null;
+  required?: boolean;
+  secret?: boolean;
+  /** `Bearer {value}` — the user pastes a token, not a header. */
+  template?: string | null;
+  default?: string | null;
+}
+
+/** A curated MCP server: everything but the credential. */
+export interface ConnectorEntry {
+  id: string;
+  name: string;
+  description: string;
+  category?: string | null;
+  transport: "stdio" | "sse";
+  command?: string | null;
+  url?: string | null;
+  env?: ConnectorField[];
+  headers?: ConnectorField[];
+  prerequisites?: string[];
+  docsUrl?: string | null;
+  /** Shipped with the app, so it cannot be deleted — only overridden. */
+  curated?: boolean;
+  source?: string | null;
+}
+
+export interface ConnectorCatalog {
+  entries: ConnectorEntry[];
+  /** catalogId → the id of the server installed from it. */
+  installed: Record<string, string>;
+}
+
+/** One question a diagnosis answered. */
+export interface McpCheck {
+  name: string;
+  ok: boolean;
+  detail: string;
+}
+
+/** Why a server isn't working — the first failing check, and what to do. */
+export interface McpDiagnosis {
+  serverId: string;
+  ok: boolean;
+  summary: string;
+  checks: McpCheck[];
+  nextStep?: string | null;
+  docsUrl?: string | null;
 }
 
 /** A tool advertised by an MCP server, with a user-assigned danger level. */

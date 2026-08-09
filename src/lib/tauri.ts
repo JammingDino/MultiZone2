@@ -22,6 +22,9 @@ import type {
   KbDocument,
   KnowledgeStatus,
   LifetimeUsage,
+  ConnectorCatalog,
+  ConnectorEntry,
+  McpDiagnosis,
   McpServer,
   McpServerView,
   Memory,
@@ -265,6 +268,8 @@ export const upsertMcpServer = (server: {
   command?: string | null;
   url?: string | null;
   env?: string | null;
+  headers?: string | null;
+  catalogId?: string | null;
   enabled?: boolean;
 }) => invoke<McpServer>("upsert_mcp_server", { server });
 export const deleteMcpServer = (id: string) => invoke<void>("delete_mcp_server", { id });
@@ -274,6 +279,23 @@ export const disconnectMcpServer = (id: string) =>
   invoke<void>("disconnect_mcp_server", { id });
 export const setMcpToolDanger = (toolId: string, dangerLevel: number) =>
   invoke<void>("set_mcp_tool_danger", { toolId, dangerLevel });
+
+// Connectors (0.11.2) — the catalog an MCP server is installed from, and the
+// diagnosis for one that will not connect.
+export const listConnectors = () => invoke<ConnectorCatalog>("list_connectors");
+export const installConnector = (input: {
+  entryId: string;
+  values?: Record<string, string>;
+  name?: string | null;
+  commandSuffix?: string | null;
+  replace?: boolean;
+}) => invoke<McpServer>("install_connector", { input });
+export const importConnectors = (input: { url?: string; json?: string }) =>
+  invoke<ConnectorEntry[]>("import_connectors", { input });
+export const deleteConnector = (entryId: string) =>
+  invoke<void>("delete_connector", { entryId });
+export const diagnoseMcpServer = (id: string) =>
+  invoke<McpDiagnosis>("diagnose_mcp_server", { id });
 
 // Memory
 export const listMemories = () => invoke<Memory[]>("list_memories");

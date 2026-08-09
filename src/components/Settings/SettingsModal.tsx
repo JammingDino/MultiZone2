@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { X, Plus, Trash2, RefreshCw, Server, Palette, MessageSquare, Database, AlertTriangle, Loader2, Folder, FolderOpen, Globe, Copy, Check, Search, Brain, Sparkles, FileUp, FileDown, Plug, Wifi, WifiOff, Library, ChevronDown, ChevronRight, Mic, Volume2, AudioLines } from "lucide-react";
+import { X, Plus, Trash2, RefreshCw, Server, Palette, MessageSquare, Database, AlertTriangle, Loader2, Folder, FolderOpen, Globe, Copy, Check, Search, Brain, Sparkles, FileUp, FileDown, Plug, Wifi, WifiOff, Library, ChevronDown, ChevronRight, Mic, Volume2, AudioLines, Stethoscope, ExternalLink, Download } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useApp } from "@/store/app";
 import type { BackgroundEffect, GlassStyle, ThemeColorKey } from "@/store/app";
@@ -24,7 +24,7 @@ import {
 } from "@/lib/settingsBundle";
 import { pickBundleFile } from "@/lib/importSettings";
 import { type SkillSeed, serializeSkill, parseSkill } from "@/lib/skillFile";
-import type { ApiBindState, CheckpointUsage, DbStats, GlobalKbView, IndexSummary, KbDocument, LifetimeUsage, McpServerView, McpTool, Provider, Skill, SkillPack } from "@/lib/types";
+import type { ApiBindState, CheckpointUsage, ConnectorCatalog, ConnectorEntry, ConnectorField, DbStats, GlobalKbView, IndexSummary, KbDocument, LifetimeUsage, McpDiagnosis, McpServerView, McpTool, Provider, Skill, SkillPack } from "@/lib/types";
 import { formatBytes, formatCount, formatTokens } from "@/lib/format";
 
 type Tab = "providers" | "appearance" | "chat" | "voice" | "speech" | "search" | "skills" | "mcp" | "knowledge" | "memory" | "api" | "data";
@@ -1900,8 +1900,10 @@ function McpTab() {
   const mcpServers = useApp((s) => s.mcpServers);
   const refreshMcpServers = useApp((s) => s.refreshMcpServers);
   const [editing, setEditing] = useState<McpServerView | "new" | null>(null);
+  const [browsing, setBrowsing] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [errorById, setErrorById] = useState<Record<string, string>>({});
+  const [diagById, setDiagById] = useState<Record<string, McpDiagnosis>>({});
 
   useEffect(() => { refreshMcpServers().catch(console.error); }, [refreshMcpServers]);
 
@@ -1921,6 +1923,23 @@ function McpTab() {
   async function disconnect(s: McpServerView) {
     await api.disconnectMcpServer(s.id);
     await refreshMcpServers();
+  }
+
+  // The diagnosis attempts the handshake itself, so it doubles as a connect —
+  // refresh afterwards or the panel would show a stale "disconnected" beside a
+  // report that says it connected.
+  async function diagnose(s: McpServerView) {
+    setBusyId(s.id);
+    setErrorById((e) => ({ ...e, [s.id]: "" }));
+    try {
+      const report = await api.diagnoseMcpServer(s.id);
+      setDiagById((d) => ({ ...d, [s.id]: report }));
+    } catch (e) {
+      setErrorById((prev) => ({ ...prev, [s.id]: String(e) }));
+    } finally {
+      setBusyId(null);
+      await refreshMcpServers();
+    }
   }
 
   async function remove(s: McpServerView) {
@@ -1944,6 +1963,15 @@ function McpTab() {
     );
   }
 
+  if (browsing) {
+    return (
+      <ConnectorCatalogPanel
+        onDone={async () => { setBrowsing(false); await refreshMcpServers(); }}
+        onCancel={() => setBrowsing(false)}
+      />
+    );
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <section>
@@ -1954,14 +1982,24 @@ function McpTab() {
           tools; set a danger level per tool, then enable specific tools per zone in the zone editor.
           MCP tool calls go through the same approval pipeline as built-in tools.
         </p>
+        <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+          Start from the <strong>catalog</strong> if you can: an entry knows the command, the
+          variables and where each credential comes from, so all it asks you for is the credential.
+        </p>
       </section>
 
-      <div>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          onClick={() => setBrowsing(true)}
+          className="flex items-center gap-1.5 rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-1.5 text-xs transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+        >
+          <Library size={12} /> Browse catalog
+        </button>
         <button
           onClick={() => setEditing("new")}
           className="flex items-center gap-1.5 rounded border border-dashed border-[var(--color-border)] px-3 py-1.5 text-xs transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
         >
-          <Plus size={12} /> Add server
+          <Plus size={12} /> Add manually
         </button>
       </div>
 
@@ -1998,6 +2036,14 @@ function McpTab() {
                     {busyId === s.id ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
                     {s.status.state === "connected" ? "Refresh" : "Connect"}
                   </button>
+                  <button
+                    onClick={() => diagnose(s)}
+                    disabled={busyId === s.id}
+                    title="Run the checks in the order they can fail and report the first one that does"
+                    className="flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1 text-[11px] hover:border-[var(--color-accent)] disabled:opacity-50"
+                  >
+                    <Stethoscope size={11} /> Diagnose
+                  </button>
                   {s.status.state === "connected" && (
                     <button onClick={() => disconnect(s)} className="rounded px-2 py-1 text-[11px] text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)]">Disconnect</button>
                   )}
@@ -2012,6 +2058,13 @@ function McpTab() {
                 <div className="mt-2 rounded border border-red-600/40 bg-red-600/10 p-2 text-[11px] text-red-500">
                   {errorById[s.id]}
                 </div>
+              )}
+
+              {diagById[s.id] && (
+                <DiagnosisPanel
+                  diagnosis={diagById[s.id]}
+                  onDismiss={() => setDiagById(({ [s.id]: _drop, ...rest }) => rest)}
+                />
               )}
 
               {s.tools.length > 0 && (
@@ -2031,6 +2084,339 @@ function McpTab() {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * The report a failed connection should have given in the first place: the
+ * checks in the order they can fail, the first false one, and the thing to do
+ * about it. The passing checks stay visible — "npx resolved, the key is set,
+ * the server itself refused us" is a different problem from "npx is missing",
+ * and only the list makes that legible.
+ */
+function DiagnosisPanel({ diagnosis, onDismiss }: { diagnosis: McpDiagnosis; onDismiss: () => void }) {
+  const tone = diagnosis.ok
+    ? "border-green-600/40 bg-green-600/10"
+    : "border-yellow-600/40 bg-yellow-600/10";
+  return (
+    <div className={`mt-2 rounded border p-2 text-[11px] ${tone}`}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="font-medium">{diagnosis.summary}</div>
+        <button onClick={onDismiss} className="shrink-0 text-[var(--color-text-muted)] hover:text-[var(--color-text)]" title="Dismiss">
+          <X size={11} />
+        </button>
+      </div>
+      <ul className="mt-1.5 flex flex-col gap-1">
+        {diagnosis.checks.map((c) => (
+          <li key={c.name} className="flex items-start gap-1.5">
+            <span className={c.ok ? "text-green-500" : "text-red-500"}>{c.ok ? "✓" : "✕"}</span>
+            <span className="min-w-0">
+              <span className="font-mono text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">{c.name}</span>{" "}
+              <span className="whitespace-pre-wrap break-words">{c.detail}</span>
+            </span>
+          </li>
+        ))}
+      </ul>
+      {diagnosis.nextStep && (
+        <div className="mt-2 border-t border-[var(--color-border)] pt-1.5">
+          <span className="font-medium">Next: </span>{diagnosis.nextStep}
+        </div>
+      )}
+      {diagnosis.docsUrl && (
+        <a href={diagnosis.docsUrl} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-[var(--color-accent)] hover:underline">
+          <ExternalLink size={10} /> {diagnosis.docsUrl}
+        </a>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The catalog: pick a connector, fill in the one thing only you have, install.
+ *
+ * Entries are files rather than code — the shipped ones come with the app, any
+ * imported ones live in the connectors folder — so "import from a URL" is the
+ * whole extensibility story and widening the set needs no release.
+ */
+function ConnectorCatalogPanel({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
+  const [catalog, setCatalog] = useState<ConnectorCatalog | null>(null);
+  const [chosen, setChosen] = useState<ConnectorEntry | null>(null);
+  const [importUrl, setImportUrl] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [error, setError] = useState("");
+  const [note, setNote] = useState("");
+
+  async function load() {
+    try {
+      setCatalog(await api.listConnectors());
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+  useEffect(() => { load().catch(console.error); }, []);
+
+  async function runImport() {
+    if (!importUrl.trim()) return;
+    setImporting(true);
+    setError("");
+    setNote("");
+    try {
+      const added = await api.importConnectors({ url: importUrl.trim() });
+      setImportUrl("");
+      setNote(`Imported ${added.length} ${added.length === 1 ? "entry" : "entries"}: ${added.map((e) => e.name).join(", ")}`);
+      await load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  async function removeEntry(entry: ConnectorEntry) {
+    if (!confirm(`Remove the catalog entry "${entry.name}"? Servers already installed from it stay.`)) return;
+    try {
+      await api.deleteConnector(entry.id);
+      await load();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  if (chosen) {
+    return (
+      <ConnectorInstallForm
+        entry={chosen}
+        alreadyInstalled={Boolean(catalog?.installed[chosen.id])}
+        onCancel={() => setChosen(null)}
+        onInstalled={onDone}
+      />
+    );
+  }
+
+  const byCategory = new Map<string, ConnectorEntry[]>();
+  for (const e of catalog?.entries ?? []) {
+    const key = e.category || "Other";
+    byCategory.set(key, [...(byCategory.get(key) ?? []), e]);
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-medium">Connector catalog</h3>
+        <button onClick={onCancel} className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]">← Back</button>
+      </div>
+      <p className="text-xs text-[var(--color-text-muted)]">
+        Each entry carries the command or URL, the variables it needs, and a link to the page each
+        credential comes from. Installing writes the server and stops — nothing runs or connects
+        until you press Connect.
+      </p>
+
+      {!catalog ? (
+        <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+          <Loader2 size={12} className="animate-spin" /> Loading…
+        </div>
+      ) : (
+        [...byCategory.entries()].map(([category, entries]) => (
+          <section key={category} className="flex flex-col gap-2">
+            <div className="text-[11px] font-medium uppercase tracking-wide text-[var(--color-text-muted)]">{category}</div>
+            {entries.map((e) => (
+              <div key={e.id} className="rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-sm font-medium">{e.name}</span>
+                      <span className="rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[10px] uppercase text-[var(--color-text-muted)]">{e.transport}</span>
+                      {catalog.installed[e.id] && (
+                        <span className="rounded border border-green-600/40 bg-green-600/10 px-1.5 py-0.5 text-[10px] text-green-500">Installed</span>
+                      )}
+                      {!e.curated && (
+                        <span className="rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]">imported</span>
+                      )}
+                    </div>
+                    <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">{e.description}</div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <button
+                      onClick={() => setChosen(e)}
+                      className="rounded border border-[var(--color-border)] px-2 py-1 text-[11px] hover:border-[var(--color-accent)]"
+                    >
+                      {catalog.installed[e.id] ? "Reinstall" : "Install"}
+                    </button>
+                    {!e.curated && (
+                      <button onClick={() => removeEntry(e)} className="rounded p-1 text-[var(--color-text-muted)] hover:text-[var(--color-danger)]" title="Remove this catalog entry">
+                        <Trash2 size={12} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </section>
+        ))
+      )}
+
+      <section className="rounded border border-dashed border-[var(--color-border)] p-3">
+        <div className="mb-1 flex items-center gap-1.5 text-xs font-medium"><Download size={12} /> Import entries from a URL</div>
+        <p className="mb-2 text-[11px] text-[var(--color-text-muted)]">
+          A JSON file holding one entry, a list of them, or an object with an
+          <span className="font-mono"> entries </span> array. Imported entries are files in the
+          connectors folder; one sharing an id with a shipped entry replaces it.
+        </p>
+        <div className="flex items-center gap-2">
+          <input
+            value={importUrl}
+            onChange={(e) => setImportUrl(e.target.value)}
+            placeholder="https://example.com/connectors.json"
+            className="min-w-0 flex-1 rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-1.5 font-mono text-[11px] outline-none focus:border-[var(--color-accent)]"
+          />
+          <button
+            onClick={runImport}
+            disabled={importing || !importUrl.trim()}
+            className="shrink-0 rounded bg-[var(--color-accent)] px-3 py-1.5 text-xs text-white disabled:opacity-50"
+          >
+            {importing ? "Importing…" : "Import"}
+          </button>
+        </div>
+      </section>
+
+      {note && <div className="rounded border border-green-600/40 bg-green-600/10 p-2 text-[11px] text-green-500">{note}</div>}
+      {error && <div className="rounded border border-red-600/40 bg-red-600/10 p-2 text-[11px] text-red-500">{error}</div>}
+    </div>
+  );
+}
+
+/**
+ * One entry's install form: the prerequisites, then only the values the entry
+ * says the user has to supply. Everything else the catalog already knows.
+ */
+function ConnectorInstallForm({
+  entry,
+  alreadyInstalled,
+  onInstalled,
+  onCancel,
+}: {
+  entry: ConnectorEntry;
+  alreadyInstalled: boolean;
+  onInstalled: () => void;
+  onCancel: () => void;
+}) {
+  const fields: ConnectorField[] = [...(entry.env ?? []), ...(entry.headers ?? [])];
+  const [values, setValues] = useState<Record<string, string>>(() =>
+    Object.fromEntries(fields.map((f) => [f.key, f.default ?? ""])),
+  );
+  const [name, setName] = useState(entry.name);
+  const [suffix, setSuffix] = useState("");
+  const [replace, setReplace] = useState(alreadyInstalled);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const missing = fields.filter((f) => f.required && !values[f.key]?.trim()).map((f) => f.label);
+
+  async function install() {
+    setSaving(true);
+    setError("");
+    try {
+      await api.installConnector({
+        entryId: entry.id,
+        values,
+        name: name.trim() || null,
+        commandSuffix: suffix.trim() || null,
+        replace,
+      });
+      onInstalled();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-medium">Install {entry.name}</h3>
+        <button onClick={onCancel} className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]">← Back</button>
+      </div>
+      <p className="text-xs text-[var(--color-text-muted)]">{entry.description}</p>
+
+      {(entry.prerequisites?.length ?? 0) > 0 && (
+        <div className="rounded border border-[var(--color-border)] bg-[var(--color-panel)] p-2">
+          <div className="mb-1 text-[11px] font-medium">Before this can work</div>
+          <ul className="flex list-disc flex-col gap-0.5 pl-4 text-[11px] text-[var(--color-text-muted)]">
+            {entry.prerequisites?.map((p) => <li key={p}>{p}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {entry.docsUrl && (
+        <a href={entry.docsUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] text-[var(--color-accent)] hover:underline">
+          <ExternalLink size={11} /> Setup guide
+        </a>
+      )}
+
+      <label className="block">
+        <div className="mb-1 text-xs text-[var(--color-text-muted)]">Name in MultiZone</div>
+        <input value={name} onChange={(e) => setName(e.target.value)} className="w-full rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]" />
+      </label>
+
+      <div className="rounded border border-[var(--color-border)] bg-[var(--color-panel)] p-2 font-mono text-[11px] text-[var(--color-text-muted)]">
+        {entry.transport === "stdio" ? entry.command : entry.url}
+      </div>
+
+      {entry.transport === "stdio" && (
+        <label className="block">
+          <div className="mb-1 text-xs text-[var(--color-text-muted)]">Extra arguments <span className="opacity-60">(appended to the command)</span></div>
+          <input value={suffix} onChange={(e) => setSuffix(e.target.value)} placeholder="e.g. a directory the server may read" className="w-full rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 font-mono text-xs outline-none focus:border-[var(--color-accent)]" />
+        </label>
+      )}
+
+      {fields.map((f) => (
+        <label key={f.key} className="block">
+          <div className="mb-1 flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
+            <span>{f.label}</span>
+            {!f.required && <span className="opacity-60">(optional)</span>}
+            <span className="font-mono opacity-60">{f.key}</span>
+          </div>
+          <input
+            type={f.secret ? "password" : "text"}
+            value={values[f.key] ?? ""}
+            onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
+            className="w-full rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 font-mono text-xs outline-none focus:border-[var(--color-accent)]"
+          />
+          {f.description && <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">{f.description}</div>}
+          {f.credentialUrl && (
+            <a href={f.credentialUrl} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-[11px] text-[var(--color-accent)] hover:underline">
+              <ExternalLink size={10} /> Where to get this
+            </a>
+          )}
+        </label>
+      ))}
+
+      {alreadyInstalled && (
+        <label className="flex items-center gap-2 text-[11px] text-[var(--color-text-muted)]">
+          <input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} />
+          Update the server already installed from this entry, rather than adding a second one
+        </label>
+      )}
+
+      {error && <div className="rounded border border-red-600/40 bg-red-600/10 p-2 text-[11px] text-red-500">{error}</div>}
+
+      <div className="flex items-center justify-end gap-2 border-t border-[var(--color-border)] pt-3">
+        <button onClick={onCancel} className="rounded px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)]">Cancel</button>
+        <button
+          onClick={install}
+          disabled={saving || missing.length > 0}
+          title={missing.length > 0 ? `Still needs: ${missing.join(", ")}` : undefined}
+          className="rounded bg-[var(--color-accent)] px-3 py-1.5 text-xs text-white disabled:opacity-50"
+        >
+          {saving ? "Installing…" : "Install"}
+        </button>
+      </div>
+      <p className="text-[11px] text-[var(--color-text-muted)]">
+        Credentials are stored with the server in MultiZone's own database, like the rest of your
+        settings. Nothing is sent anywhere until you connect.
+      </p>
     </div>
   );
 }
@@ -2096,6 +2482,7 @@ function McpServerEditor({
   const [command, setCommand] = useState(server?.command ?? "");
   const [url, setUrl] = useState(server?.url ?? "");
   const [env, setEnv] = useState(server?.env ?? "");
+  const [headers, setHeaders] = useState(server?.headers ?? "");
   const [enabled, setEnabled] = useState(server?.enabled ?? true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -2107,6 +2494,9 @@ function McpServerEditor({
     if (env.trim()) {
       try { JSON.parse(env); } catch { setError("Env must be valid JSON (e.g. {\"API_KEY\":\"…\"})."); return; }
     }
+    if (headers.trim()) {
+      try { JSON.parse(headers); } catch { setError("Headers must be valid JSON (e.g. {\"Authorization\":\"Bearer …\"})."); return; }
+    }
     setSaving(true);
     setError("");
     try {
@@ -2116,7 +2506,8 @@ function McpServerEditor({
         transport,
         command: transport === "stdio" ? command.trim() : null,
         url: transport === "sse" ? url.trim() : null,
-        env: env.trim() || null,
+        env: transport === "stdio" ? env.trim() || null : null,
+        headers: transport === "sse" ? headers.trim() || null : null,
         enabled,
       });
       onDone();
@@ -2159,10 +2550,21 @@ function McpServerEditor({
           </label>
         </>
       ) : (
-        <label className="block">
-          <div className="mb-1 text-xs text-[var(--color-text-muted)]">URL</div>
-          <input value={url} onChange={(e) => setUrl(e.target.value)} className="w-full rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 font-mono text-xs outline-none focus:border-[var(--color-accent)]" placeholder="https://example.com/mcp" />
-        </label>
+        <>
+          <label className="block">
+            <div className="mb-1 text-xs text-[var(--color-text-muted)]">URL</div>
+            <input value={url} onChange={(e) => setUrl(e.target.value)} className="w-full rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 font-mono text-xs outline-none focus:border-[var(--color-accent)]" placeholder="https://example.com/mcp" />
+          </label>
+          <label className="block">
+            <div className="mb-1 text-xs text-[var(--color-text-muted)]">Headers <span className="opacity-60">(optional JSON)</span></div>
+            <textarea value={headers} onChange={(e) => setHeaders(e.target.value)} rows={3} className="w-full rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 font-mono text-xs outline-none focus:border-[var(--color-accent)]" placeholder={'{ "Authorization": "Bearer \u2026" }'} />
+            <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+              Sent with every request. Almost every hosted MCP server wants an
+              <span className="font-mono"> Authorization </span> header here; without one it will
+              answer 401 and nothing else will work.
+            </div>
+          </label>
+        </>
       )}
 
       <label className="flex cursor-pointer items-center gap-2 text-sm">

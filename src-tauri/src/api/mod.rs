@@ -256,6 +256,11 @@ fn build_router(state: ApiState) -> Router {
         .route("/api/mcp/servers/:id/connect", post(h::connect_mcp_server))
         .route("/api/mcp/servers/:id/disconnect", post(h::disconnect_mcp_server))
         .route("/api/mcp/tools/:toolId/danger", post(h::set_mcp_tool_danger))
+        .route("/api/mcp/servers/:id/diagnose", get(h::diagnose_mcp_server))
+        .route("/api/connectors", get(h::list_connectors))
+        .route("/api/connectors/install", post(h::install_connector))
+        .route("/api/connectors/import", post(h::import_connectors))
+        .route("/api/connectors/:entryId", axum::routing::delete(h::delete_connector))
         // Knowledge
         .route("/api/knowledge", get(h::global_kb).delete(h::clear_global_kb))
         .route("/api/knowledge/config", post(h::set_global_kb_config))

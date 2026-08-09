@@ -51,6 +51,11 @@ pub struct McpServerInput {
     pub command: Option<String>,
     pub url: Option<String>,
     pub env: Option<String>,
+    /// JSON object of HTTP headers for the sse/http transport — where an
+    /// `Authorization` header for a hosted server goes (0.11.2).
+    pub headers: Option<String>,
+    /// The catalog entry this came from, when it was installed rather than typed.
+    pub catalog_id: Option<String>,
     pub enabled: Option<bool>,
 }
 
@@ -63,14 +68,16 @@ pub async fn upsert_mcp_server(
     let now = now_ts();
     let enabled = server.enabled.unwrap_or(true);
     sqlx::query(
-        "INSERT INTO mcp_servers (id, name, transport, command, url, env, enabled, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
+        "INSERT INTO mcp_servers (id, name, transport, command, url, env, headers, catalog_id, enabled, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)
          ON CONFLICT(id) DO UPDATE SET
            name = excluded.name,
            transport = excluded.transport,
            command = excluded.command,
            url = excluded.url,
            env = excluded.env,
+           headers = excluded.headers,
+           catalog_id = COALESCE(excluded.catalog_id, mcp_servers.catalog_id),
            enabled = excluded.enabled,
            updated_at = excluded.updated_at",
     )
@@ -80,6 +87,8 @@ pub async fn upsert_mcp_server(
     .bind(&server.command)
     .bind(&server.url)
     .bind(&server.env)
+    .bind(&server.headers)
+    .bind(&server.catalog_id)
     .bind(enabled)
     .bind(now)
     .execute(&state.db)

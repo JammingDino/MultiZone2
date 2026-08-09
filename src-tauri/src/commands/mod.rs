@@ -14,6 +14,7 @@ pub mod files;
 pub mod skills;
 pub mod memory;
 pub mod mcp;
+pub mod connectors;
 pub mod knowledge;
 pub mod mirror;
 pub mod pending;

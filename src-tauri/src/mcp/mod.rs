@@ -14,6 +14,9 @@
 //! server id, so a stdio child stays warm across tool calls instead of paying
 //! npx-startup per call.
 
+pub mod catalog;
+pub mod diagnose;
+
 use crate::db::models::{McpServer, McpTool};
 use crate::error::{AppError, AppResult};
 use crate::llm::types::{Tool, ToolFunction};
@@ -128,16 +131,37 @@ impl Connection {
 
 type Pending = Arc<Mutex<HashMap<i64, oneshot::Sender<Value>>>>;
 
+/// The tail of a stdio child's stderr, shared with the task draining it.
+type StderrLog = Arc<Mutex<String>>;
+
+/// How much of a child's stderr to keep. Enough for a stack trace or a usage
+/// message; not enough for a chatty server to grow without bound.
+const STDERR_KEEP_BYTES: usize = 8192;
+
 struct StdioConn {
     stdin: Mutex<ChildStdin>,
     pending: Pending,
     next_id: AtomicI64,
+    stderr: StderrLog,
     // Kept alive so the child isn't reaped; `kill_on_drop` tears it down when the
     // connection is dropped (server removed / reconnected).
     _child: Mutex<Child>,
 }
 
 impl StdioConn {
+    /// Attach whatever the child printed to stderr to a failure message. The
+    /// difference between "failed to connect" and a report worth reading is
+    /// almost always in here.
+    async fn with_stderr(&self, msg: &str) -> String {
+        let log = self.stderr.lock().await;
+        let tail = log.trim();
+        if tail.is_empty() {
+            format!("{msg} (it printed nothing to stderr)")
+        } else {
+            format!("{msg}. Its output:\n{tail}")
+        }
+    }
+
     fn next_line<S: Serialize>(value: &S) -> AppResult<String> {
         Ok(format!("{}\n", serde_json::to_string(value)?))
     }
@@ -154,12 +178,17 @@ impl StdioConn {
             stdin.write_all(line.as_bytes()).await?;
             stdin.flush().await?;
         }
-        let resp = tokio::time::timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS), rx)
-            .await
-            .map_err(|_| {
-                AppError::Other("MCP request timed out".into())
-            })?
-            .map_err(|_| AppError::Other("MCP connection closed".into()))?;
+        let resp = match tokio::time::timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS), rx).await {
+            Err(_) => return Err(AppError::Other(self.with_stderr("MCP request timed out").await)),
+            Ok(Err(_)) => {
+                // The reader task cleared the pending map: the child's stdout is
+                // closed, which means it exited. Its stderr is the answer.
+                return Err(AppError::Other(
+                    self.with_stderr("the MCP server exited without answering").await,
+                ));
+            }
+            Ok(Ok(v)) => v,
+        };
         extract_result(resp)
     }
 
@@ -177,6 +206,10 @@ impl StdioConn {
 struct HttpConn {
     http: reqwest::Client,
     url: String,
+    /// Extra headers from the server row, sent with every request. This is where
+    /// an `Authorization: Bearer …` for a hosted server lives — without it no
+    /// remote MCP server that authenticates is reachable at all (0.11.2).
+    headers: Vec<(String, String)>,
     session: Mutex<Option<String>>,
     next_id: AtomicI64,
 }
@@ -189,6 +222,11 @@ impl HttpConn {
             .header("Content-Type", "application/json")
             .header("Accept", "application/json, text/event-stream")
             .json(&body);
+        // Applied after the defaults, so a server that needs a different `Accept`
+        // (some hosted servers refuse the SSE offer) can say so.
+        for (k, v) in &self.headers {
+            req = req.header(k.as_str(), v.as_str());
+        }
         if let Some(s) = self.session.lock().await.clone() {
             req = req.header("Mcp-Session-Id", s);
         }
@@ -209,10 +247,22 @@ impl HttpConn {
             .to_string();
         let text = resp.text().await?;
         if !status.is_success() {
-            return Err(AppError::Other(format!(
-                "MCP HTTP {status}: {}",
-                text.chars().take(300).collect::<String>()
-            )));
+            let body: String = text.chars().take(300).collect();
+            // 401/403 is the one HTTP failure with a specific fix, and until
+            // 0.11.2 it was also the one we had no way to act on. Say what to do.
+            let hint = match status.as_u16() {
+                401 | 403 if self.headers.is_empty() => {
+                    " — this server wants credentials and none are configured. \
+                     Add an `Authorization` header to the server (Settings → MCP)."
+                }
+                401 | 403 => {
+                    " — the credentials sent were rejected. Check the `Authorization` \
+                     header on this server; if it is a short-lived access token it may \
+                     simply have expired."
+                }
+                _ => "",
+            };
+            return Err(AppError::Other(format!("MCP HTTP {status}{hint}: {body}")));
         }
         if !expect_response {
             return Ok(None);
@@ -467,18 +517,16 @@ impl Manager {
         cmd.args(args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
+            // Captured rather than discarded: when a stdio server exits during
+            // the handshake, its stderr is the only place that says *why* — "the
+            // command ran, the server exited, GOOGLE_CREDENTIALS_PATH is not
+            // set" instead of "failed to connect" (0.11.2).
+            .stderr(std::process::Stdio::piped())
             .kill_on_drop(true);
 
         // Optional env overrides (JSON object).
-        if let Some(env_raw) = &server.env {
-            if let Ok(Value::Object(map)) = serde_json::from_str::<Value>(env_raw) {
-                for (k, v) in map {
-                    if let Some(s) = v.as_str() {
-                        cmd.env(k, s);
-                    }
-                }
-            }
+        for (k, v) in json_string_map(server.env.as_deref()) {
+            cmd.env(k, v);
         }
 
         // Suppress the console window flash on Windows for the child process.
@@ -510,6 +558,30 @@ impl Manager {
             .take()
             .ok_or_else(|| AppError::Other("MCP child has no stdout".into()))?;
 
+        // Keep the tail of the child's stderr. A server that refuses to start
+        // says so here and nowhere else.
+        let stderr_log: StderrLog = Arc::new(Mutex::new(String::new()));
+        if let Some(stderr) = child.stderr.take() {
+            let log = stderr_log.clone();
+            tokio::spawn(async move {
+                let mut lines = BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    let mut buf = log.lock().await;
+                    buf.push_str(line.trim_end());
+                    buf.push('\n');
+                    if buf.len() > STDERR_KEEP_BYTES {
+                        let cut = buf.len() - STDERR_KEEP_BYTES;
+                        let cut = buf
+                            .char_indices()
+                            .map(|(i, _)| i)
+                            .find(|i| *i >= cut)
+                            .unwrap_or(buf.len());
+                        buf.replace_range(..cut, "");
+                    }
+                }
+            });
+        }
+
         let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
         let reader_pending = pending.clone();
         tokio::spawn(async move {
@@ -534,6 +606,7 @@ impl Manager {
             stdin: Mutex::new(stdin),
             pending,
             next_id: AtomicI64::new(1),
+            stderr: stderr_log,
             _child: Mutex::new(child),
         }))
     }
@@ -548,6 +621,7 @@ impl Manager {
         Ok(Connection::Http(HttpConn {
             http: self.http.clone(),
             url: url.to_string(),
+            headers: json_string_map(server.headers.as_deref()),
             session: Mutex::new(None),
             next_id: AtomicI64::new(1),
         }))
@@ -595,7 +669,23 @@ impl Manager {
 }
 
 pub const SERVER_COLS: &str =
-    "id, name, transport, command, url, env, enabled, created_at, updated_at";
+    "id, name, transport, command, url, env, headers, catalog_id, enabled, created_at, updated_at";
+
+/// Read one of the `env` / `headers` columns: a JSON object of string values.
+/// Anything that isn't a string is skipped rather than stringified — a header
+/// value of `true` is a mistake to ignore, not one to send as `"true"`.
+pub fn json_string_map(raw: Option<&str>) -> Vec<(String, String)> {
+    let Some(raw) = raw.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Vec::new();
+    };
+    match serde_json::from_str::<Value>(raw) {
+        Ok(Value::Object(map)) => map
+            .into_iter()
+            .filter_map(|(k, v)| v.as_str().map(|s| (k, s.to_string())))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
 
 async fn list_tools(conn: &Connection) -> AppResult<Vec<DiscoveredTool>> {
     let result = conn.request("tools/list", json!({})).await?;
@@ -761,7 +851,7 @@ pub const TOOL_COLS: &str =
 /// A very small shell-style splitter: whitespace-separated, honouring single and
 /// double quotes. Enough for MCP command lines like
 /// `npx -y @scope/server --root "C:\\Program Files"`.
-fn shell_split(input: &str) -> Vec<String> {
+pub(crate) fn shell_split(input: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut cur = String::new();
     let mut quote: Option<char> = None;

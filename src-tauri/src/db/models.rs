@@ -236,6 +236,11 @@ pub struct McpServer {
     pub url: Option<String>,
     /// JSON object of environment variables for the stdio child process.
     pub env: Option<String>,
+    /// JSON object of HTTP headers sent with every request on the sse/http
+    /// transport — where an `Authorization: Bearer …` lives. Ignored by stdio.
+    pub headers: Option<String>,
+    /// The connector-catalog entry this server was installed from, if any.
+    pub catalog_id: Option<String>,
     pub enabled: bool,
     pub created_at: i64,
     pub updated_at: i64,

@@ -1,0 +1,113 @@
+[
+  {
+    "id": "google-gmail",
+    "name": "Gmail",
+    "category": "Google",
+    "description": "Google's own hosted Gmail MCP server — read and compose mail. Needs a Google Cloud project and an OAuth access token; MultiZone sends the token you paste as an Authorization header.",
+    "transport": "sse",
+    "url": "https://gmailmcp.googleapis.com/mcp/v1",
+    "prerequisites": [
+      "A Google Cloud project with the Gmail API (gmail.googleapis.com) and the Gmail MCP API (gmailmcp.googleapis.com) enabled",
+      "An OAuth consent screen carrying the gmail.readonly and gmail.compose scopes",
+      "The gcloud CLI, to mint an access token: gcloud auth print-access-token"
+    ],
+    "docsUrl": "https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server",
+    "headers": [
+      {
+        "key": "Authorization",
+        "label": "OAuth access token",
+        "description": "Paste the token itself, not the word Bearer — MultiZone adds that. Google access tokens are short-lived (about an hour), so this needs re-pasting until signed-in connectors land in 1.2.",
+        "credentialUrl": "https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server",
+        "required": true,
+        "secret": true,
+        "template": "Bearer {value}"
+      }
+    ]
+  },
+  {
+    "id": "github",
+    "name": "GitHub",
+    "category": "Developer tools",
+    "description": "GitHub's hosted MCP server — issues, pull requests, code search and repository contents, as your account sees them.",
+    "transport": "sse",
+    "url": "https://api.githubcopilot.com/mcp/",
+    "prerequisites": [
+      "A GitHub personal access token with the scopes for what you want to reach (repo for private repositories)"
+    ],
+    "docsUrl": "https://github.com/github/github-mcp-server",
+    "headers": [
+      {
+        "key": "Authorization",
+        "label": "Personal access token",
+        "description": "A fine-grained or classic PAT. Paste the token; MultiZone adds the Bearer prefix.",
+        "credentialUrl": "https://github.com/settings/personal-access-tokens",
+        "required": true,
+        "secret": true,
+        "template": "Bearer {value}"
+      }
+    ]
+  },
+  {
+    "id": "context7",
+    "name": "Context7",
+    "category": "Developer tools",
+    "description": "Up-to-date documentation for libraries and frameworks, fetched per version rather than from the model's memory. Works without a key; a free key raises the rate limit.",
+    "transport": "sse",
+    "url": "https://mcp.context7.com/mcp",
+    "docsUrl": "https://github.com/upstash/context7",
+    "headers": [
+      {
+        "key": "Authorization",
+        "label": "API key",
+        "description": "Optional — leave blank to use the anonymous rate limit.",
+        "credentialUrl": "https://context7.com/dashboard",
+        "required": false,
+        "secret": true,
+        "template": "Bearer {value}"
+      }
+    ]
+  },
+  {
+    "id": "tavily-search",
+    "name": "Tavily search",
+    "category": "Web",
+    "description": "Tavily's search and extract tools as an MCP server. Once connected, its search tool is available to any zone you enable it for — the supported way to add a paid search provider.",
+    "transport": "stdio",
+    "command": "npx -y tavily-mcp",
+    "prerequisites": ["Node 18 or newer, so that npx can run"],
+    "docsUrl": "https://github.com/tavily-ai/tavily-mcp",
+    "env": [
+      {
+        "key": "TAVILY_API_KEY",
+        "label": "Tavily API key",
+        "description": "Starts with tvly-.",
+        "credentialUrl": "https://app.tavily.com/home",
+        "required": true,
+        "secret": true
+      }
+    ]
+  },
+  {
+    "id": "filesystem",
+    "name": "Filesystem",
+    "category": "Local",
+    "description": "The reference MCP server for reading and writing files under directories you name. MultiZone has its own file tools; this is here as the smallest working example of a stdio server.",
+    "transport": "stdio",
+    "command": "npx -y @modelcontextprotocol/server-filesystem",
+    "prerequisites": [
+      "Node 18 or newer, so that npx can run",
+      "Add the directories it may touch to the end of the command — it can reach nothing else"
+    ],
+    "docsUrl": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem"
+  },
+  {
+    "id": "playwright",
+    "name": "Playwright browser",
+    "category": "Local",
+    "description": "Drives a real browser — navigate, click, fill forms, read the accessibility tree. Downloads a browser on first run.",
+    "transport": "stdio",
+    "command": "npx -y @playwright/mcp@latest",
+    "prerequisites": ["Node 18 or newer, so that npx can run"],
+    "docsUrl": "https://github.com/microsoft/playwright-mcp"
+  }
+]

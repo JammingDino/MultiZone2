@@ -52,7 +52,7 @@ const fn open(method: &'static str, path: &'static str, description: &'static st
 
 /// Bumped whenever a route is added, removed or changes shape, so a caller can
 /// tell "the app is older than my script" from "my script is wrong".
-pub const ROUTE_SET_VERSION: u32 = 3;
+pub const ROUTE_SET_VERSION: u32 = 4;
 
 pub const ROUTES: &[RouteDef] = &[
     // Discovery — deliberately unauthenticated. A caller debugging a broken
@@ -148,6 +148,13 @@ pub const ROUTES: &[RouteDef] = &[
     r("POST", "/api/mcp/servers/:id/connect", "Connect and re-read the server's tool list"),
     r("POST", "/api/mcp/servers/:id/disconnect", "Drop the live connection"),
     r("POST", "/api/mcp/tools/:toolId/danger", "Set an MCP tool's danger level"),
+    r("GET", "/api/mcp/servers/:id/diagnose", "Why a server isn't working: the first check that fails, and what to do"),
+
+    // Connectors — the catalog an MCP server is installed from (0.11.2)
+    r("GET", "/api/connectors", "The connector catalog, with which entries are already installed"),
+    r("POST", "/api/connectors/install", "Install a catalog entry as an MCP server"),
+    r("POST", "/api/connectors/import", "Import catalog entries from a URL or pasted JSON"),
+    r("DELETE", "/api/connectors/:entryId", "Remove an imported catalog entry"),
 
     // Knowledge
     r("GET", "/api/knowledge", "Global knowledge base config and index status"),
@@ -280,6 +287,11 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("mcp::connect_mcp_server", Route("POST /api/mcp/servers/:id/connect")),
     ("mcp::disconnect_mcp_server", Route("POST /api/mcp/servers/:id/disconnect")),
     ("mcp::set_mcp_tool_danger", Route("POST /api/mcp/tools/:toolId/danger")),
+    ("connectors::list_connectors", Route("GET /api/connectors")),
+    ("connectors::install_connector", Route("POST /api/connectors/install")),
+    ("connectors::import_connectors", Route("POST /api/connectors/import")),
+    ("connectors::delete_connector", Route("DELETE /api/connectors/:entryId")),
+    ("connectors::diagnose_mcp_server", Route("GET /api/mcp/servers/:id/diagnose")),
 
     ("knowledge::get_global_kb", Route("GET /api/knowledge")),
     ("knowledge::set_global_kb_config", Route("POST /api/knowledge/config")),
@@ -955,6 +967,41 @@ pub async fn set_mcp_tool_danger(
 ) -> ApiResult<StatusCode> {
     let level = body.get("dangerLevel").and_then(|v| v.as_i64()).unwrap_or(1);
     commands::mcp::set_mcp_tool_danger(app_state(&st), tool_id, level).await?;
+    Ok(NO_CONTENT)
+}
+
+// ── Connectors (0.11.2) ──────────────────────────────────────────────────────
+
+pub async fn diagnose_mcp_server(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+) -> ApiResult<Response> {
+    Ok(Json(commands::connectors::diagnose_mcp_server(app_state(&st), id).await?).into_response())
+}
+
+pub async fn list_connectors(State(st): State<ApiState>) -> ApiResult<Response> {
+    Ok(Json(commands::connectors::list_connectors(app_state(&st)).await?).into_response())
+}
+
+pub async fn install_connector(
+    State(st): State<ApiState>,
+    Json(body): Json<commands::connectors::InstallConnectorInput>,
+) -> ApiResult<Response> {
+    Ok(Json(commands::connectors::install_connector(app_state(&st), body).await?).into_response())
+}
+
+pub async fn import_connectors(
+    State(st): State<ApiState>,
+    Json(body): Json<commands::connectors::ImportConnectorsInput>,
+) -> ApiResult<Response> {
+    Ok(Json(commands::connectors::import_connectors(app_state(&st), body).await?).into_response())
+}
+
+pub async fn delete_connector(
+    State(st): State<ApiState>,
+    Path(entry_id): Path<String>,
+) -> ApiResult<StatusCode> {
+    commands::connectors::delete_connector(app_state(&st), entry_id).await?;
     Ok(NO_CONTENT)
 }
 

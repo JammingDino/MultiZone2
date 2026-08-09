@@ -56,9 +56,10 @@ fn control_definition() -> Tool {
             description:
                 "Change MultiZone itself: appearance, zones, providers, projects, tags, skills, \
                  settings — anything the user could do in the app. Call app_read \"/api/routes\" \
-                 first for the route and its shape. PATCH /api/settings/theme with \
-                 {\"mode\":\"dark\"} switches to dark mode; POST /api/zones creates or updates a \
-                 zone. Changes are live in the open window immediately."
+                 first for the route and its shape. PATCH /api/theme with {\"mode\":\"dark\"} \
+                 switches to dark mode (app_read \"/api/theme\" first for the palette, the \
+                 effects and the custom-CSS field, each with its range); POST /api/zones creates \
+                 or updates a zone. Changes are live in the open window immediately."
                     .into(),
             parameters: json!({
                 "type": "object",

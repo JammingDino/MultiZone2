@@ -287,6 +287,7 @@ fn build_router(state: ApiState) -> Router {
             "/api/settings/:key",
             get(h::get_setting).put(h::set_setting).patch(h::patch_setting),
         )
+        .route("/api/theme", get(h::get_theme).patch(h::patch_theme))
         .route("/api/mirror", post(h::mirror_all))
         .route("/api/mirror/import", post(h::import_markdown))
         .route_layer(middleware::from_fn_with_state(state.clone(), auth_mw));

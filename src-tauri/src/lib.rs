@@ -14,6 +14,7 @@ mod tools;
 mod util;
 mod commands;
 mod state;
+mod theme;
 mod error;
 mod stt_api;
 mod tts_api;

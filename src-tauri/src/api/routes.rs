@@ -52,7 +52,7 @@ const fn open(method: &'static str, path: &'static str, description: &'static st
 
 /// Bumped whenever a route is added, removed or changes shape, so a caller can
 /// tell "the app is older than my script" from "my script is wrong".
-pub const ROUTE_SET_VERSION: u32 = 4;
+pub const ROUTE_SET_VERSION: u32 = 5;
 
 pub const ROUTES: &[RouteDef] = &[
     // Discovery — deliberately unauthenticated. A caller debugging a broken
@@ -179,6 +179,8 @@ pub const ROUTES: &[RouteDef] = &[
     r("GET", "/api/settings/:key", "Read one settings row"),
     r("PUT", "/api/settings/:key", "Write one settings row"),
     r("PATCH", "/api/settings/:key", "Merge fields into a JSON settings row (e.g. {\"mode\":\"dark\"} on `theme`)"),
+    r("GET", "/api/theme", "The appearance settings in force, with every field's type, range, default and meaning — and the CSS variables custom CSS should target"),
+    r("PATCH", "/api/theme", "Change appearance: mode, accent, the palette colours (background · panels · hover · borders · text · muted text), background effect, glass, bloom, and custom CSS. Validated, and says what is wrong with a patch it rejects"),
     r("POST", "/api/mirror", "Re-write every chat to the markdown mirror folder"),
     r("POST", "/api/mirror/import", "Import a markdown chat file as a new chat"),
 ];
@@ -1187,6 +1189,54 @@ pub async fn patch_setting(
         commands::settings::patch_setting(st.app.clone(), app_state(&st), key.clone(), patch)
             .await?;
     Ok(Json(json!({ "key": key, "value": value })).into_response())
+}
+
+/// The appearance surface, described (0.11.3).
+///
+/// `GET /api/settings/theme` already returned the theme — as a JSON *string*,
+/// carrying only the fields that happened to have been written, with nothing
+/// anywhere saying what the others were or what any of them accept. That is
+/// enough to change a value you already know the name of and no help at all in
+/// finding one, which is why the palette section may as well not have existed
+/// remotely. This serves the resolved theme alongside [`crate::theme::schema`],
+/// on the same principle as `/api/routes`: the surface documents itself, so
+/// neither the README nor a tool description has to carry a copy that rots.
+pub async fn get_theme(State(st): State<ApiState>) -> ApiResult<Response> {
+    let stored = commands::settings::get_setting(app_state(&st), "theme".into()).await?;
+    Ok(Json(json!({
+        "theme": crate::theme::resolve(stored.as_deref()),
+        "schema": crate::theme::schema(),
+    }))
+    .into_response())
+}
+
+/// Merge validated fields into the theme.
+///
+/// The validation is the reason this exists next to `PATCH
+/// /api/settings/theme`, which will still write anything at all into the row. A
+/// misspelled field or an out-of-range number lands there silently, the window
+/// ignores it, and the caller is told the change succeeded — the worst possible
+/// answer, and the one a model then reports to the user as done.
+pub async fn patch_theme(
+    State(st): State<ApiState>,
+    Json(body): Json<Value>,
+) -> ApiResult<Response> {
+    let Value::Object(patch) = body else {
+        return Err(ApiError(crate::error::AppError::Invalid(
+            "body must be a JSON object of theme fields to change, e.g. {\"mode\":\"dark\"}".into(),
+        )));
+    };
+    crate::theme::validate_patch(&patch)
+        .map_err(|why| ApiError(crate::error::AppError::Invalid(why)))?;
+
+    let merged = commands::settings::patch_setting(
+        st.app.clone(),
+        app_state(&st),
+        "theme".into(),
+        patch,
+    )
+    .await?;
+    Ok(Json(json!({ "theme": crate::theme::resolve(Some(&merged.to_string())) })).into_response())
 }
 
 pub async fn mirror_all(State(st): State<ApiState>) -> ApiResult<Response> {

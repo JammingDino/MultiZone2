@@ -36,49 +36,60 @@ use sqlx::SqlitePool;
 #[derive(Debug, Clone)]
 pub struct ThemePalette {
     pub mode: &'static str,
-    pub background: &'static str,
-    pub panel: &'static str,
-    pub text: &'static str,
+    pub background: String,
+    pub panel: String,
+    pub text: String,
     pub accent: String,
 }
 
 impl ThemePalette {
+    fn base(mode: &'static str, accent: String) -> Self {
+        let colors = if mode == "light" { crate::theme::LIGHT_BASE } else { crate::theme::DARK_BASE };
+        // Indices follow `theme::COLOR_KEYS`: bg, panel, panelHover, border,
+        // text, textMuted.
+        Self {
+            mode,
+            background: colors[0].to_string(),
+            panel: colors[1].to_string(),
+            text: colors[4].to_string(),
+            accent,
+        }
+    }
+
     pub fn dark(accent: String) -> Self {
-        Self {
-            mode: "dark",
-            background: "#0b0d10",
-            panel: "#14171c",
-            text: "#e4e6eb",
-            accent,
-        }
+        Self::base("dark", accent)
     }
 
-    pub fn light(accent: String) -> Self {
-        Self {
-            mode: "light",
-            background: "#fafafa",
-            panel: "#ffffff",
-            text: "#1f2329",
-            accent,
-        }
-    }
-
-    /// Parse `{"mode":"dark|light","accent":"#xxxxxx"}` as persisted by the
-    /// frontend theme store. Falls back to dark on any error.
+    /// Read the palette actually on screen out of the theme blob the frontend
+    /// store persists. Falls back to dark on any error.
+    ///
+    /// The per-mode overrides (`colorsDark` / `colorsLight`) are applied, not
+    /// only the mode and accent: a user who has repainted their background is
+    /// exactly the user for whom `render_graph`'s "pick colors readable against
+    /// the background" guidance was describing the wrong background.
     pub fn from_settings_json(raw: Option<&str>) -> Self {
         let v: Value = raw
             .and_then(|s| serde_json::from_str(s).ok())
             .unwrap_or(Value::Null);
-        let mode = v.get("mode").and_then(|m| m.as_str()).unwrap_or("dark");
+        let mode = if v.get("mode").and_then(|m| m.as_str()) == Some("light") { "light" } else { "dark" };
         let accent = v
             .get("accent")
             .and_then(|a| a.as_str())
             .unwrap_or("#4f9cf9")
             .to_string();
-        match mode {
-            "light" => Self::light(accent),
-            _ => Self::dark(accent),
-        }
+        let mut palette = Self::base(mode, accent);
+
+        let overrides = v.get(if mode == "light" { "colorsLight" } else { "colorsDark" });
+        let get = |key: &str| {
+            overrides
+                .and_then(|o| o.get(key))
+                .and_then(|c| c.as_str())
+                .map(str::to_string)
+        };
+        if let Some(c) = get("bg") { palette.background = c; }
+        if let Some(c) = get("panel") { palette.panel = c; }
+        if let Some(c) = get("text") { palette.text = c; }
+        palette
     }
 }
 

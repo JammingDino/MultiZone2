@@ -99,6 +99,10 @@ Reader tasks drain stdout and stderr continuously, so output printed *between* t
 
 stdin/stdout are **pipes, not a PTY**. Servers, build tools and REPLs work; programs that insist on a real terminal do not — pass `sudo -S`, expect `ssh` password prompts and full-screen TUIs to fail, and stop a process with `terminal_stop` rather than trying to send Ctrl-C. Children block-buffer on a pipe, so unbuffer where it matters (`python -u`, `stdbuf -oL`); `PYTHONUNBUFFERED` is set for you.
 
+## Editing a message
+
+Hover any message and hit **Edit**. The editor is the composer you already use: the same box, the same paperclip, the same microphone, with the message's attachments shown as chips above it. Remove one and it is gone from the resent turn; drop another in — or paste a screenshot — and it goes with it. Editing one of your own turns re-runs the conversation from that point; editing an answer just corrects the text in place.
+
 ## Voice dictation
 
 Dictate instead of typing (0.8.0+). Transcription goes to a provider you configure under **Settings → Voice**, using the OpenAI-compatible `/audio/transcriptions` endpoint — so pointing it at a local server (e.g. LM Studio serving a whisper model) keeps your audio on your machine.

@@ -1,4 +1,5 @@
 import type { ContentPart } from "@/lib/types";
+import type { PendingAttachment } from "@/lib/attachFiles";
 
 /**
  * What a user turn had attached to it, recovered from its content parts.
@@ -31,28 +32,60 @@ export function fileTextMarker(fileName: string, text: string): string {
 }
 
 export function parseFileAttachments(parts: ContentPart[]): FileAttachment[] {
-  const result: FileAttachment[] = [];
+  return splitAttachments(parts).attachments;
+}
+
+/**
+ * The same parse, also reporting the hidden parts no marker claimed (0.11.3).
+ *
+ * Editing a user turn now rebuilds its parts from the attachments the user can
+ * see and change, rather than carrying the old hidden parts through untouched —
+ * that is the only way removing an attachment can mean anything. But a hidden
+ * part this parser doesn't recognise is still something the turn carried, and
+ * dropping it because we couldn't name it would lose context silently on every
+ * edit. So the unclaimed ones come back too, to be passed through as they were.
+ */
+export function splitAttachments(parts: ContentPart[]): {
+  attachments: FileAttachment[];
+  unclaimedHidden: ContentPart[];
+} {
+  const attachments: FileAttachment[] = [];
+  const unclaimedHidden: ContentPart[] = [];
   let current: { fileName: string; pages: string[] } | null = null;
 
   for (const p of parts) {
     if (p.type === "hidden_text") {
-      if (current) { result.push({ ...current, mode: "images" }); current = null; }
+      if (current) { attachments.push({ ...current, mode: "images" }); current = null; }
 
       const imgMatch = p.text.match(/^\[Attached PDF: (.+) — \d+ pages follow as images\]$/);
       if (imgMatch) { current = { fileName: imgMatch[1], pages: [] }; continue; }
 
       const txtMatch = p.text.match(/^File: (.+) \(PDF, extracted text\)\n```\n([\s\S]*?)\n```$/);
-      if (txtMatch) { result.push({ fileName: txtMatch[1], mode: "text", text: txtMatch[2] }); continue; }
+      if (txtMatch) { attachments.push({ fileName: txtMatch[1], mode: "text", text: txtMatch[2] }); continue; }
 
       // Plain text/markdown/source attachments (0.9.4).
       const fileMatch = p.text.match(/^File: (.+)\n```\n([\s\S]*?)\n```$/);
-      if (fileMatch) result.push({ fileName: fileMatch[1], mode: "file", text: fileMatch[2] });
-    } else if (p.type === "hidden_image" && current) {
-      current.pages.push(p.image_url.url);
-    } else if (p.type !== "hidden_image") {
-      if (current) { result.push({ ...current, mode: "images" }); current = null; }
+      if (fileMatch) attachments.push({ fileName: fileMatch[1], mode: "file", text: fileMatch[2] });
+      else unclaimedHidden.push(p);
+    } else if (p.type === "hidden_image") {
+      if (current) current.pages.push(p.image_url.url);
+      // A hidden image with no PDF marker in front of it belongs to nothing this
+      // parser knows about — keep it rather than lose it.
+      else unclaimedHidden.push(p);
+    } else {
+      if (current) { attachments.push({ ...current, mode: "images" }); current = null; }
     }
   }
-  if (current) result.push({ ...current, mode: "images" });
-  return result;
+  if (current) attachments.push({ ...current, mode: "images" });
+  return { attachments, unclaimedHidden };
+}
+
+/** One recovered attachment, in the shape a composer stages files in. */
+export function fileAttachmentToPending(f: FileAttachment): PendingAttachment {
+  const id = crypto.randomUUID();
+  switch (f.mode) {
+    case "images": return { id, fileName: f.fileName, fileType: "pdf", payload: f.pages };
+    case "text":   return { id, fileName: f.fileName, fileType: "pdf", payload: f.text };
+    case "file":   return { id, fileName: f.fileName, fileType: "text", payload: f.text };
+  }
 }

@@ -3,7 +3,7 @@ import type { ContentPart, Message, InputPart } from "@/lib/types";
 import { Markdown } from "@/components/Renderers/Markdown";
 import { StreamingMarkdown } from "@/components/Renderers/StreamingMarkdown";
 import { useThrottledStreaming } from "@/lib/useThrottledStreaming";
-import { User, Check, X, FileType, ZoomIn } from "lucide-react";
+import { User, X, FileType, ZoomIn } from "lucide-react";
 import { StepBlock } from "./StepBlock";
 import { ActivityRail } from "./ActivityRail";
 import { PerspectiveStatusLine, PrimaryStatusLine } from "./StatusLine";
@@ -20,7 +20,13 @@ import {
   type Citation,
   type FileSource,
 } from "@/lib/citations";
-import { parseFileAttachments } from "@/lib/attachmentParts";
+import {
+  fileAttachmentToPending,
+  parseFileAttachments,
+  splitAttachments,
+} from "@/lib/attachmentParts";
+import { attachmentToParts, type PendingAttachment } from "@/lib/attachFiles";
+import { EditComposer } from "@/components/Chat/EditComposer";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { getZoneIcon } from "@/lib/zoneIcons";
@@ -90,15 +96,12 @@ function UserMessageImpl({ message }: { message: Message }) {
   );
   // hidden_text and hidden_image parts are never rendered — they are sent to
   // the model but kept invisible in the chat UI.
-  const fileAttachments = parseFileAttachments(parts);
-  // Hidden parts carry the attachments; keep them intact when a turn is edited
-  // and resent, so editing the question doesn't silently drop the file with it.
-  const hiddenParts = parts.filter(
-    (p) => p.type === "hidden_text" || p.type === "hidden_image",
-  );
+  // Hidden parts carry the attachments. `unclaimedHidden` is whatever they also
+  // carry that isn't one — passed through an edit untouched, since it is context
+  // the turn had and nothing on screen can stand in for it.
+  const { attachments: fileAttachments, unclaimedHidden } = splitAttachments(parts);
 
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(text);
   const [preview, setPreview] = useState<MessagePreview | null>(null);
   const resending = useRef(false);
   const loadMessages = useApp((s) => s.loadMessages);
@@ -114,29 +117,56 @@ function UserMessageImpl({ message }: { message: Message }) {
   const senderBg = subchatZone?.accentColor ?? "var(--color-accent)";
 
   /**
-   * Send this turn again — the given text plus every attachment it carried,
-   * with this message and everything after it dropped first. Shared by "Save &
-   * resend" (edited text) and "Resend" (unchanged), because those differ only in
-   * what the text is.
+   * What this turn is carrying, in the shape a composer stages files in — the
+   * visible images and the recovered file attachments as one list. Rebuilt only
+   * when the message changes, so the ids stay stable while the editor is open.
    */
-  async function resend(nextText: string) {
+  const carried = useMemo<PendingAttachment[]>(
+    () => [
+      ...images.map((img) => ({
+        id: crypto.randomUUID(),
+        fileName: "image",
+        fileType: "image" as const,
+        payload: img.image_url.url,
+      })),
+      ...fileAttachments.map(fileAttachmentToPending),
+    ],
+    [message.content],
+  );
+
+  /**
+   * Send this turn again — the given text plus the attachments it should carry —
+   * with this message and everything after it dropped first. Shared by "Save"
+   * (an edit) and "Resend" (unchanged), which differ only in what they pass.
+   *
+   * Attachments arrive as staged items rather than as the old parts, so an
+   * attachment removed in the editor is genuinely gone and one added is
+   * genuinely sent. A newly added PDF is stored for the chat the same way the
+   * composer stores one; the ones the message already had are already stored.
+   */
+  async function resend(nextText: string, attachments: PendingAttachment[]) {
     // The turn isn't streaming yet between the click and the send, so the
     // button's own disabled state can't cover this window.
     if (resending.current) return;
     resending.current = true;
+    const chatId = message.chatId;
+    const known = new Set(carried.map((a) => a.id));
     try {
-      await api.deleteMessagesFrom(message.chatId, message.id);
-      await loadMessages(message.chatId);
-      const parts: InputPart[] = [];
-      if (nextText) parts.push({ type: "text", text: nextText });
-      for (const img of images) {
-        parts.push({ type: "image", data_url: img.image_url.url });
+      await api.deleteMessagesFrom(chatId, message.id);
+      await loadMessages(chatId);
+      const next: InputPart[] = [];
+      if (nextText) next.push({ type: "text", text: nextText });
+      for (const att of attachments) {
+        next.push(...attachmentToParts(att));
+        if (!known.has(att.id) && att.fileType === "pdf" && Array.isArray(att.payload)) {
+          api.savePdfAttachment(chatId, att.fileName, att.payload).catch(console.error);
+        }
       }
-      for (const p of hiddenParts) {
-        if (p.type === "hidden_text") parts.push({ type: "hidden_text", text: p.text });
-        else parts.push({ type: "hidden_image", data_url: p.image_url.url });
+      for (const p of unclaimedHidden) {
+        if (p.type === "hidden_text") next.push({ type: "hidden_text", text: p.text });
+        else if (p.type === "hidden_image") next.push({ type: "hidden_image", data_url: p.image_url.url });
       }
-      await api.sendMessage(message.chatId, parts);
+      await api.sendMessage(chatId, next);
       refreshChats();
     } catch (e) {
       console.error(e);
@@ -145,58 +175,22 @@ function UserMessageImpl({ message }: { message: Message }) {
     }
   }
 
-  async function commitEdit() {
-    const next = draft.trim();
-    if (!next || next === text.trim()) {
-      setEditing(false);
-      setDraft(text);
-      return;
-    }
-    setEditing(false);
-    await resend(next);
-  }
-
   if (editing) {
     return (
       <div className="flex justify-end gap-3">
-        <div className="flex max-w-[80%] flex-col items-end gap-2">
-          <textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                e.preventDefault();
-                commitEdit();
-              } else if (e.key === "Escape") {
-                e.stopPropagation();
-                setEditing(false);
-                setDraft(text);
-              }
+        <div className="flex w-full max-w-[80%] flex-col items-end gap-2">
+          <EditComposer
+            initialText={text}
+            initialAttachments={carried}
+            align="end"
+            saveLabel="Save & resend"
+            saveTitle="Save this message and run the turn again from here"
+            onCancel={() => setEditing(false)}
+            onSave={async (nextText, attachments) => {
+              setEditing(false);
+              await resend(nextText, attachments);
             }}
-            autoFocus
-            rows={Math.max(2, draft.split("\n").length)}
-            className="w-[480px] max-w-[80vw] rounded-2xl rounded-tr-sm border border-[var(--color-accent)] bg-[var(--color-panel)] px-3 py-2 text-sm"
           />
-          <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-            <button
-              onClick={() => {
-                setEditing(false);
-                setDraft(text);
-              }}
-              className="flex items-center gap-1 rounded px-2 py-1 hover:bg-[var(--color-panel-hover)]"
-            >
-              <X size={11} />
-              Cancel
-            </button>
-            <button
-              onClick={commitEdit}
-              className="flex items-center gap-1 rounded bg-[var(--color-accent)] px-2 py-1 text-white"
-            >
-              <Check size={11} />
-              Save &amp; resend
-            </button>
-            <span>Ctrl+Enter to save, Esc to cancel</span>
-          </div>
         </div>
         <div
           className="mt-1 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded shadow-sm"
@@ -278,7 +272,7 @@ function UserMessageImpl({ message }: { message: Message }) {
           chatId={message.chatId}
           variant="user"
           onEdit={() => setEditing(true)}
-          onResend={() => resend(text.trim())}
+          onResend={() => resend(text.trim(), carried)}
           branchFromMessageId={message.id}
         />
       </div>
@@ -436,9 +430,13 @@ function TurnBody({
 }
 
 /**
- * Inline click-to-edit textarea for an assistant message's final answer text.
- * Saving persists the new text to the DB and flags the message as edited;
- * the surrounding turn re-renders from the reloaded messages.
+ * Inline editor for an assistant message's final answer text. Saving persists
+ * the new text to the DB and flags the message as edited; the surrounding turn
+ * re-renders from the reloaded messages.
+ *
+ * The same composer the user's own turns are edited in, minus the paperclip:
+ * an assistant answer has no attachments and cannot be given any. The mic stays
+ * — rewriting an answer by speaking it is as reasonable here as anywhere.
  */
 function AssistantEditor({
   initial,
@@ -449,62 +447,18 @@ function AssistantEditor({
   onCancel: () => void;
   onSave: (text: string) => Promise<void> | void;
 }) {
-  const [draft, setDraft] = useState(initial);
-  const [saving, setSaving] = useState(false);
-
-  async function commit() {
-    const next = draft.trim();
-    if (!next || next === initial.trim()) {
-      onCancel();
-      return;
-    }
-    setSaving(true);
-    try {
-      await onSave(next);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setSaving(false);
-    }
-  }
-
   return (
-    <div className="flex flex-col gap-2">
-      <textarea
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-            e.preventDefault();
-            commit();
-          } else if (e.key === "Escape") {
-            e.stopPropagation();
-            onCancel();
-          }
-        }}
-        autoFocus
-        rows={Math.max(3, draft.split("\n").length)}
-        className="w-full rounded-lg border border-[var(--color-accent)] bg-[var(--color-panel)] px-3 py-2 text-sm"
-      />
-      <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-        <button
-          onClick={onCancel}
-          className="flex items-center gap-1 rounded px-2 py-1 hover:bg-[var(--color-panel-hover)]"
-        >
-          <X size={11} />
-          Cancel
-        </button>
-        <button
-          onClick={commit}
-          disabled={saving}
-          className="flex items-center gap-1 rounded bg-[var(--color-accent)] px-2 py-1 text-white disabled:opacity-50"
-        >
-          <Check size={11} />
-          {saving ? "Saving…" : "Save"}
-        </button>
-        <span>Ctrl+Enter to save, Esc to cancel</span>
-      </div>
-    </div>
+    <EditComposer
+      initialText={initial}
+      onCancel={onCancel}
+      onSave={async (next) => {
+        if (next === initial.trim()) {
+          onCancel();
+          return;
+        }
+        await onSave(next);
+      }}
+    />
   );
 }
 

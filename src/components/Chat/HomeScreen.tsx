@@ -4,20 +4,14 @@ import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import type { InputPart, Zone } from "@/lib/types";
-import { renderPdfToJpegs, extractPdfText } from "@/lib/pdf";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
+import { attachmentToParts } from "@/lib/attachFiles";
 import {
-  attachmentKind,
-  attachmentToParts,
-  readTextAttachment,
-  UnreadableFileError,
-  type PendingAttachment,
-} from "@/lib/attachFiles";
-import {
-  AttachmentChip,
-  AttachmentPreview,
+  AttachError,
+  AttachmentRow,
   readFileAsDataUrl,
-} from "@/components/Chat/InputBar";
+  useAttachments,
+} from "@/components/Chat/Attachments";
 import { useDictation, MicButton, DictationMeter } from "@/components/Chat/useDictation";
 import { resolveVisionCapable } from "@/lib/vision";
 import { resolveBaseModel, resolveBaseZone } from "@/lib/baseZone";
@@ -42,7 +36,6 @@ export function HomeScreen() {
   const tags = useApp((s) => s.tags);
   const baseZoneId = useApp((s) => s.appSettings.baseZoneId);
   const sendKey = useApp((s) => s.appSettings.sendKey);
-  const pdfMode = useApp((s) => s.appSettings.pdfMode);
   const refreshChats = useApp((s) => s.refreshChats);
   const setActiveChat = useApp((s) => s.setActiveChat);
   const setChatSmart = useApp((s) => s.setChatSmart);
@@ -72,11 +65,8 @@ export function HomeScreen() {
     return { type: "quick" };
   });
   const [text, setText] = useState(homeScreenDraft);
-  const [pending, setPending] = useState<PendingAttachment[]>([]);
-  /** Why the last attempted attachment didn't stage — see the input bar. */
-  const [attachError, setAttachError] = useState<string | null>(null);
-  const [previewId, setPreviewId] = useState<string | null>(null);
-  const previewAtt = pending.find((a) => a.id === previewId) ?? null;
+  const tray = useAttachments();
+  const pending = tray.pending;
   const [menuOpen, setMenuOpen] = useState(false);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [tagMenuOpen, setTagMenuOpen] = useState(false);
@@ -190,66 +180,6 @@ export function HomeScreen() {
     return "Good evening";
   }, []);
 
-  async function handleFiles(files: FileList | File[] | null) {
-    if (!files) return;
-    const list = Array.from(files);
-    setAttachError(null);
-    for (const file of list) {
-      const kind = attachmentKind(file);
-      const id = crypto.randomUUID();
-
-      if (kind === "pdf") {
-        const stub: PendingAttachment = {
-          id,
-          fileName: file.name,
-          fileType: "pdf",
-          payload: pdfMode === "text" ? "" : [],
-          progress: { page: 0, total: 0 },
-        };
-        setPending((p) => [...p, stub]);
-        try {
-          if (pdfMode === "text") {
-            const extracted = await extractPdfText(file, (pr) => {
-              setPending((p) => p.map((a) => (a.id === id ? { ...a, progress: pr } : a)));
-            });
-            setPending((p) =>
-              p.map((a) => (a.id === id ? { ...a, payload: extracted, progress: undefined } : a)),
-            );
-          } else {
-            const pages = await renderPdfToJpegs(file, (pr) => {
-              setPending((p) => p.map((a) => (a.id === id ? { ...a, progress: pr } : a)));
-            });
-            setPending((p) =>
-              p.map((a) => (a.id === id ? { ...a, payload: pages, progress: undefined } : a)),
-            );
-          }
-        } catch (e) {
-          console.error(e);
-          setPending((p) => p.filter((a) => a.id !== id));
-        }
-      } else if (kind === "image") {
-        const dataUrl = await readFileAsDataUrl(file);
-        setPending((p) => [
-          ...p,
-          { id, fileName: file.name, fileType: "image", payload: dataUrl },
-        ]);
-      } else {
-        // Everything that isn't an image or a PDF is text — see the input bar,
-        // and `@/lib/attachFiles` for why there is no extension allowlist.
-        try {
-          const content = await readTextAttachment(file);
-          setPending((p) => [
-            ...p,
-            { id, fileName: file.name, fileType: "text", payload: content },
-          ]);
-        } catch (e) {
-          if (e instanceof UnreadableFileError) setAttachError(e.message);
-          else { console.error(e); setAttachError(`Couldn't read ${file.name}.`); }
-        }
-      }
-    }
-  }
-
   // Drag-and-drop onto the new-chat composer, mirroring ChatPanel's in-chat
   // handling. ChatPanel's own handlers bail when no chat is open, so these are
   // the only live handlers on this screen (events are consumed here first).
@@ -283,7 +213,7 @@ export function HomeScreen() {
     if (files.length === 0) return;
     // A dropped settings export is an import, not an attachment.
     void claimSettingsDrop(files, stageImport).then((claimed) => {
-      if (!claimed) handleFiles(files);
+      if (!claimed) tray.addFiles(files);
     });
   }
 
@@ -298,7 +228,7 @@ export function HomeScreen() {
       if (!file) continue;
       const dataUrl = await readFileAsDataUrl(file);
       const fileName = file.name && file.name !== "image.png" ? file.name : `pasted-${Date.now()}.png`;
-      setPending((p) => [
+      tray.setPending((p) => [
         ...p,
         { id: crypto.randomUUID(), fileName, fileType: "image", payload: dataUrl },
       ]);
@@ -387,7 +317,7 @@ export function HomeScreen() {
 
       setText("");
       setHomeScreenDraft("");
-      setPending([]);
+      tray.clear();
       api.sendMessage(chat.id, parts).catch(console.error);
     } catch (e) {
       console.error("failed to start chat:", e);
@@ -435,36 +365,8 @@ export function HomeScreen() {
 
         {/* Composer */}
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-2 shadow-sm focus-within:border-[var(--color-accent)]">
-          {attachError && (
-            <div className="mb-2 flex w-fit items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-600 dark:text-amber-400">
-              <span>{attachError}</span>
-              <button
-                onClick={() => setAttachError(null)}
-                className="opacity-60 hover:opacity-100"
-                title="Dismiss"
-              >
-                <X size={11} />
-              </button>
-            </div>
-          )}
-          {pending.length > 0 && (
-            <div className="mb-2 flex flex-wrap gap-2 px-1 pt-1">
-              {pending.map((att) => (
-                <AttachmentChip
-                  key={att.id}
-                  attachment={att}
-                  onRemove={() => setPending((p) => p.filter((a) => a.id !== att.id))}
-                  onPreview={att.progress ? undefined : () => setPreviewId(att.id)}
-                />
-              ))}
-            </div>
-          )}
-          {previewAtt && (
-            <AttachmentPreview
-              attachment={previewAtt}
-              onClose={() => setPreviewId(null)}
-            />
-          )}
+          <AttachError tray={tray} />
+          <AttachmentRow tray={tray} />
           {ocrFallback && hasVisualAttachment && (
             <div
               className="mb-2 flex w-fit items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-600 dark:text-amber-400"
@@ -508,7 +410,7 @@ export function HomeScreen() {
               type="file"
               multiple
               className="hidden"
-              onChange={(e) => { handleFiles(e.target.files); e.target.value = ""; }}
+              onChange={(e) => { tray.addFiles(e.target.files); e.target.value = ""; }}
             />
 
             {/* Dictation */}

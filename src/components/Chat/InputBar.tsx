@@ -1,19 +1,13 @@
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
-import { Paperclip, Send, X, FileText, Image as ImageIcon, FileType, Loader2, Square, ZoomIn, SlidersHorizontal, Zap, Brain, ScanText, AudioLines, Clock, CornerDownRight } from "lucide-react";
+import { Paperclip, Send, X, Loader2, Square, SlidersHorizontal, Zap, Brain, ScanText, AudioLines, Clock, CornerDownRight } from "lucide-react";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { useTts } from "@/store/tts";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
 import { useDictation, MicButton, DictationMeter } from "@/components/Chat/useDictation";
 import type { InputPart, PendingMode } from "@/lib/types";
-import { renderPdfToJpegs, extractPdfText } from "@/lib/pdf";
-import {
-  attachmentKind,
-  attachmentToParts,
-  readTextAttachment,
-  UnreadableFileError,
-  type PendingAttachment,
-} from "@/lib/attachFiles";
+import { attachmentToParts, type PendingAttachment } from "@/lib/attachFiles";
+import { AttachError, AttachmentRow, readFileAsDataUrl, useAttachments } from "@/components/Chat/Attachments";
 import { resolveVisionCapable } from "@/lib/vision";
 import { resolveBaseModel, resolveBaseProvider } from "@/lib/baseZone";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
@@ -31,8 +25,7 @@ const OV_FIELD_CLS =
   "w-full rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs outline-none focus:border-[var(--color-accent)]";
 
 // Lives in `@/lib/attachFiles` now, with the classification and part-building
-// that has to agree with it. Re-exported because the home screen composer shares
-// this file's chip and preview components.
+// that has to agree with it.
 export type { PendingAttachment };
 
 export interface InputBarHandle {
@@ -50,16 +43,9 @@ interface InputBarProps {
 
 export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
   const [text, setText] = useState("");
-  const [pending, setPending] = useState<PendingAttachment[]>([]);
   const [sending, setSending] = useState(false);
-  const [previewId, setPreviewId] = useState<string | null>(null);
-  /** Why the last attempted attachment didn't stage. Shown until the next try —
-   *  a file that silently fails to attach is the bug this replaced. */
-  const [attachError, setAttachError] = useState<string | null>(null);
-  const previewAtt = pending.find((a) => a.id === previewId) ?? null;
   const refreshChats = useApp((s) => s.refreshChats);
   const sendKey = useApp((s) => s.appSettings.sendKey);
-  const pdfMode = useApp((s) => s.appSettings.pdfMode);
   const chats = useApp((s) => s.chats);
   const zones = useApp((s) => s.zones);
   const providers = useApp((s) => s.providers);
@@ -188,6 +174,11 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
   // override (Settings / zone editor) over the name heuristic.
   const ocrFallback =
     effectiveModel != null && !resolveVisionCapable(effectiveModel, visionOverrides);
+  // Staged files. When the chosen model can't see images, PDFs are attached as
+  // extracted text — better quality than OCR'ing rendered pages — regardless of
+  // the global preference.
+  const tray = useAttachments({ pdfAsText: ocrFallback });
+  const pending = tray.pending;
   const hasVisualAttachment = pending.some((a) => a.fileType === "image" || a.fileType === "pdf");
 
   useEffect(() => {
@@ -210,7 +201,7 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
   })();
   function clearOverride() { setOvZone(undefined); setOvModel(""); }
 
-  useImperativeHandle(ref, () => ({ addFiles: (files) => handleFiles(files) }), [chatId]);
+  useImperativeHandle(ref, () => ({ addFiles: (files) => tray.addFiles(files) }), [chatId]);
 
   // Grow the textarea with its content up to the CSS max-height, after which
   // the `overflow-y-auto` class takes over and a scrollbar appears.
@@ -221,76 +212,6 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
     el.style.height = `${el.scrollHeight}px`;
   }, [text]);
 
-  async function handleFiles(files: FileList | File[] | null) {
-    if (!files) return;
-    const list = Array.from(files);
-    // When the chosen model can't see images, extract PDF text directly (better
-    // quality than OCR'ing rendered pages) regardless of the global pdfMode.
-    const usePdfText = pdfMode === "text" || ocrFallback;
-    setAttachError(null);
-    for (const file of list) {
-      const kind = attachmentKind(file);
-      const id = crypto.randomUUID();
-
-      if (kind === "pdf") {
-        const stub: PendingAttachment = {
-          id,
-          fileName: file.name,
-          fileType: "pdf",
-          payload: usePdfText ? "" : [],
-          progress: { page: 0, total: 0 },
-        };
-        setPending((p) => [...p, stub]);
-        try {
-          if (usePdfText) {
-            const text = await extractPdfText(file, (pr) => {
-              setPending((p) => p.map((a) => (a.id === id ? { ...a, progress: pr } : a)));
-            });
-            setPending((p) =>
-              p.map((a) => (a.id === id ? { ...a, payload: text, progress: undefined } : a)),
-            );
-          } else {
-            const pages = await renderPdfToJpegs(file, (pr) => {
-              setPending((p) =>
-                p.map((a) => (a.id === id ? { ...a, progress: pr } : a)),
-              );
-            });
-            setPending((p) =>
-              p.map((a) => (a.id === id ? { ...a, payload: pages, progress: undefined } : a)),
-            );
-          }
-        } catch (e) {
-          console.error(e);
-          setPending((p) => p.filter((a) => a.id !== id));
-        }
-      } else if (kind === "image") {
-        const dataUrl = await readFileAsDataUrl(file);
-        setPending((p) => [
-          ...p,
-          { id, fileName: file.name, fileType: "image", payload: dataUrl },
-        ]);
-      } else {
-        // Anything that isn't an image or a PDF is read as text — no extension
-        // allowlist, because the file the user picked is nearly always text and
-        // the list could never name every language and config format. A file
-        // that turns out to be binary is refused where they can see it.
-        try {
-          const content = await readTextAttachment(file);
-          setPending((p) => [
-            ...p,
-            { id, fileName: file.name, fileType: "text", payload: content },
-          ]);
-        } catch (e) {
-          if (e instanceof UnreadableFileError) setAttachError(e.message);
-          else { console.error(e); setAttachError(`Couldn't read ${file.name}.`); }
-        }
-      }
-    }
-  }
-
-  function removePending(id: string) {
-    setPending((p) => p.filter((a) => a.id !== id));
-  }
 
   async function onSend(explicitText?: string) {
     if (sending || disabled) return;
@@ -328,7 +249,7 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
       const overrideModel = ovModel.trim() || null;
 
       setText("");
-      setPending([]);
+      tray.clear();
       setSending(false);
       clearOverride();
 
@@ -338,7 +259,7 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
       console.error("send failed:", e);
       // Restore input so the user doesn't lose their message
       setText(savedText);
-      setPending(savedPending);
+      tray.setPending(savedPending);
       setSending(false);
     }
   }
@@ -380,7 +301,7 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
       if (!file) continue;
       const dataUrl = await readFileAsDataUrl(file);
       const fileName = file.name && file.name !== "image.png" ? file.name : `pasted-${Date.now()}.png`;
-      setPending((p) => [
+      tray.setPending((p) => [
         ...p,
         { id: crypto.randomUUID(), fileName, fileType: "image", payload: dataUrl },
       ]);
@@ -391,37 +312,8 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
     <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-2 sm:px-4 sm:py-3">
       <div className="mx-auto w-full max-w-3xl">
         {notice}
-        {attachError && (
-          <div className="mb-2 flex w-fit items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-600 dark:text-amber-400">
-            <FileText size={11} />
-            <span>{attachError}</span>
-            <button
-              onClick={() => setAttachError(null)}
-              className="opacity-60 hover:opacity-100"
-              title="Dismiss"
-            >
-              <X size={11} />
-            </button>
-          </div>
-        )}
-        {pending.length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-2">
-            {pending.map((att) => (
-              <AttachmentChip
-                key={att.id}
-                attachment={att}
-                onRemove={() => removePending(att.id)}
-                onPreview={att.progress ? undefined : () => setPreviewId(att.id)}
-              />
-            ))}
-          </div>
-        )}
-        {previewAtt && (
-          <AttachmentPreview
-            attachment={previewAtt}
-            onClose={() => setPreviewId(null)}
-          />
-        )}
+        <AttachError tray={tray} />
+        <AttachmentRow tray={tray} />
         {ocrFallback && hasVisualAttachment && (
           <div
             className="mb-2 flex w-fit items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-600 dark:text-amber-400"
@@ -511,7 +403,7 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
             multiple
             className="hidden"
             onChange={(e) => {
-              handleFiles(e.target.files);
+              tray.addFiles(e.target.files);
               e.target.value = "";
             }}
           />
@@ -685,160 +577,3 @@ function OvChip({
     </button>
   );
 }
-
-export function AttachmentChip({
-  attachment,
-  onRemove,
-  onPreview,
-}: {
-  attachment: PendingAttachment;
-  onRemove: () => void;
-  onPreview?: () => void;
-}) {
-  const icon =
-    attachment.fileType === "image" ? (
-      <ImageIcon size={12} />
-    ) : attachment.fileType === "pdf" ? (
-      <FileType size={12} />
-    ) : (
-      <FileText size={12} />
-    );
-
-  const canPreview = Boolean(onPreview);
-
-  return (
-    <div
-      className={`group flex items-center gap-1.5 rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1 text-xs ${canPreview ? "cursor-pointer hover:border-[var(--color-accent)]" : ""}`}
-      onClick={onPreview}
-      title={canPreview ? "Click to preview" : undefined}
-    >
-      {icon}
-      <span className="max-w-[160px] truncate">{attachment.fileName}</span>
-      {attachment.progress ? (
-        <span className="text-[var(--color-text-muted)]">
-          {attachment.progress.page}/{attachment.progress.total || "…"}
-        </span>
-      ) : canPreview ? (
-        <ZoomIn size={11} className="shrink-0 text-[var(--color-text-muted)] opacity-0 group-hover:opacity-100" />
-      ) : null}
-      <button
-        onClick={(e) => { e.stopPropagation(); onRemove(); }}
-        className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-      >
-        <X size={12} />
-      </button>
-    </div>
-  );
-}
-
-export function AttachmentPreview({
-  attachment,
-  onClose,
-}: {
-  attachment: PendingAttachment;
-  onClose: () => void;
-}) {
-  useDismissOnEscape(true, onClose);
-
-  let body: React.ReactNode;
-
-  if (attachment.fileType === "image") {
-    body = (
-      <img
-        src={attachment.payload as string}
-        alt={attachment.fileName}
-        className="max-h-[75vh] max-w-full rounded object-contain"
-      />
-    );
-  } else if (attachment.fileType === "pdf") {
-    if (typeof attachment.payload === "string") {
-      // text mode
-      body = (
-        <pre className="max-h-[70vh] max-w-[75vw] overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-relaxed">
-          {attachment.payload || "(no text extracted)"}
-        </pre>
-      );
-    } else {
-      // images mode — scrollable page gallery
-      const pages = attachment.payload as string[];
-      body = (
-        <div className="flex max-h-[75vh] max-w-[80vw] flex-col gap-4 overflow-y-auto">
-          {pages.map((src, i) => (
-            <div key={i} className="flex flex-col items-center gap-1">
-              <span className="text-xs text-[var(--color-text-muted)]">Page {i + 1}</span>
-              <img
-                src={src}
-                alt={`Page ${i + 1}`}
-                className="max-w-full rounded border border-[var(--color-border)]"
-              />
-            </div>
-          ))}
-        </div>
-      );
-    }
-  } else {
-    // text file
-    body = (
-      <pre className="max-h-[70vh] max-w-[75vw] overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-relaxed">
-        {attachment.payload as string}
-      </pre>
-    );
-  }
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <div
-        className="relative rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-5 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-3 flex items-center justify-between gap-6">
-          <span className="max-w-[400px] truncate text-sm font-medium">{attachment.fileName}</span>
-          <button
-            onClick={onClose}
-            className="rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
-          >
-            <X size={16} />
-          </button>
-        </div>
-        {body}
-      </div>
-    </div>
-  );
-}
-
-// Maximum long-edge pixel size for stored images. Anything larger is
-// resized down before storage so that large screenshots/photos don't
-// inflate the base64 payload sent to the model on every turn.
-const MAX_IMAGE_PX = 1280;
-
-export async function readFileAsDataUrl(file: File): Promise<string> {
-  const raw = await new Promise<string>((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(r.result as string);
-    r.onerror = reject;
-    r.readAsDataURL(file);
-  });
-
-  return new Promise<string>((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
-      const { naturalWidth: w, naturalHeight: h } = img;
-      if (w <= MAX_IMAGE_PX && h <= MAX_IMAGE_PX) {
-        resolve(raw);
-        return;
-      }
-      const scale = MAX_IMAGE_PX / Math.max(w, h);
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.round(w * scale);
-      canvas.height = Math.round(h * scale);
-      canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
-      resolve(canvas.toDataURL("image/jpeg", 0.85));
-    };
-    img.onerror = reject;
-    img.src = raw;
-  });
-}
-

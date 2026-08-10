@@ -9,6 +9,7 @@ import * as api from "@/lib/tauri";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
 import { VisionOverrideSelect } from "@/components/common/VisionOverrideSelect";
 import { Modal, ModalTitle } from "@/components/common/Modal";
+import { HexColorField } from "@/components/common/ColorPicker";
 import { UpdateSection } from "@/components/Settings/UpdateSection";
 import { getVersion } from "@tauri-apps/api/app";
 import { saveTextFile } from "@/lib/saveFile";
@@ -300,15 +301,14 @@ function AppearanceTab() {
               title={c}
             />
           ))}
-          <label className="ml-2 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+          <div className="ml-2 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
             Custom
-            <input
-              type="color"
+            <HexColorField
               value={theme.accent}
-              onChange={(e) => setTheme({ accent: e.target.value })}
-              className="h-7 w-10 cursor-pointer rounded border border-[var(--color-border)] bg-transparent"
+              onChange={(accent) => setTheme({ accent })}
+              title="Custom accent color"
             />
-          </label>
+          </div>
         </div>
       </section>
 
@@ -316,32 +316,33 @@ function AppearanceTab() {
         <h3 className="mb-2 text-sm font-medium">
           Colors · {theme.mode === "light" ? "Light" : "Dark"} mode
         </h3>
-        <div className="grid grid-cols-3 gap-2">
+        {/* Two columns rather than three: each cell now carries an editable hex
+            alongside its swatch, and a colour you can read is worth more than a
+            grid one row shorter. */}
+        <div className="grid grid-cols-2 gap-2">
           {(Object.keys(THEME_COLOR_KEYS) as ThemeColorKey[]).map((key) => {
             const value = overrides[key] ?? base[key];
             const custom = !!overrides[key];
             return (
-              <label
+              <div
                 key={key}
                 className="flex items-center gap-2 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5"
               >
-                <input
-                  type="color"
-                  value={value}
-                  onChange={(e) => setColor(key, e.target.value)}
-                  className="h-6 w-8 shrink-0 cursor-pointer rounded border border-[var(--color-border)] bg-transparent"
-                />
                 <span className="min-w-0 flex-1 truncate text-xs">{COLOR_LABELS[key]}</span>
-                {custom && (
-                  <button
-                    onClick={(e) => { e.preventDefault(); setColor(key, null); }}
-                    title="Reset to default"
-                    className="shrink-0 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-                  >
-                    <X size={11} />
-                  </button>
-                )}
-              </label>
+                <HexColorField
+                  value={value}
+                  onChange={(hex) => setColor(key, hex)}
+                  title={`${COLOR_LABELS[key]} — ${custom ? "custom" : "default"}`}
+                />
+                <button
+                  onClick={() => setColor(key, null)}
+                  title="Reset to default"
+                  disabled={!custom}
+                  className="shrink-0 text-[var(--color-text-muted)] hover:text-[var(--color-text)] disabled:invisible"
+                >
+                  <X size={11} />
+                </button>
+              </div>
             );
           })}
         </div>
@@ -526,12 +527,14 @@ function AppearanceTab() {
                   >
                     Accent
                   </button>
-                  <input
-                    type="color"
-                    value={theme.effectColor === "accent" ? theme.accent : (theme.effectColor || theme.accent)}
-                    onChange={(e) => setTheme({ effectColor: e.target.value })}
+                  <HexColorField
+                    // Following the accent is a mode, not a colour, so the field
+                    // sits empty there rather than showing an accent value that
+                    // isn't what is stored.
+                    value={theme.effectColor === "accent" ? null : (theme.effectColor || null)}
+                    fallback={theme.accent}
+                    onChange={(effectColor) => setTheme({ effectColor })}
                     title="Custom effect color"
-                    className="h-7 w-10 cursor-pointer rounded border border-[var(--color-border)] bg-transparent"
                   />
                 </div>
               </div>

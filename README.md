@@ -131,6 +131,8 @@ Dictation behaves like typing: start a recording with text selected and what you
 
 Four sliders shape whichever you pick: **Speed**, **Density**, **Opacity**, and **Hue variation**, which spreads each element's colour around your accent instead of painting everything one flat tone. Leave it at 0 for a single-colour look.
 
+Every colour control takes a hex value as well as the swatch — type or paste `#4f9cf9` (the `#` is optional, and `#abc` shorthand works) instead of converting it to three numbers in the OS picker.
+
 ### Custom CSS
 
 **Settings → Appearance → Custom CSS** (0.11.3) takes a stylesheet of your own, loaded after the app's — so an equally specific rule wins and you don't have to reach for `!important`. It has its own on/off switch, which matters more than it sounds: a rule that hides the wrong thing can be switched off without first finding it in the text.

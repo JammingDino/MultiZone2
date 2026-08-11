@@ -21,22 +21,59 @@
  * halves of this (classify here, build parts there) drift apart unnoticed.
  */
 
+import type { Transcription } from "@/lib/tauri";
 import type { InputPart } from "@/lib/types";
-import { fileTextMarker, pdfImagesMarker, pdfTextMarker } from "@/lib/attachmentParts";
+import {
+  audioTranscriptMarker,
+  fileTextMarker,
+  pdfImagesMarker,
+  pdfTextMarker,
+} from "@/lib/attachmentParts";
 
 /** Extensions decoded as images. SVG is deliberately absent: it is text, and a
  *  model reads its markup far better than a rasterised picture of it. */
 const IMAGE_EXTS = ["jpg", "jpeg", "png", "gif", "webp", "bmp", "avif"];
 
+/**
+ * Extensions transcribed rather than read (0.12.0).
+ *
+ * This is the set OpenAI's `/audio/transcriptions` documents as accepted, plus
+ * `opus` and `aac`, which ordinary voice recorders emit and which the endpoint's
+ * decoder handles in practice. Recognising an audio file at all is the whole
+ * point: before this, a dropped `.m4a` fell through to the "everything else is
+ * text" branch, decoded to binary, and was refused — the app had a transcription
+ * provider configured and still could not accept a voice note.
+ */
+const AUDIO_EXTS = [
+  "mp3", "mp4", "mpeg", "mpga", "m4a", "wav", "webm", "flac", "ogg", "oga", "opus", "aac",
+];
+
+/** How a staged audio file's transcription is going. */
+export interface AudioState {
+  status: "transcribing" | "ready" | "failed";
+  /** Why it failed, shown on the chip. */
+  error?: string;
+  /** Seconds, as measured locally before upload (the limit check needs it
+   *  whether or not the endpoint reports a duration back). */
+  durationSecs?: number;
+  /** Language the endpoint detected, when it was asked for metadata. */
+  language?: string;
+  /** True once the user has edited the transcript by hand, which suppresses any
+   *  later automatic overwrite of it. */
+  edited?: boolean;
+}
+
 /** A file staged in a composer, waiting to be sent. */
 export interface PendingAttachment {
   id: string;
   fileName: string;
-  fileType: "image" | "pdf" | "text";
+  fileType: "image" | "pdf" | "text" | "audio";
   /** For image: a data URL. For PDF: page data URLs, or extracted text. For
-   *  text: the file's contents. */
+   *  text: the file's contents. For audio: the transcript. */
   payload: string | string[];
   progress?: { page: number; total: number };
+  /** Audio only: transcription state. Absent on every other kind. */
+  audio?: AudioState;
 }
 
 /** Lowercased extension, or "" for a file that has none. */
@@ -59,6 +96,7 @@ export function attachmentKind(file: File): PendingAttachment["fileType"] {
   if (IMAGE_EXTS.includes(ext)) return "image";
   // `image/svg+xml` is excluded by the `svg` check, not by this prefix.
   if (ext !== "svg" && file.type.startsWith("image/")) return "image";
+  if (AUDIO_EXTS.includes(ext) || file.type.startsWith("audio/")) return "audio";
   return "text";
 }
 
@@ -101,6 +139,132 @@ export async function readTextAttachment(file: File): Promise<string> {
   return text;
 }
 
+// ── Audio (0.12.0) ───────────────────────────────────────────────────────────
+
+/** An audio file that can't be transcribed, with a reason the user can act on. */
+export class AudioRejectedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AudioRejectedError";
+  }
+}
+
+/**
+ * `hh:mm:ss`-ish, dropping the hour when there isn't one.
+ *
+ * Floors rather than rounds, because these are mostly *timestamps*: a segment
+ * beginning at 2.5s labelled `0:03` points past its own first word, and someone
+ * scrubbing a recording to a cited time would land after what they were looking
+ * for. Flooring is also what media players do with elapsed time.
+ */
+export function formatDuration(secs: number): string {
+  const total = Math.max(0, Math.floor(secs));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const mm = h > 0 ? String(m).padStart(2, "0") : String(m);
+  return `${h > 0 ? `${h}:` : ""}${mm}:${String(s).padStart(2, "0")}`;
+}
+
+/**
+ * How long an audio file is, decided locally by letting the browser's own
+ * decoder load its metadata.
+ *
+ * Resolves to `null` rather than rejecting when the format can't be probed: a
+ * container the WebView won't decode may still be one the transcription endpoint
+ * accepts, so an unknown duration means "no duration limit could be applied
+ * here", not "refuse the file". The size ceiling still holds either way.
+ */
+export function probeAudioDuration(file: File): Promise<number | null> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const el = document.createElement("audio");
+    const done = (value: number | null) => {
+      URL.revokeObjectURL(url);
+      resolve(value);
+    };
+    el.preload = "metadata";
+    el.onloadedmetadata = () =>
+      done(Number.isFinite(el.duration) && el.duration > 0 ? el.duration : null);
+    el.onerror = () => done(null);
+    el.src = url;
+  });
+}
+
+/**
+ * Check an audio file against the user's configured ceilings before it is read
+ * into memory and uploaded.
+ *
+ * Both limits are the user's to set, with defaults that are generous rather than
+ * cautious — 25 MB because that is OpenAI's own hard ceiling and a smaller number
+ * would invent a restriction the endpoint doesn't have, and two hours because the
+ * recordings this feature exists for (a meeting, a lecture) are long by nature.
+ *
+ * @throws {AudioRejectedError} when the file is over a limit.
+ */
+export async function checkAudioLimits(
+  file: File,
+  limits: { maxMb: number; maxMinutes: number },
+): Promise<{ durationSecs: number | null }> {
+  const maxBytes = Math.max(1, limits.maxMb) * 1024 * 1024;
+  if (file.size > maxBytes) {
+    const mb = (file.size / (1024 * 1024)).toFixed(1);
+    throw new AudioRejectedError(
+      `${file.name} is ${mb} MB, over the ${limits.maxMb} MB limit for audio uploads (Settings → Voice).`,
+    );
+  }
+  const durationSecs = await probeAudioDuration(file);
+  if (limits.maxMinutes > 0 && durationSecs != null && durationSecs > limits.maxMinutes * 60) {
+    throw new AudioRejectedError(
+      `${file.name} runs ${formatDuration(durationSecs)}, over the ${limits.maxMinutes}-minute limit for audio uploads (Settings → Voice).`,
+    );
+  }
+  return { durationSecs };
+}
+
+/** A file's bytes as bare base64 (no `data:` prefix), for the upload command. */
+export async function readFileAsBase64(file: File): Promise<string> {
+  const buf = await file.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  // Chunked so a long recording doesn't blow the argument limit of `apply`.
+  let binary = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+/**
+ * The transcript text a staged audio file carries, which is *all* the user ever
+ * sees or edits — the review editor edits this string, and the marker below wraps
+ * it verbatim. Formatting the metadata in once, here, is what keeps those two
+ * from disagreeing about what the transcript says.
+ *
+ * Without metadata it is just the words. With it, a duration/language header and
+ * timestamped segments, which is what makes an hour of audio navigable rather
+ * than a single paragraph — the model can cite a time, and so can the user.
+ */
+export function formatTranscript(t: Transcription, withMetadata: boolean): string {
+  if (!withMetadata) return t.text;
+
+  const header: string[] = [];
+  if (t.durationSecs != null) header.push(`Duration: ${formatDuration(t.durationSecs)}`);
+  if (t.language) header.push(`Language: ${t.language}`);
+
+  if (t.segments.length === 0) {
+    return header.length > 0 ? `${header.join(" · ")}\n\n${t.text}` : t.text;
+  }
+
+  const lines = t.segments.map((s) => {
+    // Flagged rather than dropped: a low-confidence span is often the one worth
+    // checking, and silently removing it would lose words the user said.
+    const unsure = s.noSpeechProb != null && s.noSpeechProb > 0.5 ? " (unclear)" : "";
+    return `[${formatDuration(s.start)}]${unsure} ${s.text.trim()}`;
+  });
+  return [...(header.length > 0 ? [header.join(" · "), ""] : []), ...lines].join("\n");
+}
+
 /**
  * The content parts one staged attachment contributes to a turn.
  *
@@ -117,6 +281,14 @@ export function attachmentToParts(att: PendingAttachment): InputPart[] {
   switch (att.fileType) {
     case "text":
       return [{ type: "hidden_text", text: fileTextMarker(att.fileName, att.payload as string) }];
+    case "audio": {
+      // A transcript that never arrived (still running, or failed) contributes
+      // nothing rather than an empty "Transcript:" block claiming the recording
+      // was silent.
+      const transcript = (att.payload as string).trim();
+      if (!transcript) return [];
+      return [{ type: "hidden_text", text: audioTranscriptMarker(att.fileName, transcript) }];
+    }
     case "image":
       return [{ type: "image", data_url: att.payload as string }];
     case "pdf": {

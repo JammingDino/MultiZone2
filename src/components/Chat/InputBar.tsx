@@ -7,7 +7,14 @@ import { ModelCombobox } from "@/components/common/ModelCombobox";
 import { useDictation, MicButton, DictationMeter } from "@/components/Chat/useDictation";
 import type { InputPart, PendingMode } from "@/lib/types";
 import { attachmentToParts, type PendingAttachment } from "@/lib/attachFiles";
-import { AttachError, AttachmentRow, readFileAsDataUrl, useAttachments } from "@/components/Chat/Attachments";
+import {
+  appendTranscript,
+  AttachError,
+  AttachmentRow,
+  AudioModeRow,
+  readFileAsDataUrl,
+  useAttachments,
+} from "@/components/Chat/Attachments";
 import { resolveVisionCapable } from "@/lib/vision";
 import { resolveBaseModel, resolveBaseProvider } from "@/lib/baseZone";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
@@ -177,7 +184,14 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
   // Staged files. When the chosen model can't see images, PDFs are attached as
   // extracted text — better quality than OCR'ing rendered pages — regardless of
   // the global preference.
-  const tray = useAttachments({ pdfAsText: ocrFallback });
+  // A transcribed upload lands in the composer as ordinary text the user can
+  // edit and send (0.12.0) — which is what lets a text-only model take spoken
+  // input at all. In "context" injection mode `onTranscript` is never called and
+  // the transcript rides along as a hidden attachment part instead.
+  const tray = useAttachments({
+    pdfAsText: ocrFallback,
+    onTranscript: (t) => appendTranscript(setText, t),
+  });
   const pending = tray.pending;
   const hasVisualAttachment = pending.some((a) => a.fileType === "image" || a.fileType === "pdf");
 
@@ -215,6 +229,10 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
 
   async function onSend(explicitText?: string) {
     if (sending || disabled) return;
+    // A transcript still arriving would be dropped by a send that doesn't wait
+    // for it — the audio chip carries no content until then. Guarded here as
+    // well as on the button because Enter doesn't go through the button.
+    if (tray.transcribing) return;
     const sourceText = explicitText ?? text;
     const hasText = sourceText.trim().length > 0;
     if (!hasText && pending.length === 0) return;
@@ -313,6 +331,7 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
       <div className="mx-auto w-full max-w-3xl">
         {notice}
         <AttachError tray={tray} />
+        <AudioModeRow tray={tray} />
         <AttachmentRow tray={tray} />
         {ocrFallback && hasVisualAttachment && (
           <div
@@ -523,9 +542,9 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
           ) : (
             <button
               onClick={() => onSend()}
-              disabled={disabled || sending || (text.trim() === "" && pending.length === 0)}
+              disabled={disabled || sending || tray.transcribing || (text.trim() === "" && pending.length === 0)}
               className="rounded bg-[var(--color-accent)] p-1.5 text-white hover:bg-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
-              title="Send"
+              title={tray.transcribing ? "Waiting for the transcript…" : "Send"}
             >
               <Send size={16} />
             </button>

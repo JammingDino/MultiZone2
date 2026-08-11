@@ -614,3 +614,34 @@ export const deleteClonedVoice = (name: string) =>
 /** Transcribe an audio file via the STT provider (auto-fill a clone's transcript). */
 export const transcribeAudioFile = (audioPath: string) =>
   invoke<string>("transcribe_audio_file", { audioPath });
+
+// Audio upload → auto-transcribe (0.12.0)
+/** One timed span of a transcript. `noSpeechProb` is whisper's confidence that
+ *  the span is *not* speech — the endpoint's only per-segment confidence signal. */
+export interface TranscriptSegment {
+  start: number;
+  end: number;
+  text: string;
+  noSpeechProb: number | null;
+}
+/** A finished transcription. Everything past `text` needs `withMetadata` *and* a
+ *  provider that implements `verbose_json`, so treat it all as optional. */
+export interface Transcription {
+  text: string;
+  language: string | null;
+  durationSecs: number | null;
+  segments: TranscriptSegment[];
+}
+/**
+ * Transcribe an uploaded audio file through the configured STT provider.
+ *
+ * The bytes go as base64 because the webview holds a `File` (dropped, picked or
+ * pasted) and not necessarily a path on disk. `language` overrides the global
+ * Settings → Voice language for this one upload; null auto-detects.
+ */
+export const transcribeAudioUpload = (
+  fileName: string,
+  audioB64: string,
+  withMetadata: boolean,
+  language: string | null,
+) => invoke<Transcription>("transcribe_audio_upload", { fileName, audioB64, withMetadata, language });

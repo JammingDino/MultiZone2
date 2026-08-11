@@ -808,6 +808,39 @@ export interface AppSettings {
   /** Auto-send the message after this many ms of sustained silence while dictating; 0 = off. */
   sttAutoSendSilenceMs: number;
   /**
+   * Audio upload → auto-transcribe (0.12.0). Dropping an audio file into a
+   * composer transcribes it through the same STT provider dictation uses, which
+   * is what lets a text-only model receive spoken input: the model sees text, so
+   * it never needs an audio channel of its own.
+   *
+   * "quick" injects the transcript the moment it arrives. "review" holds it in
+   * the chip for the user to read and correct first — worth the extra step for a
+   * recording that matters, wrong as a default for a ten-second voice note.
+   */
+  sttUploadMode: "quick" | "review";
+  /**
+   * Where a finished transcript goes. "message" makes it the user's own text in
+   * the composer, ready to edit or send. "context" keeps it as an attachment —
+   * the model gets the full transcript as hidden context while the composer stays
+   * free for the actual instruction ("summarise this meeting"), which is the only
+   * workable shape for an hour-long recording.
+   *
+   * There is no "system message" option because MultiZone has no per-turn system
+   * message to inject into — system prompts belong to a zone. "context" is the
+   * same effect: content the model reads, not presented as the user's utterance.
+   */
+  sttUploadInjection: "message" | "context";
+  /**
+   * Ask the endpoint for `verbose_json` and prepend a header carrying duration,
+   * detected language and per-segment timestamps. Off by default: most turns
+   * don't want it, and some OpenAI-compatible shims only implement plain JSON.
+   */
+  sttUploadMetadata: boolean;
+  /** Refuse audio uploads larger than this many MB. OpenAI's own ceiling is 25. */
+  sttUploadMaxMb: number;
+  /** Refuse audio longer than this many minutes; 0 = no duration limit. */
+  sttUploadMaxMinutes: number;
+  /**
    * Text-to-speech (0.8.1). The id of one of this app's `Provider` rows — the
    * same providers zones point at — so any provider exposing an
    * OpenAI-compatible `/audio/speech` endpoint (OpenAI, or a local server)
@@ -907,6 +940,11 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   sttActivationMode: "toggle",
   sttInsertionMode: "cursor",
   sttAutoSendSilenceMs: 0,
+  sttUploadMode: "quick",
+  sttUploadInjection: "message",
+  sttUploadMetadata: false,
+  sttUploadMaxMb: 25,
+  sttUploadMaxMinutes: 120,
   ttsProviderId: null,
   ttsModel: "",
   ttsVoice: "",

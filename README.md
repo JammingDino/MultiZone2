@@ -109,6 +109,25 @@ Dictate instead of typing (0.8.0+). Transcription goes to a provider you configu
 
 Dictation behaves like typing: start a recording with text selected and what you say **replaces the selection**, leaving the caret after it. With nothing selected, the transcript is inserted at the cursor — unless **Settings → Voice → Insertion mode** is set to *Replace field*, which always overwrites the whole composer.
 
+### Audio uploads
+
+Dictation needs you at the microphone, and it only helps with what you are about to say. Drop an **audio file** into any composer instead — MP3, WAV, M4A, MP4, FLAC, OGG, WebM — and it is transcribed through the same provider and sent as text (0.12.0+).
+
+The point is that the model never sees audio. **Any zone works, including text-only models**, because what arrives is a transcript — so a voice memo, a meeting recording or an interview reaches a model that has no audio input at all. It also means a recording you would never sit through dictating in real time is one drag away from being something you can ask questions about.
+
+Two choices under **Settings → Voice → Audio uploads**, both overridable per recording on the composer itself:
+
+| Setting | Options |
+|---------|---------|
+| When a transcript is ready | **Use it** — the words go straight into the message box. **Review first** — the chip holds the transcript for you to read and correct; click it to open an editable transcript, then *Use as message*. |
+| How it reaches the model | **As my message** — the transcript is the text you send. **As an attachment** — the model gets the full transcript as context while the message box stays yours, which is the mode that works for anything long: attach the meeting, then type *"what did I agree to?"*. |
+
+Turning on **Include timestamps and language** asks the endpoint for `verbose_json`, which prefixes the transcript with its duration and detected language and breaks it into `[0:00]`-stamped lines, marking any passage the model itself flagged as unclear. Not every OpenAI-compatible server implements it; one that doesn't still returns a plain transcript.
+
+Language is auto-detected by default (the **Language** setting above forces one instead). Size and duration ceilings are yours to set — 25 MB and two hours out of the box, the first because that is OpenAI's own hard limit for the endpoint. Raise them for a local server with a different one.
+
+There are no speaker labels. OpenAI's transcription endpoint does not diarize, and a guess at who was talking, presented as data, is worse than not offering it.
+
 ## Appearance
 
 **Settings → Appearance** covers the palette, fonts, bloom and shadows, plus an animated **background effect** — every one of which reacts to your cursor, and none of which need it to keep moving:

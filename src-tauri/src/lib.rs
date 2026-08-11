@@ -306,6 +306,7 @@ pub fn run() {
             commands::voice::create_cloned_voice,
             commands::voice::delete_cloned_voice,
             commands::voice::transcribe_audio_file,
+            commands::voice::transcribe_audio_upload,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

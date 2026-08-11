@@ -53,6 +53,40 @@ async fn read_stt_settings(state: &AppState) -> SttSettings {
     serde_json::from_str(&raw).unwrap_or_default()
 }
 
+/// Everything a transcription call needs, resolved from settings + the provider
+/// row: (base_url, api_key, model, language).
+///
+/// Every entry point into STT — dictation, a cloned voice's reference clip, an
+/// uploaded file — needs exactly this and used to re-derive it inline, which is
+/// three copies of the same "no provider configured" / "no model selected"
+/// wording drifting apart. `language` is `None` for auto-detect, which is the
+/// default: whisper identifies the language itself, and forcing the wrong one is
+/// worse than letting it decide.
+async fn stt_config(state: &AppState) -> AppResult<(String, Option<String>, String, Option<String>)> {
+    let settings = read_stt_settings(state).await;
+    let provider_id = settings.stt_provider_id.ok_or_else(|| {
+        AppError::Invalid(
+            "no transcription provider configured — pick one in Settings → Voice".to_string(),
+        )
+    })?;
+    if settings.stt_model.is_empty() {
+        return Err(AppError::Invalid(
+            "no transcription model selected for this provider — pick one in Settings → Voice"
+                .to_string(),
+        ));
+    }
+    let provider: Option<(String, Option<String>)> =
+        sqlx::query_as("SELECT base_url, api_key FROM providers WHERE id = ?1")
+            .bind(&provider_id)
+            .fetch_optional(&state.db)
+            .await?;
+    let (base_url, api_key) = provider.ok_or_else(|| {
+        AppError::NotFound(format!("transcription provider not found: {provider_id}"))
+    })?;
+    let lang = Some(settings.stt_language).filter(|l| !l.is_empty());
+    Ok((base_url, api_key, settings.stt_model, lang))
+}
+
 #[tauri::command]
 pub async fn start_dictation(
     state: State<'_, AppState>,
@@ -110,41 +144,23 @@ pub async fn stop_dictation(
         return Ok(String::new());
     }
 
-    let settings = read_stt_settings(&state).await;
-    let lang = if settings.stt_language.is_empty() {
-        None
-    } else {
-        Some(settings.stt_language.clone())
-    };
-
-    let provider_id = settings.stt_provider_id.ok_or_else(|| {
-        AppError::Invalid(
-            "no dictation provider configured — pick one in Settings → Voice".to_string(),
-        )
-    })?;
-    if settings.stt_model.is_empty() {
-        return Err(AppError::Invalid(
-            "no dictation model selected for this provider — pick one in Settings → Voice".to_string(),
-        ));
-    }
-    let provider: Option<(String, Option<String>)> =
-        sqlx::query_as("SELECT base_url, api_key FROM providers WHERE id = ?1")
-            .bind(&provider_id)
-            .fetch_optional(&state.db)
-            .await?;
-    let (base_url, api_key) = provider.ok_or_else(|| {
-        AppError::NotFound(format!("dictation provider not found: {provider_id}"))
-    })?;
+    let (base_url, api_key, model, lang) = stt_config(&state).await?;
     let wav_bytes = encode_wav(&samples)?;
-    crate::stt_api::transcribe_via_provider(
+    // Dictation wants the words and nothing else — no metadata request, so a
+    // provider that only speaks plain JSON is never sent a parameter it might
+    // choke on for the app's most-used voice path.
+    let result = crate::stt_api::transcribe_via_provider(
         &state.http,
         &base_url,
         api_key.as_deref(),
-        &settings.stt_model,
+        &model,
         wav_bytes,
+        "dictation.wav",
         lang.as_deref(),
+        false,
     )
-    .await
+    .await?;
+    Ok(result.text)
 }
 
 /// Encodes 16kHz mono `f32` samples as an in-memory WAV file — the format
@@ -426,32 +442,71 @@ pub async fn transcribe_audio_file(
     state: State<'_, AppState>,
     audio_path: String,
 ) -> AppResult<String> {
-    let settings = read_stt_settings(&state).await;
-    let provider_id = settings.stt_provider_id.ok_or_else(|| {
-        AppError::Invalid("no dictation provider configured — pick one in Settings → Voice".to_string())
-    })?;
-    if settings.stt_model.is_empty() {
-        return Err(AppError::Invalid(
-            "no dictation model selected — pick one in Settings → Voice".to_string(),
-        ));
-    }
-    let provider: Option<(String, Option<String>)> =
-        sqlx::query_as("SELECT base_url, api_key FROM providers WHERE id = ?1")
-            .bind(&provider_id)
-            .fetch_optional(&state.db)
-            .await?;
-    let (base_url, api_key) = provider
-        .ok_or_else(|| AppError::NotFound(format!("dictation provider not found: {provider_id}")))?;
+    let (base_url, api_key, model, lang) = stt_config(&state).await?;
     let bytes = std::fs::read(&audio_path)
         .map_err(|e| AppError::Invalid(format!("could not read audio file {audio_path}: {e}")))?;
-    let lang = if settings.stt_language.is_empty() { None } else { Some(settings.stt_language.clone()) };
+    let file_name = std::path::Path::new(&audio_path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("audio.wav");
+    let result = crate::stt_api::transcribe_via_provider(
+        &state.http,
+        &base_url,
+        api_key.as_deref(),
+        &model,
+        bytes,
+        file_name,
+        lang.as_deref(),
+        false,
+    )
+    .await?;
+    Ok(result.text)
+}
+
+/// Transcribes an audio file the user dropped into a composer (0.12.0).
+///
+/// The bytes arrive base64-encoded rather than as a path because the webview
+/// holds a `File` — from a drag-drop, a file picker or a paste — and never
+/// necessarily a readable path on disk. That is also why the size ceiling is
+/// enforced on the caller's side, where the file's size is known before it is
+/// read into memory; by the time the bytes are here they have already been paid
+/// for. This decodes, uploads and hands back the transcript.
+///
+/// `with_metadata` asks the endpoint for `verbose_json`, which is what makes the
+/// timestamps / language / per-segment confidence available. It is off by
+/// default: the extra fields are useless to most turns and some OpenAI-compatible
+/// shims only implement plain JSON.
+///
+/// Note on speaker labels: OpenAI's transcription endpoint does not diarize, so
+/// there is deliberately no speaker field here. Adding one would mean either a
+/// second vendor-specific integration or an invented guess presented as data.
+#[tauri::command]
+pub async fn transcribe_audio_upload(
+    state: State<'_, AppState>,
+    file_name: String,
+    audio_b64: String,
+    with_metadata: bool,
+    language: Option<String>,
+) -> AppResult<crate::stt_api::Transcription> {
+    let (base_url, api_key, model, default_lang) = stt_config(&state).await?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(audio_b64.as_bytes())
+        .map_err(|e| AppError::Invalid(format!("audio upload was not valid base64: {e}")))?;
+    if bytes.is_empty() {
+        return Err(AppError::Invalid(format!("{file_name} is empty")));
+    }
+    // A per-upload language wins over the global default, so one foreign-language
+    // recording doesn't require changing a setting and changing it back.
+    let lang = language.filter(|l| !l.trim().is_empty()).or(default_lang);
     crate::stt_api::transcribe_via_provider(
         &state.http,
         &base_url,
         api_key.as_deref(),
-        &settings.stt_model,
+        &model,
         bytes,
+        &file_name,
         lang.as_deref(),
+        with_metadata,
     )
     .await
 }

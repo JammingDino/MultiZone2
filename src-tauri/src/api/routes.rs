@@ -101,6 +101,7 @@ pub const ROUTES: &[RouteDef] = &[
     r("POST", "/api/plans/:id/steps", "Rewrite a plan's steps ({steps})"),
     r("POST", "/api/plans/:id/stop", "Ask the run to finish the current step and stop"),
     r("GET", "/api/chats/:id/plan-tree", "This chat's plans and every sub-agent's beneath it"),
+    r("GET", "/api/chats/:id/events", "The session event log — every tool call, approval, error and plan decision in order (?limit=N for the tail)"),
     r("POST", "/api/chats/:id/title", "Rename a chat"),
     r("POST", "/api/chats/:id/generate-title", "Have the model title the chat"),
     r("POST", "/api/chats/:id/project", "Move the chat into a project (or out of one)"),
@@ -252,6 +253,7 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("plans::update_plan_steps", Route("POST /api/plans/:id/steps")),
     ("plans::request_plan_stop", Route("POST /api/plans/:id/stop")),
     ("plans::plan_tree", Route("GET /api/chats/:id/plan-tree")),
+    ("plans::list_session_events", Route("GET /api/chats/:id/events")),
     ("chats::set_chat_project_context", Route("POST /api/chats/:id/project-context")),
     ("chats::get_chat_tags", Route("GET /api/chats/:id/tags")),
     ("chats::get_all_chat_tags", Route("GET /api/chat-tags")),
@@ -626,6 +628,16 @@ pub async fn plan_tree(
 ) -> ApiResult<Response> {
     let plans = commands::plans::plan_tree(app_state(&st), id).await?;
     Ok(Json(plans).into_response())
+}
+
+pub async fn list_session_events(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> ApiResult<Response> {
+    let limit = q.get("limit").and_then(|v| v.parse::<i64>().ok());
+    let events = commands::plans::list_session_events(app_state(&st), id, limit).await?;
+    Ok(Json(events).into_response())
 }
 
 pub async fn set_chat_smart(

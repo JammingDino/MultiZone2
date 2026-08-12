@@ -26,7 +26,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { parseFileAttachments, type FileAttachment } from "@/lib/attachmentParts";
-import type { Chat, ContentPart, Message } from "@/lib/types";
+import type { Chat, ContentPart, Message, SessionEvent } from "@/lib/types";
 import { saveTextFile } from "@/lib/saveFile";
 import { chatContextEstimate, estimateTokens } from "@/lib/tokens";
 import {
@@ -106,6 +106,12 @@ export interface ExportChatData {
   /** Sub-agent conversations to fold in. Empty when there are none, or when the
    *  user has turned them off in Settings. */
   subchats: ExportSubchat[];
+  /**
+   * The session event log (0.12.2), appended as a timeline. Empty for a chat
+   * that predates the log — the export says nothing rather than claiming the
+   * session did nothing.
+   */
+  events: SessionEvent[];
 }
 
 export interface ExportTheme {
@@ -418,7 +424,68 @@ export function buildChatMarkdown(data: ExportChatData): string {
     body.push(...subchatMarkdown(orphan, data, index, 0));
   }
 
+  // The event log as an appendix (0.12.2). Last, because it is the record
+  // rather than the reading: the transcript is what happened as told, this is
+  // what happened as logged — including the approvals declined and the failures
+  // the prose never mentions.
+  if (data.events.length) {
+    const start = data.events[0].createdAt;
+    const cell = (v: string) => v.replace(/\|/g, "\\|").replace(/\n/g, " ");
+    body.push("", "---", "", "## Session log", "");
+    body.push(
+      `_${data.events.length} recorded event${data.events.length === 1 ? "" : "s"}, in order, timed from the first._`,
+      "",
+      "| Time | Event | Detail |",
+      "| --- | --- | --- |",
+    );
+    for (const e of data.events) {
+      const detail = cell(e.detail ?? "");
+      body.push(
+        `| ${elapsedLabel(e.createdAt - start)} | ${cell(e.label)} | ${
+          detail.length > 160 ? `${detail.slice(0, 160)}…` : detail
+        } |`,
+      );
+    }
+    body.push("");
+  }
+
   return fm.join("\n") + body.join("\n").trimEnd() + "\n";
+}
+
+/**
+ * The session log as the PDF's closing section (0.12.2).
+ *
+ * The trace above is the run as it reads; this is the run as it was recorded —
+ * the approvals declined, the tools that failed, the plan edited before it was
+ * approved. Kept to a table on purpose: it is evidence, not narrative.
+ */
+function renderSessionLog(events: SessionEvent[], p: typeof PALETTE.dark): string {
+  if (!events.length) return "";
+  const start = events[0].createdAt;
+  const rows = events
+    .map(
+      (e) => `<tr>
+        <td style="color:${p.muted};white-space:nowrap;">${elapsedLabel(e.createdAt - start)}</td>
+        <td>${escapeHtml(e.label)}</td>
+      </tr>`,
+    )
+    .join("");
+  return `<div class="section">
+    <h2 style="font-size:15px;margin:18px 0 6px;">Session log</h2>
+    <div style="font-size:10.5px;color:${p.muted};margin-bottom:6px;">
+      ${events.length} recorded event${events.length === 1 ? "" : "s"}, in order, timed from the first.
+    </div>
+    <table style="border-collapse:collapse;font-size:11px;width:100%;">
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
+/** mm:ss since the session started — the axis a log is read along. */
+function elapsedLabel(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "0:00";
+  const total = Math.floor(ms / 1000);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
 }
 
 /** Markdown heading prefix for a conversation nested `depth` levels down. The
@@ -1380,6 +1447,7 @@ export async function buildChatPrintHtml(
       : ""
   }
   ${body}
+  ${renderSessionLog(data.events, p)}
 </body>
 </html>`;
 }

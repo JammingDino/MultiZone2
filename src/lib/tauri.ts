@@ -30,6 +30,7 @@ import type {
   Memory,
   Plan,
   PlanStep,
+  SessionEvent,
   Message,
   PendingMode,
   Project,
@@ -87,6 +88,8 @@ export const requestPlanStop = (planId: string) =>
   invoke<void>("request_plan_stop", { planId });
 export const planTree = (chatId: string) =>
   invoke<Plan[]>("plan_tree", { chatId });
+export const listSessionEvents = (chatId: string, limit?: number) =>
+  invoke<SessionEvent[]>("list_session_events", { chatId, limit: limit ?? null });
 
 export const setChatProject = (chatId: string, projectId: string | null) =>
   invoke<void>("set_chat_project", { chatId, projectId });

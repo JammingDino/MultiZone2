@@ -130,6 +130,16 @@ pub async fn enter(args: &Value, db: &SqlitePool, chat_id: &str) -> AppResult<St
         .to_string());
     }
     plans::set_plan_mode(db, chat_id, true).await?;
+    crate::events::record(
+        db,
+        chat_id,
+        None,
+        None,
+        "plan_mode",
+        "The model switched itself into plan mode",
+        Some(json!({ "reason": reason })),
+    )
+    .await;
     Ok(json!({
         "ok": true,
         "rendered": "plan_mode",
@@ -198,6 +208,16 @@ pub async fn exit(
     // belongs under the leader's rather than standing alone in a conversation
     // nobody is watching (0.12.1).
     plans::link_to_parent_plan(db, &plan.id, chat_id).await?;
+    crate::events::record(
+        db,
+        chat_id,
+        None,
+        zone_id,
+        "plan_filed",
+        format!("A plan was proposed: “{}” ({} steps)", title, steps.len()),
+        Some(plan.to_json()),
+    )
+    .await;
 
     let mut payload = plan.to_json();
     if let Some(obj) = payload.as_object_mut() {

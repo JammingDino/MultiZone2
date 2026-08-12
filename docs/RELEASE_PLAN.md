@@ -735,7 +735,7 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ### 0.12.0 — Plan mode
 
-*Status: built & tested (`cargo test --lib` 176 passing, `npm run build` green); not yet runtime-tested against a live model. The mode and the artifact are [plans.rs](../src-tauri/src/plans.rs), the two mode tools are [tools/plan_mode.rs](../src-tauri/src/tools/plan_mode.rs), the editable card is [PlanReview.tsx](../src/components/Chat/PlanReview.tsx), and the table is migration [033](../src-tauri/migrations/033_plan_mode.sql).*
+*Status: built & tested (`cargo test --lib` 174 passing, `npm run build` green); not yet runtime-tested against a live model. The mode and the artifact are [plans.rs](../src-tauri/src/plans.rs), the two mode tools are [tools/plan_mode.rs](../src-tauri/src/tools/plan_mode.rs), the editable card is [PlanReview.tsx](../src/components/Chat/PlanReview.tsx), and the table is migration [033](../src-tauri/migrations/033_plan_mode.sql).*
 
 *Surveyed first, and each of the four took one idea: Claude Code's phase-structured planning prompt and its rule that `ExitPlanMode` **is** the request for approval (so the model should not also ask in prose); PI's symmetric `EnterPlanMode()` / `ExitPlanMode()`, which is where the model getting to take *itself* into planning comes from; Codex's plan-as-ordered-steps with live progress; and — from [Armin Ronacher's reading of Claude Code's plan mode](https://lucumr.pocoo.org/2025/12/17/what-is-plan-mode/) — the two criticisms worth designing against: that the tools are not actually restricted (it is prompt reinforcement over an unchanged toolset), and that the plan lands in a file the user cannot see or edit. Both are inverted here: the toolset is genuinely filtered, and the plan is a row the user rewrites.*
 
@@ -750,7 +750,7 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ### 0.12.1 — Live task state
 
-*Status: built & tested (`cargo test --lib` 176 passing, `npm run build` green); not yet runtime-tested. The panel is [TaskPanel.tsx](../src/components/Chat/TaskPanel.tsx); the stop request is one column, migration [034](../src-tauri/migrations/034_plan_control.sql).*
+*Status: built & tested (`cargo test --lib` 174 passing, `npm run build` green); not yet runtime-tested. The panel is [TaskPanel.tsx](../src/components/Chat/TaskPanel.tsx); the stop request is one column, migration [034](../src-tauri/migrations/034_plan_control.sql).*
 
 - [x] The plan renders as a live checklist above the composer, steps ticking off as the turn executes them, with the current step marked and the progress bar counting everything settled rather than only what succeeded. Reloaded when the transcript grows a tool result — the moment a status can have moved — rather than polled
 - [x] Steps can fail without failing the run: `failed` is a status, the reason is kept on the step, and the task list tells the model what to do with one (carry on with what does not depend on it, or stop and report — but say which). A step reported failed with no reason gets one written for it, since a red mark with no explanation is exactly what makes a failure unreadable afterwards
@@ -762,11 +762,16 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ### 0.12.2 — Replay & the event log
 
-*Reasonix keeps a session event log and can replay a transcript; we keep everything in SQLite already and expose none of it as a timeline.*
+*Reasonix keeps a session event log and can replay a transcript; we kept everything in SQLite already and exposed none of it as a timeline.*
 
-- [ ] Session event log: every tool call, approval, error, model switch and file mutation as an ordered, queryable record
-- [ ] Replay view — step through a past session at your own pace to see what the agent did and when, distinct from re-reading the finished transcript
-- [ ] Export a session's event log with the existing trace export
+*Status: built & tested (`cargo test --lib` 174 passing, `npm run build` green); not yet runtime-tested. The log is [events.rs](../src-tauri/src/events.rs) over migration [035](../src-tauri/migrations/035_session_events.sql); the replay is [ReplayView.tsx](../src/components/Chat/ReplayView.tsx).*
+
+- [x] Session event log: turn start and end, every tool call with its arguments, every approval declined, every failure, zone switches, file mutations, and every plan decision — one ordered, queryable record per chat. Append-only and deliberately denormalised: the human-readable line is written at the time it happens, so replaying a session months later does not depend on the zone, the file or the plan still existing
+- [x] Recording can never fail a turn — every writer is best-effort and logs rather than propagates, because a log that breaks what it observes is worse than no log. Arguments are summarised, not copied: a whole file's contents is truncated with its length noted, so the log stays a record rather than a second database
+- [x] Replay view — step or play through a past session, filter by kind, and read what each event carried, with the clock showing elapsed time from the first event (the axis that makes "it spent four minutes on that search" visible). Play runs at a fixed cadence rather than the original timings: a faithful replay of a nine-minute turn takes nine minutes, and stepping is what this is for
+- [x] The log is exported with the chat — a Session log table in the Markdown and a closing section in the PDF, after the trace, because the trace is the run as it reads and the log is the run as it was recorded
+- [x] `GET /api/chats/:id/events` serves the same record to a script or a model driving the app
+- [ ] Runtime-test: run an agentic turn with an approval declined and a tool failure, then replay it
 
 ---
 

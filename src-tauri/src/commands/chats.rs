@@ -720,6 +720,10 @@ pub async fn delete_chat(state: State<'_, AppState>, id: String) -> AppResult<()
         .await?;
     // Remove the chat's mirrored markdown file too (0.7.2).
     crate::commands::mirror::unmirror_chat_best_effort(&state.db, &id).await;
+    // The event log (0.12.2) has no foreign key onto chats — it is deliberately
+    // append-only and denormalised so it survives what it describes — so a
+    // deleted chat's log has to be swept explicitly rather than cascading.
+    crate::events::clear(&state.db, &id).await.ok();
     // Tear down any persistent WSL shell owned by this chat, so deleting a chat
     // does not leave an orphaned `bash` running until the idle reaper notices.
     crate::tools::wsl::close_session(&id).await;

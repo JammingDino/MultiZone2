@@ -121,6 +121,26 @@ export interface Plan {
   approvedAt: number | null;
 }
 
+/**
+ * One row of the session event log (0.12.2) — the ordered record of what an
+ * agent actually did, including the parts the transcript never held (an
+ * approval declined, a zone switched mid-turn, a turn that died on an error).
+ */
+export interface SessionEvent {
+  id: string;
+  chatId: string;
+  /** Groups every event of one turn, matching the checkpoints' turn id. */
+  turnId: string | null;
+  /** The participant — a sub-agent or perspective zone, null for the primary. */
+  zoneId: string | null;
+  kind: string;
+  /** The line to show; written for a person at the time it happened. */
+  label: string;
+  /** JSON blob with whatever the kind carries. */
+  detail: string | null;
+  createdAt: number;
+}
+
 export function parsePlanSteps(plan: Pick<Plan, "steps">): PlanStep[] {
   try {
     const parsed = JSON.parse(plan.steps);

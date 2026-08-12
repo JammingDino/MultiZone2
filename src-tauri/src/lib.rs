@@ -17,6 +17,7 @@ mod commands;
 mod state;
 mod theme;
 mod error;
+mod events;
 mod stt_api;
 mod tts_api;
 mod updater_token;
@@ -199,6 +200,7 @@ pub fn run() {
             commands::plans::update_plan_steps,
             commands::plans::request_plan_stop,
             commands::plans::plan_tree,
+            commands::plans::list_session_events,
             commands::chats::set_chat_project,
             commands::chats::set_chat_project_context,
             commands::chats::get_chat_tags,

@@ -18,7 +18,18 @@ pub async fn set_chat_plan_mode(
     chat_id: String,
     on: bool,
 ) -> AppResult<()> {
-    plans::set_plan_mode(&state.db, &chat_id, on).await
+    plans::set_plan_mode(&state.db, &chat_id, on).await?;
+    crate::events::record(
+        &state.db,
+        &chat_id,
+        None,
+        None,
+        "plan_mode",
+        if on { "You turned plan mode on" } else { "You turned plan mode off" },
+        None,
+    )
+    .await;
+    Ok(())
 }
 
 #[tauri::command]
@@ -48,7 +59,22 @@ pub async fn approve_plan(
     edited: bool,
 ) -> AppResult<Plan> {
     let parsed: Option<Vec<PlanStep>> = steps.as_ref().map(|s| plans::sanitize_steps(s));
-    plans::approve(&state.db, &plan_id, parsed.as_deref(), edited).await
+    let plan = plans::approve(&state.db, &plan_id, parsed.as_deref(), edited).await?;
+    crate::events::record(
+        &state.db,
+        &plan.chat_id,
+        None,
+        plan.zone_id.as_deref(),
+        "plan_approved",
+        if edited {
+            format!("You approved an edited version of “{}”", plan.title)
+        } else {
+            format!("You approved “{}”", plan.title)
+        },
+        Some(plan.to_json()),
+    )
+    .await;
+    Ok(plan)
 }
 
 /// Turn a plan down. The chat stays in plan mode: the user's objection is the
@@ -57,7 +83,18 @@ pub async fn approve_plan(
 pub async fn reject_plan(state: State<'_, AppState>, plan_id: String) -> AppResult<()> {
     let plan = plans::get(&state.db, &plan_id).await?;
     plans::set_status(&state.db, &plan_id, "rejected").await?;
-    plans::set_plan_mode(&state.db, &plan.chat_id, true).await
+    plans::set_plan_mode(&state.db, &plan.chat_id, true).await?;
+    crate::events::record(
+        &state.db,
+        &plan.chat_id,
+        None,
+        plan.zone_id.as_deref(),
+        "plan_rejected",
+        format!("You turned down “{}” — still planning", plan.title),
+        None,
+    )
+    .await;
+    Ok(())
 }
 
 /// Rewrite a plan's steps without changing its status — the user striking or
@@ -69,8 +106,26 @@ pub async fn update_plan_steps(
     steps: Vec<Value>,
 ) -> AppResult<Plan> {
     let parsed = plans::sanitize_steps(&steps);
+    let before = plans::get(&state.db, &plan_id).await?.parsed_steps().len();
     plans::write_steps(&state.db, &plan_id, &parsed).await?;
-    plans::get(&state.db, &plan_id).await
+    let plan = plans::get(&state.db, &plan_id).await?;
+    crate::events::record(
+        &state.db,
+        &plan.chat_id,
+        None,
+        plan.zone_id.as_deref(),
+        "plan_edit",
+        if parsed.len() > before {
+            "You added a step to the plan"
+        } else if parsed.len() < before {
+            "You removed a step from the plan"
+        } else {
+            "You edited the plan"
+        },
+        Some(plan.to_json()),
+    )
+    .await;
+    Ok(plan)
 }
 
 /// "Finish the step you are on, then stop" (0.12.1) — the control that sits
@@ -78,7 +133,20 @@ pub async fn update_plan_steps(
 /// option and threw away everything in flight.
 #[tauri::command]
 pub async fn request_plan_stop(state: State<'_, AppState>, plan_id: String) -> AppResult<()> {
-    plans::request_stop(&state.db, &plan_id).await
+    plans::request_stop(&state.db, &plan_id).await?;
+    if let Ok(plan) = plans::get(&state.db, &plan_id).await {
+        crate::events::record(
+            &state.db,
+            &plan.chat_id,
+            None,
+            plan.zone_id.as_deref(),
+            "plan_stop",
+            "You asked the run to stop after the current step",
+            None,
+        )
+        .await;
+    }
+    Ok(())
 }
 
 /// A chat's plans and those of every subchat under it — a Multizone leader's
@@ -86,4 +154,14 @@ pub async fn request_plan_stop(state: State<'_, AppState>, plan_id: String) -> A
 #[tauri::command]
 pub async fn plan_tree(state: State<'_, AppState>, chat_id: String) -> AppResult<Vec<Plan>> {
     plans::tree_for_chat(&state.db, &chat_id).await
+}
+
+/// The chat's event log — the ordered record a replay steps through (0.12.2).
+#[tauri::command]
+pub async fn list_session_events(
+    state: State<'_, AppState>,
+    chat_id: String,
+    limit: Option<i64>,
+) -> AppResult<Vec<crate::events::SessionEvent>> {
+    crate::events::list(&state.db, &chat_id, limit).await
 }

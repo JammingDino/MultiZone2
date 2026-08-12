@@ -1497,6 +1497,21 @@ async fn run_participant_turn(
     // did", which spans the whole agentic loop, not one iteration of it.
     let turn_id = new_id();
 
+    // The session event log (0.12.2). Written alongside the turn rather than
+    // derived from it afterwards, because the things worth replaying — an
+    // approval denied, a zone switched, a turn that died on a provider error —
+    // leave nothing behind in the transcript to derive from.
+    crate::events::record(
+        &ctx.db,
+        chat_id,
+        Some(&turn_id),
+        persp,
+        "turn_start",
+        format!("{} started a turn", zone.name),
+        Some(serde_json::json!({ "zoneId": zone.id, "model": zone.model })),
+    )
+    .await;
+
     for step in 0..max_steps {
         if cancel.load(Ordering::Relaxed) {
             sink.emit_for(chat_id, persp, StreamPayload::Cancelled);
@@ -1978,6 +1993,64 @@ async fn run_participant_turn(
                 .to_string()
             };
 
+            let failed = crate::commands::tool_usage::result_is_error(&result);
+            crate::events::record(
+                &ctx.db,
+                chat_id,
+                Some(&turn_id),
+                persp,
+                if !approved {
+                    "denial"
+                } else if failed {
+                    "tool_error"
+                } else {
+                    "tool_call"
+                },
+                if !approved {
+                    format!("You declined `{}`", tc.function.name)
+                } else if failed {
+                    format!("`{}` failed", tc.function.name)
+                } else {
+                    format!("Ran `{}`", tc.function.name)
+                },
+                Some(serde_json::json!({
+                    "tool": tc.function.name,
+                    "arguments": crate::events::summarize_args(&call_arguments),
+                    "approvalRequired": needs_approval,
+                })),
+            )
+            .await;
+            if approved && !failed && crate::events::is_file_mutation(&tc.function.name) {
+                crate::events::record(
+                    &ctx.db,
+                    chat_id,
+                    Some(&turn_id),
+                    persp,
+                    "file_change",
+                    format!(
+                        "{} {}",
+                        match tc.function.name.as_str() {
+                            "create_file" => "Wrote",
+                            "edit_file" => "Edited",
+                            "delete_file" => "Deleted",
+                            "move_file" => "Moved",
+                            "copy_file" => "Copied",
+                            _ => "Created",
+                        },
+                        serde_json::from_str::<Value>(&call_arguments)
+                            .ok()
+                            .and_then(|v| v
+                                .get("path")
+                                .or_else(|| v.get("from"))
+                                .and_then(|p| p.as_str())
+                                .map(str::to_string))
+                            .unwrap_or_else(|| "a file".to_string()),
+                    ),
+                    Some(crate::events::summarize_args(&call_arguments)),
+                )
+                .await;
+            }
+
             // Usage counters (0.9.3), so the zone editor can show which tools a
             // zone actually reaches for and which keep failing. Best-effort: a
             // failed counter write never affects the turn. A denied approval
@@ -2146,6 +2219,16 @@ async fn run_participant_turn(
                             "chat-zone-updated",
                             serde_json::json!({ "chatId": chat_id, "zoneId": new_zone_id }),
                         );
+                        crate::events::record(
+                            &ctx.db,
+                            chat_id,
+                            Some(&turn_id),
+                            persp,
+                            "zone_switch",
+                            format!("Switched to {}", zone.name),
+                            Some(serde_json::json!({ "zoneId": new_zone_id, "model": zone.model })),
+                        )
+                        .await;
                     }
                     Err(e) => {
                         tracing::warn!("zone switch to {new_zone_id} failed: {e}");
@@ -2169,6 +2252,17 @@ async fn run_participant_turn(
                 .to_string(),
         ));
     }
+
+    crate::events::record(
+        &ctx.db,
+        chat_id,
+        Some(&turn_id),
+        persp,
+        if cancelled_turn { "cancelled" } else { "turn_end" },
+        if cancelled_turn { "You stopped the turn" } else { "Turn finished" },
+        None,
+    )
+    .await;
 
     sink.emit_for(chat_id, persp, StreamPayload::Done);
     Ok(())

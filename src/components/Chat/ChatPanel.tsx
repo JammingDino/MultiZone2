@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Upload, Tag as TagIcon, X, Zap, Folder, FolderX, ChevronDown, ChevronRight, SplitSquareHorizontal, Plus, ShieldAlert, Eye, Database } from "lucide-react";
+import { Upload, Tag as TagIcon, X, Zap, Folder, FolderX, ChevronDown, ChevronRight, SplitSquareHorizontal, Plus, ShieldAlert, Eye, Database, History } from "lucide-react";
 import { useApp } from "@/store/app";
 import { useShallow } from "zustand/react/shallow";
 import * as api from "@/lib/tauri";
@@ -20,6 +20,7 @@ import { getZoneIcon } from "@/lib/zoneIcons";
 import { AskUserCard } from "@/components/Message/StepBlock";
 import { PlanReview } from "@/components/Chat/PlanReview";
 import { TaskPanel } from "@/components/Chat/TaskPanel";
+import { ReplayView } from "@/components/Chat/ReplayView";
 import { resolveBaseModel } from "@/lib/baseZone";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 import type { FileDiff, StreamEnvelope } from "@/lib/types";
@@ -179,6 +180,7 @@ export function ChatPanel() {
   const approvePlan = useApp((s) => s.approvePlan);
   const rejectPlan = useApp((s) => s.rejectPlan);
   const [planBusy, setPlanBusy] = useState(false);
+  const [replayOpen, setReplayOpen] = useState(false);
 
   useEffect(() => {
     if (activeChatId) void loadPendingPlan(activeChatId);
@@ -397,6 +399,13 @@ export function ChatPanel() {
             />
             <div className="flex shrink-0 items-center gap-2">
             <ContextMeter chatId={activeChat.id} />
+            <button
+              onClick={() => setReplayOpen(true)}
+              title="Replay this session — every tool call, approval, failure and plan decision in order"
+              className="rounded p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
+            >
+              <History size={15} />
+            </button>
             <ExportMenu chatId={activeChat.id} />
             <PerspectiveZonePicker
               chatId={activeChat.id}
@@ -581,6 +590,9 @@ export function ChatPanel() {
             </div>
           </div>
         </div>
+      )}
+      {replayOpen && activeChat && (
+        <ReplayView chatId={activeChat.id} onClose={() => setReplayOpen(false)} />
       )}
       {settingsOpen && <SettingsModal />}
       {zoneEditorOpen && <ZoneEditor />}

@@ -52,13 +52,19 @@ export function ExportMenu({ chatId }: { chatId: string }) {
   async function gather(): Promise<ExportChatData | null> {
     const chat = chats.find((c) => c.id === chatId);
     if (!chat) return null;
-    const [messages, subchats] = await Promise.all([
+    const [messages, subchats, events] = await Promise.all([
       api.getMessages(chatId),
       gatherSubchats().catch((e) => {
         // A missing sub-agent tree is not a reason to refuse the export — the
         // primary conversation is still the thing being asked for.
         console.error("subchat export gather failed", e);
         return [] as ExportSubchat[];
+      }),
+      // The event log is an appendix, not the document: a chat that predates it
+      // (or a read that fails) exports exactly as it did before.
+      api.listSessionEvents(chatId).catch((e) => {
+        console.error("session log gather failed", e);
+        return [];
       }),
     ]);
     const primaryZone = chat.zoneId ? zones.find((z) => z.id === chat.zoneId) ?? null : null;
@@ -74,6 +80,7 @@ export function ExportMenu({ chatId }: { chatId: string }) {
       tagNames: (tagsByChat[chatId] ?? []).map((t) => t.name),
       zonesById,
       subchats,
+      events,
     };
   }
 

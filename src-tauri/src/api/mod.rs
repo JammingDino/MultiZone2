@@ -213,6 +213,7 @@ fn build_router(state: ApiState) -> Router {
         .route("/api/plans/:id/steps", post(h::update_plan_steps))
         .route("/api/plans/:id/stop", post(h::request_plan_stop))
         .route("/api/chats/:id/plan-tree", get(h::plan_tree))
+        .route("/api/chats/:id/events", get(h::list_session_events))
         .route("/api/chats/:id/title", post(h::rename_chat))
         .route("/api/chats/:id/generate-title", post(h::generate_title))
         .route("/api/chats/:id/project", post(h::set_chat_project))

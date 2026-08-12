@@ -93,6 +93,12 @@ pub const ROUTES: &[RouteDef] = &[
     r("DELETE", "/api/chats/:id/participant-messages", "Delete one participant's latest-round messages"),
     r("POST", "/api/chats/:id/zone", "Set the chat's primary zone"),
     r("POST", "/api/chats/:id/smart", "Turn Smart chat routing on or off"),
+    r("POST", "/api/chats/:id/plan-mode", "Turn plan mode on or off for a chat ({on: bool})"),
+    r("GET", "/api/chats/:id/plans", "Every plan this chat has proposed, approved or run"),
+    r("GET", "/api/chats/:id/plans/pending", "The plan waiting on the user, if any"),
+    r("POST", "/api/plans/:id/approve", "Approve a plan, optionally with edited steps ({steps?, edited?})"),
+    r("POST", "/api/plans/:id/reject", "Turn a plan down; the chat stays in plan mode"),
+    r("POST", "/api/plans/:id/steps", "Rewrite a plan's steps ({steps})"),
     r("POST", "/api/chats/:id/title", "Rename a chat"),
     r("POST", "/api/chats/:id/generate-title", "Have the model title the chat"),
     r("POST", "/api/chats/:id/project", "Move the chat into a project (or out of one)"),
@@ -234,6 +240,14 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("chats::set_chat_zone", Route("POST /api/chats/:id/zone")),
     ("chats::set_chat_smart", Route("POST /api/chats/:id/smart")),
     ("chats::set_chat_project", Route("POST /api/chats/:id/project")),
+    // Plan mode and plans (0.12.0). The reads are ordinary reads; approving a
+    // plan is the user's decision, so it is a control route like the rest.
+    ("plans::set_chat_plan_mode", Route("POST /api/chats/:id/plan-mode")),
+    ("plans::list_plans", Route("GET /api/chats/:id/plans")),
+    ("plans::pending_plan", Route("GET /api/chats/:id/plans/pending")),
+    ("plans::approve_plan", Route("POST /api/plans/:id/approve")),
+    ("plans::reject_plan", Route("POST /api/plans/:id/reject")),
+    ("plans::update_plan_steps", Route("POST /api/plans/:id/steps")),
     ("chats::set_chat_project_context", Route("POST /api/chats/:id/project-context")),
     ("chats::get_chat_tags", Route("GET /api/chats/:id/tags")),
     ("chats::get_all_chat_tags", Route("GET /api/chat-tags")),
@@ -528,6 +542,70 @@ pub async fn generate_title(
     )
     .await?;
     Ok(Json(json!({ "title": title })).into_response())
+}
+
+// ── Plan mode (0.12.0) ───────────────────────────────────────────────────────
+
+pub async fn set_chat_plan_mode(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> ApiResult<StatusCode> {
+    let on = b(&body, "on").unwrap_or(false);
+    commands::plans::set_chat_plan_mode(app_state(&st), id, on).await?;
+    Ok(NO_CONTENT)
+}
+
+pub async fn list_plans(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+) -> ApiResult<Response> {
+    let plans = commands::plans::list_plans(app_state(&st), id).await?;
+    Ok(Json(plans).into_response())
+}
+
+pub async fn pending_plan(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+) -> ApiResult<Response> {
+    let plan = commands::plans::pending_plan(app_state(&st), id).await?;
+    Ok(Json(plan).into_response())
+}
+
+pub async fn approve_plan(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> ApiResult<Response> {
+    let steps = body
+        .get("steps")
+        .and_then(|v| v.as_array())
+        .cloned();
+    let edited = b(&body, "edited").unwrap_or(false);
+    let plan = commands::plans::approve_plan(app_state(&st), id, steps, edited).await?;
+    Ok(Json(plan).into_response())
+}
+
+pub async fn reject_plan(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+) -> ApiResult<StatusCode> {
+    commands::plans::reject_plan(app_state(&st), id).await?;
+    Ok(NO_CONTENT)
+}
+
+pub async fn update_plan_steps(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> ApiResult<Response> {
+    let steps = body
+        .get("steps")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let plan = commands::plans::update_plan_steps(app_state(&st), id, steps).await?;
+    Ok(Json(plan).into_response())
 }
 
 pub async fn set_chat_smart(

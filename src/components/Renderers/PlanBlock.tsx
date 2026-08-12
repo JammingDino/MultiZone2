@@ -1,4 +1,5 @@
-import { Check, Circle, CircleDot, Minus } from "lucide-react";
+import { AlertTriangle, Check, Circle, CircleDot, ClipboardList, FileText, Minus } from "lucide-react";
+import type { PlanStep as ArtifactStep } from "@/lib/types";
 
 export interface PlanStep {
   step: string;
@@ -81,5 +82,96 @@ export function toPlanData(parsed: any): { steps: PlanStep[]; done: number; tota
     steps,
     done: typeof parsed.done === "number" ? parsed.done : steps.filter((s) => s.status === "done").length,
     total: typeof parsed.total === "number" ? parsed.total : steps.length,
+  };
+}
+
+/**
+ * A filed plan, as it appears in the transcript (0.12.0, `exit_plan_mode`).
+ *
+ * Read-only on purpose: the editable copy is the card at the composer, which is
+ * the one place a decision is being asked for. Once that decision is made this
+ * block is the record of what was proposed — which is worth keeping visible
+ * even (especially) when the user approved something different.
+ */
+export function PlanProposalBlock({
+  title,
+  goal,
+  steps,
+  awaiting,
+}: {
+  title?: string;
+  goal?: string | null;
+  steps: ArtifactStep[];
+  awaiting?: boolean;
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2 text-xs">
+        <ClipboardList size={12} className="text-[var(--color-accent)]" />
+        <span className="font-medium text-[var(--color-text)]">{title || "Plan"}</span>
+        <span className="text-[var(--color-text-muted)]">
+          {steps.length} step{steps.length === 1 ? "" : "s"}
+        </span>
+        {awaiting && (
+          <span className="ml-auto text-[10px] uppercase tracking-wide text-[var(--color-accent)]">
+            waiting for you
+          </span>
+        )}
+      </div>
+      {goal && <div className="text-xs text-[var(--color-text-muted)]">{goal}</div>}
+      <ol className="flex flex-col gap-1">
+        {steps.map((s, i) => (
+          <li key={s.id ?? i} className="flex items-start gap-2 text-xs">
+            <span className="mt-0.5 w-4 shrink-0 text-right text-[11px] text-[var(--color-text-muted)]">
+              {i + 1}
+            </span>
+            <div className="min-w-0 flex-1">
+              <span className="text-[var(--color-text)]">{s.step}</span>
+              {s.intent && (
+                <span className="text-[var(--color-text-muted)]"> — {s.intent}</span>
+              )}
+              {(s.files?.length ?? 0) > 0 && (
+                <span className="ml-1 inline-flex flex-wrap gap-1 align-middle">
+                  {s.files.map((f) => (
+                    <span
+                      key={f}
+                      className="inline-flex items-center gap-1 rounded bg-[var(--color-panel-hover)] px-1 py-0.5 text-[10px] text-[var(--color-text-muted)]"
+                    >
+                      <FileText size={8} /> {f}
+                    </span>
+                  ))}
+                </span>
+              )}
+            </div>
+            {s.risk && s.risk !== "low" && (
+              <span
+                className={`flex shrink-0 items-center gap-1 rounded px-1 py-0.5 text-[10px] ${
+                  s.risk === "high"
+                    ? "bg-[var(--color-danger)]/15 text-[var(--color-danger)]"
+                    : "bg-amber-400/15 text-amber-400"
+                }`}
+              >
+                <AlertTriangle size={8} /> {s.risk}
+              </span>
+            )}
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+/** Parse an `exit_plan_mode` tool result, or null if it isn't one. */
+export function toPlanProposal(
+  parsed: any,
+): { title?: string; goal?: string | null; steps: ArtifactStep[]; awaiting: boolean } | null {
+  if (!parsed || !Array.isArray(parsed.steps) || parsed.rendered !== "plan_proposal") return null;
+  const steps = parsed.steps.filter((s: any) => s && typeof s.step === "string");
+  if (steps.length === 0) return null;
+  return {
+    title: typeof parsed.title === "string" ? parsed.title : undefined,
+    goal: typeof parsed.goal === "string" ? parsed.goal : null,
+    steps,
+    awaiting: parsed.status === "waiting_for_user",
   };
 }

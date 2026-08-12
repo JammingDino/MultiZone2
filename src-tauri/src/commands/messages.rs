@@ -1445,6 +1445,9 @@ async fn run_participant_turn(
     if suppress_ask_user {
         strip_ask_user(&mut tools);
     }
+    // Plan mode (0.12.0). Re-evaluated after every tool batch below, because the
+    // model can move the chat in or out of it mid-turn.
+    let mut planning = apply_plan_mode(&ctx.db, chat_id, &mut tools).await;
     // Per-zone MCP tool danger levels, refreshed on zone switch, consulted by the
     // approval gate alongside built-in `tool_safety_by_name`.
     let mut mcp_danger = {
@@ -1803,6 +1806,14 @@ async fn run_participant_turn(
             .iter()
             .any(|tc| tc.function.name == "ask_user");
 
+        // A filed plan ends the turn the same way a question does: the plan is
+        // now the user's to edit and approve, and anything the model said after
+        // it would be arguing with a decision that hasn't been made yet.
+        let filed_plan = agg
+            .tool_calls
+            .iter()
+            .any(|tc| tc.function.name == "exit_plan_mode");
+
         // Execute tools, persist results, push into history
         let auto_approve_level = get_auto_approve_level(&ctx.db).await;
         let approval_key = approval_key(chat_id, persp);
@@ -1810,6 +1821,54 @@ async fn run_participant_turn(
             if cancel.load(Ordering::Relaxed) {
                 sink.emit_for(chat_id, persp, StreamPayload::Cancelled);
                 return Ok(());
+            }
+
+            // Plan mode's second lock (0.12.0). The tool was withheld from the
+            // request, but a model can still name one — from its own priors, a
+            // skill, or an earlier turn's transcript — and providers pass that
+            // through unchanged. Refusing here means the promise "nothing
+            // changes while planning" holds even then, and the model reads why
+            // rather than an unexplained failure.
+            if planning && !crate::plans::allowed_in_plan_mode(&tc.function.name) {
+                let refusal = crate::plans::refusal(&tc.function.name);
+                sink.emit_for(
+                    chat_id,
+                    persp,
+                    StreamPayload::ToolCallResult {
+                        index: 0,
+                        name: tc.function.name.clone(),
+                        result: refusal.clone(),
+                    },
+                );
+                let (parts, api_content) = parse_tool_result_content(&refusal);
+                let msg_id = new_id();
+                sqlx::query(
+                    "INSERT INTO messages (id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, created_at)
+                     VALUES (?1, ?2, 'tool', ?3, NULL, ?4, NULL, ?5, ?6)",
+                )
+                .bind(&msg_id)
+                .bind(chat_id)
+                .bind(serde_json::to_string(&parts)?)
+                .bind(&tc.id)
+                .bind(persp)
+                .bind(now_ts())
+                .execute(&ctx.db)
+                .await?;
+                let saved = sqlx::query_as::<_, Message>(&format!(
+                    "SELECT {MSG_COLS} FROM messages WHERE id = ?1"
+                ))
+                .bind(&msg_id)
+                .fetch_one(&ctx.db)
+                .await?;
+                sink.emit_for(chat_id, persp, StreamPayload::ToolMessageSaved { message: &saved });
+                api_messages.push(ChatMessage {
+                    role: "tool".into(),
+                    content: Some(api_content),
+                    tool_calls: None,
+                    tool_call_id: Some(tc.id.clone()),
+                    name: Some(tc.function.name.clone()),
+                });
+                continue;
             }
 
             // Check whether this tool needs explicit user approval. MCP tools
@@ -1995,8 +2054,24 @@ async fn run_participant_turn(
             });
         }
 
-        if asked_user {
+        if asked_user || filed_plan {
             break;
+        }
+
+        // `enter_plan_mode` (or a plan approved out from under this turn) may
+        // have moved the chat since the toolset was built. Rebuilding here is
+        // what makes the mode take effect from the *next* step rather than only
+        // on the next turn.
+        let planning_now = crate::plans::in_plan_mode(&ctx.db, chat_id).await;
+        if planning_now != planning {
+            tools = build_tools_for_zone(&ctx.db, &zone, &tool_ctx).await;
+            if knowledge_available {
+                tools.push(crate::tools::knowledge::definition());
+            }
+            if suppress_ask_user {
+                strip_ask_user(&mut tools);
+            }
+            planning = apply_plan_mode(&ctx.db, chat_id, &mut tools).await;
         }
 
         // A tool may have switched the chat's primary zone (`change_zone`). If so,
@@ -2031,6 +2106,7 @@ async fn run_participant_turn(
                         if suppress_ask_user {
                             strip_ask_user(&mut tools);
                         }
+                        planning = apply_plan_mode(&ctx.db, chat_id, &mut tools).await;
                         mcp_danger = {
                             let ids: Vec<String> =
                                 serde_json::from_str(&zone.tools_enabled).unwrap_or_default();
@@ -2169,6 +2245,10 @@ pub enum SnippetKind {
     Identity,
     Memory,
     CompactHint,
+    /// Plan mode is on: what planning means and how to end it (0.12.0).
+    PlanMode,
+    /// The plan the user approved, as this turn's task list (0.12.0).
+    TaskList,
 }
 
 impl SnippetKind {
@@ -2185,6 +2265,8 @@ impl SnippetKind {
             Self::Memory => "Memories",
             Self::Identity => "Multi-zone identity",
             Self::CompactHint => "Compaction hint",
+            Self::PlanMode => "Plan mode",
+            Self::TaskList => "Approved plan",
         }
     }
 }
@@ -2260,6 +2342,15 @@ pub async fn build_system_snippets(
                 zone_tool_ids.iter().any(|t| t == "plan"),
             ),
         ));
+    }
+
+    // Plan mode and its aftermath (0.12.0), directly after the loop preamble
+    // because both change what the rest of the turn is *for*. They are mutually
+    // exclusive by construction: approving a plan is what clears the mode.
+    if chat.map_or(false, |c| c.plan_mode) {
+        snippets.push((SnippetKind::PlanMode, crate::plans::plan_mode_preamble()));
+    } else if let Some(plan) = crate::plans::active_plan(db, chat_id, None).await {
+        snippets.push((SnippetKind::TaskList, crate::plans::task_list_block(&plan)));
     }
 
     // Skills catalog (Anthropic Agent Skills model): when this zone has the
@@ -2995,6 +3086,39 @@ fn user_message_content(m: &Message, downgrade_images: bool) -> Option<MessageCo
 /// turns so only the leader can pause the session to ask the user.
 fn strip_ask_user(tools: &mut Vec<Tool>) {
     tools.retain(|t| t.function.name != "ask_user");
+}
+
+/// Apply plan mode to a built toolset (0.12.0).
+///
+/// In plan mode the mutating tools are *removed from the request*, not merely
+/// discouraged — a model cannot misuse a tool it was never offered — and
+/// `exit_plan_mode` is added as the way out. Out of plan mode, a zone that has
+/// something worth withholding is offered `enter_plan_mode`, so the model can
+/// take itself into planning when a request turns out to be bigger than it
+/// sounded. A read-only zone gets neither: there is nothing to withhold, so
+/// planning mode would change nothing about what it can do.
+///
+/// Returns whether the chat is in plan mode, since the caller gates the
+/// executor's refusal on the same answer.
+async fn apply_plan_mode(db: &SqlitePool, chat_id: &str, tools: &mut Vec<Tool>) -> bool {
+    let planning = crate::plans::in_plan_mode(db, chat_id).await;
+    let has_mutating = tools
+        .iter()
+        .any(|t| !crate::plans::allowed_in_plan_mode(&t.function.name));
+
+    if planning {
+        tools.retain(|t| crate::plans::allowed_in_plan_mode(&t.function.name));
+        tools.push(crate::tools::plan_mode::exit_definition());
+        // Planning without the checklist tool leaves the model no way to report
+        // progress once the plan is approved, and the plan it just wrote is the
+        // obvious thing to keep. Cheap enough to always include.
+        if !tools.iter().any(|t| t.function.name == "update_plan") {
+            tools.push(crate::tools::plan::definition());
+        }
+    } else if has_mutating {
+        tools.push(crate::tools::plan_mode::enter_definition());
+    }
+    planning
 }
 
 async fn build_tools_for_zone(db: &SqlitePool, zone: &Zone, ctx: &ToolContext) -> Vec<Tool> {

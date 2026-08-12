@@ -18,6 +18,7 @@ import { ZoneLibrary } from "@/components/Zones/ZoneLibrary";
 import { ProjectsPanel } from "@/components/Projects/ProjectsPanel";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import { AskUserCard } from "@/components/Message/StepBlock";
+import { PlanReview } from "@/components/Chat/PlanReview";
 import { resolveBaseModel } from "@/lib/baseZone";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 import type { FileDiff, StreamEnvelope } from "@/lib/types";
@@ -167,6 +168,46 @@ export function ChatPanel() {
     }
     return null;
   }, [activeChatId, messagesByChat]);
+
+  // The plan waiting on the user in this chat (0.12.0). Read from the store
+  // rather than scanned out of the transcript like `ask_user` above: a plan
+  // outlives the turn that filed it — close the chat, come back tomorrow, it is
+  // still the thing standing between you and the work happening.
+  const pendingPlan = useApp((s) => (activeChatId ? s.pendingPlanByChat[activeChatId] : null));
+  const loadPendingPlan = useApp((s) => s.loadPendingPlan);
+  const approvePlan = useApp((s) => s.approvePlan);
+  const rejectPlan = useApp((s) => s.rejectPlan);
+  const [planBusy, setPlanBusy] = useState(false);
+
+  useEffect(() => {
+    if (activeChatId) void loadPendingPlan(activeChatId);
+  }, [activeChatId, loadPendingPlan]);
+
+  // A turn that files a plan ends on that tool result, so the arrival of one in
+  // the transcript is the signal to go and fetch the row it wrote.
+  const planFiledMarker = useMemo(() => {
+    if (!activeChatId) return null;
+    const msgs = (messagesByChat[activeChatId] ?? []).filter((m) => !m.zoneId);
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i];
+      if (m.role === "user") return null;
+      if (m.role !== "tool") continue;
+      try {
+        const parts = JSON.parse(m.content) as Array<{ type: string; text?: string }>;
+        const text = parts.find((p) => p.type === "text")?.text;
+        if (!text) continue;
+        const parsed = JSON.parse(text);
+        if (parsed?.rendered === "plan_proposal" && parsed?.planId) return String(parsed.planId);
+      } catch {}
+    }
+    return null;
+  }, [activeChatId, messagesByChat]);
+
+  useEffect(() => {
+    if (activeChatId && planFiledMarker && pendingPlan?.id !== planFiledMarker) {
+      void loadPendingPlan(activeChatId);
+    }
+  }, [activeChatId, planFiledMarker, pendingPlan?.id, loadPendingPlan]);
 
   const inputRef = useRef<InputBarHandle>(null);
   const dragDepth = useRef(0);
@@ -432,6 +473,38 @@ export function ChatPanel() {
                     onDeny={() => respondApproval(activeChatId!, pa.zoneId, false)}
                   />
                 ))}
+              </div>
+            </div>
+          ) : pendingPlan ? (
+            <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3">
+              <div className="mx-auto max-w-3xl">
+                {subchatNotice}
+                <PlanReview
+                  plan={pendingPlan}
+                  busy={planBusy}
+                  onApprove={async (steps, edited) => {
+                    setPlanBusy(true);
+                    try {
+                      await approvePlan(activeChat.id, pendingPlan.id, steps, edited);
+                      // Approval is a decision, not a message: the turn that
+                      // executes it starts here rather than waiting for the
+                      // user to also type "go".
+                      await api.sendMessage(activeChat.id, [
+                        { type: "text", text: "Approved — carry out the plan." },
+                      ]);
+                    } finally {
+                      setPlanBusy(false);
+                    }
+                  }}
+                  onReject={async () => {
+                    setPlanBusy(true);
+                    try {
+                      await rejectPlan(activeChat.id, pendingPlan.id);
+                    } finally {
+                      setPlanBusy(false);
+                    }
+                  }}
+                />
               </div>
             </div>
           ) : pendingAskUser ? (

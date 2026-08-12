@@ -69,8 +69,63 @@ export interface Chat {
    */
   contextSummary: string | null;
   contextSummaryThrough: number | null;
+  /**
+   * Plan mode (0.12.0). While on, every mutating tool is withheld from this
+   * chat's requests — the model reads, asks, and proposes a plan the user edits
+   * and approves. Either the user or the model can turn it on; only an approved
+   * plan (or the user) turns it off.
+   */
+  planMode: boolean;
   createdAt: number;
   updatedAt: number;
+}
+
+/** One step of a plan (0.12.0). */
+export interface PlanStep {
+  /** Stable across edits and reorders, so live status can find its step. */
+  id: string;
+  /** What is being done, in a few words. */
+  step: string;
+  /** Why — the sentence that makes the step reviewable rather than a label. */
+  intent?: string | null;
+  /** The files this step expects to touch, as the model named them. */
+  files: string[];
+  risk: "low" | "medium" | "high";
+  status: "pending" | "in_progress" | "done" | "skipped" | "failed";
+  note?: string | null;
+  /** Why a failed step failed — kept so the failure is readable afterwards. */
+  error?: string | null;
+}
+
+/**
+ * A plan the model proposed and the user approves, edits or turns down
+ * (0.12.0). `steps` is the raw JSON blob as stored; use `parsePlanSteps`.
+ */
+export interface Plan {
+  id: string;
+  chatId: string;
+  /** The participant that authored it — a sub-agent, or null for the primary. */
+  zoneId: string | null;
+  parentPlanId: string | null;
+  title: string;
+  goal: string | null;
+  /** JSON-encoded array of PlanStep. */
+  steps: string;
+  status: "draft" | "approved" | "executing" | "done" | "rejected" | "superseded";
+  /** True when the user changed the steps before approving. */
+  editedByUser: boolean;
+  createdAt: number;
+  updatedAt: number;
+  approvedAt: number | null;
+}
+
+export function parsePlanSteps(plan: Pick<Plan, "steps">): PlanStep[] {
+  try {
+    const parsed = JSON.parse(plan.steps);
+    return Array.isArray(parsed) ? (parsed as PlanStep[]) : [];
+  } catch {
+    return [];
+  }
 }
 
 export interface Project {

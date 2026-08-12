@@ -19,7 +19,7 @@ import { MathPlotBlock, toMathPlotData } from "@/components/Renderers/MathPlotBl
 import { MermaidBlock, type MermaidAutoFix } from "@/components/Renderers/MermaidBlock";
 import { HtmlReportBlock } from "@/components/Renderers/HtmlReportBlock";
 import { SavedFileChip } from "@/components/Renderers/SavedFileChip";
-import { PlanBlock, toPlanData } from "@/components/Renderers/PlanBlock";
+import { PlanBlock, PlanProposalBlock, toPlanData, toPlanProposal } from "@/components/Renderers/PlanBlock";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { useDictation, MicButton, DictationMeter } from "@/components/Chat/useDictation";
@@ -367,6 +367,10 @@ function renderToolOutput(
   if (name === "update_plan") {
     const data = toPlanData(parsed);
     return data ? <PlanBlock {...data} /> : null;
+  }
+  if (name === "exit_plan_mode") {
+    const proposal = toPlanProposal(parsed);
+    return proposal ? <PlanProposalBlock {...proposal} /> : null;
   }
   if (name === "present_file") {
     if (typeof parsed.path !== "string") return null;

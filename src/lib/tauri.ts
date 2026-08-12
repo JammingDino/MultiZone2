@@ -28,6 +28,8 @@ import type {
   McpServer,
   McpServerView,
   Memory,
+  Plan,
+  PlanStep,
   Message,
   PendingMode,
   Project,
@@ -68,6 +70,20 @@ export const setChatZone = (id: string, zoneId: string | null) =>
   invoke<void>("set_chat_zone", { id, zoneId });
 export const setChatSmart = (id: string, smart: boolean) =>
   invoke<void>("set_chat_smart", { id, smart });
+// Plan mode & plans (0.12.0)
+export const setChatPlanMode = (chatId: string, on: boolean) =>
+  invoke<void>("set_chat_plan_mode", { chatId, on });
+export const listPlans = (chatId: string) =>
+  invoke<Plan[]>("list_plans", { chatId });
+export const pendingPlan = (chatId: string) =>
+  invoke<Plan | null>("pending_plan", { chatId });
+export const approvePlan = (planId: string, steps: PlanStep[] | null, edited: boolean) =>
+  invoke<Plan>("approve_plan", { planId, steps, edited });
+export const rejectPlan = (planId: string) =>
+  invoke<void>("reject_plan", { planId });
+export const updatePlanSteps = (planId: string, steps: PlanStep[]) =>
+  invoke<Plan>("update_plan_steps", { planId, steps });
+
 export const setChatProject = (chatId: string, projectId: string | null) =>
   invoke<void>("set_chat_project", { chatId, projectId });
 export const setChatProjectContext = (chatId: string, enabled: boolean) =>

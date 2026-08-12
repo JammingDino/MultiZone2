@@ -18,6 +18,7 @@ pub mod connectors;
 pub mod knowledge;
 pub mod mirror;
 pub mod pending;
+pub mod plans;
 pub mod voice;
 pub mod tool_usage;
 pub mod usage;

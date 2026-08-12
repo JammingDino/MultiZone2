@@ -1,5 +1,5 @@
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
-import { Paperclip, Send, X, Loader2, Square, SlidersHorizontal, Zap, Brain, ScanText, AudioLines, Clock, CornerDownRight } from "lucide-react";
+import { Paperclip, Send, X, Loader2, Square, SlidersHorizontal, Zap, Brain, ScanText, AudioLines, Clock, CornerDownRight, ClipboardList } from "lucide-react";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { useTts } from "@/store/tts";
@@ -58,6 +58,8 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
   const providers = useApp((s) => s.providers);
   const baseZoneId = useApp((s) => s.appSettings.baseZoneId);
   const visionOverrides = useApp((s) => s.appSettings.visionOverrides);
+  const setChatPlanMode = useApp((s) => s.setChatPlanMode);
+  const planMode = !!chats.find((c) => c.id === chatId)?.planMode;
   const fileRef = useRef<HTMLInputElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   // Focus-the-composer shortcut (Ctrl/Cmd+K): the store bumps a nonce and the
@@ -399,6 +401,34 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
             />
           </div>
         )}
+        {/* Plan mode (0.12.0). A per-chat mode, so its control belongs on the
+            composer rather than in a menu: while it is on, everything you send
+            is planning, and that is worth saying continuously rather than once.
+            The same switch the model reaches through `enter_plan_mode`. */}
+        <div className="mb-2 flex items-center gap-2">
+          <button
+            onClick={() => void setChatPlanMode(chatId, !planMode)}
+            disabled={disabled}
+            title={
+              planMode
+                ? "Plan mode is on — mutating tools are withheld until you approve a plan. Click to leave."
+                : "Plan first: the model reads and proposes a plan you approve before anything changes."
+            }
+            className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition disabled:opacity-40 ${
+              planMode
+                ? "border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]"
+                : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
+            }`}
+          >
+            <ClipboardList size={11} />
+            {planMode ? "Plan mode" : "Plan first"}
+          </button>
+          {planMode && (
+            <span className="text-[11px] text-[var(--color-text-muted)]">
+              Read-only until you approve a plan.
+            </span>
+          )}
+        </div>
         <DictationMeter dictation={dictation} />
         {dictation.voiceError && (
           <div className="mb-2 flex w-fit items-center gap-1.5 rounded-full border border-red-500/40 bg-red-500/10 px-2.5 py-1 text-xs text-red-600 dark:text-red-400">

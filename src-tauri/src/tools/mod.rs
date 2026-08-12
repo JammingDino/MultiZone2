@@ -17,6 +17,7 @@ pub mod knowledge;
 pub mod subchat;
 pub mod teamwork;
 pub mod plan;
+pub mod plan_mode;
 pub mod http;
 pub mod citations;
 pub mod compact;
@@ -387,6 +388,9 @@ pub fn tool_safety_by_name(name: &str) -> u8 {
         // Watching a terminal someone already approved starting is a read.
         | "terminal_read" | "terminal_list"
         | "present_file" | "update_plan"
+        // Entering plan mode only takes capabilities away; filing a plan asks
+        // the user for something, which is its own gate.
+        | "enter_plan_mode" | "exit_plan_mode"
         // A created skill is disabled until the user enables it, so writing one
         // changes nothing an agent can act on — safe. Revising an existing skill
         // does, so `update_skill` is moderate below.
@@ -595,7 +599,9 @@ async fn dispatch_inner(
         "create_folder" => filesystem::create_folder(args, zone_config, project_dir).await,
         "find_files" => filesystem::find_files(args, zone_config, project_dir).await,
         "search_file_text" => filesystem::search_file_text(args, zone_config, project_dir).await,
-        "update_plan" => plan::run(args).await,
+        "update_plan" => plan::run(args, db, chat_id, caller_zone_id).await,
+        "enter_plan_mode" => plan_mode::enter(args, db, chat_id).await,
+        "exit_plan_mode" => plan_mode::exit(args, db, chat_id, caller_zone_id).await,
         "http_request" => http::run(args, http).await,
         "compact_context" => compact::run(args, db, chat_id).await,
         "spawn_subagent" => subchat::spawn(args, ctx, sink, caller_zone_id, chat_id).await,

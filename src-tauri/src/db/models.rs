@@ -82,6 +82,10 @@ pub struct Chat {
     /// they stay in the DB and on screen.
     pub context_summary: Option<String>,
     pub context_summary_through: Option<i64>,
+    /// Plan mode (0.12.0): while true, every mutating tool is withheld from
+    /// this chat's requests and the model's job is to propose a plan the user
+    /// approves. Cleared when a plan is approved, or by the user.
+    pub plan_mode: bool,
     pub created_at: i64,
     pub updated_at: i64,
 }

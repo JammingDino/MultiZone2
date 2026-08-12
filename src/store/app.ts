@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { DEFAULT_APP_SETTINGS, type AppSettings, type Chat, type Checkpoint, type RestoreReport, type ChatTagEntry, type ChatTagLink, type ChatZone, type McpServerView, type Memory, type Message, type PendingMessage, type PendingMode, type Project, type Provider, type Skill, type SkillPack, type Tag, type Zone } from "@/lib/types";
+import { DEFAULT_APP_SETTINGS, type AppSettings, type Chat, type Checkpoint, type RestoreReport, type ChatTagEntry, type ChatTagLink, type ChatZone, type McpServerView, type Memory, type Message, type PendingMessage, type PendingMode, type Plan, type PlanStep, type Project, type Provider, type Skill, type SkillPack, type Tag, type Zone } from "@/lib/types";
 import * as api from "@/lib/tauri";
 import type { SettingsBundle } from "@/lib/settingsBundle";
 
@@ -381,6 +381,17 @@ interface AppStore {
   setChatTitle: (chatId: string, title: string) => void;
   setChatZone: (chatId: string, zoneId: string | null) => Promise<void>;
   setChatSmart: (chatId: string, smart: boolean) => Promise<void>;
+  /** Plan mode (0.12.0) — the user's hand on the same switch the model has. */
+  setChatPlanMode: (chatId: string, on: boolean) => Promise<void>;
+  /**
+   * The plan waiting on the user, per chat. Loaded when a chat opens and
+   * refreshed when a turn files one, so a plan proposed yesterday is still
+   * there to approve today rather than living only in the live stream.
+   */
+  pendingPlanByChat: Record<string, Plan | null>;
+  loadPendingPlan: (chatId: string) => Promise<void>;
+  approvePlan: (chatId: string, planId: string, steps: PlanStep[] | null, edited: boolean) => Promise<void>;
+  rejectPlan: (chatId: string, planId: string) => Promise<void>;
   /** Re-title a chat. `wholeConversation` (a user-forced regenerate) titles the
    *  chat as it now stands rather than from its opening message alone. */
   regenerateTitle: (chatId: string, wholeConversation?: boolean) => Promise<void>;
@@ -1289,6 +1300,38 @@ export const useApp = create<AppStore>((set, get) => ({
       chats: s.chats.map((c) =>
         c.id === chatId ? { ...c, zoneId, smartRouting: false } : c,
       ),
+    }));
+  },
+  pendingPlanByChat: {},
+  async setChatPlanMode(chatId, on) {
+    await api.setChatPlanMode(chatId, on);
+    set((s) => ({
+      chats: s.chats.map((c) => (c.id === chatId ? { ...c, planMode: on } : c)),
+    }));
+  },
+  async loadPendingPlan(chatId) {
+    try {
+      const plan = await api.pendingPlan(chatId);
+      set((s) => ({ pendingPlanByChat: { ...s.pendingPlanByChat, [chatId]: plan } }));
+    } catch (e) {
+      console.warn("failed to load the pending plan", e);
+    }
+  },
+  async approvePlan(chatId, planId, steps, edited) {
+    await api.approvePlan(planId, steps, edited);
+    // Approving is what clears plan mode (the backend does it in the same
+    // transaction); mirror it here so the composer stops saying "planning"
+    // before the chat list next refreshes.
+    set((s) => ({
+      pendingPlanByChat: { ...s.pendingPlanByChat, [chatId]: null },
+      chats: s.chats.map((c) => (c.id === chatId ? { ...c, planMode: false } : c)),
+    }));
+  },
+  async rejectPlan(chatId, planId) {
+    await api.rejectPlan(planId);
+    set((s) => ({
+      pendingPlanByChat: { ...s.pendingPlanByChat, [chatId]: null },
+      chats: s.chats.map((c) => (c.id === chatId ? { ...c, planMode: true } : c)),
     }));
   },
   async setChatSmart(chatId, smart) {

@@ -735,11 +735,18 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ### 0.12.0 — Plan mode
 
-- [ ] A per-chat mode where mutating tools are withheld and the model's job is to produce a plan — read-only tools stay available so the plan is grounded in the actual files
-- [ ] The plan lands as a structured artifact, not prose: ordered steps, each with intent, the files it expects to touch, and its risk level
-- [ ] The user edits the plan — reorder, delete, rewrite, annotate a step — before approving it
-- [ ] Approving a plan hands it to the executing zone as the turn's task list; the model cannot silently substitute a different plan
-- [ ] Plan mode is a first-class chat mode alongside Quick / Smart / Zone / Multizone, not a tool a zone may or may not have enabled
+*Status: built & tested (`cargo test --lib` 176 passing, `npm run build` green); not yet runtime-tested against a live model. The mode and the artifact are [plans.rs](../src-tauri/src/plans.rs), the two mode tools are [tools/plan_mode.rs](../src-tauri/src/tools/plan_mode.rs), the editable card is [PlanReview.tsx](../src/components/Chat/PlanReview.tsx), and the table is migration [033](../src-tauri/migrations/033_plan_mode.sql).*
+
+*Surveyed first, and each of the four took one idea: Claude Code's phase-structured planning prompt and its rule that `ExitPlanMode` **is** the request for approval (so the model should not also ask in prose); PI's symmetric `EnterPlanMode()` / `ExitPlanMode()`, which is where the model getting to take *itself* into planning comes from; Codex's plan-as-ordered-steps with live progress; and — from [Armin Ronacher's reading of Claude Code's plan mode](https://lucumr.pocoo.org/2025/12/17/what-is-plan-mode/) — the two criticisms worth designing against: that the tools are not actually restricted (it is prompt reinforcement over an unchanged toolset), and that the plan lands in a file the user cannot see or edit. Both are inverted here: the toolset is genuinely filtered, and the plan is a row the user rewrites.*
+
+- [x] A per-chat mode where mutating tools are withheld and the model's job is to produce a plan — read-only tools stay available so the plan is grounded in the actual files. Enforced twice: the mutating definitions are dropped from the request (`apply_plan_mode`), and the executor refuses a withheld name if the model produces one anyway, with a result that says why and what to do instead. An allowlist rather than a deny-list, so a tool added later is unavailable while planning until someone thinks about it — the test asserts that from the deny side
+- [x] The plan lands as a structured artifact, not prose: ordered steps, each with intent, the files it expects to touch, and its risk level. Sanitised on the way in from either end (a bare string is a step; an unknown risk falls back rather than failing the call), because the same normalisation should apply whether the model or the editor produced it
+- [x] The user edits the plan — reorder, delete, rewrite, add a step — before approving it, and what they approve is what is written back to the row
+- [x] Approving a plan hands it to the executing zone as the turn's task list, injected from the table on every request of the turn rather than from anything the model remembers. `update_plan` is redirected into the approved plan while one is in force: statuses are the model's to change, step text is not, and a call with a different number of steps is refused with the approved list attached
+- [x] **The model can take itself in and out of the mode.** `enter_plan_mode` withholds its own mutating tools from the next step onward when a request turns out bigger than it sounded; `exit_plan_mode` files the plan and ends the turn, the way `ask_user` does. The asymmetry is the point — giving up your own permissions needs nobody's consent, handing them back to yourself needs the user's
+- [x] Plan mode is a first-class chat mode, not a tool a zone may or may not have enabled: a toggle on the composer, a "Plan first" entry in the new-chat mode menu, and a `plan_mode` column on the chat. It composes with Quick / Smart / Zone / Multizone rather than replacing them — a plan is still planned *by* somebody
+- [x] Six routes on the local API (`POST /api/chats/:id/plan-mode`, the two plan reads, approve / reject / steps), so a script or a model driving the app through `app_control` can see and answer a plan too
+- [ ] Runtime-test the whole path: ask for something large, watch the mutating tools disappear, edit the plan, approve it, and confirm the executing turn is held to the edited steps
 
 ### 0.12.1 — Live task state
 

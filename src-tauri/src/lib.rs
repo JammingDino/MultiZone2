@@ -7,6 +7,7 @@ mod knowledge;
 mod llm;
 mod mcp;
 mod ocr;
+mod plans;
 mod review;
 mod pdf_bridge;
 mod skillpacks;
@@ -190,6 +191,12 @@ pub fn run() {
             commands::chats::rename_chat,
             commands::chats::set_chat_zone,
             commands::chats::set_chat_smart,
+            commands::plans::set_chat_plan_mode,
+            commands::plans::list_plans,
+            commands::plans::pending_plan,
+            commands::plans::approve_plan,
+            commands::plans::reject_plan,
+            commands::plans::update_plan_steps,
             commands::chats::set_chat_project,
             commands::chats::set_chat_project_context,
             commands::chats::get_chat_tags,

@@ -25,6 +25,8 @@ const VISUAL_TOOLS = new Set([
  */
 const TOOL_LABELS: Record<string, string> = {
   ask_user: "Asking a question",
+  enter_plan_mode: "Switching to plan mode",
+  exit_plan_mode: "Proposing a plan",
   change_zone: "Switching zone",
   compact_context: "Compacting context",
   copy_file: "Copying file",

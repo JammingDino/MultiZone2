@@ -763,10 +763,19 @@ html.shadows [class*="shadow-xl"] {
 }
 /* The conversation arriving: the thread rises into place, the header drops from
    under the title bar, and the composer follows a beat later so the eye lands on
-   it last — it is where the user is about to type. */
-.mz-view-in    { animation: mz-view-in 240ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }
-.mz-drop-in    { animation: mz-drop-in 220ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }
-.mz-fade-in    { animation: mz-fade-in 200ms ease-out both; }
+   it last — it is where the user is about to type.
+
+   `backwards`, never `forwards`/`both`. A *filling* animation on opacity or
+   transform keeps applying after it ends, and an element with an animation on
+   either is a stacking context for as long as that lasts — which in 0.12.3 trapped
+   every header dropdown inside the un-positioned header, where the `position:
+   relative` message thread painted over the top of it. Menus appeared under the
+   transcript and could not be clicked. The final keyframe is the element's natural
+   state (opaque, untransformed), so filling forwards bought nothing: ending the
+   animation cleanly leaves the same pixels and no stacking context. */
+.mz-view-in    { animation: mz-view-in 240ms cubic-bezier(0.22, 0.61, 0.36, 1) backwards; }
+.mz-drop-in    { animation: mz-drop-in 220ms cubic-bezier(0.22, 0.61, 0.36, 1) backwards; }
+.mz-fade-in    { animation: mz-fade-in 200ms ease-out backwards; }
 .mz-delay-60   { animation-delay: 60ms; }
 .mz-delay-120  { animation-delay: 120ms; }
 

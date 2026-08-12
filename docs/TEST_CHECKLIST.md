@@ -160,6 +160,7 @@ Needs two builds: install version N, then publish N+1.
 - [ ] A very long tool output is clamped with a note rather than freezing the pane
 - [ ] Replay on a subchat (whose messages were never opened) is complete — the transcript is fetched, not read from the store
 - [ ] Kind filter chips cover the new kinds and filtering still steps/plays correctly
+- [ ] 🔁 **Every dropdown opens over the transcript and is clickable** — Export, Perspectives, the zone picker, the project/tag strip's own two menus, and the composer's message-options popover. (0.12.3's entrance animations filled `forwards`, which kept a stacking context alive on the un-positioned header and put all of them *under* the message thread, unclickable. Fill mode is `backwards` for this reason — do not "tidy" it to `both`)
 - [ ] Header row: gauge, project chip, replay, Export, Perspectives and the zone control all read at the same glyph size
 - [ ] The spend chip is a legible dollar sign; hovering explains the figure is billed *tokens*, not currency 🔁
 - [ ] The zone control shows the zone name only; the model id is on its tooltip and on every menu row
@@ -169,6 +170,9 @@ Needs two builds: install version N, then publish N+1.
 - [ ] 🖥️ **Launch in light mode shows no dark flash**, and no panel changes colour after the window appears
 - [ ] 🔁 **Interface font size is correct on the first frame** — set it to 22px, restart, and confirm without opening Settings → Appearance (this used to appear to need that visit)
 - [ ] A custom font is the first text drawn, not Inter replaced by it a beat later
+- [ ] 🔁 **Opening Settings → Appearance changes nothing on screen.** Compare the section headers before and after: the app used to run on Segoe UI until that tab's preset previews happened to pull Inter down, and every glyph in the app then changed
+- [ ] The landing greeting varies between visits and suits the hour — check the small hours, the morning and late evening
+- [ ] 🖥️ **Touch/stylus: the window drags by its title bar**, follows the contact without lag, and a maximized window restores and then follows. Double-tap still maximizes/restores, a tap does not leave the bar stuck, and mouse dragging is unchanged
 - [ ] The boot splash draws the accent-coloured mark and is gone inside a second; a click, tap or keypress skips it immediately
 - [ ] The splash does not reappear when the window is reloaded mid-session, and never appears twice
 - [ ] ⚙️ Clearing the webview's localStorage (or a fresh install) launches on the defaults with no stale palette or size

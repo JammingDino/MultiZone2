@@ -19,6 +19,33 @@ import { resolveVisionCapable } from "@/lib/vision";
 import { resolveBaseModel, resolveBaseZone } from "@/lib/baseZone";
 import { claimSettingsDrop } from "@/lib/importSettings";
 
+/**
+ * What the landing view says hello with, by hour.
+ *
+ * Four fixed greetings meant the same four strings for the life of the install,
+ * which is a lot of mornings to be told "Good morning" by software. Each bucket
+ * keeps its plain form and adds a few that notice *when* you are here — the small
+ * hours read differently from mid-afternoon, and an app that says so is better
+ * company than one that doesn't. Deliberately short and low-key: this is a label
+ * above a text box, not a personality.
+ */
+const GREETINGS: [until: number, phrases: string[]][] = [
+  [5, ["Late night tinkering again", "Still up?", "The small hours", "Working late", "Nobody else is awake"]],
+  [8, ["Early start", "Up before the rest", "Morning, early one", "First light"]],
+  [12, ["Good morning", "Morning", "Fresh start", "Morning — what's first?"]],
+  [17, ["Good afternoon", "Afternoon", "Back at it", "Halfway through"]],
+  [21, ["Good evening", "Evening", "Winding down?", "Evening shift"]],
+  [24, ["Still going", "Late one tonight", "Night owl hours", "Good evening"]],
+];
+
+/** A greeting for the hour `now` falls in. Exported shape kept trivial so the
+ *  buckets can be edited without touching the component. */
+function pickGreeting(now: Date): string {
+  const h = now.getHours();
+  const phrases = GREETINGS.find(([until]) => h < until)?.[1] ?? GREETINGS[2][1];
+  return phrases[Math.floor(Math.random() * phrases.length)];
+}
+
 type Mode =
   | { type: "quick" }
   | { type: "smart" }
@@ -183,13 +210,9 @@ export function HomeScreen() {
     effectiveModel != null && !resolveVisionCapable(effectiveModel, visionOverrides);
   const hasVisualAttachment = pending.some((a) => a.fileType === "image" || a.fileType === "pdf");
 
-  const greeting = useMemo(() => {
-    const h = new Date().getHours();
-    if (h < 5) return "Working late?";
-    if (h < 12) return "Good morning";
-    if (h < 18) return "Good afternoon";
-    return "Good evening";
-  }, []);
+  // One of the phrases for this hour, chosen per mount — so it changes when you
+  // come back to the landing view, not while you sit reading it.
+  const greeting = useMemo(() => pickGreeting(new Date()), []);
 
   // Drag-and-drop onto the new-chat composer, mirroring ChatPanel's in-chat
   // handling. ChatPanel's own handlers bail when no chat is open, so these are
@@ -371,11 +394,12 @@ export function HomeScreen() {
             on launch, or on coming back from a conversation — is a movement rather
             than a cut. Both are pure decoration and both are dropped under
             `prefers-reduced-motion` (see styles.css). */}
+        {/* Greeting only. The line under it ("Ask anything to start, or pick a
+            zone…") was onboarding text on a screen the user sees every day, and
+            everything it pointed at — the composer, the zone chip — is directly
+            below it and labelled. */}
         <div className="mz-fade-in mb-6 text-center">
           <h1 className="text-2xl font-semibold text-[var(--color-text)]">{greeting}</h1>
-          <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-            Ask anything to start, or pick a zone for a tailored assistant.
-          </p>
         </div>
 
         {/* Composer */}

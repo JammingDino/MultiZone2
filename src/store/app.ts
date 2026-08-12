@@ -683,21 +683,32 @@ function applyAppSettingsToDom(settings: AppSettings) {
   const family = settings.fontFamily?.trim();
   if (family) {
     document.documentElement.style.setProperty("--font-family", `"${family}", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`);
-    // Inject Google Fonts link if not already present for this family
-    const encoded = encodeURIComponent(family);
-    const href = `https://fonts.googleapis.com/css2?family=${encoded}:wght@400;500;600;700&display=swap`;
-    let link = fontLinkEl();
-    if (!link || link.href !== href) {
-      link?.remove();
-      link = document.createElement("link");
-      link.id = FONT_LINK_ID;
-      link.rel = "stylesheet";
-      link.href = href;
-      document.head.appendChild(link);
-    }
   } else {
     document.documentElement.style.removeProperty("--font-family");
-    fontLinkEl()?.remove();
+  }
+
+  // The face the app is actually about to render in — the user's choice, or Inter,
+  // which the default stack asks for first and no desktop OS ships. Fetching it
+  // here rather than only when the user picks something means it is on its way
+  // during launch, behind the splash.
+  //
+  // It was previously fetched *only* for a custom family, so the app ran on the
+  // stack's next fallback (Segoe UI on Windows) until something else happened to
+  // pull Inter down — and one thing did: opening Settings → Appearance, whose
+  // dropdown loads every preset face for its previews, Inter among them. Every
+  // piece of text in the app then re-rendered in a different typeface, on a panel
+  // where the user had changed nothing.
+  const webfont = family || "Inter";
+  const encoded = encodeURIComponent(webfont);
+  const href = `https://fonts.googleapis.com/css2?family=${encoded}:wght@400;500;600;700&display=swap`;
+  let link = fontLinkEl();
+  if (!link || link.href !== href) {
+    link?.remove();
+    link = document.createElement("link");
+    link.id = FONT_LINK_ID;
+    link.rel = "stylesheet";
+    link.href = href;
+    document.head.appendChild(link);
   }
 
   saveBootSnapshot();

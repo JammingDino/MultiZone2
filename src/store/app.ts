@@ -624,7 +624,46 @@ const DEFAULT_THEME: ThemePrefs = {
 
 const LEGACY_FONT_SIZE: Record<string, number> = { normal: 14, large: 16, xl: 18 };
 
-let fontLinkEl: HTMLLinkElement | null = null;
+/** The webfont `<link>`, found by id rather than held in a variable — `index.html`
+ *  may have created it before this module ever ran (see `saveBootSnapshot`). */
+const FONT_LINK_ID = "mz-font-link";
+
+function fontLinkEl(): HTMLLinkElement | null {
+  return document.getElementById(FONT_LINK_ID) as HTMLLinkElement | null;
+}
+
+/**
+ * Where the pre-paint restore in `index.html` reads from, and the version tag
+ * that lets a future change to the format invalidate every stored copy at once.
+ */
+const BOOT_SNAPSHOT_KEY = "mz.boot.v1";
+
+/**
+ * Cache the appearance decisions currently stamped on `<html>` so the next launch
+ * can put them back before it paints.
+ *
+ * Deliberately dumb: it copies the element's own `style` and `class` rather than
+ * the preferences behind them, so it cannot fall out of step with the two
+ * functions that write them, and adding a new theme toggle needs nothing here.
+ * The user's custom stylesheet is *not* carried — it has to be the last sheet in
+ * the document to win, and at boot the app's own stylesheet has not been injected
+ * yet, so restoring it early would quietly change which rules apply.
+ */
+function saveBootSnapshot() {
+  try {
+    localStorage.setItem(
+      BOOT_SNAPSHOT_KEY,
+      JSON.stringify({
+        cls: document.documentElement.className,
+        style: document.documentElement.getAttribute("style") ?? "",
+        fontHref: fontLinkEl()?.href ?? "",
+      }),
+    );
+  } catch {
+    // Storage full or unavailable. The only cost is the launch flash we used to
+    // have unconditionally, so there is nothing to report.
+  }
+}
 
 function applyAppSettingsToDom(settings: AppSettings) {
   const fs = typeof settings.fontSize === "number" ? settings.fontSize : 14;
@@ -647,18 +686,21 @@ function applyAppSettingsToDom(settings: AppSettings) {
     // Inject Google Fonts link if not already present for this family
     const encoded = encodeURIComponent(family);
     const href = `https://fonts.googleapis.com/css2?family=${encoded}:wght@400;500;600;700&display=swap`;
-    if (!fontLinkEl || fontLinkEl.href !== href) {
-      fontLinkEl?.remove();
-      fontLinkEl = document.createElement("link");
-      fontLinkEl.rel = "stylesheet";
-      fontLinkEl.href = href;
-      document.head.appendChild(fontLinkEl);
+    let link = fontLinkEl();
+    if (!link || link.href !== href) {
+      link?.remove();
+      link = document.createElement("link");
+      link.id = FONT_LINK_ID;
+      link.rel = "stylesheet";
+      link.href = href;
+      document.head.appendChild(link);
     }
   } else {
     document.documentElement.style.removeProperty("--font-family");
-    fontLinkEl?.remove();
-    fontLinkEl = null;
+    fontLinkEl()?.remove();
   }
+
+  saveBootSnapshot();
 }
 
 function applyThemeToDom(theme: ThemePrefs) {
@@ -696,6 +738,7 @@ function applyThemeToDom(theme: ThemePrefs) {
   else html.style.removeProperty("--color-border-strong");
 
   applyCustomCss(theme);
+  saveBootSnapshot();
 }
 
 const CUSTOM_CSS_ELEMENT_ID = "multizone-custom-css";
@@ -1454,6 +1497,11 @@ export const useApp = create<AppStore>((set, get) => ({
         // migration is needed beyond letting them fall out of use.
         set({ appSettings: merged });
         applyAppSettingsToDom(merged);
+      } else {
+        // Nothing saved yet. The defaults still have to be written to the DOM:
+        // a stale boot snapshot from a previous install (or a reset) would
+        // otherwise keep sizing the interface until the first settings write.
+        applyAppSettingsToDom(DEFAULT_APP_SETTINGS);
       }
     } catch (e) {
       console.warn("failed to load app settings", e);
@@ -1751,3 +1799,20 @@ export const useApp = create<AppStore>((set, get) => ({
     }));
   },
 }));
+
+/**
+ * The DOM follows the store, always.
+ *
+ * Both writers of these two slices already stamp their change on `<html>`
+ * themselves, so this is a backstop rather than the mechanism — but it is the
+ * reason the appearance can no longer be *out* of step with the settings: the
+ * interface font size used to arrive late, and looked to the user like it took
+ * opening Settings → Appearance to be honoured at all. Any path that reaches the
+ * state (a load, a write from the HTTP API, an imported bundle) now repaints,
+ * whether or not it remembered to. Outside React, so a colour dragged across its
+ * slider does not re-render the app on every frame.
+ */
+useApp.subscribe((state, prev) => {
+  if (state.appSettings !== prev.appSettings) applyAppSettingsToDom(state.appSettings);
+  if (state.theme !== prev.theme) applyThemeToDom(state.theme);
+});

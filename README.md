@@ -99,6 +99,12 @@ Reader tasks drain stdout and stderr continuously, so output printed *between* t
 
 stdin/stdout are **pipes, not a PTY**. Servers, build tools and REPLs work; programs that insist on a real terminal do not — pass `sudo -S`, expect `ssh` password prompts and full-screen TUIs to fail, and stop a process with `terminal_stop` rather than trying to send Ctrl-C. Children block-buffer on a pipe, so unbuffer where it matters (`python -u`, `stdbuf -oL`); `PYTHONUNBUFFERED` is set for you.
 
+## Replaying a session
+
+The clock icon in the chat header opens **Replay** — the run as it actually happened, in order, at whatever pace you read at (0.12.2+). It is not the transcript scrolled back: it carries the parts the transcript never had, like an approval you declined, a tool that failed, a zone that switched mid-turn, or a plan you rewrote before approving.
+
+From 0.12.3 it carries the conversation too, woven into the same timeline: what you asked, what each zone answered, and every tool call with its **arguments, its output and how long it took**. That is the point — "where did that number come from?" is answerable after the fact and not only while it scrolls past. Each row shows elapsed time from the first event alongside the wall clock; **Play** steps at a fixed cadence for skimming, and the chips filter by kind.
+
 ## Editing a message
 
 Hover any message and hit **Edit**. The editor is the composer you already use: the same box, the same paperclip, the same microphone, with the message's attachments shown as chips above it. Remove one and it is gone from the resent turn; drop another in — or paste a screenshot — and it goes with it. Editing one of your own turns re-runs the conversation from that point; editing an answer just corrects the text in place.
@@ -151,6 +157,8 @@ There are no speaker labels. OpenAI's transcription endpoint does not diarize, a
 Four sliders shape whichever you pick: **Speed**, **Density**, **Opacity**, and **Hue variation**, which spreads each element's colour around your accent instead of painting everything one flat tone. Leave it at 0 for a single-colour look.
 
 Every colour control takes a hex value as well as the swatch — type or paste `#4f9cf9` (the `#` is optional, and `#abc` shorthand works) instead of converting it to three numbers in the OS picker.
+
+Whatever you choose is on screen from the first frame of the next launch (0.12.3). The preferences live in the database, so the window used to paint before it knew what it should look like — a light-mode install flashed a dark panel, and a changed interface size resized the whole UI a beat after it appeared. The last appearance is now restored before the first paint, and the app's mark is drawn over the remaining gap while the chat list and background arrive; click, tap or press any key to skip it.
 
 ### Custom CSS
 

@@ -367,7 +367,11 @@ export function HomeScreen() {
         </div>
       )}
       <div className="w-full max-w-2xl">
-        <div className="mb-6 text-center">
+        {/* The greeting fades and the composer rises under it, so arriving here —
+            on launch, or on coming back from a conversation — is a movement rather
+            than a cut. Both are pure decoration and both are dropped under
+            `prefers-reduced-motion` (see styles.css). */}
+        <div className="mz-fade-in mb-6 text-center">
           <h1 className="text-2xl font-semibold text-[var(--color-text)]">{greeting}</h1>
           <p className="mt-1 text-sm text-[var(--color-text-muted)]">
             Ask anything to start, or pick a zone for a tailored assistant.
@@ -375,7 +379,7 @@ export function HomeScreen() {
         </div>
 
         {/* Composer */}
-        <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-2 shadow-sm focus-within:border-[var(--color-accent)]">
+        <div className="mz-view-in mz-delay-60 rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-2 shadow-sm focus-within:border-[var(--color-accent)]">
           <AttachError tray={tray} />
           <AudioModeRow tray={tray} />
           <AttachmentRow tray={tray} />

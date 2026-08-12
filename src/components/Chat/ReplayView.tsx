@@ -1,20 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
+  Brain,
   ChevronLeft,
   ChevronRight,
   ClipboardList,
   Ban,
   FileText,
   Flag,
+  MessageSquare,
   Pause,
   Play,
+  User,
   Wrench,
   Users,
 } from "lucide-react";
 import { Modal, ModalTitle } from "@/components/common/Modal";
 import * as api from "@/lib/tauri";
-import type { SessionEvent } from "@/lib/types";
+import { buildTrace } from "@/lib/exportTrace";
+import type { Message, SessionEvent } from "@/lib/types";
 
 /**
  * Replay (0.12.2) — stepping through a past session at your own pace.
@@ -26,12 +30,21 @@ import type { SessionEvent } from "@/lib/types";
  * approving. The clock on the left is elapsed time from the first event, which
  * is the axis that makes a run legible ("it spent four minutes on that search").
  *
+ * It is *also* the transcript, from 0.12.3. The event log alone said a tool ran
+ * and not what it came back with, which made the one question a replay is opened
+ * to answer — "where did that number come from?" — the one it could not answer.
+ * The conversation is already stored, so weaving it into the same timeline costs
+ * nothing on disk: what the user asked, what each zone answered, and every tool
+ * call with its arguments and its output now sit in order alongside the log's own
+ * approvals and failures.
+ *
  * Play is deliberately a fixed cadence rather than the original timings: a
  * faithful replay of a nine-minute turn takes nine minutes. Stepping is what
  * this is for; play is for skimming.
  */
 export function ReplayView({ chatId, onClose }: { chatId: string; onClose: () => void }) {
   const [events, setEvents] = useState<SessionEvent[] | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [index, setIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [kinds, setKinds] = useState<Set<string>>(new Set());
@@ -43,14 +56,25 @@ export function ReplayView({ chatId, onClose }: { chatId: string; onClose: () =>
       .listSessionEvents(chatId)
       .then((e) => alive && setEvents(e))
       .catch(() => alive && setEvents([]));
+    // The transcript is fetched rather than read from the store so a replay opened
+    // on a chat whose messages were never loaded (a subchat, say) is complete.
+    void api
+      .getMessages(chatId)
+      .then((m) => alive && setMessages(m))
+      .catch(() => alive && setMessages([]));
     return () => {
       alive = false;
     };
   }, [chatId]);
 
+  const entries = useMemo(
+    () => mergeTimeline(events ?? [], messages),
+    [events, messages],
+  );
+
   const shown = useMemo(
-    () => (events ?? []).filter((e) => kinds.size === 0 || kinds.has(e.kind)),
-    [events, kinds],
+    () => entries.filter((e) => kinds.size === 0 || kinds.has(e.kind)),
+    [entries, kinds],
   );
 
   // Auto-advance, stopping of its own accord at the end rather than looping —
@@ -76,17 +100,14 @@ export function ReplayView({ chatId, onClose }: { chatId: string; onClose: () =>
       ?.scrollIntoView({ block: "nearest" });
   }, [index]);
 
-  const start = events?.[0]?.createdAt ?? 0;
+  const start = entries[0]?.at ?? 0;
   const current = shown[Math.min(index, Math.max(0, shown.length - 1))];
-  const allKinds = useMemo(
-    () => [...new Set((events ?? []).map((e) => e.kind))],
-    [events],
-  );
+  const allKinds = useMemo(() => [...new Set(entries.map((e) => e.kind))], [entries]);
 
   return (
     <Modal
       onClose={onClose}
-      className="h-[640px] w-[880px]"
+      className="h-[640px] w-[940px]"
       header={<ModalTitle>Replay this session</ModalTitle>}
     >
       <div
@@ -147,7 +168,7 @@ export function ReplayView({ chatId, onClose }: { chatId: string; onClose: () =>
         </div>
 
         <div className="flex min-h-0 flex-1">
-          <div ref={listRef} className="w-1/2 overflow-y-auto border-r border-[var(--color-border)] p-2">
+          <div ref={listRef} className="w-[46%] overflow-y-auto border-r border-[var(--color-border)] p-2">
             {events === null ? (
               <div className="p-4 text-xs text-[var(--color-text-muted)]">Loading…</div>
             ) : shown.length === 0 ? (
@@ -165,11 +186,20 @@ export function ReplayView({ chatId, onClose }: { chatId: string; onClose: () =>
                     i === index ? "bg-[var(--color-panel-hover)]" : "hover:bg-[var(--color-panel-hover)]"
                   } ${i > index ? "opacity-45" : ""}`}
                 >
-                  <span className="w-12 shrink-0 pt-0.5 text-right text-[10px] tabular-nums text-[var(--color-text-muted)]">
-                    {elapsed(e.createdAt - start)}
+                  <span
+                    className="w-9 shrink-0 pt-0.5 text-right text-[10px] tabular-nums text-[var(--color-text-muted)]"
+                    /* Elapsed is the axis you read a run by; the wall clock is what
+                       you cross-reference against anything outside the app, so both
+                       are here rather than one behind a click. */
+                    title={new Date(e.at).toLocaleString()}
+                  >
+                    {elapsed(e.at - start)}
                   </span>
                   <KindIcon kind={e.kind} />
                   <span className="min-w-0 flex-1 text-[var(--color-text)]">{e.label}</span>
+                  <span className="shrink-0 pt-0.5 text-[10px] tabular-nums text-[var(--color-text-muted)]/70">
+                    {clock(e.at)}
+                  </span>
                 </button>
               ))
             )}
@@ -183,14 +213,28 @@ export function ReplayView({ chatId, onClose }: { chatId: string; onClose: () =>
                   <span className="font-medium">{current.label}</span>
                 </div>
                 <div className="mb-3 text-[11px] text-[var(--color-text-muted)]">
-                  {new Date(current.createdAt).toLocaleString()} · {kindLabel(current.kind)}
+                  {new Date(current.at).toLocaleString()} · {kindLabel(current.kind)}
+                  {current.meta ? ` · ${current.meta}` : ""}
                   {current.turnId ? ` · turn ${current.turnId.slice(0, 8)}` : ""}
                 </div>
-                {current.detail ? (
-                  <pre className="whitespace-pre-wrap break-words rounded border border-[var(--color-border)] bg-[var(--color-bg)]/50 p-2 text-[11px] text-[var(--color-text-muted)]">
-                    {pretty(current.detail)}
-                  </pre>
-                ) : (
+                {current.body && (
+                  <div className="mb-3 whitespace-pre-wrap break-words rounded border border-[var(--color-border)] bg-[var(--color-bg)]/50 p-2 text-[12px] leading-relaxed text-[var(--color-text)]">
+                    {clamp(current.body)}
+                  </div>
+                )}
+                {current.detail && (
+                  <>
+                    {current.body && (
+                      <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                        {current.detailLabel ?? "Detail"}
+                      </div>
+                    )}
+                    <pre className="whitespace-pre-wrap break-words rounded border border-[var(--color-border)] bg-[var(--color-bg)]/50 p-2 text-[11px] text-[var(--color-text-muted)]">
+                      {clamp(pretty(current.detail))}
+                    </pre>
+                  </>
+                )}
+                {!current.body && !current.detail && (
                   <div className="text-[11px] text-[var(--color-text-muted)]">
                     Nothing further recorded for this event.
                   </div>
@@ -208,6 +252,144 @@ export function ReplayView({ chatId, onClose }: { chatId: string; onClose: () =>
   );
 }
 
+/**
+ * One line of the replay. The event log and the transcript describe the same run
+ * from two sides, so both are reduced to this before being interleaved.
+ */
+interface ReplayEntry {
+  id: string;
+  /** Epoch ms this happened at. */
+  at: number;
+  kind: string;
+  /** The one-line summary shown in the list. */
+  label: string;
+  /** Prose — a question, an answer, a tool's output. Shown as written. */
+  body?: string | null;
+  /** A structured blob (tool arguments, an event's payload), pretty-printed. */
+  detail?: string | null;
+  /** Names what `detail` is, when it sits under a body. */
+  detailLabel?: string;
+  /** Extra facts for the header line, e.g. "1.4s · error". */
+  meta?: string | null;
+  turnId?: string | null;
+}
+
+/** How much of a long body/detail is rendered. Past this, a replay pane becomes a
+ *  document viewer, and the whole thing is in the transcript and the export. */
+const CLAMP_CHARS = 20_000;
+
+function clamp(text: string): string {
+  if (text.length <= CLAMP_CHARS) return text;
+  return `${text.slice(0, CLAMP_CHARS)}\n\n… ${text.length - CLAMP_CHARS} more characters (see the chat itself, or export it)`;
+}
+
+/**
+ * The log and the transcript, in one ordered list.
+ *
+ * Ties go to the log: a `tool_call` row is written when the call is issued and the
+ * assistant message carrying it is saved in the same instant, and reading "ran
+ * read_file" before "read_file → ok" is the order it happened in.
+ */
+function mergeTimeline(events: SessionEvent[], messages: Message[]): ReplayEntry[] {
+  const fromLog: ReplayEntry[] = events.map((e) => ({
+    id: e.id,
+    at: e.createdAt,
+    kind: e.kind,
+    label: e.label,
+    detail: e.detail,
+    turnId: e.turnId,
+  }));
+  const fromChat = transcriptEntries(messages);
+  return [...fromLog.map((e, i) => ({ e, rank: [e.at, 0, i] as const })),
+          ...fromChat.map((e, i) => ({ e, rank: [e.at, 1, i] as const }))]
+    .sort((a, b) =>
+      a.rank[0] - b.rank[0] || a.rank[1] - b.rank[1] || a.rank[2] - b.rank[2])
+    .map(({ e }) => e);
+}
+
+/**
+ * The conversation as replay entries.
+ *
+ * Built on `buildTrace`, the same reduction the PDF export uses — so a tool's
+ * arguments, its output and how long it took are already matched up, and this
+ * only has to decide how each piece reads as a single line.
+ */
+function transcriptEntries(messages: Message[]): ReplayEntry[] {
+  const out: ReplayEntry[] = [];
+  let n = 0;
+  const id = () => `msg-${n++}`;
+
+  for (const unit of buildTrace(messages)) {
+    for (const item of unit.items) {
+      if (item.kind === "text") {
+        const you = unit.role === "user";
+        out.push({
+          id: id(),
+          at: item.timestamp,
+          kind: you ? "user_message" : "assistant_text",
+          label: `${you ? "You: " : ""}${oneLine(item.text)}`,
+          body: item.text,
+        });
+      } else if (item.kind === "thinking") {
+        out.push({
+          id: id(),
+          at: item.timestamp,
+          kind: "thinking",
+          // The reasoning text itself is deliberately not carried through the
+          // trace model, so this is a marker with a size, not a transcript of it.
+          label: `Thought for ${item.durationMs != null ? secs(item.durationMs) : "a while"}`,
+          meta: `${item.characters.toLocaleString()} characters of reasoning`,
+        });
+      } else if (item.kind === "images") {
+        out.push({
+          id: id(),
+          at: item.timestamp,
+          kind: "user_message",
+          label: `You attached ${item.count} image${item.count === 1 ? "" : "s"}`,
+        });
+      } else if (item.kind === "attachments") {
+        out.push({
+          id: id(),
+          at: item.timestamp,
+          kind: "user_message",
+          label: `You attached ${item.files.map((f) => f.fileName).join(", ")}`,
+          detail: JSON.stringify(item.files, null, 2),
+        });
+      } else {
+        // A tool. The call is already in the log; what was missing is what came
+        // back, so the entry is placed at the moment the result landed.
+        const name = item.call.function.name;
+        const at = item.timestamp + (item.durationMs ?? 0);
+        const outcome =
+          item.status === "error" ? "failed" : item.status === "no-result" ? "no result" : "ok";
+        out.push({
+          id: id(),
+          at,
+          kind: item.status === "error" ? "tool_failed" : "tool_result",
+          label: `${name} → ${outcome}${item.resultText ? `: ${oneLine(item.resultText, 60)}` : ""}`,
+          body: item.resultText,
+          detail: item.args ? JSON.stringify(item.args, null, 2) : null,
+          detailLabel: "Arguments",
+          meta: [outcome, item.durationMs != null ? secs(item.durationMs) : null]
+            .filter(Boolean)
+            .join(" · "),
+        });
+      }
+    }
+  }
+  return out;
+}
+
+/** A single line for the list: no newlines, and short enough not to wrap twice. */
+function oneLine(text: string, max = 90): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+function secs(ms: number): string {
+  return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+}
+
 function pretty(detail: string): string {
   try {
     return JSON.stringify(JSON.parse(detail), null, 2);
@@ -223,6 +405,15 @@ function elapsed(ms: number): string {
   const m = Math.floor(total / 60);
   const s = total % 60;
   return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+/** Wall clock, for cross-referencing anything outside the app. */
+function clock(ms: number): string {
+  return new Date(ms).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
 }
 
 function kindLabel(kind: string): string {
@@ -243,13 +434,18 @@ function kindLabel(kind: string): string {
     plan_stop: "stop",
     error: "error",
     cancelled: "cancelled",
+    user_message: "you",
+    assistant_text: "answer",
+    thinking: "thinking",
+    tool_result: "tool output",
+    tool_failed: "tool failed",
   };
   return map[kind] ?? kind;
 }
 
 function KindIcon({ kind }: { kind: string }) {
   const cls = "mt-0.5 h-3 w-3 shrink-0";
-  if (kind === "tool_error" || kind === "error")
+  if (kind === "tool_error" || kind === "error" || kind === "tool_failed")
     return <AlertTriangle className={`${cls} text-[var(--color-danger)]`} />;
   if (kind === "denial" || kind === "cancelled")
     return <Ban className={`${cls} text-amber-400`} />;
@@ -258,5 +454,8 @@ function KindIcon({ kind }: { kind: string }) {
   if (kind === "zone_switch") return <Users className={`${cls} text-[var(--color-text-muted)]`} />;
   if (kind === "turn_start" || kind === "turn_end")
     return <Flag className={`${cls} text-[var(--color-text-muted)]`} />;
+  if (kind === "user_message") return <User className={`${cls} text-[var(--color-accent)]`} />;
+  if (kind === "assistant_text") return <MessageSquare className={`${cls} text-[var(--color-text)]`} />;
+  if (kind === "thinking") return <Brain className={`${cls} text-[var(--color-text-muted)]`} />;
   return <Wrench className={`${cls} text-[var(--color-text-muted)]`} />;
 }

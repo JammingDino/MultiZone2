@@ -775,6 +775,22 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [x] `GET /api/chats/:id/events` serves the same record to a script or a model driving the app
 - [ ] Runtime-test: run an agentic turn with an approval declined and a tool failure, then replay it
 
+### 0.12.3 — The chat window
+
+*The replay shipped in 0.12.2 could say a tool ran and not what it returned, which is the one question a replay is opened to answer. Around it, the header row had five glyph sizes and the window announced every launch with a flash of the wrong theme.*
+
+*Status: built, typechecked (`npx tsc --noEmit` clean, `vite build` green) and checked in a browser harness; not yet runtime-tested in the Tauri shell — see section 11c of [TEST_CHECKLIST.md](TEST_CHECKLIST.md).*
+
+- [x] Replay carries the transcript as well as the log ([ReplayView.tsx](../src/components/Chat/ReplayView.tsx)): the question asked, each zone's answer, thinking markers with durations, and every tool call's **arguments and output** with how long it took, interleaved with the log's own approvals and failures by timestamp. Built on `buildTrace` — the same reduction the PDF export uses — so the pairing of a call to its result is not implemented twice, and it costs nothing on disk because the conversation was already stored. Ties go to the log, since a `tool_call` row is written the instant the call is issued. Each row now shows elapsed *and* wall-clock time; prose renders as prose and JSON as JSON; a very long output is clamped with a note rather than turning the pane into a document viewer
+- [x] One glyph size across the header row ([chrome.ts](../src/lib/chrome.ts)), imported by every control in it so the next one added cannot drift. The spend chip is a plain dollar sign at that size — the receipt glyph it replaces was the smallest thing in the header and unidentifiable. *Known reading: the figure beside it is billed tokens, not currency; the tooltip and popover say so*
+- [x] The zone control shows the zone name and not the model id, which was making the widest control in the header the one carrying the least actionable text. The id stays on the tooltip and on every row of the menu
+- [x] The project/tag bar is a header chip that opens it, not a permanent second row ([ChatPanel.tsx](../src/components/Chat/ChatPanel.tsx)). The chip carries what the bar used to spend a row displaying — the project with its colour, the tag count — and the sidebar already groups by project and filters by tag, so the strip is where you *change* those, not where you read them. Open/closed persists per install
+- [x] Entrance animations between the landing view and a conversation ([styles.css](../src/styles.css)): the header drops in, the thread rises, the composer follows a beat later so the eye finishes where the user is about to type. All of it off under `prefers-reduced-motion`
+- [x] Launch no longer flashes. The appearance is restored before the first paint from a snapshot of `<html>`'s own class and inline style, written on every appearance change ([index.html](../index.html), `saveBootSnapshot` in [store/app.ts](../src/store/app.ts)) — deliberately a replay of the last settled frame rather than a second implementation of the theme, so it cannot fall out of step. The webfont link goes out in the same breath
+- [x] Appearance now follows the store unconditionally: a `useApp.subscribe` repaints on any change to `theme` / `appSettings` whatever route made it (a load, the HTTP API, an imported bundle), and `loadAppSettings` applies its defaults when nothing is stored. This is the fix for the interface font size appearing to need a visit to Settings → Appearance before it took effect — the mechanism was never identified by reading, so the sync was made declarative instead. **Needs the runtime check in 11c to confirm**
+- [x] Boot splash ([BootSplash.tsx](../src/components/BootSplash.tsx)) — the window icon's "M" drawn in the user's accent over the background the window is already using, so it leaving reveals a finished window rather than cutting to a different one. Under a second, once per launch (not once per mount, which StrictMode would make a flicker), and any click, tap or keypress skips it
+- [ ] Runtime-test: launch in light mode with a 22px interface size and a custom font, then replay a turn that ran tools
+
 ---
 
 ## 1.0.0 — Hardening & Public Release

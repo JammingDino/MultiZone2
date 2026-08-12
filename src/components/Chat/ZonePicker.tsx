@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Check, Plus, Layers, Zap, Brain, Loader2, Crown } from "lucide-react";
 import { useApp } from "@/store/app";
 import { getZoneIcon } from "@/lib/zoneIcons";
+import { HEADER_CHEVRON, HEADER_ICON } from "@/lib/chrome";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 
 type RoutingState =
@@ -70,28 +71,33 @@ export function ZonePicker({ chatId, currentZoneId, smartRouting, routingState }
         title="Change zone"
       >
         {smartRouting && routingState?.status === "routing" ? (
-          <Loader2 size={12} className="animate-spin text-[var(--color-accent)]" />
+          <Loader2 size={HEADER_ICON} className="animate-spin text-[var(--color-accent)]" />
         ) : routedZone ? (
           // Show the routed zone's own icon + color so it's visually distinct
           <span
-            className="flex h-4 w-4 items-center justify-center rounded"
+            className="flex h-[18px] w-[18px] items-center justify-center rounded"
             style={{ background: routedZone.accentColor ?? "var(--color-accent)" }}
           >
-            <RoutedIcon size={10} color="white" />
+            <RoutedIcon size={11} color="white" />
           </span>
         ) : smartRouting ? (
-          <Brain size={12} className="text-[var(--color-accent)]" />
+          <Brain size={HEADER_ICON} className="text-[var(--color-accent)]" />
         ) : current ? (
           <span
-            className="flex h-4 w-4 items-center justify-center rounded"
+            className="flex h-[18px] w-[18px] items-center justify-center rounded"
             style={{ background: currentColor ?? "var(--color-accent)" }}
           >
-            <CurrentIcon size={10} color="white" />
+            <CurrentIcon size={11} color="white" />
           </span>
         ) : (
-          <Zap size={12} className="text-[var(--color-accent)]" />
+          <Zap size={HEADER_ICON} className="text-[var(--color-accent)]" />
         )}
         {(() => {
+          // The zone's name, and only its name. The model id used to be appended,
+          // which made the widest control in the header the one carrying the least
+          // actionable text — a 30-character id you cannot do anything about from
+          // here. It is still on the button's tooltip, on every row of the menu
+          // below, and in the zone editor.
           const label =
             smartRouting && routingState?.status === "routing"
               ? "Routing…"
@@ -100,18 +106,18 @@ export function ZonePicker({ chatId, currentZoneId, smartRouting, routingState }
                 : smartRouting
                   ? "Smart chat"
                   : current
-                    ? `${current.name} · ${current.model}`
+                    ? current.name
                     : "Quick chat";
-          // Long model ids (e.g. provider/long-model-name) would otherwise push
-          // the rest of the top bar around — clamp the width and ellipsize,
-          // keeping the full text reachable via the tooltip.
           return (
-            <span className="max-w-[200px] truncate" title={label}>
+            <span
+              className="max-w-[160px] truncate"
+              title={current && !smartRouting ? `${current.name} · ${current.model}` : label}
+            >
               {label}
             </span>
           );
         })()}
-        <ChevronDown size={12} className="shrink-0" />
+        <ChevronDown size={HEADER_CHEVRON} className="shrink-0" />
       </button>
 
       {open && (

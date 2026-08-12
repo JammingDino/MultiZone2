@@ -153,6 +153,26 @@ Needs two builds: install version N, then publish N+1.
 - [ ] Replay shows the turn's tool calls, any declined approval, any failure, and the plan decisions, in order
 - [ ] Exported Markdown and PDF both carry the Session log
 
+## 11c. Chat window & launch (0.12.3)
+
+- [ ] Replay interleaves the transcript with the log: the question asked, each answer, thinking markers, and every tool call's **output** — in the order they happened, with elapsed *and* wall-clock time on each row
+- [ ] Selecting a tool row shows its output as text and its arguments as JSON; a failed tool reads as failed
+- [ ] A very long tool output is clamped with a note rather than freezing the pane
+- [ ] Replay on a subchat (whose messages were never opened) is complete — the transcript is fetched, not read from the store
+- [ ] Kind filter chips cover the new kinds and filtering still steps/plays correctly
+- [ ] Header row: gauge, project chip, replay, Export, Perspectives and the zone control all read at the same glyph size
+- [ ] The spend chip is a legible dollar sign; hovering explains the figure is billed *tokens*, not currency 🔁
+- [ ] The zone control shows the zone name only; the model id is on its tooltip and on every menu row
+- [ ] No project/tag bar by default. The header chip shows the project (with its colour) and tag count, opens the strip, and the open/closed choice survives a restart
+- [ ] Opening the first chat animates rather than cuts; returning to the landing view animates too
+- [ ] With the OS set to reduce motion, every one of those animations is off — including the splash's stroke draw
+- [ ] 🖥️ **Launch in light mode shows no dark flash**, and no panel changes colour after the window appears
+- [ ] 🔁 **Interface font size is correct on the first frame** — set it to 22px, restart, and confirm without opening Settings → Appearance (this used to appear to need that visit)
+- [ ] A custom font is the first text drawn, not Inter replaced by it a beat later
+- [ ] The boot splash draws the accent-coloured mark and is gone inside a second; a click, tap or keypress skips it immediately
+- [ ] The splash does not reappear when the window is reloaded mid-session, and never appears twice
+- [ ] ⚙️ Clearing the webview's localStorage (or a fresh install) launches on the defaults with no stale palette or size
+
 ## 12. Performance
 
 - [ ] Cold start time recorded: ______

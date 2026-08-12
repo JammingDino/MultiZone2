@@ -3,6 +3,7 @@ import { downloadDir } from "@tauri-apps/api/path";
 import { Sidebar } from "./components/Sidebar/Sidebar";
 import { ChatPanel } from "./components/Chat/ChatPanel";
 import { BackgroundEffect } from "./components/BackgroundEffect";
+import { BootSplash } from "./components/BootSplash";
 import { TitleBar } from "./components/TitleBar";
 import { Onboarding } from "./components/Onboarding/Onboarding";
 import { NoProviderBanner } from "./components/Onboarding/NoProviderBanner";
@@ -164,6 +165,9 @@ export default function App() {
       {/* App-wide so the confirmation can sit above onboarding as well as the
           chat — a settings file may be dropped or picked from either. */}
       <ImportSettingsDialog />
+      {/* Last child, and above everything: it covers the window while the first
+          frame settles. */}
+      <BootSplash />
     </div>
   );
 }

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Gauge, Receipt, Users } from "lucide-react";
+import { DollarSign, Gauge, Users } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
+import { HEADER_ICON } from "@/lib/chrome";
 import { formatTokens } from "@/lib/format";
 import { chatContextEstimate } from "@/lib/tokens";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
@@ -163,18 +164,23 @@ export function ContextMeter({ chatId }: { chatId: string }) {
           .filter(Boolean)
           .join("\n\n")}
       >
-        <Gauge size={12} />
+        <Gauge size={HEADER_ICON} />
         <span className="font-mono">{formatTokens(chatTotal)}</span>
         <span className="hidden sm:inline">ctx</span>
         {sessionTotal != null && (
           <span className="ml-0.5 flex items-center gap-1 border-l border-[var(--color-border)] pl-1.5 text-[var(--color-accent)]">
-            <Users size={11} />
+            <Users size={HEADER_ICON} />
             <span className="font-mono">{formatTokens(sessionTotal)}</span>
           </span>
         )}
         {buttonSpend && (
           <span className="ml-0.5 flex items-center gap-1 border-l border-[var(--color-border)] pl-1.5">
-            <Receipt size={11} />
+            {/* A plain dollar sign, at the same size as the rest of the row: the
+                receipt glyph it replaces was the smallest thing in the header and
+                unidentifiable at 11px. The figure beside it is still tokens
+                billed, not currency — see the tooltip and the popover, which is
+                where the number is explained either way. */}
+            <DollarSign size={HEADER_ICON} />
             <span className="font-mono">{formatTokens(buttonSpend.totalTokens)}</span>
           </span>
         )}

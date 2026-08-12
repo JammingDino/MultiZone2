@@ -22,7 +22,9 @@ import { PlanReview } from "@/components/Chat/PlanReview";
 import { TaskPanel } from "@/components/Chat/TaskPanel";
 import { ReplayView } from "@/components/Chat/ReplayView";
 import { resolveBaseModel } from "@/lib/baseZone";
+import { HEADER_ICON } from "@/lib/chrome";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
+import { usePersistentBool } from "@/lib/uiState";
 import type { FileDiff, StreamEnvelope } from "@/lib/types";
 
 /** How long stream events are collected before being applied as one batch. */
@@ -181,6 +183,10 @@ export function ChatPanel() {
   const rejectPlan = useApp((s) => s.rejectPlan);
   const [planBusy, setPlanBusy] = useState(false);
   const [replayOpen, setReplayOpen] = useState(false);
+  // Whether the project/tag strip is showing. Persisted per install rather than
+  // per chat: someone who files every conversation wants the row up permanently,
+  // and someone who never does should not have to close it again tomorrow.
+  const [metaOpen, setMetaOpen] = usePersistentBool("chatMetaStrip", false);
 
   useEffect(() => {
     if (activeChatId) void loadPendingPlan(activeChatId);
@@ -387,8 +393,8 @@ export function ChatPanel() {
       onDrop={onDrop}
     >
       {activeChat ? (
-        <>
-          <header className="flex min-h-12 flex-wrap items-center gap-2 border-b border-[var(--color-border)] px-3 py-1.5 sm:flex-nowrap sm:gap-3 sm:px-4">
+        <div key={activeChat.id} className="mz-view-in flex min-h-0 flex-1 flex-col">
+          <header className="mz-drop-in flex min-h-12 flex-wrap items-center gap-2 border-b border-[var(--color-border)] px-3 py-1.5 sm:flex-nowrap sm:gap-3 sm:px-4">
             <div className="min-w-0 flex-1 truncate text-sm font-medium">{activeChat.title}</div>
             <ConversationIndicator chatId={activeChat.id} />
             <PerspectiveZoneChips
@@ -399,12 +405,18 @@ export function ChatPanel() {
             />
             <div className="flex shrink-0 items-center gap-2">
             <ContextMeter chatId={activeChat.id} />
+            <MetaStripToggle
+              open={metaOpen}
+              onToggle={() => setMetaOpen(!metaOpen)}
+              project={projects.find((p) => p.id === activeChat.projectId) ?? null}
+              tagCount={(tagsByChat[activeChat.id] ?? []).length}
+            />
             <button
               onClick={() => setReplayOpen(true)}
               title="Replay this session — every tool call, approval, failure and plan decision in order"
               className="rounded p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
             >
-              <History size={15} />
+              <History size={HEADER_ICON} />
             </button>
             <ExportMenu chatId={activeChat.id} />
             <PerspectiveZonePicker
@@ -432,8 +444,14 @@ export function ChatPanel() {
             </div>
           </header>
 
-          {/* Project + tag strip — always available so you can set the chat's
-              project and tags from one place. */}
+          {/* Project + tag strip, on request rather than always (0.12.3).
+              It was a permanent second bar under the header, and for the common
+              case — no project, no tags — it said so in italics and cost a row of
+              the window to do it. The sidebar already groups chats by project and
+              filters by tag, so the strip is where you *change* those, not where
+              you read them: the header chip above carries the state, and opening
+              it is one click when the answer is "put this one somewhere". */}
+          {metaOpen && (
           <ProjectTagStrip
             chatId={activeChat.id}
             projectId={activeChat.projectId}
@@ -449,6 +467,7 @@ export function ChatPanel() {
             onRemoveTag={(tagId) => removeChatTag(activeChat.id, tagId)}
             onToggleTagContext={(tagId, e) => toggleChatTagContext(activeChat.id, tagId, e)}
           />
+          )}
 
           {/* Keyed by chat id so switching chats remounts the thread instead of
               reusing the previous chat's component instances. Turns and text
@@ -569,16 +588,22 @@ export function ChatPanel() {
               </div>
             </div>
           ) : (
-            <InputBar
-              chatId={activeChat.id}
-              disabled={inputDisabled}
-              ref={inputRef}
-              notice={subchatNotice}
-            />
+            // The composer arrives a beat after the thread it belongs to, so the
+            // eye finishes on the thing the user is about to type into.
+            <div className="mz-view-in mz-delay-60 shrink-0">
+              <InputBar
+                chatId={activeChat.id}
+                disabled={inputDisabled}
+                ref={inputRef}
+                notice={subchatNotice}
+              />
+            </div>
           )}
-        </>
+        </div>
       ) : (
-        <HomeScreen />
+        <div className="mz-view-in flex min-h-0 flex-1 flex-col">
+          <HomeScreen />
+        </div>
       )}
       {isDragOver && activeChat && (
         <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-[var(--color-bg)]/70 backdrop-blur-sm">
@@ -639,6 +664,64 @@ function SubchatBanner({ zone }: { zone: Zone | null }) {
         <span className="truncate">Sub-agent conversation — you can reply here directly.</span>
       )}
     </div>
+  );
+}
+
+/**
+ * The header's stand-in for the project/tag strip (0.12.3).
+ *
+ * Carries the state the strip used to spend a whole row displaying — which
+ * project this chat is filed under, and how many tags it has — and opens the
+ * strip when the user wants to change it. Unfiled chats, which are most of them,
+ * get a single muted folder glyph instead of a bar reading "no tags yet".
+ */
+function MetaStripToggle({
+  open,
+  onToggle,
+  project,
+  tagCount,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  project: Project | null;
+  tagCount: number;
+}) {
+  const Icon = project ? getZoneIcon(project.icon) : Folder;
+  const color = project?.accentColor ?? "var(--color-accent)";
+  return (
+    <button
+      onClick={onToggle}
+      title={
+        open
+          ? "Hide the project and tag row"
+          : `${project ? `Project: ${project.name}` : "No project"}${
+              tagCount > 0 ? ` · ${tagCount} tag${tagCount === 1 ? "" : "s"}` : ""
+            } — click to change`
+      }
+      className={`flex max-w-[180px] items-center gap-1.5 rounded px-1.5 py-1 text-xs transition ${
+        open
+          ? "bg-[var(--color-panel-hover)] text-[var(--color-text)]"
+          : "text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
+      }`}
+    >
+      {project ? (
+        <span
+          className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded"
+          style={{ background: color }}
+        >
+          <Icon size={11} color="white" />
+        </span>
+      ) : (
+        <Folder size={HEADER_ICON} className="shrink-0" />
+      )}
+      {project && <span className="truncate">{project.name}</span>}
+      {tagCount > 0 && (
+        <span className="flex shrink-0 items-center gap-1">
+          <TagIcon size={HEADER_ICON} />
+          {tagCount}
+        </span>
+      )}
+    </button>
   );
 }
 
@@ -993,7 +1076,7 @@ function PerspectiveZonePicker({
             : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
         }`}
       >
-        <SplitSquareHorizontal size={12} />
+        <SplitSquareHorizontal size={HEADER_ICON} />
         {count > 0 ? `${count} perspective${count > 1 ? "s" : ""}` : "Perspectives"}
       </button>
 

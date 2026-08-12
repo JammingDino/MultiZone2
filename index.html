@@ -5,6 +5,46 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>MultiZone</title>
+    <script>
+      /*
+       * Put back the appearance this install was last using, before the first
+       * paint.
+       *
+       * The real preferences live in the database, which means the window has
+       * already painted by the time the store has read them: a light-mode user
+       * saw a dark panel flash on every launch, and anyone who had changed the
+       * interface font size saw the whole UI resize a moment after it appeared.
+       *
+       * Nothing here decides anything. `applyThemeToDom` / `applyAppSettingsToDom`
+       * in store/app.ts write every one of their decisions as inline style and
+       * classes on <html>, and cache that element's `style` + `class` verbatim
+       * (see `saveBootSnapshot`) — so this is a replay of the last frame the app
+       * settled on, which the store then overwrites with the authoritative values
+       * a few hundred milliseconds later. A stale or missing snapshot is only ever
+       * the flash we had before.
+       */
+      try {
+        var mzBoot = JSON.parse(localStorage.getItem("mz.boot.v1") || "null");
+        if (mzBoot) {
+          var mzHtml = document.documentElement;
+          if (mzBoot.cls) mzHtml.className = mzBoot.cls;
+          if (mzBoot.style) mzHtml.setAttribute("style", mzBoot.style);
+          /* The webfont too — it is a network fetch, so starting it here rather
+             than after the store loads is the difference between the first text
+             the user sees being their font and being Inter. */
+          if (mzBoot.fontHref) {
+            var mzLink = document.createElement("link");
+            mzLink.id = "mz-font-link";
+            mzLink.rel = "stylesheet";
+            mzLink.href = mzBoot.fontHref;
+            document.head.appendChild(mzLink);
+          }
+        }
+      } catch (e) {
+        /* Storage disabled or corrupt — the app starts on its defaults, exactly
+           as it did before any of this existed. */
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

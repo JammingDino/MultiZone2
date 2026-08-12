@@ -740,3 +740,59 @@ html.shadows [class*="shadow-xl"] {
 @media (prefers-reduced-motion: reduce) {
   .mz-indeterminate { animation-duration: 2.4s; }
 }
+
+/* ===== View transitions =====
+   Opening the first chat used to swap the landing view for the conversation in
+   one frame: a header, a meta strip and a thread all appeared at once where a
+   moment ago there had been a greeting and a single box. The panels are the same
+   panels either way, so the change is announced rather than explained — these
+   are short entrance animations that let the eye follow what moved where.
+   Everything here is decoration, so it is dropped entirely for anyone who has
+   asked their system for less motion. */
+@keyframes mz-view-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes mz-drop-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes mz-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+/* The conversation arriving: the thread rises into place, the header drops from
+   under the title bar, and the composer follows a beat later so the eye lands on
+   it last — it is where the user is about to type. */
+.mz-view-in    { animation: mz-view-in 240ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }
+.mz-drop-in    { animation: mz-drop-in 220ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }
+.mz-fade-in    { animation: mz-fade-in 200ms ease-out both; }
+.mz-delay-60   { animation-delay: 60ms; }
+.mz-delay-120  { animation-delay: 120ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  .mz-view-in, .mz-drop-in, .mz-fade-in { animation: none; }
+}
+
+/* ===== Boot splash =====
+   The window paints before the store has read the theme, so a light-mode install
+   used to flash a dark panel on every launch (see `index.html`'s pre-paint
+   restore, which fixes the palette itself). This covers the rest of the gap —
+   the chat list, the background canvas, fonts — with the app's own mark being
+   drawn, and gets out of the way inside a second. */
+@keyframes mz-splash-draw {
+  from { stroke-dashoffset: var(--mz-splash-len); }
+  to   { stroke-dashoffset: 0; }
+}
+@keyframes mz-splash-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+.mz-splash-mark path {
+  stroke-dasharray: var(--mz-splash-len);
+  animation: mz-splash-draw 620ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+.mz-splash-out { animation: mz-splash-out 260ms ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .mz-splash-mark path { animation: none; stroke-dashoffset: 0; }
+}

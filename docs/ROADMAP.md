@@ -34,7 +34,7 @@ Semantic versioning. Each release is tagged `vMAJOR.MINOR.PATCH`.
 | **0.9.x** | Tool Improvements — naming clarity, file management, self-authored skills, reliability pass | In progress |
 | **0.10.x** | Reversible work — checkpoints, undo, review before apply | Planned |
 | **0.11.x** | The app sets itself up — API refresh, an API tool, connector catalog | In progress — API refresh and the API tool done; connectors open |
-| **0.12.x** | Planning & task control — plan mode, live task state, replay | Built — runtime testing open |
+| **0.12.x** | Planning & task control — plan mode, live task state, replay, chat-window pass | Built — runtime testing open |
 | **1.0.0** | Hardening & Public Release | Planned |
 | **1.1.x** | In-chat rendering — charts from data, richer artifacts | Planned |
 | **1.2.x** | Signed-in connectors — OAuth, keychain, per-scope consent | Planned |
@@ -146,7 +146,9 @@ The release closes by making one surface *usable* rather than merely reachable. 
 
 The `plan` tool gives a model a checklist. What it does not give the user is a say. Plan mode makes planning a state of the chat rather than a checklist the model keeps, and the way into it is asking for one — there is no button, because pressing it would mean deciding before you typed whether what you were about to type needed a plan. While the mode is on, mutating tools are withheld, read-only tools stay so the plan is grounded in real files, and the result is a structured artifact — ordered steps, expected files, risk per step — that the user edits before approving. An approved plan becomes the executing turn's task list, rendering live as steps tick off, with the ability to strike, add, or stop after the current step instead of cancelling the whole turn. The Multizone leader gets the same surface: leader plan and sub-agent plans in one tree, which is the first time that orchestration has had anywhere to hold a task. The release closes with the record: a session event log and a replay view, so what an agent did is inspectable after the fact and not only while it scrolls past.
 
-**Done when:** a user can ask for a plan, rewrite it, watch it execute step by step, intervene mid-run without losing the turn, and afterwards replay exactly what happened.
+**0.12.3 — the chat window earns its space.** The record and the chrome around it, since a replay nobody can read and a header nobody can parse are the same kind of failure. Replay stops being only the event log: the conversation is already stored, so it is woven into the same timeline — what was asked, what each zone answered, and every tool call with its arguments, its output and how long it took — which is what makes "where did that number come from?" answerable after the fact. The header row goes from five glyph sizes to one, the spend chip becomes a legible dollar sign, and the zone control drops the model id it was spending its width on. The permanent project/tag bar becomes a header chip that opens it, so a chat that is filed nowhere no longer pays a row of the window to say so, and the jump from the landing view to a conversation is animated rather than cut. Launch stops flashing: the appearance is restored from a cache before the first paint, and the app's mark is drawn over it for the half-second the rest of the window takes to arrive.
+
+**Done when:** a user can ask for a plan, rewrite it, watch it execute step by step, intervene mid-run without losing the turn, and afterwards replay exactly what happened — including what every tool returned.
 
 ---
 

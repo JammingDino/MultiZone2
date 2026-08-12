@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Download, FileText, FileType, Loader2 } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
+import { HEADER_ICON } from "@/lib/chrome";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 import {
   exportChatMarkdown,
@@ -118,7 +119,11 @@ export function ExportMenu({ chatId }: { chatId: string }) {
         title="Export this chat"
         className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2 py-1 text-xs text-[var(--color-text-muted)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
       >
-        {busy ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+        {busy ? (
+          <Loader2 size={HEADER_ICON} className="animate-spin" />
+        ) : (
+          <Download size={HEADER_ICON} />
+        )}
         Export
       </button>
 

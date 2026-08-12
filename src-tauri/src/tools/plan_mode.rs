@@ -1,11 +1,15 @@
 //! `enter_plan_mode` / `exit_plan_mode` (0.12.0) — the model's own hand on the
 //! mode switch.
 //!
-//! Plan mode is a chat mode the user can turn on, but the case it matters most
-//! in is the one where they didn't: a request that sounded small turns out to
-//! rewrite six files, and the model is the first to know. Every harness worth
-//! copying gives the model that move — PI's `EnterPlanMode()`, Claude Code's and
-//! Codex's exits — so it lives here too, in both directions:
+//! Plan mode is a state of the chat, and since 0.12.1 these two tools are the
+//! only way a chat enters and leaves it — the composer toggle is gone. A button
+//! asked the user to decide, before typing, whether what they were about to type
+//! was big enough to need a plan; that is the judgement they came to the model
+//! for. Asking for a plan does it instead, and so does the case that matters
+//! most: a request that sounded small turns out to rewrite six files, and the
+//! model is the first to know. Every harness worth copying gives the model that
+//! move — PI's `EnterPlanMode()`, Claude Code's and Codex's exits — so it lives
+//! here too, in both directions:
 //!
 //! - `enter_plan_mode` takes the model *into* planning mid-turn: the mutating
 //!   tools go away from the next step onward, and it keeps investigating with
@@ -32,12 +36,14 @@ pub fn enter_definition() -> Tool {
         function: ToolFunction {
             name: "enter_plan_mode".into(),
             description:
-                "Switch this chat into plan mode when a request turns out to need more \
-                 changes, or riskier ones, than the user is likely to have pictured — several \
-                 files, a migration, anything you would want agreed before it happens. Your \
-                 mutating tools are withheld from the next step onward; you keep every \
-                 read-only tool, investigate, and finish with `exit_plan_mode`. Do not call it \
-                 for work you can simply do."
+                "Switch this chat into plan mode. Call it when the user asks for a plan, or to \
+                 see the plan first, or to hold off until they have agreed — this tool is the \
+                 only way to give them one, so do not write the plan out in prose instead. Call \
+                 it unasked when a request turns out to need more changes, or riskier ones, than \
+                 the user is likely to have pictured — several files, a migration, anything you \
+                 would want agreed before it happens. Your mutating tools are withheld from the \
+                 next step onward; you keep every read-only tool, investigate, and finish with \
+                 `exit_plan_mode`. Do not call it for work you can simply do."
                     .into(),
             parameters: json!({
                 "type": "object",

@@ -1341,6 +1341,10 @@ export const useApp = create<AppStore>((set, get) => ({
       },
     }));
   },
+  // No UI caller since 0.12.1: entering plan mode is the model's move
+  // (`enter_plan_mode`) and leaving it is approving or rejecting the plan. Kept
+  // as the frontend half of the command behind `POST /api/chats/:id/plan-mode`,
+  // so a script or a model driving the app can still set the mode directly.
   async setChatPlanMode(chatId, on) {
     await api.setChatPlanMode(chatId, on);
     set((s) => ({

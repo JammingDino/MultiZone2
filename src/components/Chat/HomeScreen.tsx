@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Send, ChevronDown, Zap, Check, Layers, Settings as SettingsIcon, Loader2, Brain, Paperclip, Tag, X, SplitSquareHorizontal, Crown, Users, Upload, ScanText, ClipboardList } from "lucide-react";
+import { Send, ChevronDown, Zap, Check, Layers, Settings as SettingsIcon, Loader2, Brain, Paperclip, Tag, X, SplitSquareHorizontal, Crown, Users, Upload, ScanText } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { getZoneIcon } from "@/lib/zoneIcons";
@@ -60,8 +60,6 @@ export function HomeScreen() {
   // Plan first (0.12.0). Orthogonal to which zone answers rather than an
   // alternative to it — a plan is still planned *by* somebody — so it rides in
   // the mode menu as its own switch instead of a fifth exclusive entry.
-  const [planFirst, setPlanFirst] = useState(false);
-  const setChatPlanMode = useApp((s) => s.setChatPlanMode);
 
   const [mode, setMode] = useState<Mode>(() => {
     // Mount path for "new chat" started from a project: honour its default zone.
@@ -296,11 +294,6 @@ export function HomeScreen() {
       if (currentMode.type === "smart") {
         await setChatSmart(chat.id, true);
       }
-      // Set before the first message goes out, or the opening turn is the one
-      // turn of the chat that could still change things.
-      if (planFirst) {
-        await setChatPlanMode(chat.id, true);
-      }
       // Multizone session: a leader primary delegates to a sub-agent roster
       // rather than running perspective zones. Set the roster before sending so
       // the leader's first turn already knows which zones it can spawn.
@@ -477,14 +470,6 @@ export function HomeScreen() {
                       <Layers size={12} /> Choose a zone
                     </>
                   )}
-                  {planFirst && (
-                    <span
-                      title="This chat starts in plan mode"
-                      className="flex items-center gap-1 rounded-full bg-[var(--color-accent)]/15 px-1.5 py-0.5 text-[10px] text-[var(--color-accent)]"
-                    >
-                      <ClipboardList size={9} /> plan
-                    </span>
-                  )}
                   <ChevronDown size={12} className="ml-auto shrink-0" />
                 </button>
 
@@ -571,22 +556,6 @@ export function HomeScreen() {
                           </button>
                         );
                       })}
-
-                      <div className="my-1 border-t border-[var(--color-border)]" />
-                      <button
-                        onClick={() => setPlanFirst((v) => !v)}
-                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)]"
-                        title="Start in plan mode: the model reads and proposes a plan you approve before anything is changed"
-                      >
-                        <ClipboardList size={13} className="text-[var(--color-accent)]" />
-                        <div className="flex-1">
-                          <div>Plan first</div>
-                          <div className="text-xs text-[var(--color-text-muted)]">
-                            Read-only until you approve a plan
-                          </div>
-                        </div>
-                        {planFirst && <Check size={12} className="text-[var(--color-accent)]" />}
-                      </button>
 
                       <div className="my-1 border-t border-[var(--color-border)]" />
                       <button

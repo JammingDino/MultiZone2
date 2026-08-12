@@ -58,7 +58,6 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
   const providers = useApp((s) => s.providers);
   const baseZoneId = useApp((s) => s.appSettings.baseZoneId);
   const visionOverrides = useApp((s) => s.appSettings.visionOverrides);
-  const setChatPlanMode = useApp((s) => s.setChatPlanMode);
   const planMode = !!chats.find((c) => c.id === chatId)?.planMode;
   const fileRef = useRef<HTMLInputElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -401,34 +400,25 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
             />
           </div>
         )}
-        {/* Plan mode (0.12.0). A per-chat mode, so its control belongs on the
-            composer rather than in a menu: while it is on, everything you send
-            is planning, and that is worth saying continuously rather than once.
-            The same switch the model reaches through `enter_plan_mode`. */}
-        <div className="mb-2 flex items-center gap-2">
-          <button
-            onClick={() => void setChatPlanMode(chatId, !planMode)}
-            disabled={disabled}
-            title={
-              planMode
-                ? "Plan mode is on — mutating tools are withheld until you approve a plan. Click to leave."
-                : "Plan first: the model reads and proposes a plan you approve before anything changes."
-            }
-            className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition disabled:opacity-40 ${
-              planMode
-                ? "border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]"
-                : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
-            }`}
-          >
-            <ClipboardList size={11} />
-            {planMode ? "Plan mode" : "Plan first"}
-          </button>
-          {planMode && (
+        {/* Plan mode (0.12.1). Entering is the model's move, not a button: the
+            user asks for a plan in prose and the model calls `enter_plan_mode`.
+            What stays here is the state, because a mode that silently withholds
+            tools has to be visible while it is on — an indicator, not a switch.
+            Leaving is by approving or rejecting the plan in `PlanReview`. */}
+        {planMode && (
+          <div className="mb-2 flex items-center gap-2">
+            <span
+              title="Mutating tools are withheld until you approve a plan."
+              className="flex items-center gap-1.5 rounded-full border border-[var(--color-accent)] bg-[var(--color-accent)]/10 px-2.5 py-1 text-xs text-[var(--color-accent)]"
+            >
+              <ClipboardList size={11} />
+              Plan mode
+            </span>
             <span className="text-[11px] text-[var(--color-text-muted)]">
               Read-only until you approve a plan.
             </span>
-          )}
-        </div>
+          </div>
+        )}
         <DictationMeter dictation={dictation} />
         {dictation.voiceError && (
           <div className="mb-2 flex w-fit items-center gap-1.5 rounded-full border border-red-500/40 bg-red-500/10 px-2.5 py-1 text-xs text-red-600 dark:text-red-400">

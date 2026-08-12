@@ -137,7 +137,8 @@ Needs two builds: install version N, then publish N+1.
 
 ## 11b. Planning & task control (0.12.x)
 
-- [ ] Turning "Plan first" on in the new-chat menu opens a chat already in plan mode
+- [ ] Asking for a plan in prose ("plan this first") puts the chat into plan mode — there is no button, and no "Plan first" entry in the new-chat menu
+- [ ] While plan mode is on the composer shows the indicator, and it is not clickable
 - [ ] In plan mode, a request that would write refuses to write: the model reads and asks instead, and the tool list it is offered contains no mutating tool
 - [ ] A model asked to do something large calls `enter_plan_mode` itself, and says why
 - [ ] `exit_plan_mode` ends the turn and shows the plan card — the model does not also ask "is this plan ok?" in prose

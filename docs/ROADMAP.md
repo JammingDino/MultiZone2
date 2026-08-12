@@ -34,7 +34,7 @@ Semantic versioning. Each release is tagged `vMAJOR.MINOR.PATCH`.
 | **0.9.x** | Tool Improvements — naming clarity, file management, self-authored skills, reliability pass | In progress |
 | **0.10.x** | Reversible work — checkpoints, undo, review before apply | Planned |
 | **0.11.x** | The app sets itself up — API refresh, an API tool, connector catalog | In progress — API refresh and the API tool done; connectors open |
-| **0.12.x** | Planning & task control — plan mode, live task state, replay | Built |
+| **0.12.x** | Planning & task control — plan mode, live task state, replay | Built — runtime testing open |
 | **1.0.0** | Hardening & Public Release | Planned |
 | **1.1.x** | In-chat rendering — charts from data, richer artifacts | Planned |
 | **1.2.x** | Signed-in connectors — OAuth, keychain, per-scope consent | Planned |

@@ -1028,9 +1028,89 @@ function VoiceTab() {
       </section>
 
       <section>
+        <h3 className="mb-1 text-sm font-medium">Audio uploads</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          Drop an audio file into any composer — MP3, WAV, M4A, MP4, FLAC, OGG, WebM — and it is
+          transcribed by the provider above, then sent as text. That is what lets a{" "}
+          <em>text-only</em> model take spoken input: it never sees audio, only the transcript.
+        </p>
+        {(!appSettings.sttProviderId || !appSettings.sttModel) && (
+          <p className="mb-3 text-xs text-amber-600 dark:text-amber-400">
+            Audio uploads need the transcription provider above configured first.
+          </p>
+        )}
+
+        <p className="mb-2 text-xs text-[var(--color-text-muted)]">When a transcript is ready</p>
+        <OptionCards
+          value={appSettings.sttUploadMode}
+          onChange={(sttUploadMode) => setAppSettings({ sttUploadMode })}
+          options={[
+            ["quick", "Use it", "Put the transcript straight into the message box"],
+            ["review", "Review first", "Read and correct it on the chip before sending"],
+          ]}
+        />
+
+        <p className="mb-2 mt-4 text-xs text-[var(--color-text-muted)]">How it reaches the model</p>
+        <OptionCards
+          value={appSettings.sttUploadInjection}
+          onChange={(sttUploadInjection) => setAppSettings({ sttUploadInjection })}
+          options={[
+            ["message", "As my message", "The transcript becomes the text you send"],
+            ["context", "As an attachment", "Model reads it as context; the message box stays yours"],
+          ]}
+        />
+        <p className="mt-2 text-xs text-[var(--color-text-muted)]">
+          “As an attachment” is the one that works for long recordings: the whole transcript goes to
+          the model while you type the actual instruction — “summarise this meeting”, “what did I
+          promise to do?”.
+        </p>
+
+        <div className="mt-4">
+          <ToggleRow
+            label="Include timestamps and language"
+            description="Asks the endpoint for per-segment timings, the detected language and a note on passages it was unsure of. Not every OpenAI-compatible server implements this."
+            checked={appSettings.sttUploadMetadata}
+            onChange={(sttUploadMetadata) => setAppSettings({ sttUploadMetadata })}
+          />
+        </div>
+
+        <div className="mt-4 flex flex-col gap-3">
+          <SliderRow
+            label="Maximum file size"
+            value={appSettings.sttUploadMaxMb}
+            min={1}
+            max={200}
+            step={1}
+            display={`${appSettings.sttUploadMaxMb} MB`}
+            onChange={(sttUploadMaxMb) => setAppSettings({ sttUploadMaxMb })}
+          />
+          <SliderRow
+            label="Maximum duration"
+            value={appSettings.sttUploadMaxMinutes}
+            min={0}
+            max={480}
+            step={5}
+            display={
+              appSettings.sttUploadMaxMinutes === 0
+                ? "no limit"
+                : `${appSettings.sttUploadMaxMinutes} min`
+            }
+            onChange={(sttUploadMaxMinutes) => setAppSettings({ sttUploadMaxMinutes })}
+          />
+        </div>
+        <p className="mt-2 text-xs text-[var(--color-text-muted)]">
+          OpenAI's hosted endpoint rejects anything over 25 MB itself; raise this only for a local
+          or self-hosted server with its own ceiling. Duration is measured before upload, and a
+          format this machine can't decode is uploaded anyway rather than refused on a guess.
+        </p>
+      </section>
+
+      <section>
         <h3 className="mb-1 text-sm font-medium">Language</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          BCP-47-ish language code (e.g. <span className="font-mono">en</span>). Leave empty to auto-detect.
+          BCP-47-ish language code (e.g. <span className="font-mono">en</span>). Leave empty to auto-detect
+          — which is the better default for both dictation and uploads, since the model identifies the
+          language itself and forcing the wrong one is worse than letting it decide.
         </p>
         <input
           type="text"

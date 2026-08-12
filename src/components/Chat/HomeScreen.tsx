@@ -7,8 +7,10 @@ import type { InputPart, Zone } from "@/lib/types";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 import { attachmentToParts } from "@/lib/attachFiles";
 import {
+  appendTranscript,
   AttachError,
   AttachmentRow,
+  AudioModeRow,
   readFileAsDataUrl,
   useAttachments,
 } from "@/components/Chat/Attachments";
@@ -65,7 +67,9 @@ export function HomeScreen() {
     return { type: "quick" };
   });
   const [text, setText] = useState(homeScreenDraft);
-  const tray = useAttachments();
+  // Starting a chat from a voice note: the transcript becomes the opening
+  // message, same as it does in the in-chat composer (0.12.0).
+  const tray = useAttachments({ onTranscript: (t) => appendTranscript(setText, t) });
   const pending = tray.pending;
   const [menuOpen, setMenuOpen] = useState(false);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
@@ -153,6 +157,9 @@ export function HomeScreen() {
   const canSend =
     (text.trim().length > 0 || pending.length > 0) &&
     !sending &&
+    // An audio chip carries no content until its transcript lands, so sending
+    // mid-transcription would quietly drop the recording.
+    !tray.transcribing &&
     !quickSelectedButUnavailable &&
     !multizoneSelectedButUnavailable;
 
@@ -366,6 +373,7 @@ export function HomeScreen() {
         {/* Composer */}
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-2 shadow-sm focus-within:border-[var(--color-accent)]">
           <AttachError tray={tray} />
+          <AudioModeRow tray={tray} />
           <AttachmentRow tray={tray} />
           {ocrFallback && hasVisualAttachment && (
             <div

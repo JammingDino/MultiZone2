@@ -41,8 +41,9 @@ export interface TraceImagesItem {
 /** One file the user attached to a turn. */
 export interface TraceAttachment {
   fileName: string;
-  /** How it was sent: rendered PDF pages, extracted PDF text, or a text file. */
-  mode: "images" | "text" | "file";
+  /** How it was sent: rendered PDF pages, extracted PDF text, a text file, or a
+   *  transcribed audio upload. */
+  mode: "images" | "text" | "file" | "audio";
   /** Page count, for a PDF sent as page images. */
   pages: number | null;
   /** Character count of the text the model received, when it was text. */

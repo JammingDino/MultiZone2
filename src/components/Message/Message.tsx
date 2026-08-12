@@ -3,7 +3,7 @@ import type { ContentPart, Message, InputPart } from "@/lib/types";
 import { Markdown } from "@/components/Renderers/Markdown";
 import { StreamingMarkdown } from "@/components/Renderers/StreamingMarkdown";
 import { useThrottledStreaming } from "@/lib/useThrottledStreaming";
-import { User, X, FileType, ZoomIn } from "lucide-react";
+import { AudioLines, User, X, FileType, ZoomIn } from "lucide-react";
 import { StepBlock } from "./StepBlock";
 import { ActivityRail } from "./ActivityRail";
 import { PerspectiveStatusLine, PrimaryStatusLine } from "./StatusLine";
@@ -245,7 +245,11 @@ function UserMessageImpl({ message }: { message: Message }) {
                   className="flex items-center gap-1.5 rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1 text-xs hover:border-[var(--color-accent)] hover:bg-[var(--color-panel-hover)]"
                   title="Click to preview"
                 >
-                  <FileType size={11} className="shrink-0 text-[var(--color-text-muted)]" />
+                  {f.mode === "audio" ? (
+                    <AudioLines size={11} className="shrink-0 text-[var(--color-text-muted)]" />
+                  ) : (
+                    <FileType size={11} className="shrink-0 text-[var(--color-text-muted)]" />
+                  )}
                   <span className="max-w-[180px] truncate">{f.fileName}</span>
                   <ZoomIn size={10} className="shrink-0 text-[var(--color-text-muted)]" />
                 </button>

@@ -13,13 +13,95 @@ use reqwest::Client;
 
 use crate::error::{AppError, AppResult};
 
-/// POSTs the recorded audio to a provider's OpenAI-compatible transcription
-/// endpoint and returns the transcript text.
+/// One timed span of a transcript, as `verbose_json` reports it.
 ///
-/// `file_name` is the name the audio is uploaded under; its extension is what
-/// most servers (and ffmpeg behind them) use to pick a decoder, so a caller
-/// uploading an existing file should pass that file's real name rather than a
-/// generic one.
+/// `no_speech_prob` is whisper's own confidence that the span is *not* speech —
+/// the closest thing the endpoint gives us to a per-segment confidence score, and
+/// what the UI's metadata header surfaces so a user can see which passages the
+/// model was unsure about rather than trusting a flat wall of text.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptSegment {
+    #[serde(default)]
+    pub start: f64,
+    #[serde(default)]
+    pub end: f64,
+    #[serde(default)]
+    pub text: String,
+    #[serde(default, alias = "no_speech_prob")]
+    pub no_speech_prob: Option<f64>,
+}
+
+/// A finished transcription. The metadata fields are only populated when the
+/// caller asked for `verbose_json` *and* the provider actually implements it —
+/// a plain-`json` provider (or a shim that ignores the parameter) still yields a
+/// usable `text` with everything else empty, which is why they are all optional
+/// rather than a separate result type.
+#[derive(Debug, Clone, serde::Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Transcription {
+    pub text: String,
+    /// Detected (or forced) language, as the endpoint names it.
+    pub language: Option<String>,
+    /// Audio duration in seconds, per the endpoint.
+    pub duration_secs: Option<f64>,
+    pub segments: Vec<TranscriptSegment>,
+}
+
+/// `verbose_json`'s response. Every field past `text` is optional so a provider
+/// that answers a plain `{"text": ...}` to a verbose request still parses.
+#[derive(serde::Deserialize)]
+struct TranscriptionResponse {
+    text: String,
+    #[serde(default)]
+    language: Option<String>,
+    #[serde(default)]
+    duration: Option<f64>,
+    #[serde(default)]
+    segments: Vec<TranscriptSegment>,
+}
+
+/// The MIME type to upload a given audio file extension as.
+///
+/// The endpoint dispatches on the uploaded part's filename and content type, so
+/// sending every recording as `audio/wav` (as dictation used to, having only ever
+/// produced WAVs) makes a strict endpoint reject a perfectly valid `.m4a`. The
+/// list is exactly the set OpenAI's `/audio/transcriptions` documents as
+/// accepted; an unknown extension falls back to `application/octet-stream` and is
+/// left for the endpoint to accept or refuse on its own terms, rather than being
+/// blocked here on a guess.
+pub fn audio_mime_for(file_name: &str) -> &'static str {
+    let ext = std::path::Path::new(file_name)
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "wav" => "audio/wav",
+        "mp3" | "mpga" => "audio/mpeg",
+        "m4a" => "audio/mp4",
+        "mp4" => "video/mp4",
+        "mpeg" => "video/mpeg",
+        "flac" => "audio/flac",
+        "ogg" | "oga" => "audio/ogg",
+        "opus" => "audio/opus",
+        "webm" => "audio/webm",
+        "aac" => "audio/aac",
+        _ => "application/octet-stream",
+    }
+}
+
+/// POSTs audio to a provider's OpenAI-compatible transcription endpoint.
+///
+/// `file_name` travels with the upload rather than being invented here: the
+/// endpoint reads the extension to decide how to decode the bytes, so an
+/// uploaded `notes.m4a` has to arrive called that.
+///
+/// `verbose` asks for `response_format=verbose_json` (per-segment timings, the
+/// detected language, the duration). A provider that doesn't implement it
+/// answers ordinary JSON, which still deserializes — so verbose is a request,
+/// not a requirement, and the caller checks whether the metadata came back
+/// rather than assuming it did.
 pub async fn transcribe_via_provider(
     http: &Client,
     base_url: &str,
@@ -28,9 +110,9 @@ pub async fn transcribe_via_provider(
     audio_bytes: Vec<u8>,
     file_name: &str,
     lang: Option<&str>,
-) -> AppResult<String> {
+    verbose: bool,
+) -> AppResult<Transcription> {
     let url = format!("{}/audio/transcriptions", base_url.trim_end_matches('/'));
-    let mime = mime_for(file_name);
 
     let mut form = reqwest::multipart::Form::new()
         .text("model", model.to_string())
@@ -38,19 +120,22 @@ pub async fn transcribe_via_provider(
             "file",
             reqwest::multipart::Part::bytes(audio_bytes)
                 .file_name(file_name.to_string())
-                .mime_str(mime)?,
+                .mime_str(audio_mime_for(file_name))?,
         );
     if let Some(l) = lang {
         if !l.is_empty() {
             form = form.text("language", l.to_string());
         }
     }
+    if verbose {
+        form = form.text("response_format", "verbose_json");
+    }
 
     // Same diagnostics as the TTS path: this prints to the `npm run tauri dev`
     // console and is the quickest way to separate a misconfigured
     // endpoint/model from an actual transcription failure.
     tracing::info!(
-        "STT request → POST {url} (model={model:?}, file={file_name:?}, lang={lang:?}, auth={})",
+        "STT request → POST {url} (model={model:?}, file={file_name:?}, lang={lang:?}, verbose={verbose}, auth={})",
         api_key.map(|k| !k.is_empty()).unwrap_or(false),
     );
 
@@ -106,8 +191,8 @@ pub async fn transcribe_via_provider(
         )));
     }
 
-    match extract_transcript(&body_text) {
-        Some(text) => Ok(text.trim().to_string()),
+    match parse_transcription(&body_text) {
+        Some(t) => Ok(t),
         None => {
             tracing::error!("STT endpoint returned an unrecognized body ({content_type}): {body_text}");
             Err(AppError::Provider(format!(
@@ -118,25 +203,41 @@ pub async fn transcribe_via_provider(
     }
 }
 
-/// Pulls the transcript out of whatever the endpoint answered with.
+/// Pulls a `Transcription` out of whatever the endpoint answered with.
 ///
-/// OpenAI's documented shape is `{"text": "..."}`, but the servers people point
-/// this at in practice are not all faithful to it: some answer plain text, some
-/// use `transcript`, some only return `verbose_json`-style `segments`, and some
-/// wrap the payload one level deep. Accepting all of those is the difference
-/// between dictation working and an opaque decode error, so parse leniently and
-/// only give up when there is genuinely no text anywhere.
-fn extract_transcript(body: &str) -> Option<String> {
+/// The documented shape is tried first so `verbose_json`'s metadata survives.
+/// Everything after it is salvage: the servers people point this at are not all
+/// faithful to the spec — some answer plain text, some use `transcript`, some
+/// only return segments, some wrap the payload one level deep — and accepting
+/// those is the difference between transcription working and an opaque decode
+/// error. Metadata is lost on the salvage paths, which is why they are the
+/// fallback rather than the primary parse.
+fn parse_transcription(body: &str) -> Option<Transcription> {
     let trimmed = body.trim();
     if trimmed.is_empty() {
         return None;
     }
+    if let Ok(parsed) = serde_json::from_str::<TranscriptionResponse>(trimmed) {
+        return Some(Transcription {
+            text: parsed.text.trim().to_string(),
+            language: parsed.language.filter(|l| !l.is_empty()),
+            duration_secs: parsed.duration,
+            segments: parsed.segments,
+        });
+    }
+    extract_transcript(trimmed).map(|text| Transcription {
+        text: text.trim().to_string(),
+        ..Default::default()
+    })
+}
 
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+/// Best-effort transcript text from a body that isn't the documented shape.
+fn extract_transcript(body: &str) -> Option<String> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
         // Not JSON at all — a server that answers `text/plain` with the
         // transcript itself. Anything that looks like markup is not a
         // transcript (an HTML error page from a reverse proxy, say).
-        return if trimmed.starts_with('<') { None } else { Some(trimmed.to_string()) };
+        return if body.starts_with('<') { None } else { Some(body.to_string()) };
     };
     transcript_from_value(&value)
 }
@@ -152,7 +253,7 @@ fn transcript_from_value(value: &serde_json::Value) -> Option<String> {
                     }
                 }
             }
-            // `verbose_json` without a top-level `text`: stitch the segments.
+            // Segments without a top-level `text`: stitch them together.
             for key in ["segments", "chunks", "results"] {
                 if let Some(items) = map.get(key).and_then(|v| v.as_array()) {
                     let joined = items
@@ -179,26 +280,6 @@ fn transcript_from_value(value: &serde_json::Value) -> Option<String> {
     }
 }
 
-/// The MIME type to upload an audio file under, from its extension. Servers
-/// generally sniff the filename anyway, but sending `audio/wav` for an MP3 is
-/// the kind of mismatch a strict endpoint rejects outright.
-fn mime_for(file_name: &str) -> &'static str {
-    let ext = std::path::Path::new(file_name)
-        .extension()
-        .and_then(|s| s.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    match ext.as_str() {
-        "mp3" => "audio/mpeg",
-        "mp4" | "m4a" => "audio/mp4",
-        "ogg" | "oga" => "audio/ogg",
-        "flac" => "audio/flac",
-        "webm" => "audio/webm",
-        "mpeg" | "mpga" => "audio/mpeg",
-        _ => "audio/wav",
-    }
-}
-
 fn truncate(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         s.to_string()
@@ -209,30 +290,49 @@ fn truncate(s: &str, max: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::extract_transcript;
+    use super::{audio_mime_for, parse_transcription};
 
     #[test]
     fn reads_the_openai_shape() {
-        assert_eq!(extract_transcript(r#"{"text":"hello there"}"#).unwrap(), "hello there");
+        let t = parse_transcription(r#"{"text":"hello there"}"#).unwrap();
+        assert_eq!(t.text, "hello there");
+        assert!(t.segments.is_empty());
     }
 
     #[test]
-    fn reads_plain_text_and_alternate_keys() {
-        assert_eq!(extract_transcript("hello there").unwrap(), "hello there");
-        assert_eq!(extract_transcript(r#"{"transcript":"hi"}"#).unwrap(), "hi");
-        assert_eq!(extract_transcript(r#"{"data":{"text":"hi"}}"#).unwrap(), "hi");
+    fn keeps_verbose_metadata() {
+        let body = r#"{"text":"hi","language":"en","duration":1.5,
+            "segments":[{"start":0.0,"end":1.5,"text":"hi","no_speech_prob":0.01}]}"#;
+        let t = parse_transcription(body).unwrap();
+        assert_eq!(t.language.as_deref(), Some("en"));
+        assert_eq!(t.duration_secs, Some(1.5));
+        assert_eq!(t.segments.len(), 1);
+    }
+
+    #[test]
+    fn salvages_plain_text_and_alternate_keys() {
+        assert_eq!(parse_transcription("hello there").unwrap().text, "hello there");
+        assert_eq!(parse_transcription(r#"{"transcript":"hi"}"#).unwrap().text, "hi");
+        assert_eq!(parse_transcription(r#"{"data":{"text":"hi"}}"#).unwrap().text, "hi");
     }
 
     #[test]
     fn stitches_segments_when_there_is_no_top_level_text() {
         let body = r#"{"segments":[{"text":"one"},{"text":"two"}]}"#;
-        assert_eq!(extract_transcript(body).unwrap(), "one two");
+        assert_eq!(parse_transcription(body).unwrap().text, "one two");
     }
 
     #[test]
     fn rejects_bodies_with_no_transcript() {
-        assert!(extract_transcript("").is_none());
-        assert!(extract_transcript("<html>oops</html>").is_none());
-        assert!(extract_transcript(r#"{"error":"nope"}"#).is_none());
+        assert!(parse_transcription("").is_none());
+        assert!(parse_transcription("<html>oops</html>").is_none());
+        assert!(parse_transcription(r#"{"error":"nope"}"#).is_none());
+    }
+
+    #[test]
+    fn maps_extensions_to_mime_types() {
+        assert_eq!(audio_mime_for("notes.m4a"), "audio/mp4");
+        assert_eq!(audio_mime_for("dictation.wav"), "audio/wav");
+        assert_eq!(audio_mime_for("mystery.bin"), "application/octet-stream");
     }
 }

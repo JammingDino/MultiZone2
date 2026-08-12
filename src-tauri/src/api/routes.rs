@@ -352,6 +352,7 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("voice::create_cloned_voice", GuiOnly("uploads a reference sample chosen in a native file dialog")),
     ("voice::delete_cloned_voice", GuiOnly("removes a voice from a picker in Settings")),
     ("voice::transcribe_audio_file", GuiOnly("transcribes a file chosen in a native file dialog")),
+    ("voice::transcribe_audio_upload", GuiOnly("transcribes bytes the window already holds as a composer attachment")),
 ];
 
 // ─── Handlers ─────────────────────────────────────────────────────────────────

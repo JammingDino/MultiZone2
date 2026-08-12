@@ -24,18 +24,86 @@ import { claimSettingsDrop } from "@/lib/importSettings";
  *
  * Four fixed greetings meant the same four strings for the life of the install,
  * which is a lot of mornings to be told "Good morning" by software. Each bucket
- * keeps its plain form and adds a few that notice *when* you are here — the small
- * hours read differently from mid-afternoon, and an app that says so is better
- * company than one that doesn't. Deliberately short and low-key: this is a label
- * above a text box, not a personality.
+ * now holds a dozen or so that notice *when* you are here: the small hours read
+ * differently from mid-afternoon, and an app that says so is better company than
+ * one that doesn't.
+ *
+ * Two rules for anything added here. Every line has to earn its place, so the
+ * one-word stubs are gone ("Morning" is not a greeting, it is a timestamp) and
+ * one canonical form per bucket is enough. And no em dashes: the greeting is set
+ * large and centred, where a dash reads as a missing second half.
  */
 const GREETINGS: [until: number, phrases: string[]][] = [
-  [5, ["Late night tinkering again", "Still up?", "The small hours", "Working late", "Nobody else is awake"]],
-  [8, ["Early start", "Up before the rest", "Morning, early one", "First light"]],
-  [12, ["Good morning", "Morning", "Fresh start", "Morning — what's first?"]],
-  [17, ["Good afternoon", "Afternoon", "Back at it", "Halfway through"]],
-  [21, ["Good evening", "Evening", "Winding down?", "Evening shift"]],
-  [24, ["Still going", "Late one tonight", "Night owl hours", "Good evening"]],
+  // The small hours.
+  [5, [
+    "Late night tinkering again",
+    "Still up?",
+    "The small hours",
+    "Working late",
+    "Nobody else is awake",
+    "Burning the midnight oil",
+    "One more thing before bed?",
+    "The quiet part of the night",
+    "Sleep is for tomorrow",
+    "Just you and the machine",
+  ]],
+  // Before the day has properly started.
+  [8, [
+    "Early start",
+    "Up before the rest",
+    "First light",
+    "Beat the sunrise",
+    "An early one today",
+    "The whole day ahead",
+    "Quiet start",
+    "Up with the birds",
+    "Nice and early",
+  ]],
+  [12, [
+    "Good morning",
+    "Fresh start",
+    "What's first today?",
+    "Morning shift",
+    "Ready when you are",
+    "A clear morning ahead",
+    "Let's make a start",
+    "Plenty of morning left",
+    "Straight to it then",
+  ]],
+  [17, [
+    "Good afternoon",
+    "Back at it",
+    "Halfway through",
+    "Afternoon stretch",
+    "Post-lunch push",
+    "The long stretch",
+    "Still plenty of day left",
+    "Picking up where you left off",
+    "Afternoon then",
+  ]],
+  [21, [
+    "Good evening",
+    "Winding down?",
+    "Evening shift",
+    "Clocking off soon?",
+    "The last stretch of the day",
+    "Just getting started?",
+    "Tidying up for the day?",
+    "Evening then",
+    "Time for one more?",
+  ]],
+  // Late, but not yet unreasonable.
+  [24, [
+    "Still going",
+    "Late one tonight",
+    "Night owl hours",
+    "Good evening",
+    "Wrapping up?",
+    "One last push?",
+    "The house is quiet",
+    "Late shift",
+    "Winning against the clock?",
+  ]],
 ];
 
 /** A greeting for the hour `now` falls in. Exported shape kept trivial so the

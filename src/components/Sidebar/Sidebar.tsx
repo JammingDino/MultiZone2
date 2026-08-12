@@ -195,7 +195,7 @@ export function Sidebar() {
         {/* Footer icons */}
         <div className="mt-auto border-t border-[var(--color-border)] p-1 flex flex-col items-center gap-1">
           <button
-            onClick={openZoneLibrary}
+            onClick={() => openZoneLibrary()}
             title="Configure Zones"
             className="rounded p-2 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-accent)]"
           >
@@ -436,7 +436,7 @@ export function Sidebar() {
       {/* Footer buttons */}
       <div className="border-t border-[var(--color-border)] p-2 flex flex-col gap-1">
         <button
-          onClick={openZoneLibrary}
+          onClick={() => openZoneLibrary()}
           className="flex w-full items-center justify-center gap-2 rounded-md border border-[var(--color-border)] py-2 text-xs transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
         >
           <Layers size={13} />

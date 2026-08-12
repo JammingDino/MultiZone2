@@ -329,6 +329,23 @@ interface AppStore {
   editingZoneId: string | null;
   zonesPanelOpen: boolean;
   zoneLibraryOpen: boolean;
+  /**
+   * Where "Configure Zones" was opened from, so it can offer a way back.
+   * `"settings"` when it was reached through Settings → Zones — the library
+   * then shows a back button that reopens Settings instead of dropping the user
+   * on the chat. Null when it was opened from the sidebar, which has nothing to
+   * go back to.
+   */
+  zoneLibraryReturnTo: "settings" | null;
+  /**
+   * The Settings tab to land on the next time Settings opens (the id of a tab
+   * in SettingsModal), or null for its own default. Set when something outside
+   * Settings sends the user there — the zone library's back button, so it
+   * returns to the Zones entry it was launched from rather than to Providers.
+   */
+  settingsInitialTab: string | null;
+  /** Same breadcrumb for the zone editor, which Settings → Zones can also open. */
+  zoneEditorReturnTo: "settings" | null;
   defaultZoneId: string | null;
   shortcutsHelpOpen: boolean;
   /** Whether the sidebar is expanded. Persisted across sessions (ui.sidebarOpen). */
@@ -380,12 +397,16 @@ interface AppStore {
 
   openSettings: () => void;
   closeSettings: () => void;
-  openZoneEditor: (id: string | null) => void;
+  openZoneEditor: (id: string | null, returnTo?: "settings") => void;
   closeZoneEditor: () => void;
+  /** Leave the zone editor and reopen whatever opened it (Settings). */
+  returnFromZoneEditor: () => void;
   openZonesPanel: () => void;
   closeZonesPanel: () => void;
-  openZoneLibrary: () => void;
+  openZoneLibrary: (returnTo?: "settings") => void;
   closeZoneLibrary: () => void;
+  /** Leave the zone library and reopen whatever opened it (Settings). */
+  returnFromZoneLibrary: () => void;
   setDefaultZone: (id: string | null) => Promise<void>;
   loadDefaultZone: () => Promise<void>;
   openShortcutsHelp: () => void;
@@ -733,6 +754,9 @@ export const useApp = create<AppStore>((set, get) => ({
   editingZoneId: null,
   zonesPanelOpen: false,
   zoneLibraryOpen: false,
+  zoneLibraryReturnTo: null,
+  settingsInitialTab: null,
+  zoneEditorReturnTo: null,
   defaultZoneId: null,
   shortcutsHelpOpen: false,
   sidebarOpen: readSidebarOpen(),
@@ -1451,12 +1475,47 @@ export const useApp = create<AppStore>((set, get) => ({
   },
   openSettings: () => set({ settingsOpen: true }),
   closeSettings: () => set({ settingsOpen: false }),
-  openZoneEditor: (id) => set({ zoneEditorOpen: true, editingZoneId: id }),
-  closeZoneEditor: () => set({ zoneEditorOpen: false, editingZoneId: null }),
+  openZoneEditor: (id, returnTo) =>
+    set({
+      zoneEditorOpen: true,
+      editingZoneId: id,
+      zoneEditorReturnTo: returnTo ?? null,
+      settingsOpen: returnTo === "settings" ? false : get().settingsOpen,
+    }),
+  closeZoneEditor: () =>
+    set({ zoneEditorOpen: false, editingZoneId: null, zoneEditorReturnTo: null }),
+  returnFromZoneEditor: () => {
+    const back = get().zoneEditorReturnTo;
+    set({
+      zoneEditorOpen: false,
+      editingZoneId: null,
+      zoneEditorReturnTo: null,
+      settingsOpen: back === "settings",
+      settingsInitialTab: back === "settings" ? "zones" : get().settingsInitialTab,
+    });
+  },
   openZonesPanel: () => set({ zonesPanelOpen: true }),
   closeZonesPanel: () => set({ zonesPanelOpen: false }),
-  openZoneLibrary: () => set({ zoneLibraryOpen: true }),
-  closeZoneLibrary: () => set({ zoneLibraryOpen: false }),
+  // Opening the library from Settings closes Settings rather than stacking a
+  // second modal over it: two overlays deep, Escape becomes ambiguous and the
+  // backdrop click closes the wrong one. The breadcrumb is kept in
+  // `zoneLibraryReturnTo` instead, and the library's back button walks it.
+  openZoneLibrary: (returnTo) =>
+    set({
+      zoneLibraryOpen: true,
+      zoneLibraryReturnTo: returnTo ?? null,
+      settingsOpen: returnTo === "settings" ? false : get().settingsOpen,
+    }),
+  closeZoneLibrary: () => set({ zoneLibraryOpen: false, zoneLibraryReturnTo: null }),
+  returnFromZoneLibrary: () => {
+    const back = get().zoneLibraryReturnTo;
+    set({
+      zoneLibraryOpen: false,
+      zoneLibraryReturnTo: null,
+      settingsOpen: back === "settings",
+      settingsInitialTab: back === "settings" ? "zones" : get().settingsInitialTab,
+    });
+  },
   openShortcutsHelp: () => set({ shortcutsHelpOpen: true }),
   closeShortcutsHelp: () => set({ shortcutsHelpOpen: false }),
   setSidebarOpen: (open) => {

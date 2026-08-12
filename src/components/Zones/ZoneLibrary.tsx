@@ -13,6 +13,7 @@ import { resolveBaseModel, resolveBaseProvider } from "@/lib/baseZone";
 import { installEntry, installTeam, saveZoneToLibrary, importEntryFromJson, exportZoneJson } from "@/lib/zoneLibrary";
 import { ZoneForm } from "./ZoneForm";
 import { Modal, ModalTitle } from "@/components/common/Modal";
+import { BackToSettings } from "@/components/common/BackToSettings";
 
 type View = "library" | "detail" | "editor";
 
@@ -55,6 +56,9 @@ function driftsFromLibrary(entry: LibraryEntry, zone: Zone): boolean {
  */
 export function ZoneLibrary() {
   const closeZoneLibrary = useApp((s) => s.closeZoneLibrary);
+  // Set when Settings → Zones opened this panel, so it can offer the way back.
+  const returnTo = useApp((s) => s.zoneLibraryReturnTo);
+  const returnFromZoneLibrary = useApp((s) => s.returnFromZoneLibrary);
   const zones = useApp((s) => s.zones);
   const providers = useApp((s) => s.providers);
   const baseZoneId = useApp((s) => s.appSettings.baseZoneId);
@@ -361,9 +365,14 @@ export function ZoneLibrary() {
 
   return (
     <Modal
-      onClose={closeZoneLibrary}
+      onClose={returnTo ? returnFromZoneLibrary : closeZoneLibrary}
       className="h-[700px] w-[980px] overflow-hidden"
-      header={<ModalTitle>Configure Zones</ModalTitle>}
+      header={
+        <>
+          {returnTo === "settings" && <BackToSettings onClick={returnFromZoneLibrary} />}
+          <ModalTitle>Configure Zones</ModalTitle>
+        </>
+      }
     >
         <div className="flex min-h-0 flex-1">
           {/* LEFT RAIL */}

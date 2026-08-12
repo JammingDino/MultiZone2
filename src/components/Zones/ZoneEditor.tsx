@@ -4,15 +4,18 @@ import { useShallow } from "zustand/react/shallow";
 import type { Zone } from "@/lib/types";
 import { ZoneForm } from "./ZoneForm";
 import { Modal, ModalTitle } from "@/components/common/Modal";
+import { BackToSettings } from "@/components/common/BackToSettings";
 
 export function ZoneEditor() {
-  const { providers, zones, editingZoneId, closeZoneEditor, refreshZones } = useApp(
+  const { providers, zones, editingZoneId, closeZoneEditor, refreshZones, returnTo, returnFromZoneEditor } = useApp(
     useShallow((s) => ({
       providers: s.providers,
       zones: s.zones,
       editingZoneId: s.editingZoneId,
       closeZoneEditor: s.closeZoneEditor,
       refreshZones: s.refreshZones,
+      returnTo: s.zoneEditorReturnTo,
+      returnFromZoneEditor: s.returnFromZoneEditor,
     })),
   );
   const existing = useMemo(
@@ -20,21 +23,30 @@ export function ZoneEditor() {
     [zones, editingZoneId],
   );
 
+  // Finishing here goes back where the user came from — Settings, when Settings
+  // → Zones opened this editor; otherwise simply closed.
+  const leave = returnTo ? returnFromZoneEditor : closeZoneEditor;
+
   async function onSaved(_saved: Zone) {
     await refreshZones();
-    closeZoneEditor();
+    leave();
   }
 
   async function onDeleted() {
     await refreshZones();
-    closeZoneEditor();
+    leave();
   }
 
   return (
     <Modal
-      onClose={closeZoneEditor}
+      onClose={leave}
       className="h-[700px] w-[800px]"
-      header={<ModalTitle>{existing ? "Edit zone" : "New zone"}</ModalTitle>}
+      header={
+        <>
+          {returnTo === "settings" && <BackToSettings onClick={returnFromZoneEditor} />}
+          <ModalTitle>{existing ? "Edit zone" : "New zone"}</ModalTitle>
+        </>
+      }
     >
       <ZoneForm
         zone={existing}

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { X, Plus, Trash2, RefreshCw, Server, Palette, MessageSquare, Database, AlertTriangle, Loader2, Folder, FolderOpen, Globe, Copy, Check, Search, Brain, Sparkles, FileUp, FileDown, Plug, Wifi, WifiOff, Library, ChevronDown, ChevronRight, Mic, Volume2, AudioLines, Stethoscope, ExternalLink, Download } from "lucide-react";
+import { X, Plus, Trash2, RefreshCw, Server, Palette, MessageSquare, Database, AlertTriangle, Loader2, Folder, FolderOpen, Globe, Copy, Check, Search, Brain, Sparkles, FileUp, FileDown, Plug, Wifi, WifiOff, Library, Layers, ChevronDown, ChevronRight, Mic, Volume2, AudioLines, Stethoscope, ExternalLink, Download } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useApp } from "@/store/app";
 import type { BackgroundEffect, GlassStyle, ThemeColorKey } from "@/store/app";
@@ -28,11 +28,21 @@ import { type SkillSeed, serializeSkill, parseSkill } from "@/lib/skillFile";
 import type { ApiBindState, CheckpointUsage, ConnectorCatalog, ConnectorEntry, ConnectorField, DbStats, GlobalKbView, IndexSummary, KbDocument, LifetimeUsage, McpDiagnosis, McpServerView, McpTool, Provider, Skill, SkillPack } from "@/lib/types";
 import { formatBytes, formatCount, formatTokens } from "@/lib/format";
 
-type Tab = "providers" | "appearance" | "chat" | "voice" | "speech" | "search" | "skills" | "mcp" | "knowledge" | "memory" | "api" | "data";
+type Tab = "providers" | "zones" | "appearance" | "chat" | "voice" | "speech" | "search" | "skills" | "mcp" | "knowledge" | "memory" | "api" | "data";
+
+const TAB_IDS: Tab[] = ["providers", "zones", "appearance", "chat", "voice", "speech", "search", "skills", "mcp", "knowledge", "memory", "api", "data"];
+
+function isTab(v: string | null): v is Tab {
+  return !!v && (TAB_IDS as string[]).includes(v);
+}
 
 export function SettingsModal() {
   const closeSettings = useApp((s) => s.closeSettings);
-  const [tab, setTab] = useState<Tab>("providers");
+  // Something outside Settings can say which tab to land on — the zone
+  // library's back button does, so returning lands on Zones rather than
+  // dumping the user back at Providers with no sense of where they were.
+  const initialTab = useApp((s) => s.settingsInitialTab);
+  const [tab, setTab] = useState<Tab>(isTab(initialTab) ? initialTab : "providers");
 
   return (
     <Modal onClose={closeSettings} className="h-[620px] w-[820px]" header={<ModalTitle>Settings</ModalTitle>}>
@@ -41,6 +51,7 @@ export function SettingsModal() {
           <nav className="flex w-44 flex-col gap-0.5 overflow-y-auto border-r border-[var(--color-border)] p-2 text-sm">
             <NavGroup label="Models" />
             <TabButton active={tab === "providers"} icon={<Server size={14} />} label="Providers" onClick={() => setTab("providers")} />
+            <TabButton active={tab === "zones"} icon={<Layers size={14} />} label="Zones" onClick={() => setTab("zones")} />
 
             <NavGroup label="Interface" />
             <TabButton active={tab === "appearance"} icon={<Palette size={14} />} label="Appearance" onClick={() => setTab("appearance")} />
@@ -61,6 +72,7 @@ export function SettingsModal() {
           </nav>
           <div className="flex-1 overflow-y-auto p-4">
             {tab === "providers" && <ProvidersTab />}
+            {tab === "zones" && <ZonesTab />}
             {tab === "appearance" && <AppearanceTab />}
             {tab === "chat" && <ChatTab />}
             {tab === "voice" && <VoiceTab />}
@@ -97,6 +109,91 @@ function TabButton({ active, icon, label, onClick }: { active: boolean; icon: Re
       {icon}
       {label}
     </button>
+  );
+}
+
+// ─── Zones ────────────────────────────────────────────────────────────────────
+
+/**
+ * Settings → Zones. Zones are configured in the Configure Zones panel (the zone
+ * library), which is a whole screen of its own rather than something that fits
+ * in a settings pane — so this tab is the door to it, plus the list of what is
+ * installed so the door is worth opening from here at all.
+ *
+ * Both destinations close Settings and leave a breadcrumb (`returnTo`) instead
+ * of stacking a second modal on top of it: the panel that opens shows a "Back
+ * to settings" button that lands the user back on this tab.
+ */
+function ZonesTab() {
+  const zones = useApp((s) => s.zones);
+  const providers = useApp((s) => s.providers);
+  const openZoneLibrary = useApp((s) => s.openZoneLibrary);
+  const openZoneEditor = useApp((s) => s.openZoneEditor);
+  const baseZoneId = useApp((s) => s.appSettings.baseZoneId);
+
+  return (
+    <>
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-sm font-medium">Zones</h3>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => openZoneEditor(null, "settings")}
+            className="flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1 text-xs hover:border-[var(--color-accent)]"
+          >
+            <Plus size={12} /> New zone
+          </button>
+          <button
+            onClick={() => openZoneLibrary("settings")}
+            className="flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1 text-xs hover:border-[var(--color-accent)]"
+          >
+            <Layers size={12} /> Configure Zones
+          </button>
+        </div>
+      </div>
+
+      <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+        A zone is an assistant with its own model, prompt and tools. Configure Zones
+        opens the full panel — the installed zones on the left, the library of
+        presets to add on the right.
+      </p>
+
+      {zones.length === 0 ? (
+        <div className="rounded border border-dashed border-[var(--color-border)] p-4 text-center text-xs text-[var(--color-text-muted)]">
+          No zones yet.{" "}
+          <button onClick={() => openZoneLibrary("settings")} className="text-[var(--color-accent)] hover:underline">
+            Browse the library
+          </button>{" "}
+          or create one.
+        </div>
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          {zones.map((z) => {
+            const provider = providers.find((p) => p.id === z.providerId);
+            return (
+              <button
+                key={z.id}
+                onClick={() => openZoneEditor(z.id, "settings")}
+                className="flex items-center gap-2 rounded border border-[var(--color-border)] px-3 py-2 text-left text-xs hover:border-[var(--color-accent)]"
+              >
+                <span className="min-w-0 flex-1 truncate font-medium text-[var(--color-text)]">
+                  {z.name}
+                  {z.id === baseZoneId && (
+                    <span className="ml-2 rounded bg-[var(--color-panel-hover)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">
+                      base
+                    </span>
+                  )}
+                </span>
+                <span className="shrink-0 truncate text-[var(--color-text-muted)]">
+                  {provider ? `${provider.name} · ` : ""}
+                  {z.model}
+                </span>
+                <ChevronRight size={12} className="shrink-0 text-[var(--color-text-muted)]" />
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </>
   );
 }
 

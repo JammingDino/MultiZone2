@@ -808,6 +808,13 @@ export interface AppSettings {
   /** Auto-send the message after this many ms of sustained silence while dictating; 0 = off. */
   sttAutoSendSilenceMs: number;
   /**
+   * Live partials (0.11.5): re-transcribe the recording so far every this many
+   * ms while the user is still speaking, so words appear as they are said.
+   * 0 = off (the default), because each pass is a full request to the provider
+   * — cheap and private against a local server, billable against a hosted one.
+   */
+  sttLivePartialMs: number;
+  /**
    * Text-to-speech (0.8.1). The id of one of this app's `Provider` rows — the
    * same providers zones point at — so any provider exposing an
    * OpenAI-compatible `/audio/speech` endpoint (OpenAI, or a local server)
@@ -907,6 +914,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   sttActivationMode: "toggle",
   sttInsertionMode: "cursor",
   sttAutoSendSilenceMs: 0,
+  sttLivePartialMs: 0,
   ttsProviderId: null,
   ttsModel: "",
   ttsVoice: "",

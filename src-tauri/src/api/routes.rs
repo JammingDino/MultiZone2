@@ -344,6 +344,7 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("voice::stop_dictation", GuiOnly("ends a capture that only the window could have started")),
     ("voice::cancel_dictation", GuiOnly("ends a capture that only the window could have started")),
     ("voice::dictation_level", GuiOnly("live meter for the window's mic button")),
+    ("voice::dictation_partial", GuiOnly("provisional transcript of a capture only the window could have started")),
     ("voice::synthesize_speech", GuiOnly("returns audio for the window's player")),
     ("voice::summarize_for_speech", GuiOnly("condenses an answer for the window's player")),
     ("voice::list_tts_voices", GuiOnly("populates a picker in Settings")),

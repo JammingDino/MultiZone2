@@ -8,9 +8,10 @@
 //! The resampled samples are WAV-encoded and uploaded to the configured STT
 //! provider in `commands::voice` — there is no in-process inference here.
 //!
-//! This accumulates the whole session's raw audio and resamples once, at
-//! `stop_capture`, since the transcript is only needed after the user stops
-//! speaking (there are no live partials).
+//! This accumulates the whole session's raw audio in one growing buffer and
+//! resamples on the way out — at `stop_capture` for the final transcript, and
+//! at `CaptureHandle::snapshot` for the live partials (0.11.5), which read the
+//! same buffer without disturbing the recording still filling it.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -80,6 +81,21 @@ impl CaptureHandle {
     /// Most recent input peak, 0.0 (silence) to 1.0 (clipping).
     pub fn level(&self) -> f32 {
         f32::from_bits(self.level.load(Ordering::Relaxed))
+    }
+
+    /// Everything captured so far, resampled to 16kHz mono — the recording
+    /// continues untouched.
+    ///
+    /// Live partials re-transcribe the whole utterance from the start each
+    /// time rather than only the newly arrived audio: each partial then
+    /// *replaces* the last instead of being appended to it, so the provider
+    /// gets the full context every pass and can revise words it heard wrong at
+    /// the end of the previous one. Transcribing only the new slice would be
+    /// cheaper but would cut words in half at every chunk boundary and freeze
+    /// those errors into the text permanently.
+    pub fn snapshot(&self) -> Vec<f32> {
+        let raw = self.buffer.lock().map(|b| b.clone()).unwrap_or_default();
+        resample_linear(&raw, self.source_rate, WHISPER_SAMPLE_RATE)
     }
 }
 

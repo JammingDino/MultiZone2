@@ -589,6 +589,14 @@ export const cancelDictation = (sessionId: string) =>
 /** Live input peak (0–1) for a recording session, polled to drive the meter. */
 export const dictationLevel = (sessionId: string) =>
   invoke<number>("dictation_level", { sessionId });
+/**
+ * Provisional transcript of what has been recorded so far, without stopping the
+ * recording (0.11.5). Each call transcribes the whole utterance from the start,
+ * so the answer replaces the previous partial rather than extending it. Empty
+ * while there is too little audio, or once the session has ended.
+ */
+export const dictationPartial = (sessionId: string) =>
+  invoke<string>("dictation_partial", { sessionId });
 
 // Text-to-speech (0.8.1)
 /** Synthesized audio: base64 payload plus its MIME type (e.g. audio/mpeg, audio/wav). */

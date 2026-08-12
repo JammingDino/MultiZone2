@@ -12,9 +12,12 @@ import { useTts } from "@/store/tts";
  * behaves identically wherever a message is typed — including over a selection,
  * which the transcript replaces exactly as typed characters would.
  *
- * Transcription runs when recording stops (there are no live partials): the
- * recording is uploaded to the configured provider and the returned transcript
- * is committed in one shot.
+ * Transcription runs when recording stops: the recording is uploaded to the
+ * configured provider and the returned transcript is committed in one shot.
+ * With `sttLivePartialMs` set (0.11.5) the recording so far is *also*
+ * re-transcribed on that interval and spliced in provisionally, so words appear
+ * while the user is still speaking; the transcript from `stopDictation` still
+ * has the final say and overwrites whatever the last partial left behind.
  *
  * `cancelKey` cancels any in-progress recording when it changes — InputBar
  * passes the chat id so switching chats stops a recording left running — while
@@ -39,7 +42,9 @@ export function useDictation({
 }) {
   const sttActivationMode = useApp((s) => s.appSettings.sttActivationMode);
   const sttInsertionMode = useApp((s) => s.appSettings.sttInsertionMode);
+  const sttLivePartialMs = useApp((s) => s.appSettings.sttLivePartialMs);
   const voiceRecording = useApp((s) => s.voiceRecording);
+  const voiceSessionId = useApp((s) => s.voiceSessionId);
   const startDictation = useApp((s) => s.startDictation);
   const stopDictationAction = useApp((s) => s.stopDictation);
   const cancelDictationAction = useApp((s) => s.cancelDictation);
@@ -51,30 +56,48 @@ export function useDictation({
   // was said, which is what typing over a selection does and therefore what the
   // gesture already means to everyone using it.
   const dictationRangeRef = useRef<{ start: number; end: number } | null>(null);
+  // Where the text *after* the dictated span currently resumes. It starts at
+  // the end of the captured range and then tracks the end of whatever was last
+  // spliced in, so a provisional transcript is replaced by the next one (and
+  // finally by the real one) instead of each being appended to the last.
+  const dictationTailRef = useRef<number | null>(null);
+  // Set while a stop is in flight, so a partial that resolves during the
+  // handover can't land on top of the final transcript.
+  const stoppingRef = useRef(false);
 
-  function commitTranscript(finalText: string) {
-    if (!finalText) return;
+  /** Splices `next` into the field over whatever the dictation last wrote. */
+  function spliceTranscript(next: string, final: boolean) {
     const range = dictationRangeRef.current;
     if (sttInsertionMode === "replace" || range == null) {
-      setText(finalText);
-    } else {
-      setText((prev) => prev.slice(0, range.start) + finalText + prev.slice(range.end));
-      // Leave the caret after the words just spoken, collapsed — again, where
-      // typing would have left it. The field re-renders with the new value
-      // first, so the move waits a frame.
-      const el = taRef.current;
-      if (el) {
-        const caret = range.start + finalText.length;
-        requestAnimationFrame(() => {
-          try {
-            el.setSelectionRange(caret, caret);
-          } catch {
-            // Not every field supports a selection range (a number input, say);
-            // the text landed either way.
-          }
-        });
-      }
+      setText(next);
+      return;
     }
+    const tail = dictationTailRef.current ?? range.end;
+    setText((prev) => prev.slice(0, range.start) + next + prev.slice(tail));
+    dictationTailRef.current = range.start + next.length;
+    if (!final) return;
+    // Leave the caret after the words just spoken, collapsed — again, where
+    // typing would have left it. The field re-renders with the new value
+    // first, so the move waits a frame.
+    const el = taRef.current;
+    if (el) {
+      const caret = range.start + next.length;
+      requestAnimationFrame(() => {
+        try {
+          el.setSelectionRange(caret, caret);
+        } catch {
+          // Not every field supports a selection range (a number input, say);
+          // the text landed either way.
+        }
+      });
+    }
+  }
+
+  function commitTranscript(finalText: string) {
+    // An empty final transcript with partials already on screen still has to be
+    // applied — it clears text the provider has since decided wasn't speech.
+    if (!finalText && dictationTailRef.current == null) return;
+    spliceTranscript(finalText, true);
   }
 
   async function beginDictation() {
@@ -89,6 +112,8 @@ export function useDictation({
       // the same expression with nothing selected to remove.
       end: el?.selectionEnd ?? el?.selectionStart ?? end,
     };
+    dictationTailRef.current = null;
+    stoppingRef.current = false;
     setVoiceError(null);
     try {
       await startDictation();
@@ -98,6 +123,7 @@ export function useDictation({
   }
 
   async function endDictation() {
+    stoppingRef.current = true;
     setTranscribing(true);
     try {
       const finalText = await stopDictationAction();
@@ -109,6 +135,41 @@ export function useDictation({
       setTranscribing(false);
     }
   }
+
+  /**
+   * Live partials: re-transcribe the recording so far on an interval and splice
+   * the result in provisionally. Off unless the user sets an interval, since
+   * every pass is a full transcription request — free against a local server,
+   * billed per call against a hosted one.
+   *
+   * Only one request is ever in flight: a provider slower than the interval
+   * (or a long recording that grows slower to transcribe) skips ticks rather
+   * than queueing up requests behind itself, so the partials simply refresh
+   * less often instead of falling further and further behind.
+   */
+  useEffect(() => {
+    if (!sttLivePartialMs || !voiceRecording || !voiceSessionId) return;
+    let stopped = false;
+    let inFlight = false;
+    const id = setInterval(async () => {
+      if (inFlight || stopped) return;
+      inFlight = true;
+      try {
+        const partial = await api.dictationPartial(voiceSessionId);
+        if (!stopped && !stoppingRef.current && partial) spliceTranscript(partial, false);
+      } catch {
+        // A failed partial is not worth surfacing — the final transcript is the
+        // authority and reports its own errors.
+      } finally {
+        inFlight = false;
+      }
+    }, sttLivePartialMs);
+    return () => {
+      stopped = true;
+      clearInterval(id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sttLivePartialMs, voiceRecording, voiceSessionId]);
 
   function handleMicClick() {
     if (sttActivationMode === "hold") return; // driven by mouse/touch down+up instead
@@ -160,7 +221,13 @@ export function useDictation({
     startListening: beginDictation,
     stopListening: endDictation,
     cancelListening: () => {
-      if (voiceRecording) cancelDictationAction().catch(() => {});
+      if (!voiceRecording) return;
+      stoppingRef.current = true;
+      cancelDictationAction().catch(() => {});
+      // Cancelling throws the recording away, so any provisional words it put
+      // in the field go with it — otherwise a cancel would leave behind text
+      // the user never chose to keep.
+      if (dictationTailRef.current != null) spliceTranscript("", true);
     },
   };
 }
@@ -181,12 +248,12 @@ function formatElapsed(ms: number): string {
  * The "something is happening" strip for dictation (0.9.12), shown above the
  * composer while the mic is live and while the recording is being transcribed.
  *
- * Transcription only runs once the user stops speaking — the provider is sent
- * one WAV at the end, so there are no live partials to show and no way to make
- * words appear as they are said. What the user actually needs in the meantime is
- * proof the microphone is working, so this scrolls a real level meter: each bar
- * is one peak sample polled from the live capture session, newest on the right.
- * A dead or muted device reads as a flat line, which is itself the answer.
+ * With live partials off, transcription only runs once the user stops speaking,
+ * so there is nothing to show in the meantime except proof the microphone is
+ * working: this scrolls a real level meter, each bar one peak sample polled from
+ * the live capture session, newest on the right. A dead or muted device reads as
+ * a flat line, which is itself the answer. (With partials on, the words are
+ * already landing in the composer and the meter is just the mic check.)
  *
  * It polls inside this component rather than in `useDictation` so a 14Hz sample
  * re-renders thirty-two divs and not the whole composer.

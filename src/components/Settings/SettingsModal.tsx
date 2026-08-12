@@ -1083,6 +1083,33 @@ function VoiceTab() {
       </section>
 
       <section>
+        <h3 className="mb-1 text-sm font-medium">Live transcription</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          Show words as you speak by re-transcribing the recording on an interval.
+          Each pass is a full request to the provider — free against a local server,
+          billed per call against a hosted one.
+        </p>
+        <ToggleRow
+          label="Show words while speaking"
+          checked={appSettings.sttLivePartialMs > 0}
+          onChange={(v) => setAppSettings({ sttLivePartialMs: v ? 1500 : 0 })}
+        />
+        {appSettings.sttLivePartialMs > 0 && (
+          <div className="mt-2">
+            <SliderRow
+              label="Refresh interval"
+              value={appSettings.sttLivePartialMs}
+              min={500}
+              max={5000}
+              step={250}
+              display={`${appSettings.sttLivePartialMs}ms`}
+              onChange={(v) => setAppSettings({ sttLivePartialMs: v })}
+            />
+          </div>
+        )}
+      </section>
+
+      <section>
         <h3 className="mb-3 text-sm font-medium">Auto-send on silence</h3>
         <ToggleRow
           label="Auto-send after silence"

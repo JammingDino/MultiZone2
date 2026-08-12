@@ -110,7 +110,14 @@ pub async fn stop_dictation(
         return Ok(String::new());
     }
 
-    let settings = read_stt_settings(&state).await;
+    transcribe_samples(&state, &samples).await
+}
+
+/// Transcribes captured mic samples through the configured STT provider.
+/// Shared by the final transcript and the live partials, so both resolve the
+/// provider, model and language identically.
+async fn transcribe_samples(state: &AppState, samples: &[f32]) -> AppResult<String> {
+    let settings = read_stt_settings(state).await;
     let lang = if settings.stt_language.is_empty() {
         None
     } else {
@@ -135,7 +142,7 @@ pub async fn stop_dictation(
     let (base_url, api_key) = provider.ok_or_else(|| {
         AppError::NotFound(format!("dictation provider not found: {provider_id}"))
     })?;
-    let wav_bytes = encode_wav(&samples)?;
+    let wav_bytes = encode_wav(samples)?;
     crate::stt_api::transcribe_via_provider(
         &state.http,
         &base_url,
@@ -146,6 +153,41 @@ pub async fn stop_dictation(
         lang.as_deref(),
     )
     .await
+}
+
+/// Shortest snapshot worth sending: below roughly a third of a second there is
+/// no word to hear yet, and every provider answers an empty string for it.
+const MIN_PARTIAL_SAMPLES: usize = (crate::audio::WHISPER_SAMPLE_RATE as usize) / 3;
+
+/// Transcribes the audio recorded *so far* in a live session and returns it,
+/// without stopping the recording (0.11.5).
+///
+/// This is what makes words appear while the user is still speaking against an
+/// ordinary `/audio/transcriptions` endpoint, which has no streaming of its
+/// own: the composer polls this on an interval and each answer replaces the
+/// last, because every call transcribes the whole utterance from the start
+/// (see `CaptureHandle::snapshot`). The caller is expected to treat the result
+/// as provisional — `stop_dictation`'s transcript is still the authority.
+///
+/// A session that has already stopped answers an empty string rather than
+/// erroring: the poll and the stop race by design, exactly as `dictation_level`
+/// does.
+#[tauri::command]
+pub async fn dictation_partial(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> AppResult<String> {
+    let samples = {
+        let sessions = state.voice_sessions.lock().await;
+        match sessions.get(&session_id) {
+            Some(handle) => handle.snapshot(),
+            None => return Ok(String::new()),
+        }
+    };
+    if samples.len() < MIN_PARTIAL_SAMPLES {
+        return Ok(String::new());
+    }
+    transcribe_samples(&state, &samples).await
 }
 
 /// Encodes 16kHz mono `f32` samples as an in-memory WAV file — the format

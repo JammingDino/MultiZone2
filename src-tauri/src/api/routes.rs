@@ -99,6 +99,8 @@ pub const ROUTES: &[RouteDef] = &[
     r("POST", "/api/plans/:id/approve", "Approve a plan, optionally with edited steps ({steps?, edited?})"),
     r("POST", "/api/plans/:id/reject", "Turn a plan down; the chat stays in plan mode"),
     r("POST", "/api/plans/:id/steps", "Rewrite a plan's steps ({steps})"),
+    r("POST", "/api/plans/:id/stop", "Ask the run to finish the current step and stop"),
+    r("GET", "/api/chats/:id/plan-tree", "This chat's plans and every sub-agent's beneath it"),
     r("POST", "/api/chats/:id/title", "Rename a chat"),
     r("POST", "/api/chats/:id/generate-title", "Have the model title the chat"),
     r("POST", "/api/chats/:id/project", "Move the chat into a project (or out of one)"),
@@ -248,6 +250,8 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("plans::approve_plan", Route("POST /api/plans/:id/approve")),
     ("plans::reject_plan", Route("POST /api/plans/:id/reject")),
     ("plans::update_plan_steps", Route("POST /api/plans/:id/steps")),
+    ("plans::request_plan_stop", Route("POST /api/plans/:id/stop")),
+    ("plans::plan_tree", Route("GET /api/chats/:id/plan-tree")),
     ("chats::set_chat_project_context", Route("POST /api/chats/:id/project-context")),
     ("chats::get_chat_tags", Route("GET /api/chats/:id/tags")),
     ("chats::get_all_chat_tags", Route("GET /api/chat-tags")),
@@ -606,6 +610,22 @@ pub async fn update_plan_steps(
         .unwrap_or_default();
     let plan = commands::plans::update_plan_steps(app_state(&st), id, steps).await?;
     Ok(Json(plan).into_response())
+}
+
+pub async fn request_plan_stop(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+) -> ApiResult<StatusCode> {
+    commands::plans::request_plan_stop(app_state(&st), id).await?;
+    Ok(NO_CONTENT)
+}
+
+pub async fn plan_tree(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+) -> ApiResult<Response> {
+    let plans = commands::plans::plan_tree(app_state(&st), id).await?;
+    Ok(Json(plans).into_response())
 }
 
 pub async fn set_chat_smart(

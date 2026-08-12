@@ -390,6 +390,15 @@ interface AppStore {
    */
   pendingPlanByChat: Record<string, Plan | null>;
   loadPendingPlan: (chatId: string) => Promise<void>;
+  /**
+   * Every plan in a chat and in the subchats below it (0.12.1) — the live task
+   * state the checklist renders from, and, in a Multizone run, the leader's
+   * plan and its sub-agents' in one list.
+   */
+  planTreeByChat: Record<string, Plan[]>;
+  loadPlanTree: (chatId: string) => Promise<void>;
+  setPlanSteps: (chatId: string, planId: string, steps: PlanStep[]) => Promise<void>;
+  requestPlanStop: (chatId: string, planId: string) => Promise<void>;
   approvePlan: (chatId: string, planId: string, steps: PlanStep[] | null, edited: boolean) => Promise<void>;
   rejectPlan: (chatId: string, planId: string) => Promise<void>;
   /** Re-title a chat. `wholeConversation` (a user-forced regenerate) titles the
@@ -1303,6 +1312,35 @@ export const useApp = create<AppStore>((set, get) => ({
     }));
   },
   pendingPlanByChat: {},
+  planTreeByChat: {},
+  async loadPlanTree(chatId) {
+    try {
+      const plans = await api.planTree(chatId);
+      set((s) => ({ planTreeByChat: { ...s.planTreeByChat, [chatId]: plans } }));
+    } catch (e) {
+      console.warn("failed to load the plan tree", e);
+    }
+  },
+  async setPlanSteps(chatId, planId, steps) {
+    const updated = await api.updatePlanSteps(planId, steps);
+    set((s) => ({
+      planTreeByChat: {
+        ...s.planTreeByChat,
+        [chatId]: (s.planTreeByChat[chatId] ?? []).map((p) => (p.id === planId ? updated : p)),
+      },
+    }));
+  },
+  async requestPlanStop(chatId, planId) {
+    await api.requestPlanStop(planId);
+    set((s) => ({
+      planTreeByChat: {
+        ...s.planTreeByChat,
+        [chatId]: (s.planTreeByChat[chatId] ?? []).map((p) =>
+          p.id === planId ? { ...p, stopRequested: true } : p,
+        ),
+      },
+    }));
+  },
   async setChatPlanMode(chatId, on) {
     await api.setChatPlanMode(chatId, on);
     set((s) => ({

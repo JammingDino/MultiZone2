@@ -72,3 +72,18 @@ pub async fn update_plan_steps(
     plans::write_steps(&state.db, &plan_id, &parsed).await?;
     plans::get(&state.db, &plan_id).await
 }
+
+/// "Finish the step you are on, then stop" (0.12.1) — the control that sits
+/// between letting a run finish and cancelling it, which until now was the only
+/// option and threw away everything in flight.
+#[tauri::command]
+pub async fn request_plan_stop(state: State<'_, AppState>, plan_id: String) -> AppResult<()> {
+    plans::request_stop(&state.db, &plan_id).await
+}
+
+/// A chat's plans and those of every subchat under it — a Multizone leader's
+/// plan and its sub-agents' in one list, which the UI renders as a tree.
+#[tauri::command]
+pub async fn plan_tree(state: State<'_, AppState>, chat_id: String) -> AppResult<Vec<Plan>> {
+    plans::tree_for_chat(&state.db, &chat_id).await
+}

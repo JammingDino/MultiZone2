@@ -168,13 +168,16 @@ pub struct Plan {
     pub steps: String,
     pub status: String,
     pub edited_by_user: bool,
+    /// The user asked for the run to finish the current step and stop (0.12.1).
+    /// Honoured at the next step boundary, then cleared.
+    pub stop_requested: bool,
     pub created_at: i64,
     pub updated_at: i64,
     pub approved_at: Option<i64>,
 }
 
 pub const PLAN_COLS: &str = "id, chat_id, zone_id, parent_plan_id, title, goal, steps, status, \
-     edited_by_user, created_at, updated_at, approved_at";
+     edited_by_user, stop_requested, created_at, updated_at, approved_at";
 
 impl Plan {
     pub fn parsed_steps(&self) -> Vec<PlanStep> {
@@ -432,6 +435,75 @@ pub async fn approve(
     Ok(plan)
 }
 
+/// "Finish this step, then stop" (0.12.1). Recorded rather than acted on
+/// immediately: the turn is mid-tool-call, and interrupting there is the
+/// cancellation this exists to avoid.
+pub async fn request_stop(db: &SqlitePool, id: &str) -> AppResult<()> {
+    sqlx::query("UPDATE plans SET stop_requested = 1, updated_at = ?1 WHERE id = ?2")
+        .bind(now_ts())
+        .bind(id)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
+/// Take the request off the plan once the loop has honoured it, so a later run
+/// of the same plan doesn't stop on a stale flag.
+pub async fn clear_stop(db: &SqlitePool, id: &str) -> AppResult<()> {
+    sqlx::query("UPDATE plans SET stop_requested = 0, updated_at = ?1 WHERE id = ?2")
+        .bind(now_ts())
+        .bind(id)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
+/// Hang a sub-agent's plan off the plan its leader is executing, so the two
+/// render as one tree rather than as unrelated checklists in chats the user has
+/// to go and find. Best-effort by design: a subchat whose parent has no active
+/// plan is simply a plan with no parent.
+pub async fn link_to_parent_plan(db: &SqlitePool, plan_id: &str, chat_id: &str) -> AppResult<()> {
+    let parent_chat: Option<String> =
+        sqlx::query_scalar("SELECT parent_chat_id FROM chats WHERE id = ?1")
+            .bind(chat_id)
+            .fetch_optional(db)
+            .await?
+            .flatten();
+    let Some(parent_chat) = parent_chat else {
+        return Ok(());
+    };
+    let Some(parent) = active_plan(db, &parent_chat, None).await else {
+        return Ok(());
+    };
+    sqlx::query("UPDATE plans SET parent_plan_id = ?1, updated_at = ?2 WHERE id = ?3")
+        .bind(&parent.id)
+        .bind(now_ts())
+        .bind(plan_id)
+        .execute(db)
+        .await?;
+    Ok(())
+}
+
+/// Every plan in this chat and in the subchats descended from it — the leader's
+/// and its sub-agents', which is the first surface Multizone orchestration has
+/// had for holding a task at all.
+pub async fn tree_for_chat(db: &SqlitePool, chat_id: &str) -> AppResult<Vec<Plan>> {
+    let rows = sqlx::query_as::<_, Plan>(&format!(
+        "WITH RECURSIVE descendants(id) AS (
+             SELECT ?1
+             UNION
+             SELECT c.id FROM chats c JOIN descendants d ON c.parent_chat_id = d.id
+         )
+         SELECT {PLAN_COLS} FROM plans
+         WHERE chat_id IN (SELECT id FROM descendants)
+         ORDER BY created_at ASC"
+    ))
+    .bind(chat_id)
+    .fetch_all(db)
+    .await?;
+    Ok(rows)
+}
+
 // ── Handing an approved plan to the executing turn ───────────────────────────
 
 /// The task list injected into the system prompt of a turn that has an approved
@@ -482,7 +554,12 @@ pub fn task_list_block(plan: &Plan) -> String {
     out.push_str(
         "\nKeep the plan's state current with `update_plan`: send every step, in this order, \
          with exactly one marked `in_progress`. Step text is fixed — only the statuses are \
-         yours to change.\n",
+         yours to change.\n\n\
+         A step that fails does not have to end the run: mark it `failed` with a `note` saying \
+         why, then decide — carry on with the steps that do not depend on it, or stop and \
+         report. Say which you chose. The user may also strike a step or add one while you \
+         work; the list above is re-read on every step, so treat it as current and do not \
+         reinstate something they removed.\n",
     );
     out
 }
@@ -626,6 +703,7 @@ mod tests {
             .unwrap(),
             status: "approved".into(),
             edited_by_user: true,
+            stop_requested: false,
             created_at: 0,
             updated_at: 0,
             approved_at: Some(1),

@@ -111,9 +111,11 @@ export interface Plan {
   goal: string | null;
   /** JSON-encoded array of PlanStep. */
   steps: string;
-  status: "draft" | "approved" | "executing" | "done" | "rejected" | "superseded";
+  status: "draft" | "approved" | "executing" | "done" | "stopped" | "rejected" | "superseded";
   /** True when the user changed the steps before approving. */
   editedByUser: boolean;
+  /** The user asked the run to finish the current step and stop (0.12.1). */
+  stopRequested: boolean;
   createdAt: number;
   updatedAt: number;
   approvedAt: number | null;

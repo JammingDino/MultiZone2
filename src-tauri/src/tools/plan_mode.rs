@@ -194,6 +194,10 @@ pub async fn exit(
     // the chat is visibly waiting on the user rather than silently able to act.
     plans::set_plan_mode(db, chat_id, true).await?;
     let plan = plans::save_draft(db, chat_id, zone_id, title, goal, &steps).await?;
+    // In a Multizone run this chat may be a subchat, in which case the plan
+    // belongs under the leader's rather than standing alone in a conversation
+    // nobody is watching (0.12.1).
+    plans::link_to_parent_plan(db, &plan.id, chat_id).await?;
 
     let mut payload = plan.to_json();
     if let Some(obj) = payload.as_object_mut() {

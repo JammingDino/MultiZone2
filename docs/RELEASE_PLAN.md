@@ -750,11 +750,15 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ### 0.12.1 — Live task state
 
-- [ ] The plan renders as a live checklist in the chat, steps ticking off as the turn executes them, with the current step marked
-- [ ] Steps can fail without failing the run: a failed step is marked, its error kept, and the model decides whether to continue or stop
-- [ ] Mid-run the user can strike a step, add one, or stop after the current step — control that doesn't require cancelling the whole turn
-- [ ] Plan state persists with the chat, so a long task can be closed and re-opened
-- [ ] Multizone leader gets the same surface: the leader's plan and each sub-agent's plan render in one tree
+*Status: built & tested (`cargo test --lib` 176 passing, `npm run build` green); not yet runtime-tested. The panel is [TaskPanel.tsx](../src/components/Chat/TaskPanel.tsx); the stop request is one column, migration [034](../src-tauri/migrations/034_plan_control.sql).*
+
+- [x] The plan renders as a live checklist above the composer, steps ticking off as the turn executes them, with the current step marked and the progress bar counting everything settled rather than only what succeeded. Reloaded when the transcript grows a tool result — the moment a status can have moved — rather than polled
+- [x] Steps can fail without failing the run: `failed` is a status, the reason is kept on the step, and the task list tells the model what to do with one (carry on with what does not depend on it, or stop and report — but say which). A step reported failed with no reason gets one written for it, since a red mark with no explanation is exactly what makes a failure unreadable afterwards
+- [x] Mid-run the user can strike a step or add one — the list is re-read on every request of the turn, so the model sees the change at its next step and is told not to reinstate something that was removed
+- [x] **Stop after the current step.** Cancelling was the only control the app had over a run, and it is the wrong one for "not that step": everything in flight is lost to change one line. The request is recorded on the plan and honoured at the next step boundary by withholding the tools for one more step — the same mechanism the step budget uses to guarantee the turn ends in prose — so the work finishes and gets reported instead of vanishing
+- [x] Plan state persists with the chat: it is a row, so a long task can be closed and re-opened, and the plan proposed yesterday is still the thing waiting for an answer today
+- [x] Multizone leader gets the same surface: a sub-agent's plan is linked to the leader's when it is filed, and the panel renders them as one tree — the first place an orchestration run has had to hold a task where the user is actually sitting
+- [ ] Runtime-test: run a plan of several steps, strike one mid-run, add one, and stop after a step
 
 ### 0.12.2 — Replay & the event log
 

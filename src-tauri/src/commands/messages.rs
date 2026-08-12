@@ -1483,6 +1483,9 @@ async fn run_participant_turn(
     let mut produced_output = false;
     // A turn the user stopped is an empty result on purpose, not a failure.
     let mut cancelled_turn = false;
+    // Set when the user asked the run to stop after the step in flight (0.12.1).
+    // The next step runs with no tools, so it can only answer.
+    let mut stop_after_step = false;
     // Citation numbering for this turn. Every citing tool numbers its own
     // results from 1, so without a shared counter a search and a `read_file` in
     // the same turn would both tell the model to write `[1]`. See
@@ -1512,7 +1515,7 @@ async fn run_participant_turn(
         // the model can choose what to spend its last call on; the final step
         // both warns and withholds the tools, which is what actually guarantees
         // prose comes back.
-        let final_step = continuity::is_final_step(step, max_steps);
+        let final_step = continuity::is_final_step(step, max_steps) || stop_after_step;
         if final_step {
             push_system_note(&mut api_messages, continuity::final_step_nudge(max_steps));
         } else if continuity::is_wrapup_step(step, max_steps) {
@@ -2056,6 +2059,25 @@ async fn run_participant_turn(
 
         if asked_user || filed_plan {
             break;
+        }
+
+        // "Finish this step, then stop" (0.12.1). Honoured here, at the step
+        // boundary, which is the whole point of it: cancelling mid-call throws
+        // away the work in flight, and the user asking to stop after step three
+        // of eight is not asking for step three to be lost. Withholding the
+        // tools for one more step is what turns the loop into a wrap-up — the
+        // same mechanism the step budget uses to guarantee prose at the end.
+        if let Some(plan) = crate::plans::active_plan(&ctx.db, chat_id, persp).await {
+            if plan.stop_requested {
+                crate::plans::clear_stop(&ctx.db, &plan.id).await.ok();
+                crate::plans::set_status(&ctx.db, &plan.id, "stopped").await.ok();
+                push_system_note(
+                    &mut api_messages,
+                    "The user has asked you to stop after the current step. Do not start                      another step or call another tool. Report what you finished, what you                      did not, and what the next person picking this up needs to know."
+                        .to_string(),
+                );
+                stop_after_step = true;
+            }
         }
 
         // `enter_plan_mode` (or a plan approved out from under this turn) may

@@ -19,6 +19,7 @@ import { ProjectsPanel } from "@/components/Projects/ProjectsPanel";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import { AskUserCard } from "@/components/Message/StepBlock";
 import { PlanReview } from "@/components/Chat/PlanReview";
+import { TaskPanel } from "@/components/Chat/TaskPanel";
 import { resolveBaseModel } from "@/lib/baseZone";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 import type { FileDiff, StreamEnvelope } from "@/lib/types";
@@ -208,6 +209,26 @@ export function ChatPanel() {
       void loadPendingPlan(activeChatId);
     }
   }, [activeChatId, planFiledMarker, pendingPlan?.id, loadPendingPlan]);
+
+  // Live task state (0.12.1). The plan tree is reloaded when the transcript
+  // grows a tool result, which is exactly when a step can have changed status —
+  // cheaper and more truthful than polling, since `update_plan` writing the row
+  // is the only thing that moves it.
+  const loadPlanTree = useApp((s) => s.loadPlanTree);
+  const isStreaming = useApp(
+    (s) =>
+      !!activeChatId &&
+      (Boolean(s.streamingByChat[activeChatId]) ||
+        Object.keys(s.perspectiveStreamsByChat[activeChatId] ?? {}).length > 0),
+  );
+  const toolResultCount = useMemo(() => {
+    if (!activeChatId) return 0;
+    return (messagesByChat[activeChatId] ?? []).filter((m) => m.role === "tool").length;
+  }, [activeChatId, messagesByChat]);
+
+  useEffect(() => {
+    if (activeChatId) void loadPlanTree(activeChatId);
+  }, [activeChatId, toolResultCount, loadPlanTree]);
 
   const inputRef = useRef<InputBarHandle>(null);
   const dragDepth = useRef(0);
@@ -453,6 +474,14 @@ export function ChatPanel() {
           {/* Review queue (0.10.2): staged writes waiting to be read and
               applied. Renders nothing when nothing is queued, which is every
               chat unless review mode is on. */}
+          {/* The approved plan while it runs — the only view of what is *about*
+              to happen, and where a step can be struck or the run stopped
+              without cancelling the turn (0.12.1). */}
+          <div className="px-4">
+            <div className="mx-auto max-w-3xl">
+              <TaskPanel chatId={activeChat.id} streaming={isStreaming} />
+            </div>
+          </div>
           <ReviewQueue chatId={activeChat.id} />
           {pendingApprovals.length > 0 ? (
             <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3">

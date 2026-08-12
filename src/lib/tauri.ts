@@ -83,6 +83,10 @@ export const rejectPlan = (planId: string) =>
   invoke<void>("reject_plan", { planId });
 export const updatePlanSteps = (planId: string, steps: PlanStep[]) =>
   invoke<Plan>("update_plan_steps", { planId, steps });
+export const requestPlanStop = (planId: string) =>
+  invoke<void>("request_plan_stop", { planId });
+export const planTree = (chatId: string) =>
+  invoke<Plan[]>("plan_tree", { chatId });
 
 export const setChatProject = (chatId: string, projectId: string | null) =>
   invoke<void>("set_chat_project", { chatId, projectId });

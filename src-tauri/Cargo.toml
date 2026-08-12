@@ -1,6 +1,6 @@
 [package]
 name = "multizone"
-version = "0.11.4"
+version = "0.12.0"
 description = "MultiZone — LLM interface"
 authors = ["MultiZone"]
 edition = "2021"

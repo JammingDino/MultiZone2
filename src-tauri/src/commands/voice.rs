@@ -142,6 +142,7 @@ pub async fn stop_dictation(
         api_key.as_deref(),
         &settings.stt_model,
         wav_bytes,
+        "dictation.wav",
         lang.as_deref(),
     )
     .await
@@ -445,12 +446,20 @@ pub async fn transcribe_audio_file(
     let bytes = std::fs::read(&audio_path)
         .map_err(|e| AppError::Invalid(format!("could not read audio file {audio_path}: {e}")))?;
     let lang = if settings.stt_language.is_empty() { None } else { Some(settings.stt_language.clone()) };
+    // Upload under the file's real name: the extension is how the server picks
+    // a decoder, so an .mp3 sent as "dictation.wav" can be rejected outright.
+    let file_name = std::path::Path::new(&audio_path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("audio.wav")
+        .to_string();
     crate::stt_api::transcribe_via_provider(
         &state.http,
         &base_url,
         api_key.as_deref(),
         &settings.stt_model,
         bytes,
+        &file_name,
         lang.as_deref(),
     )
     .await

@@ -18,6 +18,7 @@ import {
 import { Modal, ModalTitle } from "@/components/common/Modal";
 import * as api from "@/lib/tauri";
 import { buildTrace } from "@/lib/exportTrace";
+import { CHROME_ACTIVE, CHROME_OUTLINED } from "@/lib/chrome";
 import type { Message, SessionEvent } from "@/lib/types";
 
 /**
@@ -121,21 +122,21 @@ export function ReplayView({ chatId, onClose }: { chatId: string; onClose: () =>
           <button
             onClick={() => setPlaying((p) => !p)}
             disabled={shown.length === 0}
-            className="flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1 hover:border-[var(--color-accent)] disabled:opacity-40"
+            className="flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1 hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-40"
           >
             {playing ? <Pause size={11} /> : <Play size={11} />}
             {playing ? "Pause" : "Play"}
           </button>
           <button
             onClick={() => { setPlaying(false); setIndex((i) => Math.max(0, i - 1)); }}
-            className="rounded border border-[var(--color-border)] p-1 hover:border-[var(--color-accent)]"
+            className={`rounded p-1 ${CHROME_OUTLINED}`}
             aria-label="Previous event"
           >
             <ChevronLeft size={12} />
           </button>
           <button
             onClick={() => { setPlaying(false); setIndex((i) => Math.min(shown.length - 1, i + 1)); }}
-            className="rounded border border-[var(--color-border)] p-1 hover:border-[var(--color-accent)]"
+            className={`rounded p-1 ${CHROME_OUTLINED}`}
             aria-label="Next event"
           >
             <ChevronRight size={12} />
@@ -154,11 +155,7 @@ export function ReplayView({ chatId, onClose }: { chatId: string; onClose: () =>
                     return next;
                   })
                 }
-                className={`rounded-full border px-2 py-0.5 text-[10px] ${
-                  kinds.has(k)
-                    ? "border-[var(--color-accent)] text-[var(--color-accent)]"
-                    : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-                }`}
+                className={`rounded-full px-2 py-0.5 text-[10px] ${kinds.has(k) ? CHROME_ACTIVE : CHROME_OUTLINED}`}
               >
                 {kindLabel(k)}
               </button>

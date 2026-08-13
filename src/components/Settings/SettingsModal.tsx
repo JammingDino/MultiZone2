@@ -143,13 +143,13 @@ function ZonesTab() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => openZoneEditor(null, "settings")}
-            className="flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1 text-xs hover:border-[var(--color-accent)]"
+            className="flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
           >
             <Plus size={12} /> New zone
           </button>
           <button
             onClick={() => openZoneLibrary("settings")}
-            className="flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1 text-xs hover:border-[var(--color-accent)]"
+            className="flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
           >
             <Layers size={12} /> Configure Zones
           </button>
@@ -207,7 +207,7 @@ function ProvidersTab() {
         <h3 className="text-sm font-medium">Providers</h3>
         <button
           onClick={() => setEditing({ name: "", baseUrl: "", apiKey: "" })}
-          className="flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1 text-xs hover:border-[var(--color-accent)]"
+          className="flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
         >
           <Plus size={12} /> Add provider
         </button>
@@ -479,7 +479,7 @@ function AppearanceTab() {
               {fontInput && (
                 <button
                   onClick={() => applyFont("")}
-                  className="shrink-0 rounded border border-[var(--color-border)] px-2 py-1 text-xs hover:border-[var(--color-accent)]"
+                  className="shrink-0 rounded border border-[var(--color-border)] px-2 py-1 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
                 >
                   Reset
                 </button>
@@ -998,7 +998,7 @@ function ChatTab() {
         <div className="flex items-center gap-2">
           <button
             onClick={pickDefaultDir}
-            className="flex shrink-0 items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:border-[var(--color-accent)]"
+            className="flex shrink-0 items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
           >
             <FolderOpen size={13} /> Choose folder…
           </button>
@@ -1593,7 +1593,7 @@ function VoiceCloningSettings() {
             <div className="flex items-center gap-2">
               <button
                 onClick={pickAudio}
-                className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:border-[var(--color-accent)]"
+                className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
               >
                 <FileUp size={12} /> Choose audio…
               </button>
@@ -2153,7 +2153,7 @@ function SkillEditor({
 
       <div className="flex items-center justify-end gap-2 border-t border-[var(--color-border)] pt-3">
         {skill && (
-          <button onClick={onExport} className="mr-auto flex items-center gap-1 rounded border border-[var(--color-border)] px-3 py-1.5 text-xs hover:border-[var(--color-accent)]">
+          <button onClick={onExport} className="mr-auto flex items-center gap-1 rounded border border-[var(--color-border)] px-3 py-1.5 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]">
             <FileDown size={12} /> Export
           </button>
         )}
@@ -2325,7 +2325,7 @@ function McpTab() {
                   <button
                     onClick={() => connect(s)}
                     disabled={busyId === s.id}
-                    className="flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1 text-[11px] hover:border-[var(--color-accent)] disabled:opacity-50"
+                    className="flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1 text-[11px] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-50"
                   >
                     {busyId === s.id ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
                     {s.status.state === "connected" ? "Refresh" : "Connect"}
@@ -2334,7 +2334,7 @@ function McpTab() {
                     onClick={() => diagnose(s)}
                     disabled={busyId === s.id}
                     title="Run the checks in the order they can fail and report the first one that does"
-                    className="flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1 text-[11px] hover:border-[var(--color-accent)] disabled:opacity-50"
+                    className="flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1 text-[11px] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-50"
                   >
                     <Stethoscope size={11} /> Diagnose
                   </button>
@@ -2533,7 +2533,7 @@ function ConnectorCatalogPanel({ onDone, onCancel }: { onDone: () => void; onCan
                   <div className="flex shrink-0 items-center gap-1">
                     <button
                       onClick={() => setChosen(e)}
-                      className="rounded border border-[var(--color-border)] px-2 py-1 text-[11px] hover:border-[var(--color-accent)]"
+                      className="rounded border border-[var(--color-border)] px-2 py-1 text-[11px] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
                     >
                       {catalog.installed[e.id] ? "Reinstall" : "Install"}
                     </button>
@@ -3039,7 +3039,7 @@ function KnowledgeTab() {
           ) : (
             <span className="flex-1 text-xs text-[var(--color-text-muted)]">No default directory set.</span>
           )}
-          <button onClick={pickDir} className="flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1.5 text-xs hover:border-[var(--color-accent)]">
+          <button onClick={pickDir} className="flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1.5 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]">
             <Folder size={12} /> {dir ? "Change" : "Choose"}
           </button>
         </div>
@@ -3393,14 +3393,14 @@ function ApiTab() {
           <button
             onClick={copyToken}
             disabled={!appSettings.apiToken}
-            className="flex shrink-0 items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1.5 text-xs hover:border-[var(--color-accent)] disabled:opacity-50"
+            className="flex shrink-0 items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1.5 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-50"
           >
             {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? "Copied" : "Copy"}
           </button>
           <button
             onClick={regenerateToken}
             disabled={busy}
-            className="flex shrink-0 items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1.5 text-xs hover:border-[var(--color-accent)] disabled:opacity-50"
+            className="flex shrink-0 items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1.5 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-50"
           >
             <RefreshCw size={12} className={busy ? "animate-spin" : ""} /> Regenerate
           </button>
@@ -3589,7 +3589,7 @@ function DataTab() {
         <div className="mt-2 flex items-center gap-2">
           <button
             onClick={pickMirrorDir}
-            className="flex shrink-0 items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:border-[var(--color-accent)]"
+            className="flex shrink-0 items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
           >
             <FolderOpen size={13} /> Choose folder…
           </button>
@@ -3613,7 +3613,7 @@ function DataTab() {
           <button
             onClick={runFullMirror}
             disabled={!mirrorOn || !mirrorDir || mirrorBusy}
-            className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:border-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
             title={!mirrorDir ? "Choose a folder first." : "Re-write every chat to the folder now."}
           >
             {mirrorBusy ? <Loader2 size={13} className="animate-spin" /> : <FileDown size={13} />}
@@ -3622,7 +3622,7 @@ function DataTab() {
           <button
             onClick={importMarkdown}
             disabled={importBusy}
-            className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:border-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
           >
             {importBusy ? <Loader2 size={13} className="animate-spin" /> : <FileUp size={13} />}
             Import from markdown…
@@ -3668,7 +3668,7 @@ function DataTab() {
             <div className="flex gap-2">
               <button
                 onClick={() => setResetStage("idle")}
-                className="rounded border border-[var(--color-border)] px-3 py-1.5 text-sm hover:border-[var(--color-accent)]"
+                className="rounded border border-[var(--color-border)] px-3 py-1.5 text-sm hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
               >
                 Cancel
               </button>
@@ -3787,7 +3787,7 @@ function CheckpointStorageSection() {
         <button
           onClick={runPrune}
           disabled={busy}
-          className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:border-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
         >
           {busy ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
           Apply limits now
@@ -3986,7 +3986,7 @@ function SettingsTransferSection() {
         <button
           onClick={doExport}
           disabled={busy || nothingSelected}
-          className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:border-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
         >
           {busy ? <Loader2 size={13} className="animate-spin" /> : <FileDown size={13} />}
           Export settings…
@@ -3994,7 +3994,7 @@ function SettingsTransferSection() {
         <button
           onClick={pickImport}
           disabled={busy}
-          className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:border-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
         >
           {busy ? <Loader2 size={13} className="animate-spin" /> : <FileUp size={13} />}
           Import settings…
@@ -4393,10 +4393,10 @@ function ProviderForm({ value, onClose, onSaved }: { value: Partial<Provider>; o
             <Trash2 size={12} /> Delete
           </button>
         )}
-        <button onClick={onTest} disabled={testing} className="flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1 text-xs hover:border-[var(--color-accent)] disabled:opacity-50">
+        <button onClick={onTest} disabled={testing} className="flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-50">
           <RefreshCw size={12} className={testing ? "animate-spin" : ""} /> Test
         </button>
-        <button onClick={onClose} className="rounded border border-[var(--color-border)] px-2 py-1 text-xs hover:border-[var(--color-accent)]">
+        <button onClick={onClose} className="rounded border border-[var(--color-border)] px-2 py-1 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]">
           {value.id ? "Done" : "Cancel"}
         </button>
         {!value.id && (

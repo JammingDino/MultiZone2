@@ -246,7 +246,7 @@ function UserMessageImpl({ message }: { message: Message }) {
                           : { kind: "file-text", fileName: f.fileName, text: f.text },
                     )
                   }
-                  className="flex items-center gap-1.5 rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1 text-xs hover:border-[var(--color-accent)] hover:bg-[var(--color-panel-hover)]"
+                  className="flex items-center gap-1.5 rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] hover:bg-[var(--color-panel-hover)]"
                   title="Click to preview"
                 >
                   {f.mode === "audio" ? (

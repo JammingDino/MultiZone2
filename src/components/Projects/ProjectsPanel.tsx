@@ -264,7 +264,7 @@ function ProjectForm({
           <div className="flex items-center gap-2">
             <button
               onClick={pickDirectory}
-              className="flex shrink-0 items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:border-[var(--color-accent)]"
+              className="flex shrink-0 items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
             >
               <FolderOpen size={13} /> Choose folder…
             </button>
@@ -525,7 +525,7 @@ function KnowledgeSection({ project }: { project: Project }) {
               : dirty ? "Save the embedding settings first."
               : "Walk the directory and (re)build the index."
           }
-          className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1 text-xs hover:border-[var(--color-accent)] disabled:opacity-50"
+          className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-50"
         >
           {indexing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
           {indexing ? "Indexing…" : indexed ? "Re-index" : "Index directory"}

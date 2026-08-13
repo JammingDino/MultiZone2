@@ -192,7 +192,7 @@ export function ImportSettingsDialog() {
             <button
               onClick={close}
               disabled={busy}
-              className="rounded border border-[var(--color-border)] px-3 py-1.5 text-xs hover:border-[var(--color-accent)] disabled:opacity-50"
+              className="rounded border border-[var(--color-border)] px-3 py-1.5 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-50"
             >
               Cancel
             </button>

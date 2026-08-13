@@ -263,7 +263,7 @@ export function Onboarding() {
               <button
                 onClick={() => { setStep("provider"); setError(null); }}
                 disabled={busy}
-                className="rounded border border-[var(--color-border)] px-3 py-2 text-sm hover:border-[var(--color-accent)] disabled:opacity-50"
+                className="rounded border border-[var(--color-border)] px-3 py-2 text-sm hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-50"
               >
                 Back
               </button>

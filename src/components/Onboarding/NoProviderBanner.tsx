@@ -52,14 +52,14 @@ export function NoProviderBanner() {
           </button>
           <button
             onClick={onImport}
-            className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1 hover:border-[var(--color-accent)]"
+            className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1 hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
           >
             <FileUp size={12} />
             Import settings…
           </button>
           <button
             onClick={openSettings}
-            className="rounded border border-[var(--color-border)] px-2.5 py-1 hover:border-[var(--color-accent)]"
+            className="rounded border border-[var(--color-border)] px-2.5 py-1 hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
           >
             Open settings
           </button>

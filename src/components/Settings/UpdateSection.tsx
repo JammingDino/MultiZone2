@@ -117,7 +117,7 @@ export function UpdateSection() {
           <button
             onClick={() => void u.checkForUpdate(false)}
             disabled={busy}
-            className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-3 py-1 text-xs transition-colors hover:border-[var(--color-accent)] disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-3 py-1 text-xs transition-colors hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-50"
           >
             <RefreshCw size={12} className={u.stage === "checking" ? "animate-spin" : ""} />
             {u.stage === "checking" ? "Checking…" : "Check for updates"}

@@ -136,7 +136,7 @@ function ErrorCard({
             {action === "settings" && (
               <button
                 onClick={onOpenSettings}
-                className="flex items-center gap-1.5 rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1 text-xs hover:border-[var(--color-accent)]"
+                className="flex items-center gap-1.5 rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
               >
                 <SettingsIcon size={12} />
                 Open settings

@@ -127,10 +127,13 @@ export async function renderMermaidSvg(source: string): Promise<string | null> {
 }
 
 /**
- * Identifies the stored `draw_diagram` call behind this block, which is what
- * lets a repair be written back in place (0.9.8). Absent for diagrams from
- * fenced code blocks, which have no tool call to correct — those fall back to
- * sending the error into the conversation instead.
+ * Identifies the stored `draw_diagram` call behind this block (0.9.8).
+ *
+ * Only affects whether a repair is written back to disk: with both ids the
+ * corrected source replaces the stored call and survives a reload, without them
+ * `fix_diagram` returns the correction for display only. Either way the repair
+ * itself works, so a diagram from a fenced code block is repaired the same way
+ * as one from a tool call — it just doesn't persist.
  */
 export interface MermaidAutoFix {
   chatId: string;
@@ -159,8 +162,9 @@ export function MermaidBlock({
     () => fixCache.get(originalSource) ?? null,
   );
   const [repairing, setRepairing] = useState(false);
-  // Set once a repair has been asked for and come back no better, so the error
-  // view stops offering the same button a second time.
+  // Set when a repair came back no better, so the error view can say so. It
+  // still offers to retry: the old one-attempt guard existed because repairs
+  // fired on their own and could loop, which they no longer do.
   const [repairFailed, setRepairFailed] = useState(false);
   const cleanSource = repaired ?? originalSource;
   // Held in a ref so a fresh object identity from the parent doesn't re-run the
@@ -175,8 +179,18 @@ export function MermaidBlock({
     setRepaired(fixCache.get(originalSource) ?? null);
   }, [originalSource]);
 
+  // The chat whose model does the repairing. The block's own tool call names it
+  // when there is one; a fenced diagram belongs to whatever chat is on screen.
+  const activeChatId = useApp((s) => s.activeChatId);
+  const repairChatId = autoFix?.chatId ?? activeChatId;
+
   /**
    * Ask the model to correct this source and swap the result in place.
+   *
+   * The whole repair stays out of the conversation: `fix_diagram` puts the
+   * broken source and the parser error to the model on their own, forces one
+   * `draw_diagram` call, and writes the answer back over the stored call. No
+   * turn is added, nothing is sent as if the user had typed it.
    *
    * Only ever reached from the button in the error view. Until 0.12.5 this ran
    * by itself the moment a diagram failed to parse, which meant a render error
@@ -185,13 +199,17 @@ export function MermaidBlock({
    */
   const requestRepair = useCallback(async (renderError: string) => {
     const target = autoFixRef.current;
-    if (!target) return;
+    const chatId = target?.chatId ?? repairChatId;
+    if (!chatId) return;
     setRepairing(true);
+    setRepairFailed(false);
     try {
+      // The ids are optional: with them the fix is persisted over the stored
+      // tool call, without them it is returned for this session only.
       const fix = await api.fixDiagram({
-        chatId: target.chatId,
-        messageId: target.messageId ?? null,
-        toolCallId: target.toolCallId ?? null,
+        chatId,
+        messageId: target?.messageId ?? null,
+        toolCallId: target?.toolCallId ?? null,
         source: originalSource,
         error: renderError,
       });
@@ -205,7 +223,7 @@ export function MermaidBlock({
     } finally {
       setRepairing(false);
     }
-  }, [originalSource]);
+  }, [originalSource, repairChatId]);
 
   useEffect(() => {
     if (!cleanSource) {
@@ -262,7 +280,7 @@ export function MermaidBlock({
       <MermaidErrorView
         error={error}
         source={cleanSource}
-        canRepairInPlace={!!autoFix && !repairFailed}
+        canRepair={!!repairChatId}
         onRepair={() => void requestRepair(error)}
         repairFailed={repairFailed}
       />
@@ -715,78 +733,43 @@ function MermaidRepairingView() {
 /**
  * A diagram that didn't parse, and the offer to do something about it.
  *
- * Nothing here happens on its own. There are two ways to ask for a fix and the
- * cheaper one is preferred: when the block came from a stored `draw_diagram`
- * call, the model is asked to correct just that source and the result is
- * written back in place, leaving the conversation untouched. A fenced
- * ```mermaid block has no tool call to rewrite, so the only route is sending
- * the error into the chat as a new turn — which is also the fallback once an
- * in-place repair has been tried and failed.
+ * Nothing here happens on its own, and nothing it does appears in the
+ * conversation. The button runs the same quiet `fix_diagram` request the
+ * renderer used to fire by itself: the model is shown one broken source and one
+ * parser error, and its answer replaces the diagram. It never posts a turn on
+ * the user's behalf — a repair is a thing the app does to a diagram, not
+ * something the user is made to have said.
  */
 function MermaidErrorView({
   error,
   source,
-  canRepairInPlace,
+  canRepair,
   onRepair,
   repairFailed,
 }: {
   error: string;
   source: string;
-  canRepairInPlace: boolean;
+  canRepair: boolean;
   onRepair: () => void;
   repairFailed: boolean;
 }) {
-  const chatId = useApp((s) => s.activeChatId);
-  const isStreaming = useApp((s) =>
-    chatId ? Boolean(s.streamingByChat[chatId]) : false,
-  );
-  const [state, setState] = useState<"idle" | "sending" | "sent">("idle");
-
-  async function askInConversation() {
-    if (!chatId || isStreaming || state !== "idle") return;
-    setState("sending");
-    try {
-      await api.sendMessage(chatId, [
-        { type: "text", text: buildCorrectionMessage(error, source) },
-      ]);
-      setState("sent");
-    } catch (e) {
-      console.error("fix request failed", e);
-      setState("idle");
-    }
-  }
-
   return (
     <div className="my-2 rounded border border-[var(--color-danger)] bg-[var(--color-panel)] p-3 text-xs">
       <div className="mb-1 flex items-center justify-between gap-2">
         <span className="text-[var(--color-danger)]">Mermaid render error</span>
-        {state === "sending" && (
-          <span className="flex items-center gap-1 text-[var(--color-text-muted)]">
-            <Loader2 size={11} className="animate-spin" /> Asking the model to fix it…
-          </span>
-        )}
-        {state === "sent" && (
-          <span className="text-[var(--color-text-muted)]">Sent error to model.</span>
-        )}
-        {state === "idle" && (
+        {canRepair && (
           <button
-            onClick={canRepairInPlace ? onRepair : askInConversation}
-            disabled={!canRepairInPlace && isStreaming}
-            title={
-              canRepairInPlace
-                ? "Ask the model to correct this diagram, without adding a turn to the chat"
-                : "Send the error into the conversation for the model to answer"
-            }
-            className="flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-0.5 text-[var(--color-text-muted)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={onRepair}
+            title="Ask the model to correct this diagram. Nothing is added to the chat."
+            className="flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-0.5 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
           >
-            <Wand2 size={11} /> Ask model to fix
+            <Wand2 size={11} /> {repairFailed ? "Try again" : "Ask model to fix"}
           </button>
         )}
       </div>
-      {repairFailed && state === "idle" && (
+      {repairFailed && (
         <div className="mb-1.5 text-[var(--color-text-muted)]">
-          The correction didn't work. Asking again sends the error back into the
-          conversation instead, which gives the model the full context to retry.
+          The model couldn't correct this one. Trying again asks it fresh.
         </div>
       )}
       <pre className="whitespace-pre-wrap text-[var(--color-text-muted)]">
@@ -799,19 +782,5 @@ function MermaidErrorView({
         <pre className="mt-1 whitespace-pre-wrap">{source}</pre>
       </details>
     </div>
-  );
-}
-
-function buildCorrectionMessage(error: string, source: string): string {
-  return (
-    `Your last Mermaid diagram failed to render. Please call \`draw_diagram\` again with corrected syntax.\n\n` +
-    `**Parser error:**\n\`\`\`\n${error}\n\`\`\`\n\n` +
-    `**Source you produced:**\n\`\`\`mermaid\n${source}\n\`\`\`\n\n` +
-    `**Common pitfalls to check:**\n` +
-    `- Don't put LaTeX or MathJax (\`$...$\`, \`\\frac\`, etc.) inside node labels — Mermaid's parser does not understand them. Use plain text or HTML entities instead, or omit the math from the diagram and describe it in surrounding prose.\n` +
-    `- Don't use unescaped parentheses, brackets, or quotes inside node labels.\n` +
-    `- For line breaks inside a label, use \`<br/>\`, not \`\\n\`.\n` +
-    `- Subgraph titles with special characters must be wrapped in double quotes.\n` +
-    `- Only call \`draw_diagram\` once with the corrected source; do not include any other tool calls in this response.`
   );
 }

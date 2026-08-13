@@ -228,6 +228,38 @@ pub fn final_step_nudge(max_steps: usize) -> String {
     )
 }
 
+/// The budget a planning turn gets (0.12.7).
+///
+/// Planning is the one kind of turn whose entire output is reading: search the
+/// web, follow what it returns, read the files, then write the plan a step at a
+/// time — each of which is a step of the loop. Held to the ordinary budget, a
+/// model planning properly runs out during the research and files whatever it
+/// has, which is exactly the thin plan this release exists to stop. Nothing here
+/// can change anything on disk, so the usual reason to be miserly does not
+/// apply; the ceiling and the cancel button remain the real limits.
+pub fn plan_mode_steps(base: usize) -> usize {
+    base.saturating_mul(2).max(PLAN_MODE_MIN_STEPS).min(MAX_MAX_STEPS)
+}
+
+/// Floor for a planning turn, so a user who set a small budget for ordinary work
+/// does not get a plan written from three searches.
+const PLAN_MODE_MIN_STEPS: usize = 24;
+
+/// The last-step nudge for a turn that is *planning*, where tools are not fully
+/// withheld: `exit_plan_mode` survives, because a plan mode turn that runs out of
+/// budget and answers in prose has produced the one thing the mode exists to
+/// prevent — a plan the user cannot edit or approve.
+pub fn final_step_plan_nudge(max_steps: usize) -> String {
+    format!(
+        "# Out of steps\n\
+         You have used all {max_steps} tool steps for this turn. Every tool is switched off for \
+         this message except the ones that file your plan. Stop researching and call \
+         `exit_plan_mode` now with what you have — file the plan even if it is less complete \
+         than you wanted, and say what is still open in its context. Do not write the plan out \
+         in prose instead: prose is not something the user can edit or approve."
+    )
+}
+
 /// True when this step should carry the wrap-up warning. `step` is zero-based.
 pub fn is_wrapup_step(step: usize, max_steps: usize) -> bool {
     step + WRAPUP_RESERVE == max_steps

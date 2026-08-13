@@ -1474,7 +1474,16 @@ async fn run_participant_turn(
     // last two steps are spent finishing: one warned step, then a final step with
     // tools switched off so the turn always ends in an answer instead of falling
     // silently off the end of a tool result (see `llm::continuity`).
-    let max_steps = max_tool_steps(&ctx.db).await;
+    // A planning turn gets a larger budget: its whole output is reading, none of
+    // it can change anything, and a plan filed because the loop ran out mid-
+    // research is the thin plan 0.12.7 exists to stop. Fixed for the turn — the
+    // loop bound is evaluated once — so a chat that enters plan mode *mid*-turn
+    // keeps the ordinary budget and is caught instead by the final-step
+    // exception below, which leaves `exit_plan_mode` reachable.
+    let max_steps = {
+        let base = max_tool_steps(&ctx.db).await;
+        if planning { continuity::plan_mode_steps(base) } else { base }
+    };
     // Stall recovery state, tracked across the whole turn.
     let mut used_tools_this_turn = false;
     let mut nudges_used = 0usize;
@@ -1531,7 +1540,16 @@ async fn run_participant_turn(
         // both warns and withholds the tools, which is what actually guarantees
         // prose comes back.
         let final_step = continuity::is_final_step(step, max_steps) || stop_after_step;
-        if final_step {
+        // A planning turn's last step keeps the tools that *file* the plan. The
+        // whole point of the mode is that the answer arrives as a row the user
+        // can edit; a turn that runs out of budget and writes the plan into the
+        // transcript instead has failed in the specific way the mode exists to
+        // prevent. `stop_after_step` is excluded — that one is the user asking
+        // for the work to end, and it should.
+        let plan_endgame = final_step && planning && !stop_after_step;
+        if plan_endgame {
+            push_system_note(&mut api_messages, continuity::final_step_plan_nudge(max_steps));
+        } else if final_step {
             push_system_note(&mut api_messages, continuity::final_step_nudge(max_steps));
         } else if continuity::is_wrapup_step(step, max_steps) {
             push_system_note(
@@ -1566,8 +1584,25 @@ async fn run_participant_turn(
             max_tokens: zone.max_tokens,
             top_p: zone.top_p,
             // Tools are withheld on the final step so the model has no option
-            // but to answer. Every other step offers the full set.
-            tools: if tools.is_empty() || final_step { None } else { Some(tools.clone()) },
+            // but to answer. Every other step offers the full set — except a
+            // planning turn's last step, which keeps exactly the tools that end
+            // it properly (see `plan_endgame`).
+            tools: if tools.is_empty() {
+                None
+            } else if plan_endgame {
+                let filing: Vec<Tool> = tools
+                    .iter()
+                    .filter(|t| {
+                        matches!(t.function.name.as_str(), "exit_plan_mode" | "draft_plan_step")
+                    })
+                    .cloned()
+                    .collect();
+                if filing.is_empty() { None } else { Some(filing) }
+            } else if final_step {
+                None
+            } else {
+                Some(tools.clone())
+            },
             tool_choice: None,
             reasoning_effort,
             chat_template_kwargs: None,
@@ -3224,15 +3259,34 @@ async fn apply_plan_mode(db: &SqlitePool, chat_id: &str, tools: &mut Vec<Tool>) 
 
     if planning {
         tools.retain(|t| crate::plans::allowed_in_plan_mode(&t.function.name));
+        // Drafting the plan a step at a time, filing it, and reading one back:
+        // always offered while planning, whatever the zone has enabled, because
+        // they *are* the mode. A zone with no plan tool ticked can still plan.
+        tools.push(crate::tools::plan_mode::draft_step_definition());
         tools.push(crate::tools::plan_mode::exit_definition());
+        if !tools.iter().any(|t| t.function.name == "read_plan") {
+            tools.push(crate::tools::plan_mode::read_plan_definition());
+        }
         // Planning without the checklist tool leaves the model no way to report
         // progress once the plan is approved, and the plan it just wrote is the
         // obvious thing to keep. Cheap enough to always include.
         if !tools.iter().any(|t| t.function.name == "update_plan") {
             tools.push(crate::tools::plan::definition());
         }
-    } else if has_mutating {
-        tools.push(crate::tools::plan_mode::enter_definition());
+    } else {
+        if has_mutating {
+            tools.push(crate::tools::plan_mode::enter_definition());
+        }
+        // Out of plan mode `read_plan` earns its place only when there is a
+        // plan to read: a turn executing an approved one is exactly where step
+        // 6's specification has scrolled out of context and needs fetching
+        // back. In a chat that has never planned it would be one more tool
+        // definition in every request for nothing.
+        if crate::plans::chat_has_plans(db, chat_id).await
+            && !tools.iter().any(|t| t.function.name == "read_plan")
+        {
+            tools.push(crate::tools::plan_mode::read_plan_definition());
+        }
     }
     planning
 }

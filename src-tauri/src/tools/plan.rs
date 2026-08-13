@@ -206,13 +206,16 @@ async fn sync_active_plan(args: &Value, db: &SqlitePool, plan: plans::Plan) -> A
         .all(|s| matches!(s.status.as_str(), "done" | "skipped" | "failed"));
     let status = if terminal { "done" } else { "executing" };
     plans::set_status(db, &plan.id, status).await?;
+    // Keep the document on disk in step with the run, so opening it mid-task
+    // shows where the work actually is rather than where it started.
+    plans::refresh_doc(db, &plan.id).await;
 
     let done = merged.iter().filter(|s| s.status == "done").count();
-    let current = merged
+    let current_step = merged
         .iter()
         .find(|s| s.status == "in_progress")
-        .or_else(|| merged.iter().find(|s| s.status == "pending"))
-        .map(|s| s.step.clone());
+        .or_else(|| merged.iter().find(|s| s.status == "pending"));
+    let current = current_step.map(|s| s.step.clone());
 
     Ok(json!({
         "rendered": "plan",
@@ -223,6 +226,12 @@ async fn sync_active_plan(args: &Value, db: &SqlitePool, plan: plans::Plan) -> A
         "done": done,
         "total": merged.len(),
         "current": current,
+        // The specification of the step now in hand, handed back unasked. It is
+        // the one thing the model is about to need and the first thing context
+        // compaction takes away — cheaper here than a `read_plan` round trip at
+        // every step boundary.
+        "currentDetail": current_step.and_then(|s| s.detail.clone()),
+        "currentAcceptance": current_step.and_then(|s| s.acceptance.clone()),
     })
     .to_string())
 }

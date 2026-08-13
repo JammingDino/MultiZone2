@@ -389,8 +389,10 @@ pub fn tool_safety_by_name(name: &str) -> u8 {
         | "terminal_read" | "terminal_list"
         | "present_file" | "update_plan"
         // Entering plan mode only takes capabilities away; filing a plan asks
-        // the user for something, which is its own gate.
-        | "enter_plan_mode" | "exit_plan_mode"
+        // the user for something, which is its own gate. Drafting a step writes
+        // only to the plan the user has not been shown yet, and reading a plan
+        // back is a read of the app's own record.
+        | "enter_plan_mode" | "exit_plan_mode" | "draft_plan_step" | "read_plan"
         // A created skill is disabled until the user enables it, so writing one
         // changes nothing an agent can act on — safe. Revising an existing skill
         // does, so `update_skill` is moderate below.
@@ -602,6 +604,8 @@ async fn dispatch_inner(
         "update_plan" => plan::run(args, db, chat_id, caller_zone_id).await,
         "enter_plan_mode" => plan_mode::enter(args, db, chat_id).await,
         "exit_plan_mode" => plan_mode::exit(args, db, chat_id, caller_zone_id).await,
+        "draft_plan_step" => plan_mode::draft_step(args, db, chat_id, caller_zone_id).await,
+        "read_plan" => plan_mode::read(args, db, chat_id).await,
         "http_request" => http::run(args, http).await,
         "compact_context" => compact::run(args, db, chat_id).await,
         "spawn_subagent" => subchat::spawn(args, ctx, sink, caller_zone_id, chat_id).await,

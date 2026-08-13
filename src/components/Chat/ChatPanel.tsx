@@ -512,7 +512,11 @@ export function ChatPanel() {
               and scrolls itself; this keeps the flexbox from re-deciding that. */}
           <div className="shrink-0 px-4">
             <div className="mx-auto max-w-3xl">
-              <TaskPanel chatId={activeChat.id} streaming={isStreaming} />
+              <TaskPanel
+                chatId={activeChat.id}
+                streaming={isStreaming}
+                compact={!!pendingPlan && pendingApprovals.length === 0}
+              />
             </div>
           </div>
           <ReviewQueue chatId={activeChat.id} />

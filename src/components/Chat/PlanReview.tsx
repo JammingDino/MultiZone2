@@ -142,7 +142,10 @@ export function PlanReview({
   const thin = steps.filter((s) => (s.detail?.trim().length ?? 0) < 120).length;
 
   return (
-    <div className="flex max-h-[min(46vh,560px)] flex-col overflow-hidden rounded-lg border border-[var(--color-accent)]/40 bg-[var(--color-panel)]">
+    /* A floor as well as a ceiling: without one the card resizes on every page
+       turn — tall for a step with three screens of specification, short for the
+       next one — and the Approve button moves under the pointer between them. */
+    <div className="flex max-h-[min(46vh,560px)] min-h-[15rem] flex-col overflow-hidden rounded-lg border border-[var(--color-accent)]/40 bg-[var(--color-panel)]">
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <div className="shrink-0 border-b border-[var(--color-border)] px-3 pb-2 pt-2.5">
         <div className="flex items-start gap-2">
@@ -185,10 +188,23 @@ export function PlanReview({
         )}
       </div>
 
-      {/* ── Body: bounded, and the only thing that scrolls ─────────────── */}
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-3 py-2.5">
+      {/* ── Body: bounded, and where all the scrolling happens ──────────
+          `overflow-hidden` rather than `overflow-y-auto`, because the paged
+          view wants its *detail pane* to take the leftover height and scroll
+          there — so the step's heading, its risk chip and its move/edit/remove
+          buttons stay pinned while you read three screens of specification.
+          The other views scroll as a whole, which is right for them.
+
+          A flex column, and every view below is a flex *item* of it — not a
+          `h-full` block. `height: 100%` against a parent whose height came from
+          the flex algorithm does not resolve here: it falls back to auto, the
+          view grows past its container, and `overflow-hidden` clips the
+          specification instead of scrolling it. A flex item's main size is
+          definite, so `min-h-0 flex-1` gets the height `h-full` only appeared
+          to. */}
+      <div ref={scrollRef} className="flex min-h-0 flex-1 flex-col overflow-hidden px-3 py-2.5">
         {listView ? (
-          <ol className="flex flex-col gap-1.5">
+          <ol className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto">
             {steps.map((s, i) => (
               <li key={s.id}>
                 <CompactRow
@@ -208,18 +224,20 @@ export function PlanReview({
             )}
           </ol>
         ) : onContext && context ? (
-          <div>
+          <div className="min-h-0 flex-1 overflow-y-auto">
             <SectionLabel icon={<BookOpen size={11} />} text="Context, assumptions and open questions" />
             <Markdown source={context} className="mz-plan-prose" fontSize="0.78rem" />
           </div>
         ) : current ? (
           editingId === current.id ? (
-            <StepEditor
-              step={current}
-              index={index}
-              onChange={(fields) => patch(current.id, fields)}
-              onDone={() => setEditingId(null)}
-            />
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <StepEditor
+                step={current}
+                index={index}
+                onChange={(fields) => patch(current.id, fields)}
+                onDone={() => setEditingId(null)}
+              />
+            </div>
           ) : (
             <StepPage
               step={current}
@@ -384,8 +402,8 @@ function StepPage({
 }) {
   const detail = step.detail?.trim() || "";
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-start gap-2">
+    <div className="flex min-h-0 flex-1 flex-col gap-2">
+      <div className="flex shrink-0 items-start gap-2">
         <span className="mt-[3px] shrink-0 text-[11px] tabular-nums text-[var(--color-text-muted)]">
           {index + 1}.
         </span>
@@ -414,40 +432,45 @@ function StepPage({
         </div>
       </div>
 
-      {/* The specification. Bounded and scrolling in its own right, so one
-          long step cannot make the whole card feel like a document viewer. */}
-      {detail ? (
-        <div className="max-h-[44vh] overflow-y-auto rounded border border-[var(--color-border)] bg-[var(--color-bg)]/40 px-2.5 py-2">
-          <Markdown source={detail} className="mz-plan-prose" fontSize="0.78rem" />
-        </div>
-      ) : (
-        <div className="rounded border border-dashed border-[var(--color-border)] px-2.5 py-2 text-[11px] italic text-[var(--color-text-muted)]">
-          No detail — the model gave this step a heading and nothing else.
-        </div>
-      )}
-
-      {step.acceptance && (
-        <div className="flex items-start gap-1.5 rounded border border-[var(--color-border)] bg-[var(--color-bg)]/40 px-2.5 py-1.5">
-          <Target size={11} className="mt-[3px] shrink-0 text-[var(--color-accent)]" />
-          <div className="min-w-0 text-[11px] text-[var(--color-text-muted)]">
-            <span className="font-medium text-[var(--color-text)]">Done when </span>
-            {step.acceptance}
+      {/* Everything except the heading scrolls together in what is left of the
+          card. Only the heading and its buttons are pinned, because those are
+          the navigation — pinning the acceptance line and the file chips too
+          looked tidier and left the specification about 90px to live in, which
+          is the one thing on this card anybody came to read. */}
+      <div className="flex min-h-[4rem] flex-1 flex-col gap-2 overflow-y-auto overscroll-contain">
+        {detail ? (
+          <div className="rounded border border-[var(--color-border)] bg-[var(--color-bg)]/40 px-2.5 py-2">
+            <Markdown source={detail} className="mz-plan-prose" fontSize="0.78rem" />
           </div>
-        </div>
-      )}
+        ) : (
+          <div className="rounded border border-dashed border-[var(--color-border)] px-2.5 py-2 text-[11px] italic text-[var(--color-text-muted)]">
+            No detail — the model gave this step a heading and nothing else.
+          </div>
+        )}
 
-      {(step.files?.length ?? 0) > 0 && (
-        <div className="flex flex-wrap gap-1">
-          {step.files.map((f) => (
-            <span
-              key={f}
-              className="inline-flex items-center gap-1 rounded bg-[var(--color-panel-hover)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]"
-            >
-              <FileText size={9} /> {f}
-            </span>
-          ))}
-        </div>
-      )}
+        {step.acceptance && (
+          <div className="flex shrink-0 items-start gap-1.5 rounded border border-[var(--color-border)] bg-[var(--color-bg)]/40 px-2.5 py-1.5">
+            <Target size={11} className="mt-[3px] shrink-0 text-[var(--color-accent)]" />
+            <div className="min-w-0 text-[11px] text-[var(--color-text-muted)]">
+              <span className="font-medium text-[var(--color-text)]">Done when </span>
+              {step.acceptance}
+            </div>
+          </div>
+        )}
+
+        {(step.files?.length ?? 0) > 0 && (
+          <div className="flex shrink-0 flex-wrap gap-1">
+            {step.files.map((f) => (
+              <span
+                key={f}
+                className="inline-flex items-center gap-1 rounded bg-[var(--color-panel-hover)] px-1.5 py-0.5 text-[10px] text-[var(--color-text-muted)]"
+              >
+                <FileText size={9} /> {f}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

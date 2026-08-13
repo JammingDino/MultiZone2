@@ -36,7 +36,17 @@ import { Markdown } from "@/components/Renderers/Markdown";
  * In a Multizone run the leader's plan and each sub-agent's render in one tree,
  * because a sub-agent's checklist lived in a subchat nobody was watching.
  */
-export function TaskPanel({ chatId, streaming }: { chatId: string; streaming: boolean }) {
+export function TaskPanel({
+  chatId,
+  streaming,
+  compact,
+}: {
+  chatId: string;
+  streaming: boolean;
+  /** Something else is competing for the space below the transcript — a plan
+   *  waiting on the user. Progress is the less urgent of the two. */
+  compact?: boolean;
+}) {
   const plans = useApp((s) => s.planTreeByChat[chatId]);
   const zones = useApp((s) => s.zones);
   const setPlanSteps = useApp((s) => s.setPlanSteps);
@@ -94,8 +104,15 @@ export function TaskPanel({ chatId, streaming }: { chatId: string; streaming: bo
        render at full height between the transcript and the composer — pushing
        both off the window and leaving the wheel with nothing to scroll anywhere
        over the panel, because it was not a scroll container and the thread's is
-       in a sibling subtree. A third of the window, then it scrolls. */
-    <div className="max-h-[32vh] overflow-y-auto overscroll-contain rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)]">
+       in a sibling subtree. A third of the window, then it scrolls.
+
+       Half that again when a plan is waiting on the user: two full-size panels
+       stacked between the thread and the composer leave the transcript about
+       190px, which is not a conversation any more. The card is a decision and
+       this is a progress readout, so this is the one that yields. */
+    <div
+      className={`${compact ? "max-h-[16vh]" : "max-h-[32vh]"} overflow-y-auto overscroll-contain rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)]`}
+    >
       <PlanRows
         plan={root}
         zone={null}

@@ -527,8 +527,9 @@ export function HomeScreen() {
             {/* Dictation */}
             <MicButton dictation={dictation} />
 
-            {/* Center group — items at natural width, spread left/center/right */}
-            <div className="flex flex-1 items-center justify-between">
+            {/* What the chat will be — mode, and who else answers — reading
+                left to right from the attach and mic buttons it follows. */}
+            <div className="flex flex-1 items-center gap-2">
 
             {/* Mode */}
             <div className="relative shrink-0">
@@ -720,6 +721,14 @@ export function HomeScreen() {
               />
             )}
 
+            </div>{/* end left group */}
+
+            {/* Filing and send, gathered at the right edge. Project and tag say
+                where this chat goes rather than what it is, so they belong with
+                the button that sends it, not spread across the bar — and at a
+                tighter gap than the rest of the row, to read as one cluster. */}
+            <div className="flex shrink-0 items-center gap-1">
+
             {/* Project — custom dropdown */}
             {projects.length > 0 && (
               <div className="relative shrink-0">
@@ -844,18 +853,20 @@ export function HomeScreen() {
               </div>
             )}
 
-            </div>{/* end center group */}
-
-            {/* Send */}
+            {/* Icon only, like the two beside it. The paper plane is the most
+                recognisable glyph in the row and the Enter key sends anyway;
+                the accent fill is what marks this as the one action here. */}
             <button
               onClick={start}
               disabled={!canSend}
-              className={`shrink-0 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm ${PRIMARY_ACTION}`}
+              className={`flex shrink-0 items-center justify-center rounded-full p-2 ${PRIMARY_ACTION}`}
               title={quickSelectedButUnavailable ? "Set a default model first" : "Send"}
+              aria-label="Send"
             >
-              {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-              Send
+              {sending ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
             </button>
+
+            </div>{/* end right cluster */}
           </div>
         </div>
 

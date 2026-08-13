@@ -178,7 +178,7 @@ function UserMessageImpl({ message }: { message: Message }) {
 
   if (editing) {
     return (
-      <div className="flex justify-end gap-3">
+      <div className="mz-user-row flex justify-end gap-3">
         <div className="flex w-full max-w-[80%] flex-col items-end gap-2">
           <EditComposer
             initialText={text}
@@ -206,7 +206,9 @@ function UserMessageImpl({ message }: { message: Message }) {
 
   return (
     <div className="msg-row">
-      <div className="flex justify-end gap-3">
+      {/* Mirror of the assistant turn: the bubble ends where the composer ends
+          and the avatar hangs off to the right of it. */}
+      <div className="mz-user-row flex justify-end gap-3">
         <div className="flex max-w-[80%] flex-col items-end gap-2">
           {images.length > 0 && (
             <div className="flex flex-wrap justify-end gap-2">

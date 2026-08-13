@@ -323,11 +323,13 @@ input[type="color"]:hover { border-color: var(--color-accent); }
   pointer-events: auto;
 }
 
-/* ===== Assistant turn gutter =====
-   An answer's vertical rule marks the left edge of the message column — the
-   same edge the user's bubbles end at and the composer below starts at — with
-   the zone avatar hanging off into the margin beside it, rather than the whole
-   turn being pushed in by the width of the avatar.
+/* ===== Turn gutters =====
+   Both sides of the conversation square up with the message column, and hang
+   their avatar in the margin outside it: an answer's vertical rule starts at
+   the column's left edge, a user's bubble ends at its right edge, and those are
+   the same two edges the composer below spans between. Before this each turn
+   was pushed inwards by the width of its own avatar, so nothing lined up with
+   anything.
 
    The overhang is 1.75rem of avatar + 0.75rem of gap. It only turns on once the
    thread is wide enough to hold it outside the column: the column is capped at
@@ -341,6 +343,15 @@ input[type="color"]:hover { border-color: var(--color-accent); }
 @container (min-width: 52rem) {
   .mz-turn-row {
     margin-left: -2.5rem;
+  }
+  .mz-user-row {
+    margin-right: -2.5rem;
+  }
+  /* Once the avatar is outside the column, the action bar has no avatar column
+     to clear — flush is what keeps it under the rule / the bubble's edge. */
+  .msg-row .mz-actions-inset {
+    padding-left: 0;
+    padding-right: 0;
   }
 }
 

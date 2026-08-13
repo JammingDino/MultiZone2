@@ -154,7 +154,11 @@ export function MessageActions({
 
   return (
     <div
-      className={`mt-1 flex items-center gap-1 text-xs text-[var(--color-text-muted)] ${
+      // The inset matches the avatar column, so the bar lines up with the rule
+      // (or the bubble's edge) rather than with the avatar. `mz-actions-inset`
+      // drops it again on a wide thread, where the avatar hangs outside the
+      // column and there is no column to skip past — see styles.css.
+      className={`mz-actions-inset mt-1 flex items-center gap-1 text-xs text-[var(--color-text-muted)] ${
         variant === "user" ? "justify-end pr-10" : variant === "assistant" ? "pl-10" : ""
       }`}
     >

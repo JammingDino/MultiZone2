@@ -4,6 +4,7 @@ import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { useTts } from "@/store/tts";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
+import { CHROME_ACTIVE, CHROME_OUTLINED, CHROME_QUIET } from "@/lib/chrome";
 import { useDictation, MicButton, DictationMeter } from "@/components/Chat/useDictation";
 import type { InputPart, PendingMode } from "@/lib/types";
 import { attachmentToParts, type PendingAttachment } from "@/lib/attachFiles";
@@ -431,7 +432,7 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
         <div className="flex items-end gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 focus-within:border-[var(--color-accent)]">
           <button
             onClick={() => fileRef.current?.click()}
-            className="rounded p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
+            className={`rounded p-1.5 ${CHROME_QUIET}`}
             title="Attach file"
           >
             <Paperclip size={16} />
@@ -452,10 +453,8 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
               onClick={toggleConversation}
               disabled={disabled}
               title={conversationActive ? "End conversation mode" : "Start hands-free conversation"}
-              className={`rounded p-1.5 hover:bg-[var(--color-panel-hover)] disabled:opacity-40 ${
-                conversationActive
-                  ? "text-[var(--color-accent)]"
-                  : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+              className={`rounded p-1.5 disabled:opacity-40 ${
+                conversationActive ? CHROME_ACTIVE : CHROME_QUIET
               }`}
             >
               <AudioLines size={16} className={conversationActive ? "animate-pulse" : ""} />
@@ -466,8 +465,8 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
               onClick={() => setOvOpen((v) => !v)}
               disabled={disabled}
               title="Options for this message (zone / model)"
-              className={`rounded p-1.5 hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)] disabled:opacity-40 ${
-                overrideActive ? "text-[var(--color-accent)]" : "text-[var(--color-text-muted)]"
+              className={`rounded p-1.5 disabled:opacity-40 ${
+                overrideActive || ovOpen ? CHROME_ACTIVE : CHROME_QUIET
               }`}
             >
               <SlidersHorizontal size={16} />
@@ -585,10 +584,8 @@ function QueueModeChip({
     <button
       onClick={onClick}
       title={title}
-      className={`flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 transition ${
-        active
-          ? "border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]"
-          : "border-transparent hover:border-[var(--color-border)] hover:text-[var(--color-text)]"
+      className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 ${
+        active ? `${CHROME_ACTIVE} bg-[var(--color-accent)]/10` : CHROME_QUIET
       }`}
     >
       {icon}
@@ -605,10 +602,8 @@ function OvChip({
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition ${
-        active
-          ? "border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]"
-          : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
+      className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-xs ${
+        active ? `${CHROME_ACTIVE} bg-[var(--color-accent)]/10` : CHROME_OUTLINED
       }`}
     >
       {icon}

@@ -21,7 +21,7 @@ import { PlanReview } from "@/components/Chat/PlanReview";
 import { TaskPanel } from "@/components/Chat/TaskPanel";
 import { ReplayView } from "@/components/Chat/ReplayView";
 import { resolveBaseModel } from "@/lib/baseZone";
-import { HEADER_ICON } from "@/lib/chrome";
+import { CHROME_ACTIVE, CHROME_OUTLINED, CHROME_QUIET, HEADER_ICON } from "@/lib/chrome";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 import { usePersistentBool } from "@/lib/uiState";
 import type { FileDiff, StreamEnvelope } from "@/lib/types";
@@ -411,7 +411,7 @@ export function ChatPanel() {
             <button
               onClick={() => setReplayOpen(true)}
               title="Replay this session — every tool call, approval, failure and plan decision in order"
-              className="rounded p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
+              className={`rounded p-1.5 ${CHROME_QUIET}`}
             >
               <History size={HEADER_ICON} />
             </button>
@@ -694,10 +694,8 @@ function MetaStripToggle({
               tagCount > 0 ? ` · ${tagCount} tag${tagCount === 1 ? "" : "s"}` : ""
             } — click to change`
       }
-      className={`flex max-w-[180px] items-center gap-1.5 rounded px-1.5 py-1 text-xs transition ${
-        open
-          ? "bg-[var(--color-panel-hover)] text-[var(--color-text)]"
-          : "text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
+      className={`flex max-w-[180px] items-center gap-1.5 rounded px-1.5 py-1 text-xs ${
+        open ? CHROME_ACTIVE : CHROME_QUIET
       }`}
     >
       {project ? (
@@ -1066,10 +1064,8 @@ function PerspectiveZonePicker({
       <button
         onClick={() => setOpen((v) => !v)}
         title="Perspective zones — get responses from multiple zones simultaneously"
-        className={`flex items-center gap-1.5 rounded border px-2 py-1 text-xs transition ${
-          count > 0
-            ? "border-[var(--color-accent)] text-[var(--color-accent)]"
-            : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+        className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs ${
+          count > 0 ? CHROME_ACTIVE : CHROME_OUTLINED
         }`}
       >
         <SplitSquareHorizontal size={HEADER_ICON} />

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Send, ChevronDown, Zap, Check, Layers, Settings as SettingsIcon, Loader2, Brain, Paperclip, Tag, X, SplitSquareHorizontal, Crown, Users, Upload, ScanText } from "lucide-react";
+import { Send, ChevronDown, Zap, Check, Layers, Settings as SettingsIcon, Loader2, Brain, Paperclip, Tag, X, SplitSquareHorizontal, Crown, Users, Upload, ScanText, Folder } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { getZoneIcon } from "@/lib/zoneIcons";
+import { CHROME_ACTIVE, CHROME_OUTLINED, CHROME_QUIET } from "@/lib/chrome";
 import type { InputPart, Zone } from "@/lib/types";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 import { attachmentToParts } from "@/lib/attachFiles";
@@ -234,6 +235,8 @@ export function HomeScreen() {
 
   const selectedZone =
     mode.type === "zone" ? zones.find((z) => z.id === mode.id) ?? null : null;
+  const selectedProject = projects.find((p) => p.id === selectedProjectId) ?? null;
+  const SelectedProjectIcon = selectedProject ? getZoneIcon(selectedProject.icon) : Folder;
   // Zones that can orchestrate a multizone session.
   const leaderZones = useMemo(() => zones.filter((z) => z.isLeader), [zones]);
   const multizoneAvailable = leaderZones.length > 0;
@@ -508,7 +511,7 @@ export function HomeScreen() {
             {/* Attach */}
             <button
               onClick={() => fileRef.current?.click()}
-              className="shrink-0 rounded-full p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
+              className={`shrink-0 rounded-full p-1.5 ${CHROME_QUIET}`}
               title="Attach file"
             >
               <Paperclip size={15} />
@@ -531,7 +534,9 @@ export function HomeScreen() {
             <div className="relative shrink-0">
               <button
                 onClick={() => setMenuOpen((v) => !v)}
-                className="flex items-center gap-1.5 rounded-full border border-[var(--color-border)] px-2.5 py-1 text-xs text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
+                className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs ${
+                  menuOpen ? CHROME_ACTIVE : CHROME_OUTLINED
+                }`}
               >
                   {mode.type === "quick" ? (
                     <>
@@ -718,13 +723,34 @@ export function HomeScreen() {
             {/* Project — custom dropdown */}
             {projects.length > 0 && (
               <div className="relative shrink-0">
+                {/* Icon only, and the same folder glyph the active chat's header
+                    uses for the same thing — this is the one control that named
+                    its own empty state ("No project"), which is the least
+                    interesting thing the composer could be saying. A chosen
+                    project shows its own icon and colour, exactly as it does in
+                    the header. */}
                 <button
                   onClick={() => setProjectMenuOpen((v) => !v)}
-                  className="flex items-center gap-1.5 rounded-full border border-[var(--color-border)] px-2.5 py-1 text-xs text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
+                  title={
+                    selectedProject
+                      ? `Project: ${selectedProject.name} — click to change`
+                      : "No project — click to file this chat under one"
+                  }
+                  aria-label={selectedProject ? `Project: ${selectedProject.name}` : "No project"}
+                  className={`flex items-center rounded-full p-1.5 ${
+                    projectMenuOpen ? CHROME_ACTIVE : CHROME_QUIET
+                  }`}
                 >
-                  <Layers size={12} className={selectedProjectId ? "text-[var(--color-accent)]" : ""} />
-                  {selectedProjectId ? (projects.find((p) => p.id === selectedProjectId)?.name ?? "Project") : "No project"}
-                  <ChevronDown size={12} />
+                  {selectedProject ? (
+                    <span
+                      className="flex h-[15px] w-[15px] items-center justify-center rounded"
+                      style={{ background: selectedProject.accentColor ?? "var(--color-accent)" }}
+                    >
+                      <SelectedProjectIcon size={10} color="white" />
+                    </span>
+                  ) : (
+                    <Folder size={15} />
+                  )}
                 </button>
                 {projectMenuOpen && (
                   <>
@@ -738,16 +764,27 @@ export function HomeScreen() {
                         {!selectedProjectId && <Check size={10} className="ml-auto text-[var(--color-accent)]" />}
                       </button>
                       {projects.length > 0 && <div className="my-1 border-t border-[var(--color-border)]" />}
-                      {projects.map((p) => (
-                        <button
-                          key={p.id}
-                          onClick={() => { setSelectedProjectId(p.id); setProjectMenuOpen(false); }}
-                          className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-[var(--color-panel-hover)]"
-                        >
-                          {p.name}
-                          {selectedProjectId === p.id && <Check size={10} className="ml-auto text-[var(--color-accent)]" />}
-                        </button>
-                      ))}
+                      {projects.map((p) => {
+                        // Same swatch the in-chat project picker uses, so a
+                        // project is recognisable by its colour in both menus.
+                        const Icon = getZoneIcon(p.icon);
+                        return (
+                          <button
+                            key={p.id}
+                            onClick={() => { setSelectedProjectId(p.id); setProjectMenuOpen(false); }}
+                            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-[var(--color-panel-hover)]"
+                          >
+                            <span
+                              className="flex h-4 w-4 shrink-0 items-center justify-center rounded"
+                              style={{ background: p.accentColor ?? "var(--color-accent)" }}
+                            >
+                              <Icon size={10} color="white" />
+                            </span>
+                            {p.name}
+                            {selectedProjectId === p.id && <Check size={10} className="ml-auto text-[var(--color-accent)]" />}
+                          </button>
+                        );
+                      })}
                     </div>
                   </>
                 )}
@@ -775,9 +812,13 @@ export function HomeScreen() {
                 })}
                 <button
                   onClick={() => setTagMenuOpen((v) => !v)}
-                  className="flex items-center gap-1 rounded-full border border-[var(--color-border)] px-2.5 py-1 text-xs text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
+                  title="Tag this chat"
+                  aria-label="Tag this chat"
+                  className={`flex items-center rounded-full p-1.5 ${
+                    tagMenuOpen ? CHROME_ACTIVE : CHROME_QUIET
+                  }`}
                 >
-                  <Tag size={10} /> + Tag
+                  <Tag size={15} />
                 </button>
                 {tagMenuOpen && (
                   <>
@@ -892,10 +933,8 @@ function PerspectivePicker({
       <button
         onClick={() => setOpen((v) => !v)}
         title="Perspectives — get answers from multiple zones side by side"
-        className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition ${
-          count > 0
-            ? "border-[var(--color-accent)] text-[var(--color-accent)]"
-            : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
+        className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs ${
+          count > 0 || open ? CHROME_ACTIVE : CHROME_OUTLINED
         }`}
       >
         <SplitSquareHorizontal size={12} />

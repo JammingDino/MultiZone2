@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Check, Plus, Layers, Zap, Brain, Loader2, Crown } from "lucide-react";
 import { useApp } from "@/store/app";
 import { getZoneIcon } from "@/lib/zoneIcons";
-import { HEADER_CHEVRON, HEADER_ICON } from "@/lib/chrome";
+import { CHROME_ACTIVE, CHROME_QUIET, HEADER_CHEVRON, HEADER_ICON } from "@/lib/chrome";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 
 type RoutingState =
@@ -67,7 +67,7 @@ export function ZonePicker({ chatId, currentZoneId, smartRouting, routingState }
     <div ref={wrapRef} className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex min-w-0 max-w-full items-center gap-1.5 rounded border border-transparent px-1.5 py-0.5 text-xs text-[var(--color-text-muted)] hover:border-[var(--color-border)] hover:bg-[var(--color-panel)] hover:text-[var(--color-text)]"
+        className={`flex min-w-0 max-w-full items-center gap-1.5 rounded px-1.5 py-0.5 text-xs ${open ? CHROME_ACTIVE : CHROME_QUIET}`}
         title="Change zone"
       >
         {smartRouting && routingState?.status === "routing" ? (

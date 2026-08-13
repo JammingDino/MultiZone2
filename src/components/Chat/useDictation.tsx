@@ -3,6 +3,7 @@ import { Loader2, Mic } from "lucide-react";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { useTts } from "@/store/tts";
+import { CHROME_QUIET } from "@/lib/chrome";
 
 /**
  * Shared dictation controller for a text composer (0.8.0). Wires the mic
@@ -365,8 +366,10 @@ export function MicButton({
               ? "Hold to dictate"
               : "Start dictation"
       }
-      className={`rounded p-1.5 hover:bg-[var(--color-panel-hover)] disabled:opacity-40 ${
-        voiceRecording ? "text-red-500" : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+      // Recording keeps its red — that one is a state, not chrome, and it has
+      // to stay legible as "live" rather than as "hovered".
+      className={`rounded p-1.5 disabled:opacity-40 ${
+        voiceRecording ? "border border-red-500 text-red-500 transition" : CHROME_QUIET
       }`}
     >
       {transcribing ? (

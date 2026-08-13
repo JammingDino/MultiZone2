@@ -6,6 +6,7 @@ import { useTts, zoneVoice } from "@/store/tts";
 import * as api from "@/lib/tauri";
 import { formatTokens } from "@/lib/format";
 import { estimateTokens } from "@/lib/tokens";
+import { ACTION_ICON, CHROME_OUTLINED, CHROME_QUIET } from "@/lib/chrome";
 
 interface Props {
   /** Used for copy. */
@@ -163,7 +164,7 @@ export function MessageActions({
       }`}
     >
       <ActionButton onClick={onCopy} label={copied ? "Copied" : "Copy"}>
-        {copied ? <Check size={11} /> : <Copy size={11} />}
+        {copied ? <Check size={ACTION_ICON} /> : <Copy size={ACTION_ICON} />}
       </ActionButton>
 
       {variant !== "user" && messageId && (
@@ -181,7 +182,7 @@ export function MessageActions({
           label="Regenerate"
           disabled={isBusy}
         >
-          <RotateCcw size={11} />
+          <RotateCcw size={ACTION_ICON} />
         </ActionButton>
       )}
 
@@ -193,13 +194,13 @@ export function MessageActions({
           label="Resend"
           disabled={isBusy}
         >
-          <RotateCcw size={11} />
+          <RotateCcw size={ACTION_ICON} />
         </ActionButton>
       )}
 
       {onEdit && (
         <ActionButton onClick={onEdit} label="Edit" disabled={isBusy}>
-          <Pencil size={11} />
+          <Pencil size={ACTION_ICON} />
         </ActionButton>
       )}
 
@@ -210,7 +211,7 @@ export function MessageActions({
             label={branching ? "Branching…" : "Branch"}
             disabled={isBusy || branching}
           >
-            <GitBranch size={11} />
+            <GitBranch size={ACTION_ICON} />
           </ActionButton>
           {rewind && (
             <RewindPrompt
@@ -237,9 +238,10 @@ export function MessageActions({
         <div className="relative">
           <ActionButton
             onClick={() => setShowStats((v) => !v)}
-            label={`${formatDuration(stats.durationMs)} · ${formatTokenTotal(stats)} tok`}
+            label="Timing and token count for this answer"
+            readout={`${formatDuration(stats.durationMs)} · ${formatTokenTotal(stats)} tok`}
           >
-            <BarChart3 size={11} />
+            <BarChart3 size={ACTION_ICON} />
           </ActionButton>
           {showStats && (
             <div className="absolute bottom-full left-0 z-40 mb-1 min-w-[220px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] p-2 text-xs shadow-lg">
@@ -334,13 +336,13 @@ function RewindPrompt({
       <div className="mt-2 flex flex-wrap gap-1.5">
         <button
           onClick={() => onChoose(true)}
-          className="rounded border border-[var(--color-border)] px-2 py-1 hover:border-[var(--color-accent)]"
+          className={`rounded px-2 py-1 ${CHROME_OUTLINED}`}
         >
           Branch and rewind files
         </button>
         <button
           onClick={() => onChoose(false)}
-          className="rounded border border-[var(--color-border)] px-2 py-1 hover:border-[var(--color-accent)]"
+          className={`rounded px-2 py-1 ${CHROME_OUTLINED}`}
         >
           Branch only
         </button>
@@ -396,7 +398,7 @@ function ReadAloudButton({
           onClick={() => readAloud(messageId, chatId, text, voice)}
           label="Read aloud"
         >
-          <Volume2 size={11} />
+          <Volume2 size={ACTION_ICON} />
         </ActionButton>
         {error && errorMessageId === messageId && (
           <span
@@ -416,28 +418,40 @@ function ReadAloudButton({
     <>
       {status === "paused" ? (
         <ActionButton onClick={resume} label="Resume">
-          <Play size={11} />
+          <Play size={ACTION_ICON} />
         </ActionButton>
       ) : (
         <ActionButton onClick={pause} label={status === "loading" ? "Loading…" : "Pause"}>
-          <Pause size={11} />
+          <Pause size={ACTION_ICON} />
         </ActionButton>
       )}
       <ActionButton onClick={stop} label="Stop">
-        <Square size={11} />
+        <Square size={ACTION_ICON} />
       </ActionButton>
     </>
   );
 }
 
+/**
+ * One action in the bar under a message.
+ *
+ * Icon only: the labels turned a hover affordance into a permanent five-word
+ * strip under every turn, and these are the same handful of actions on every
+ * message — once you know the row, reading "Copy Regenerate Edit Branch" each
+ * time is noise. The label stays as the tooltip, and as the button's accessible
+ * name. `readout` is for the one action that carries a number rather than a
+ * name — the stats button — where the text *is* the information.
+ */
 function ActionButton({
   onClick,
   label,
+  readout,
   children,
   disabled,
 }: {
   onClick: () => void;
   label: string;
+  readout?: string;
   children: React.ReactNode;
   disabled?: boolean;
 }) {
@@ -445,11 +459,12 @@ function ActionButton({
     <button
       onClick={onClick}
       disabled={disabled}
-      className="flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-40"
+      className={`flex items-center gap-1 rounded px-1.5 py-1 ${CHROME_QUIET} disabled:cursor-not-allowed disabled:opacity-40`}
       title={label}
+      aria-label={label}
     >
       {children}
-      <span>{label}</span>
+      {readout && <span>{readout}</span>}
     </button>
   );
 }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { DollarSign, Gauge, Users } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
-import { HEADER_ICON } from "@/lib/chrome";
+import { CHROME_ACTIVE, CHROME_QUIET, HEADER_ICON } from "@/lib/chrome";
 import { formatTokens } from "@/lib/format";
 import { chatContextEstimate } from "@/lib/tokens";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
@@ -153,7 +153,7 @@ export function ContextMeter({ chatId }: { chatId: string }) {
     <div className="relative shrink-0">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
+        className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-xs ${open ? CHROME_ACTIVE : CHROME_QUIET}`}
         title={[
           sessionTotal != null
             ? "Context: this chat's, then the whole team's (estimated)"

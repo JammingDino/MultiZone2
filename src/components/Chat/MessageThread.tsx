@@ -238,7 +238,10 @@ export function MessageThread({ chatId }: { chatId: string }) {
 
   return (
     <div className="relative flex flex-1 flex-col overflow-hidden">
-      <div className="flex-1 overflow-y-auto px-3 py-4 sm:px-6" ref={containerRef}>
+      {/* `mz-thread` is the container-query context the assistant turns measure
+          to decide whether there is room to hang their avatar outside the
+          message column (see styles.css). */}
+      <div className="mz-thread flex-1 overflow-y-auto px-3 py-4 sm:px-6" ref={containerRef}>
         <div
           className={`mx-auto flex w-full flex-col gap-5 ${columnsMode ? "" : "max-w-3xl"}`}
           style={columnsMode ? { maxWidth: columnsMaxWidth } : undefined}

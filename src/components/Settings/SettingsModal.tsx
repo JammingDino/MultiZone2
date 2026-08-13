@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { X, Plus, Trash2, RefreshCw, Server, Palette, MessageSquare, Database, AlertTriangle, Loader2, Folder, FolderOpen, Globe, Copy, Check, Search, Brain, Sparkles, FileUp, FileDown, Plug, Wifi, WifiOff, Library, Layers, ChevronDown, ChevronRight, Mic, Volume2, AudioLines, Stethoscope, ExternalLink, Download } from "lucide-react";
+import { X, Plus, Trash2, RefreshCw, Server, Palette, MessageSquare, Database, AlertTriangle, Loader2, Folder, FolderOpen, Globe, Copy, Check, Brain, Sparkles, FileUp, FileDown, Plug, Wifi, WifiOff, Library, Layers, ChevronDown, ChevronRight, Mic, Volume2, AudioLines, Stethoscope, ExternalLink, Download } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useApp } from "@/store/app";
 import type { BackgroundEffect, GlassStyle, ThemeColorKey } from "@/store/app";
@@ -11,6 +11,7 @@ import { VisionOverrideSelect } from "@/components/common/VisionOverrideSelect";
 import { Modal, ModalTitle } from "@/components/common/Modal";
 import { HexColorField } from "@/components/common/ColorPicker";
 import { UpdateSection } from "@/components/Settings/UpdateSection";
+import { InstalledZones, useZoneActions } from "@/components/Zones/InstalledZones";
 import { getVersion } from "@tauri-apps/api/app";
 import { saveTextFile } from "@/lib/saveFile";
 import { resolveBaseProvider } from "@/lib/baseZone";
@@ -28,9 +29,9 @@ import { type SkillSeed, serializeSkill, parseSkill } from "@/lib/skillFile";
 import type { ApiBindState, CheckpointUsage, ConnectorCatalog, ConnectorEntry, ConnectorField, DbStats, GlobalKbView, IndexSummary, KbDocument, LifetimeUsage, McpDiagnosis, McpServerView, McpTool, Provider, Skill, SkillPack } from "@/lib/types";
 import { formatBytes, formatCount, formatTokens } from "@/lib/format";
 
-type Tab = "providers" | "zones" | "appearance" | "chat" | "voice" | "speech" | "search" | "skills" | "mcp" | "knowledge" | "memory" | "api" | "data";
+type Tab = "providers" | "zones" | "appearance" | "chat" | "voice" | "speech" | "skills" | "mcp" | "knowledge" | "memory" | "api" | "data";
 
-const TAB_IDS: Tab[] = ["providers", "zones", "appearance", "chat", "voice", "speech", "search", "skills", "mcp", "knowledge", "memory", "api", "data"];
+const TAB_IDS: Tab[] = ["providers", "zones", "appearance", "chat", "voice", "speech", "skills", "mcp", "knowledge", "memory", "api", "data"];
 
 function isTab(v: string | null): v is Tab {
   return !!v && (TAB_IDS as string[]).includes(v);
@@ -60,7 +61,6 @@ export function SettingsModal() {
             <TabButton active={tab === "speech"} icon={<Volume2 size={14} />} label="Speech" onClick={() => setTab("speech")} />
 
             <NavGroup label="Tools & context" />
-            <TabButton active={tab === "search"} icon={<Search size={14} />} label="Search" onClick={() => setTab("search")} />
             <TabButton active={tab === "skills"} icon={<Sparkles size={14} />} label="Skills" onClick={() => setTab("skills")} />
             <TabButton active={tab === "knowledge"} icon={<Library size={14} />} label="Knowledge" onClick={() => setTab("knowledge")} />
             <TabButton active={tab === "memory"} icon={<Brain size={14} />} label="Memory" onClick={() => setTab("memory")} />
@@ -77,7 +77,6 @@ export function SettingsModal() {
             {tab === "chat" && <ChatTab />}
             {tab === "voice" && <VoiceTab />}
             {tab === "speech" && <SpeechTab />}
-            {tab === "search" && <SearchTab />}
             {tab === "skills" && <SkillsTab />}
             {tab === "mcp" && <McpTab />}
             {tab === "knowledge" && <KnowledgeTab />}
@@ -120,16 +119,21 @@ function TabButton({ active, icon, label, onClick }: { active: boolean; icon: Re
  * in a settings pane — so this tab is the door to it, plus the list of what is
  * installed so the door is worth opening from here at all.
  *
+ * That list is the same component the Configure Zones rail uses (0.12.4). It
+ * used to be a second, plainer one written here — same zones, same action, two
+ * looks — which is exactly the kind of split that makes an app feel like
+ * several apps. Opening a zone lands in the same editor from either side too:
+ * `openZoneEditor` goes through Configure Zones wherever it is called from.
+ *
  * Both destinations close Settings and leave a breadcrumb (`returnTo`) instead
  * of stacking a second modal on top of it: the panel that opens shows a "Back
  * to settings" button that lands the user back on this tab.
  */
 function ZonesTab() {
   const zones = useApp((s) => s.zones);
-  const providers = useApp((s) => s.providers);
   const openZoneLibrary = useApp((s) => s.openZoneLibrary);
   const openZoneEditor = useApp((s) => s.openZoneEditor);
-  const baseZoneId = useApp((s) => s.appSettings.baseZoneId);
+  const zoneActions = useZoneActions({ onEdit: (id) => openZoneEditor(id, "settings") });
 
   return (
     <>
@@ -166,32 +170,16 @@ function ZonesTab() {
           or create one.
         </div>
       ) : (
-        <div className="flex flex-col gap-1.5">
-          {zones.map((z) => {
-            const provider = providers.find((p) => p.id === z.providerId);
-            return (
-              <button
-                key={z.id}
-                onClick={() => openZoneEditor(z.id, "settings")}
-                className="flex items-center gap-2 rounded border border-[var(--color-border)] px-3 py-2 text-left text-xs hover:border-[var(--color-accent)]"
-              >
-                <span className="min-w-0 flex-1 truncate font-medium text-[var(--color-text)]">
-                  {z.name}
-                  {z.id === baseZoneId && (
-                    <span className="ml-2 rounded bg-[var(--color-panel-hover)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">
-                      base
-                    </span>
-                  )}
-                </span>
-                <span className="shrink-0 truncate text-[var(--color-text-muted)]">
-                  {provider ? `${provider.name} · ` : ""}
-                  {z.model}
-                </span>
-                <ChevronRight size={12} className="shrink-0 text-[var(--color-text-muted)]" />
-              </button>
-            );
-          })}
-        </div>
+        <>
+          <div className="px-2 pb-1 text-[10.5px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+            Installed · {zones.length}
+          </div>
+          <InstalledZones
+            actions={zoneActions}
+            onOpen={(id) => openZoneEditor(id, "settings")}
+          />
+          {zoneActions.menuElement}
+        </>
       )}
     </>
   );
@@ -3248,37 +3236,10 @@ function MemoryTab() {
   );
 }
 
-// ─── Search ─────────────────────────────────────────────────────────────────────
-
-function SearchTab() {
-  return (
-    <div className="flex flex-col gap-6">
-      <section>
-        <h3 className="mb-1 text-sm font-medium">Web search</h3>
-        <p className="mb-2 text-xs text-[var(--color-text-muted)]">
-          The built-in <strong>Search the web</strong> tool queries several independent engines at
-          once (DuckDuckGo, Bing, Brave, Yandex, Ecosia, Yahoo, Wikipedia) and merges the results —
-          keyless, with nothing to configure here. If one engine is rate-limited, the others still
-          answer, so you rarely get a false “no results”. Enable it per zone in the zone editor.
-        </p>
-        <p className="text-xs text-[var(--color-text-muted)]">
-          Want a paid provider like <strong>Tavily</strong>, Brave, or Serper? Connect their MCP
-          server in the <strong>MCP</strong> tab and its search tool becomes available to your zones —
-          no key handling here, and you manage it alongside your other integrations.
-        </p>
-      </section>
-
-      <section>
-        <h3 className="mb-1 text-sm font-medium">Reading pages</h3>
-        <p className="text-xs text-[var(--color-text-muted)]">
-          <strong>Fetch a page or PDF</strong> reads a result in full as clean markdown, and{" "}
-          <strong>Crawl a site</strong> follows links within one site to gather a topic in a single
-          call. Both are keyless too. Enable them per zone alongside search.
-        </p>
-      </section>
-    </div>
-  );
-}
+// The Search tab was removed at 0.12.4. It had held no settings since the
+// keyless search tools landed at 1.0 — just prose explaining that there was
+// nothing to configure, which is not what a Settings pane is for. The tools are
+// enabled per zone in the zone editor, and a paid provider is an MCP server.
 
 // ─── API ──────────────────────────────────────────────────────────────────────
 

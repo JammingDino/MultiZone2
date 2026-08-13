@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { ContentPart, Message, InputPart } from "@/lib/types";
 import { Markdown } from "@/components/Renderers/Markdown";
 import { StreamingMarkdown } from "@/components/Renderers/StreamingMarkdown";
@@ -334,7 +335,11 @@ function MessagePreviewModal({
     );
   }
 
-  return (
+  // Rendered into the body rather than in place. The thread is a container
+  // query context (see `.mz-thread`), and containment makes it the containing
+  // block for fixed descendants — a preview left in the tree would cover the
+  // message list instead of the window.
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
       onClick={onClose}
@@ -354,7 +359,8 @@ function MessagePreviewModal({
         </div>
         {body}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -634,10 +640,10 @@ function BotTurnViewImpl({ turn, isLatest = false }: { turn: BotTurn; isLatest?:
     );
   }
 
-  // ── Ordinary single-zone turn (unchanged look) ──
+  // ── Ordinary single-zone turn ──
   return (
     <div className="msg-row">
-      <div className="flex gap-3">
+      <div className="mz-turn-row flex gap-3">
         <div className="flex flex-col items-center gap-1">
           <div
             className="mt-1 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded shadow-sm"
@@ -833,7 +839,11 @@ function ParticipantCard({
 
   return (
     <div className={`msg-row ${layout === "columns" ? "min-w-[280px] max-w-3xl flex-1" : ""}`}>
-      <div className="flex gap-3">
+      {/* Stacked cards sit in the ordinary message column and hang their avatar
+          in its margin like any other turn. Side-by-side columns have no margin
+          to hang in — the space to a card's left belongs to the card beside it —
+          so there the avatar stays in flow. */}
+      <div className={`flex gap-3 ${layout === "columns" ? "" : "mz-turn-row"}`}>
         {/* Avatar + the collapse "dropdown" beneath it */}
         <div className="flex flex-col items-center gap-1">
           <div

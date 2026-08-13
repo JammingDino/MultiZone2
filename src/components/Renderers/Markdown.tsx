@@ -65,12 +65,20 @@ export function Markdown({
   source,
   citations,
   part,
+  className = "",
+  fontSize,
 }: {
   source: string;
   citations?: Citation[];
   /** One group of a document split across several renderers (StreamingMarkdown):
    *  the first/last-child margin reset belongs to the document, not the group. */
   part?: boolean;
+  /** Extra classes on the wrapper — for markdown rendered outside the thread. */
+  className?: string;
+  /** Overrides the message font size. Markdown shown in a panel rather than in
+   *  the conversation (release notes, say) is chrome, and should be sized like
+   *  the chrome around it rather than tracking the reader's message size. */
+  fontSize?: string;
 }) {
   // Append the citation plugin only when there are citations to map, so ordinary
   // messages keep the stable module-level plugin array (no needless re-parse).
@@ -100,8 +108,8 @@ export function Markdown({
 
   return (
     <div
-      className={part ? "markdown markdown-part" : "markdown"}
-      style={{ fontSize: "var(--font-size-message, 14px)" }}
+      className={`${part ? "markdown markdown-part" : "markdown"}${className ? ` ${className}` : ""}`}
+      style={{ fontSize: fontSize ?? "var(--font-size-message, 14px)" }}
       onClick={onClick}
     >
       <ReactMarkdown

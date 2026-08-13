@@ -13,7 +13,6 @@ import { ReviewQueue } from "./ReviewQueue";
 import { DiffView } from "@/components/common/DiffView";
 import { HomeScreen } from "./HomeScreen";
 import { SettingsModal } from "@/components/Settings/SettingsModal";
-import { ZoneEditor } from "@/components/Zones/ZoneEditor";
 import { ZoneLibrary } from "@/components/Zones/ZoneLibrary";
 import { ProjectsPanel } from "@/components/Projects/ProjectsPanel";
 import { getZoneIcon } from "@/lib/zoneIcons";
@@ -40,7 +39,6 @@ export function ChatPanel() {
     tagsByChat,
     chatZonesByChat,
     settingsOpen,
-    zoneEditorOpen,
     zoneLibraryOpen,
     projectsPanelOpen,
     applyStreamEvent,
@@ -71,7 +69,6 @@ export function ChatPanel() {
       tagsByChat: s.tagsByChat,
       chatZonesByChat: s.chatZonesByChat,
       settingsOpen: s.settingsOpen,
-      zoneEditorOpen: s.zoneEditorOpen,
       zoneLibraryOpen: s.zoneLibraryOpen,
       projectsPanelOpen: s.projectsPanelOpen,
       applyStreamEvent: s.applyStreamEvent,
@@ -620,7 +617,6 @@ export function ChatPanel() {
         <ReplayView chatId={activeChat.id} onClose={() => setReplayOpen(false)} />
       )}
       {settingsOpen && <SettingsModal />}
-      {zoneEditorOpen && <ZoneEditor />}
       {zoneLibraryOpen && <ZoneLibrary />}
       {projectsPanelOpen && <ProjectsPanel />}
     </main>

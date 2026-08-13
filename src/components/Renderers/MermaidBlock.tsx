@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import mermaid from "mermaid";
-import { Loader2, GitBranch, Wand2, ZoomIn, ZoomOut, RotateCcw, Move } from "lucide-react";
+import {
+  Loader2, GitBranch, Wand2, ZoomIn, ZoomOut, RotateCcw, Move,
+  ChevronsUpDown, ChevronsDownUp, Maximize2, Minimize2,
+} from "lucide-react";
 import { useApp } from "@/store/app";
+import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 import * as api from "@/lib/tauri";
 
 const MIN_ZOOM = 0.4;
@@ -281,11 +286,32 @@ export function MermaidBlock({
 
 /**
  * Holds the rendered Mermaid SVG and provides zoom (mouse wheel + buttons)
- * and pan (drag) inside a fixed viewport. Resetting returns to fit-to-width.
+ * and pan (drag) inside the viewport. Resetting returns to fit-to-width.
+ *
+ * The viewport comes in three sizes. Inline it is short enough to stay a part
+ * of the conversation rather than taking it over; "taller" trades that for room
+ * when a diagram genuinely needs it; fullscreen gives the diagram the window,
+ * which is the only thing that helps a wide sequence diagram — extra height
+ * does nothing for one. All three are the same component instance, so zoom and
+ * pan survive the switch: opening fullscreen keeps whatever the user had
+ * already framed instead of throwing it away.
  */
 function MermaidViewport({ svg }: { svg: string }) {
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [expanded, setExpanded] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  // The height the block occupied in the thread, held while it is fullscreen.
+  const slotRef = useRef<HTMLDivElement>(null);
+  const [slotHeight, setSlotHeight] = useState<number | null>(null);
+  // Escape leaves fullscreen — through the shared layer stack, so a diagram
+  // opened from inside a modal closes itself first and leaves the modal up.
+  useDismissOnEscape(fullscreen, () => setFullscreen(false));
+
+  const toggleFullscreen = useCallback(() => {
+    if (!fullscreen) setSlotHeight(slotRef.current?.offsetHeight ?? null);
+    setFullscreen(!fullscreen);
+  }, [fullscreen]);
   // Live state. Refs are used for state that doesn't drive layout — drag origin,
   // active pointers (for pinch detection), the current pinch snapshot — so we
   // can avoid re-rendering on every pointer-move event.
@@ -439,17 +465,27 @@ function MermaidViewport({ svg }: { svg: string }) {
     if (pointersRef.current.size === 0) dragRef.current = null;
   }, []);
 
-  return (
+  const frame = (
     <div
-      className="relative my-2 rounded border border-[var(--color-border)]"
-      style={{ background: "transparent" }}
+      className={
+        fullscreen
+          ? "relative flex h-full w-full flex-col overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)]"
+          : "relative rounded border border-[var(--color-border)]"
+      }
+      style={fullscreen ? undefined : { background: "transparent" }}
     >
       <div
         ref={viewportRef}
-        className="flex max-h-[600px] justify-center overflow-hidden p-3 select-none [&_svg]:max-w-full [&_svg]:!bg-transparent"
+        className={`flex justify-center overflow-hidden p-3 select-none [&_svg]:max-w-full [&_svg]:!bg-transparent ${
+          fullscreen ? "min-h-0 flex-1 items-center" : ""
+        }`}
         style={{
           touchAction: "none",
           cursor: dragRef.current ? "grabbing" : "grab",
+          // Capped against the window rather than at a taller fixed pixel
+          // height: a viewport that doesn't fit on screen just moves the
+          // scrolling problem from inside the diagram to outside it.
+          maxHeight: fullscreen ? undefined : expanded ? "85vh" : "600px",
         }}
         onWheel={onWheel}
         onPointerDown={onPointerDown}
@@ -479,11 +515,62 @@ function MermaidViewport({ svg }: { svg: string }) {
         <ZoomButton title="Reset view" onClick={reset}>
           <RotateCcw size={12} />
         </ZoomButton>
+        <span className="mx-0.5 h-4 w-px bg-[var(--color-border)]" />
+        {/* Height is only worth offering while the diagram is in the thread —
+            fullscreen is already as tall as the window goes. */}
+        {!fullscreen && (
+          <ZoomButton
+            title={expanded ? "Shorter view" : "Taller view"}
+            onClick={() => setExpanded((v) => !v)}
+          >
+            {expanded ? <ChevronsDownUp size={12} /> : <ChevronsUpDown size={12} />}
+          </ZoomButton>
+        )}
+        <ZoomButton
+          title={fullscreen ? "Exit fullscreen (Esc)" : "Fullscreen"}
+          onClick={toggleFullscreen}
+        >
+          {fullscreen ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+        </ZoomButton>
       </div>
       <div className="pointer-events-none absolute bottom-1.5 left-2 flex items-center gap-1 text-[10px] text-[var(--color-text-muted)] opacity-50">
         <Move size={10} /> drag to pan · ctrl+wheel or pinch to zoom
+        {fullscreen && " · esc to exit"}
       </div>
     </div>
+  );
+
+  return (
+    <>
+      {/* Fullscreen moves the diagram out of the thread, so the slot it leaves
+          behind holds its height. Otherwise every message below it slides up
+          while the user is looking at something else, and slides back down when
+          they close it. */}
+      <div
+        ref={slotRef}
+        className="my-2"
+        style={fullscreen && slotHeight != null ? { height: slotHeight } : undefined}
+      >
+        {!fullscreen && frame}
+      </div>
+      {/* Portalled to the body: the thread is a container-query context, and
+          containment would otherwise pin this to the message list rather than
+          the window (see `.mz-thread`). */}
+      {fullscreen &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-50 flex bg-black/70 p-4 backdrop-blur-sm"
+            onClick={(e) => {
+              // Click the backdrop to leave; a click that lands on the frame
+              // (including a pan that ends outside it) does not.
+              if (e.target === e.currentTarget) setFullscreen(false);
+            }}
+          >
+            {frame}
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }
 

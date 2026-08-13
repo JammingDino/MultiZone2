@@ -73,6 +73,26 @@ export async function seedCuratedLibrary(): Promise<void> {
   } catch { /* ignore */ }
 }
 
+/**
+ * The shipped team an installed zone belongs to, or null.
+ *
+ * A live zone carries no team field of its own — a team is a property of the
+ * preset *set* a zone was installed from, not of the zone afterwards — so this
+ * matches by name, the same way the library decides whether an entry is already
+ * installed. Derived from the in-code curated set, so it costs no disk read and
+ * every list that shows zones can label them without loading the library.
+ */
+let teamByZoneName: Map<string, string> | null = null;
+export function zoneTeamName(name: string): string | null {
+  if (!teamByZoneName) {
+    teamByZoneName = new Map();
+    for (const e of curatedEntries()) {
+      if (e.team) teamByZoneName.set(e.name.toLowerCase(), e.team);
+    }
+  }
+  return teamByZoneName.get(name.trim().toLowerCase()) ?? null;
+}
+
 /** Export a live zone as a JSON file to a user-chosen path (re-importable via Add zones). */
 export async function exportZoneJson(zone: Zone): Promise<void> {
   const data = {

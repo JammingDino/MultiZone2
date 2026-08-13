@@ -325,8 +325,6 @@ interface AppStore {
 
   // ui
   settingsOpen: boolean;
-  zoneEditorOpen: boolean;
-  editingZoneId: string | null;
   zonesPanelOpen: boolean;
   zoneLibraryOpen: boolean;
   /**
@@ -338,14 +336,23 @@ interface AppStore {
    */
   zoneLibraryReturnTo: "settings" | null;
   /**
+   * Ask Configure Zones to open straight into the editor rather than onto the
+   * library grid: `zoneId` is the zone to edit, or null to start a new one.
+   *
+   * There is no separate zone-editor modal any more (0.12.4). Editing a zone
+   * from the chat's zone picker used to open one shell and editing the same
+   * zone from Configure Zones another, so the same form arrived at two
+   * different sizes with its sidebar in two different places. One panel, one
+   * form: `openZoneEditor` now routes every entry point through here.
+   */
+  zoneLibraryInitialEdit: { zoneId: string | null } | null;
+  /**
    * The Settings tab to land on the next time Settings opens (the id of a tab
    * in SettingsModal), or null for its own default. Set when something outside
    * Settings sends the user there — the zone library's back button, so it
    * returns to the Zones entry it was launched from rather than to Providers.
    */
   settingsInitialTab: string | null;
-  /** Same breadcrumb for the zone editor, which Settings → Zones can also open. */
-  zoneEditorReturnTo: "settings" | null;
   defaultZoneId: string | null;
   shortcutsHelpOpen: boolean;
   /** Whether the sidebar is expanded. Persisted across sessions (ui.sidebarOpen). */
@@ -417,10 +424,8 @@ interface AppStore {
 
   openSettings: () => void;
   closeSettings: () => void;
+  /** Open Configure Zones on the editor for `id` (null = a new zone). */
   openZoneEditor: (id: string | null, returnTo?: "settings") => void;
-  closeZoneEditor: () => void;
-  /** Leave the zone editor and reopen whatever opened it (Settings). */
-  returnFromZoneEditor: () => void;
   openZonesPanel: () => void;
   closeZonesPanel: () => void;
   openZoneLibrary: (returnTo?: "settings") => void;
@@ -824,13 +829,11 @@ export const useApp = create<AppStore>((set, get) => ({
   conversationChatId: null,
 
   settingsOpen: false,
-  zoneEditorOpen: false,
-  editingZoneId: null,
   zonesPanelOpen: false,
   zoneLibraryOpen: false,
   zoneLibraryReturnTo: null,
+  zoneLibraryInitialEdit: null,
   settingsInitialTab: null,
-  zoneEditorReturnTo: null,
   defaultZoneId: null,
   shortcutsHelpOpen: false,
   sidebarOpen: readSidebarOpen(),
@@ -1619,25 +1622,15 @@ export const useApp = create<AppStore>((set, get) => ({
   },
   openSettings: () => set({ settingsOpen: true }),
   closeSettings: () => set({ settingsOpen: false }),
+  // Editing a zone is the library panel opened on its editor, not a panel of
+  // its own — see `zoneLibraryInitialEdit` for why there is only one now.
   openZoneEditor: (id, returnTo) =>
     set({
-      zoneEditorOpen: true,
-      editingZoneId: id,
-      zoneEditorReturnTo: returnTo ?? null,
+      zoneLibraryOpen: true,
+      zoneLibraryReturnTo: returnTo ?? null,
+      zoneLibraryInitialEdit: { zoneId: id },
       settingsOpen: returnTo === "settings" ? false : get().settingsOpen,
     }),
-  closeZoneEditor: () =>
-    set({ zoneEditorOpen: false, editingZoneId: null, zoneEditorReturnTo: null }),
-  returnFromZoneEditor: () => {
-    const back = get().zoneEditorReturnTo;
-    set({
-      zoneEditorOpen: false,
-      editingZoneId: null,
-      zoneEditorReturnTo: null,
-      settingsOpen: back === "settings",
-      settingsInitialTab: back === "settings" ? "zones" : get().settingsInitialTab,
-    });
-  },
   openZonesPanel: () => set({ zonesPanelOpen: true }),
   closeZonesPanel: () => set({ zonesPanelOpen: false }),
   // Opening the library from Settings closes Settings rather than stacking a
@@ -1648,14 +1641,17 @@ export const useApp = create<AppStore>((set, get) => ({
     set({
       zoneLibraryOpen: true,
       zoneLibraryReturnTo: returnTo ?? null,
+      zoneLibraryInitialEdit: null,
       settingsOpen: returnTo === "settings" ? false : get().settingsOpen,
     }),
-  closeZoneLibrary: () => set({ zoneLibraryOpen: false, zoneLibraryReturnTo: null }),
+  closeZoneLibrary: () =>
+    set({ zoneLibraryOpen: false, zoneLibraryReturnTo: null, zoneLibraryInitialEdit: null }),
   returnFromZoneLibrary: () => {
     const back = get().zoneLibraryReturnTo;
     set({
       zoneLibraryOpen: false,
       zoneLibraryReturnTo: null,
+      zoneLibraryInitialEdit: null,
       settingsOpen: back === "settings",
       settingsInitialTab: back === "settings" ? "zones" : get().settingsInitialTab,
     });

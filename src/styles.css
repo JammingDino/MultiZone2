@@ -323,6 +323,27 @@ input[type="color"]:hover { border-color: var(--color-accent); }
   pointer-events: auto;
 }
 
+/* ===== Assistant turn gutter =====
+   An answer's vertical rule marks the left edge of the message column — the
+   same edge the user's bubbles end at and the composer below starts at — with
+   the zone avatar hanging off into the margin beside it, rather than the whole
+   turn being pushed in by the width of the avatar.
+
+   The overhang is 1.75rem of avatar + 0.75rem of gap. It only turns on once the
+   thread is wide enough to hold it outside the column: the column is capped at
+   48rem and centred, so at 52rem of thread there is at least 2rem of slack per
+   side plus the thread's own 0.75–1.5rem of padding. Narrower than that there
+   is nowhere to hang, so the avatar stays in flow and the turn indents as it
+   always did. Everything is in rem, so it holds as the UI font size scales. */
+.mz-thread {
+  container-type: inline-size;
+}
+@container (min-width: 52rem) {
+  .mz-turn-row {
+    margin-left: -2.5rem;
+  }
+}
+
 /* ===== Markdown content ===== */
 .markdown {
   line-height: 1.55;

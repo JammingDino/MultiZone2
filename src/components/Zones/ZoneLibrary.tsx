@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   X, Download, Check, Loader2, Sparkles, Bookmark, ChevronLeft, ChevronRight,
-  ChevronDown, Plus, Upload, Settings as SettingsIcon, MessageSquare, Trash2, Star, Pencil, Crown,
+  ChevronDown, Plus, Upload, Settings as SettingsIcon, MessageSquare, Trash2, Star, Crown,
   Users,
 } from "lucide-react";
 import { useApp } from "@/store/app";
@@ -10,8 +10,9 @@ import type { LibraryEntry, Provider, Zone } from "@/lib/types";
 import { ALL_TOOLS } from "@/lib/types";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import { resolveBaseModel, resolveBaseProvider } from "@/lib/baseZone";
-import { installEntry, installTeam, saveZoneToLibrary, importEntryFromJson, exportZoneJson } from "@/lib/zoneLibrary";
+import { installEntry, installTeam, saveZoneToLibrary, importEntryFromJson } from "@/lib/zoneLibrary";
 import { ZoneForm } from "./ZoneForm";
+import { InstalledZones, useZoneActions } from "./InstalledZones";
 import { Modal, ModalTitle } from "@/components/common/Modal";
 import { BackToSettings } from "@/components/common/BackToSettings";
 
@@ -67,12 +68,24 @@ export function ZoneLibrary() {
   const defaultZoneId = useApp((s) => s.defaultZoneId);
   const setDefaultZone = useApp((s) => s.setDefaultZone);
 
+  // Set when the panel was opened *as* a zone editor rather than as the library
+  // — from Settings → Zones, the chat's zone picker, the home screen. Read once
+  // for the initial view: the panel unmounts when it closes, so every such open
+  // is a fresh mount.
+  const initialEdit = useApp((s) => s.zoneLibraryInitialEdit);
+
   const [entries, setEntries] = useState<LibraryEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<View>("library");
+  const [view, setView] = useState<View>(initialEdit ? "editor" : "library");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Zone being edited in the embedded editor (null = creating a new zone).
-  const [editorZoneId, setEditorZoneId] = useState<string | null>(null);
+  const [editorZoneId, setEditorZoneId] = useState<string | null>(initialEdit?.zoneId ?? null);
+  // True while the panel is still doing the one job it was opened for. Saving
+  // then leaves the way the old standalone editor did — back to Settings, or to
+  // the chat — rather than dropping the user on a library grid they never asked
+  // for. Browsing the library clears it: from that point this *is* the library,
+  // and finishing an edit belongs back in it.
+  const [openedAsEditor, setOpenedAsEditor] = useState(!!initialEdit);
   const [page, setPage] = useState(0);
   const [addOpen, setAddOpen] = useState(false);
   const [urlValue, setUrlValue] = useState("");
@@ -80,10 +93,6 @@ export function ZoneLibrary() {
   const [savePicker, setSavePicker] = useState(false);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
-  // Right-click zone context menu + inline rename.
-  const [zoneMenu, setZoneMenu] = useState<{ zone: Zone; x: number; y: number } | null>(null);
-  const [renamingId, setRenamingId] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   const toastTimer = useRef<number | undefined>(undefined);
 
@@ -155,43 +164,33 @@ export function ZoneLibrary() {
     setView("editor");
   }
 
-  function openZoneMenu(zone: Zone, x: number, y: number) {
-    setZoneMenu({ zone, x, y });
+  /** Deliberate navigation to the library — this stops being an editor. */
+  function showLibrary() {
+    setOpenedAsEditor(false);
+    setView("library");
   }
-  function startRename(zone: Zone) {
-    setZoneMenu(null);
-    setRenameValue(zone.name);
-    setRenamingId(zone.id);
+
+  const leavePanel = returnTo ? returnFromZoneLibrary : closeZoneLibrary;
+
+  /** Finished with the editor: leave the panel, or fall back into the library. */
+  async function afterEditor() {
+    await refreshZones();
+    if (openedAsEditor) leavePanel();
+    else setView("library");
   }
-  async function commitRename(zone: Zone) {
-    const next = renameValue.trim();
-    setRenamingId(null);
-    if (!next || next === zone.name) return;
-    try {
-      await api.upsertZone({ ...zone, name: next });
-      await refreshZones();
-      flash(`Renamed to “${next}”`);
-    } catch (e) {
-      console.error(e);
+
+  // Rename / export / delete plus the right-click menu offering them, shared
+  // with the installed list and hung off the library cards below.
+  const zoneActions = useZoneActions({ onEdit: openEditor, onNotify: flash });
+
+  // Deleting the zone whose editor is open leaves the editor pointed at
+  // nothing, whichever route the delete came in by — fall back to the library.
+  useEffect(() => {
+    if (view === "editor" && editorZoneId && !zones.some((z) => z.id === editorZoneId)) {
+      setEditorZoneId(null);
+      setView("library");
     }
-  }
-  function onExportZone(zone: Zone) {
-    setZoneMenu(null);
-    exportZoneJson(zone);
-    flash(`Exported “${zone.name}”`);
-  }
-  async function onDeleteZone(zone: Zone) {
-    setZoneMenu(null);
-    setBusy(true);
-    try {
-      await api.deleteZone(zone.id);
-      await refreshZones();
-      if (editorZoneId === zone.id) setView("library");
-      flash(`Deleted “${zone.name}”`);
-    } finally {
-      setBusy(false);
-    }
-  }
+  }, [view, editorZoneId, zones]);
 
   async function onInstall(e: LibraryEntry) {
     if (!quickProvider || busy) return;
@@ -365,7 +364,7 @@ export function ZoneLibrary() {
 
   return (
     <Modal
-      onClose={returnTo ? returnFromZoneLibrary : closeZoneLibrary}
+      onClose={leavePanel}
       className="h-[700px] w-[980px] overflow-hidden"
       header={
         <>
@@ -387,7 +386,7 @@ export function ZoneLibrary() {
                 <Plus size={15} /> New Zone
               </button>
               <button
-                onClick={() => setView("library")}
+                onClick={showLibrary}
                 className={`flex h-9 items-center justify-center gap-2 rounded-lg border text-sm font-semibold transition ${
                   view === "library" || view === "detail"
                     ? "border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]"
@@ -402,57 +401,11 @@ export function ZoneLibrary() {
               Installed · {zones.length}
             </div>
             <div className="flex-1 overflow-y-auto px-2 pb-3">
-              {zones.length === 0 && (
-                <div className="px-2 py-3 text-xs text-[var(--color-text-muted)]">No zones installed yet.</div>
-              )}
-              {zones.map((z) => {
-                const Icon = getZoneIcon(z.icon);
-                const accent = z.accentColor ?? "var(--color-accent)";
-                const active = view === "editor" && editorZoneId === z.id;
-                if (renamingId === z.id) {
-                  return (
-                    <div key={z.id} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5">
-                      <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg" style={{ background: accent }}>
-                        <Icon size={15} color="white" />
-                      </span>
-                      <input
-                        autoFocus
-                        value={renameValue}
-                        onChange={(e) => setRenameValue(e.target.value)}
-                        onBlur={() => commitRename(z)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") commitRename(z);
-                          // Cancelling the rename is all Escape does here — it
-                          // must not also close the library behind it.
-                          if (e.key === "Escape") { e.stopPropagation(); setRenamingId(null); }
-                        }}
-                        className="min-w-0 flex-1 rounded border border-[var(--color-accent)] bg-[var(--color-bg)] px-1.5 py-0.5 text-[13px] outline-none"
-                      />
-                    </div>
-                  );
-                }
-                return (
-                  <button
-                    key={z.id}
-                    onClick={() => openEditor(z.id)}
-                    onContextMenu={(e) => { e.preventDefault(); openZoneMenu(z, e.clientX, e.clientY); }}
-                    className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-[var(--color-panel-hover)] ${active ? "bg-[var(--color-panel-hover)]" : ""}`}
-                  >
-                    <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg" style={{ background: accent }}>
-                      <Icon size={15} color="white" />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-1">
-                        <span className="truncate text-[13px] font-medium leading-tight">{z.name}</span>
-                        {z.isLeader && (
-                          <Crown size={11} className="flex-shrink-0 text-amber-500" />
-                        )}
-                      </span>
-                      <span className="block truncate text-[11px] text-[var(--color-text-muted)]">{z.model}</span>
-                    </span>
-                  </button>
-                );
-              })}
+              <InstalledZones
+                actions={zoneActions}
+                activeZoneId={view === "editor" ? editorZoneId : null}
+                onOpen={openEditor}
+              />
             </div>
           </div>
 
@@ -468,9 +421,9 @@ export function ZoneLibrary() {
                 providers={providers}
                 isDefault={!!editorZone && defaultZoneId === editorZone.id}
                 onToggleDefault={() => { if (editorZone) setDefaultZone(defaultZoneId === editorZone.id ? null : editorZone.id); }}
-                onBack={() => setView("library")}
-                onSaved={async () => { await refreshZones(); setView("library"); }}
-                onDeleted={async () => { await refreshZones(); setView("library"); }}
+                onBack={showLibrary}
+                onSaved={afterEditor}
+                onDeleted={afterEditor}
               />
             ) : view === "detail" && selected ? (
               <DetailView
@@ -479,7 +432,7 @@ export function ZoneLibrary() {
                 updateAvailable={hasUpdate(selected)}
                 canInstall={canInstall}
                 busy={busy}
-                onBack={() => setView("library")}
+                onBack={showLibrary}
                 onInstall={() => onInstall(selected)}
                 onConfigure={() => onConfigure(selected)}
                 onUninstall={() => onUninstall(selected)}
@@ -501,7 +454,7 @@ export function ZoneLibrary() {
                 onConfigure={onConfigure}
                 onCardContextMenu={(e, ev) => {
                   const z = liveZoneFor(e);
-                  if (z) { ev.preventDefault(); openZoneMenu(z, ev.clientX, ev.clientY); }
+                  if (z) zoneActions.openMenu(z, ev);
                 }}
                 page={pageSafe}
                 totalPages={totalPages}
@@ -544,49 +497,8 @@ export function ZoneLibrary() {
           </div>
         )}
 
-        {zoneMenu && (
-          <ZoneContextMenu
-            x={zoneMenu.x}
-            y={zoneMenu.y}
-            onClose={() => setZoneMenu(null)}
-            onEdit={() => { const z = zoneMenu.zone; setZoneMenu(null); openEditor(z.id); }}
-            onRename={() => startRename(zoneMenu.zone)}
-            onExport={() => onExportZone(zoneMenu.zone)}
-            onDelete={() => onDeleteZone(zoneMenu.zone)}
-          />
-        )}
+        {zoneActions.menuElement}
     </Modal>
-  );
-}
-
-function ZoneContextMenu({
-  x, y, onClose, onEdit, onRename, onExport, onDelete,
-}: {
-  x: number; y: number; onClose: () => void;
-  onEdit: () => void; onRename: () => void; onExport: () => void; onDelete: () => void;
-}) {
-  return (
-    <>
-      <div className="fixed inset-0 z-[70]" onClick={onClose} onContextMenu={(e) => { e.preventDefault(); onClose(); }} />
-      <div className="fixed z-[80] min-w-[160px] rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-2xl" style={{ left: x, top: y }}>
-        <MenuItem icon={<SettingsIcon size={13} />} label="Edit" onClick={onEdit} />
-        <MenuItem icon={<Pencil size={13} />} label="Rename" onClick={onRename} />
-        <MenuItem icon={<Download size={13} />} label="Export JSON" onClick={onExport} />
-        <div className="my-1 border-t border-[var(--color-border)]" />
-        <MenuItem icon={<Trash2 size={13} />} label="Delete" onClick={onDelete} danger />
-      </div>
-    </>
-  );
-}
-
-function MenuItem({ icon, label, onClick, danger }: { icon: React.ReactNode; label: string; onClick: () => void; danger?: boolean }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-[13px] hover:bg-[var(--color-panel-hover)] ${danger ? "text-[var(--color-danger)]" : ""}`}
-    >
-      {icon} {label}
-    </button>
   );
 }
 

@@ -8,6 +8,7 @@ import { TitleBar } from "./components/TitleBar";
 import { Onboarding } from "./components/Onboarding/Onboarding";
 import { NoProviderBanner } from "./components/Onboarding/NoProviderBanner";
 import { ImportSettingsDialog } from "./components/Settings/ImportSettingsDialog";
+import { UpdatePrompt } from "./components/UpdatePrompt";
 import { ShortcutsHelpModal } from "./components/common/ShortcutsHelpModal";
 import { useApp } from "./store/app";
 import { useGlobalShortcuts } from "./lib/useGlobalShortcuts";
@@ -165,6 +166,9 @@ export default function App() {
       {/* App-wide so the confirmation can sit above onboarding as well as the
           chat — a settings file may be dropped or picked from either. */}
       <ImportSettingsDialog />
+      {/* Checks for a new release shortly after launch and only appears if it
+          finds one — see UpdatePrompt for why the failures stay quiet. */}
+      <UpdatePrompt />
       {/* Last child, and above everything: it covers the window while the first
           frame settles. */}
       <BootSplash />

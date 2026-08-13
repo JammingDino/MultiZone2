@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { Download, RefreshCw, CheckCircle2, AlertTriangle } from "lucide-react";
 import { useUpdater } from "@/lib/useUpdater";
+import { Markdown } from "@/components/Renderers/Markdown";
 
 /**
  * Update control for Settings → Data.
@@ -43,10 +44,13 @@ export function UpdateSection() {
               <div className="font-medium text-[var(--color-text)]">
                 Version {u.version} is available
               </div>
+              {/* Release bodies are written in Markdown on GitHub, so they are
+                  rendered as Markdown here — headings and lists, not a wall of
+                  literal `##` and `-`. */}
               {u.notes && (
-                <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap font-sans text-[var(--color-text-muted)]">
-                  {u.notes}
-                </pre>
+                <div className="mt-1.5 max-h-40 overflow-auto rounded border border-[var(--color-border)] px-2.5 py-2">
+                  <Markdown source={u.notes} fontSize="12px" />
+                </div>
               )}
             </div>
           </div>

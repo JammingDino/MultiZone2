@@ -88,6 +88,14 @@ export interface PlanStep {
   step: string;
   /** Why — the sentence that makes the step reviewable rather than a label. */
   intent?: string | null;
+  /**
+   * The specification, as Markdown (0.12.7). The approach and the rejected
+   * alternatives, the concrete parameters, what goes wrong here. `step` is the
+   * heading; this is the plan.
+   */
+  detail?: string | null;
+  /** How anyone tells this step is genuinely finished rather than nominally. */
+  acceptance?: string | null;
   /** The files this step expects to touch, as the model named them. */
   files: string[];
   risk: "low" | "medium" | "high";
@@ -109,9 +117,29 @@ export interface Plan {
   parentPlanId: string | null;
   title: string;
   goal: string | null;
+  /**
+   * Everything true of the plan before step 1 (0.12.7), as Markdown: the scope
+   * decision made and the ones rejected, the assumptions, what the research
+   * turned up, what is still open.
+   */
+  context?: string | null;
+  /** Absolute path to the plan's Markdown document, when one was written. */
+  docPath?: string | null;
   /** JSON-encoded array of PlanStep. */
   steps: string;
-  status: "draft" | "approved" | "executing" | "done" | "stopped" | "rejected" | "superseded";
+  /**
+   * `drafting` is a plan being written a step at a time that the user has not
+   * been shown; it becomes `draft` when `exit_plan_mode` files it.
+   */
+  status:
+    | "drafting"
+    | "draft"
+    | "approved"
+    | "executing"
+    | "done"
+    | "stopped"
+    | "rejected"
+    | "superseded";
   /** True when the user changed the steps before approving. */
   editedByUser: boolean;
   /** The user asked the run to finish the current step and stop (0.12.1). */

@@ -25,6 +25,7 @@ const VISUAL_TOOLS = new Set([
  */
 const TOOL_LABELS: Record<string, string> = {
   ask_user: "Asking a question",
+  draft_plan_step: "Writing a plan step",
   enter_plan_mode: "Switching to plan mode",
   exit_plan_mode: "Proposing a plan",
   change_zone: "Switching zone",
@@ -72,6 +73,7 @@ const TOOL_LABELS: Record<string, string> = {
   terminal_start: "Opening terminal",
   terminal_stop: "Closing terminal",
   terminal_write: "Typing into terminal",
+  read_plan: "Reading the plan",
   update_plan: "Updating plan",
   update_skill: "Updating skill",
   web_search: "Searching the web",

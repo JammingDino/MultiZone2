@@ -442,8 +442,23 @@ export function HomeScreen() {
   }
 
   return (
+    /* Balance (0.12.7). Two things were off. The block was centred *geometrically*
+       in a tall window, which reads as low — the eye puts the centre of a page
+       above its middle, which is why every poster and title slide sits its
+       subject high. The asymmetric padding here is the correction: content
+       centres in what is left after 9vh is taken off the bottom, so it lands
+       where it looks centred rather than where it measures centred.
+
+       And the column was narrower than the one it turns into. This composer was
+       `max-w-2xl` and the in-chat composer is `max-w-3xl`, so sending the first
+       message made the box you had just typed into jump 96px wider. Same width
+       either side of that transition now, and the landing view stops looking
+       like a small thing adrift in a large window.
+
+       `overflow-y-auto` with real padding is what keeps that honest on a short
+       window: centring plus a nudge has to degrade to scrolling, not clipping. */
     <div
-      className="relative flex flex-1 flex-col items-center justify-center px-4"
+      className="relative flex flex-1 flex-col items-center justify-center overflow-y-auto px-4 pb-[9vh] pt-8"
       onDragEnter={onDragEnter}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
@@ -460,7 +475,7 @@ export function HomeScreen() {
           </div>
         </div>
       )}
-      <div className="w-full max-w-2xl">
+      <div className="w-full max-w-3xl">
         {/* The greeting fades and the composer rises under it, so arriving here —
             on launch, or on coming back from a conversation — is a movement rather
             than a cut. Both are pure decoration and both are dropped under
@@ -469,7 +484,7 @@ export function HomeScreen() {
             zone…") was onboarding text on a screen the user sees every day, and
             everything it pointed at — the composer, the zone chip — is directly
             below it and labelled. */}
-        <div className="mz-fade-in mb-6 text-center">
+        <div className="mz-fade-in mb-7 text-center">
           <h1 className="text-2xl font-semibold text-[var(--color-text)]">{greeting}</h1>
         </div>
 

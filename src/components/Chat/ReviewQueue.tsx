@@ -3,6 +3,7 @@ import { ClipboardCheck, Check, X, Loader2, TriangleAlert } from "lucide-react";
 import * as api from "@/lib/tauri";
 import type { ApplyOutcome, StagedEdit } from "@/lib/types";
 import { DiffView } from "@/components/common/DiffView";
+import { PRIMARY_ACTION } from "@/lib/chrome";
 
 /**
  * The review queue (0.10.2).
@@ -140,7 +141,7 @@ export function ReviewQueue({ chatId }: { chatId: string }) {
             <button
               onClick={applyAll}
               disabled={busy !== null}
-              className="flex items-center gap-1 rounded bg-[var(--color-accent)] px-2.5 py-1 text-xs text-white hover:opacity-90 disabled:opacity-50"
+              className={`flex items-center gap-1 rounded px-2.5 py-1 text-xs ${PRIMARY_ACTION}`}
             >
               {busy === "__all__" ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
               Apply all

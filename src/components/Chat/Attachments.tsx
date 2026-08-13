@@ -29,6 +29,7 @@ import {
   type PendingAttachment,
 } from "@/lib/attachFiles";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
+import { CHROME_QUIET, PRIMARY_ACTION } from "@/lib/chrome";
 
 /**
  * Staged attachments for one composer.
@@ -471,7 +472,7 @@ export function AttachmentPreview({
         {onRetry && (
           <button
             onClick={onRetry}
-            className="w-fit rounded bg-[var(--color-accent)] px-3 py-1.5 text-xs text-white hover:bg-[var(--color-accent-hover)]"
+            className={`w-fit rounded px-3 py-1.5 text-xs ${PRIMARY_ACTION}`}
           >
             Try again
           </button>
@@ -495,7 +496,7 @@ export function AttachmentPreview({
             <button
               onClick={onUse}
               title="Move this transcript into the message box and remove the attachment"
-              className="shrink-0 rounded bg-[var(--color-accent)] px-3 py-1.5 text-xs text-white hover:bg-[var(--color-accent-hover)]"
+              className={`shrink-0 rounded px-3 py-1.5 text-xs ${PRIMARY_ACTION}`}
             >
               Use as message
             </button>
@@ -549,7 +550,7 @@ export function AttachmentPreview({
           <span className="max-w-[400px] truncate text-sm font-medium">{attachment.fileName}</span>
           <button
             onClick={onClose}
-            className="rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
+            className={`rounded p-1 ${CHROME_QUIET}`}
           >
             <X size={16} />
           </button>

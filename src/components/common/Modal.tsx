@@ -1,6 +1,7 @@
 import { X } from "lucide-react";
 import type { ReactNode } from "react";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
+import { CHROME_QUIET } from "@/lib/chrome";
 
 /**
  * The one workspace footprint. Every full panel — Settings, Configure Zones,
@@ -58,7 +59,7 @@ export function Modal({
           <button
             onClick={onClose}
             aria-label="Close"
-            className="shrink-0 rounded-md p-1.5 text-[var(--color-text-muted)] transition hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
+            className={`shrink-0 rounded-md p-1.5 ${CHROME_QUIET}`}
           >
             <X size={16} />
           </button>

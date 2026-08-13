@@ -12,6 +12,7 @@ import {
   type ImportResult,
   type PlanRow,
 } from "@/lib/settingsBundle";
+import { PRIMARY_ACTION } from "@/lib/chrome";
 
 /**
  * Confirmation step for a settings import, wherever it was raised from —
@@ -182,7 +183,7 @@ export function ImportSettingsDialog() {
         {result ? (
           <button
             onClick={close}
-            className="rounded bg-[var(--color-accent)] px-3 py-1.5 text-xs text-white hover:opacity-90"
+            className={`rounded px-3 py-1.5 text-xs ${PRIMARY_ACTION}`}
           >
             Done
           </button>
@@ -198,7 +199,7 @@ export function ImportSettingsDialog() {
             <button
               onClick={confirm}
               disabled={busy || !plan}
-              className="flex items-center gap-1.5 rounded bg-[var(--color-accent)] px-3 py-1.5 text-xs text-white hover:opacity-90 disabled:opacity-50"
+              className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-xs ${PRIMARY_ACTION}`}
             >
               {busy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
               Import

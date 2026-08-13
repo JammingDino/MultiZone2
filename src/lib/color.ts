@@ -30,3 +30,22 @@ export function normalizeHex(input: string): string | null {
 export function isHex(input: string): boolean {
   return normalizeHex(input) !== null;
 }
+
+/**
+ * The same colour moved towards white (positive `amount`) or black (negative),
+ * as a fraction of the distance to it. Used for the accent's hover shade.
+ *
+ * The theme shipped a hand-picked `--color-accent-hover` per mode, and then
+ * every custom accent overwrote it with the accent itself — so the moment a
+ * user picked their own colour, every filled button in the app stopped
+ * reacting to the pointer. Deriving it means any accent gets a hover.
+ */
+export function shade(hex: string, amount: number): string {
+  const c = normalizeHex(hex);
+  if (!c) return hex;
+  const towards = amount >= 0 ? 255 : 0;
+  const f = Math.min(1, Math.abs(amount));
+  const mix = (channel: number) => Math.round(channel + (towards - channel) * f);
+  const parts = [1, 3, 5].map((i) => mix(parseInt(c.slice(i, i + 2), 16)));
+  return `#${parts.map((n) => n.toString(16).padStart(2, "0")).join("")}`;
+}

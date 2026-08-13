@@ -47,6 +47,18 @@ export const CHROME_QUIET = `border border-transparent text-[var(--color-text-mu
 export const CHROME_OUTLINED = `border border-[var(--color-border)] text-[var(--color-text-muted)] ${CHROME_GLOW}`;
 
 /**
+ * The filled accent button — the one "do it" action of a bar, a dialog, or a
+ * form. Four different hovers were in use (`opacity-90`, `brightness-110`,
+ * `bg-accent-hover`, and on a good third of them nothing at all), so the same
+ * button dimmed in one panel, brightened in the next, and sat inert in the one
+ * after. It darkens or lightens towards its hover shade — see `shade()`.
+ *
+ * Layout is the caller's: these buttons are legitimately different sizes.
+ */
+export const PRIMARY_ACTION =
+  "bg-[var(--color-accent)] text-white transition hover:bg-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-50";
+
+/**
  * A control that is currently on or open. Same accent as the hover state, held
  * rather than transient, so "open" and "about to be clicked" look related
  * instead of a dropdown going grey while its neighbour goes blue.

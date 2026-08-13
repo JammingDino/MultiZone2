@@ -31,6 +31,7 @@ import {
   useAttachments,
 } from "@/components/Chat/Attachments";
 import { useDictation, MicButton, DictationMeter } from "@/components/Chat/useDictation";
+import { CHROME_QUIET, PRIMARY_ACTION } from "@/lib/chrome";
 
 export function EditComposer({
   initialText,
@@ -153,7 +154,7 @@ export function EditComposer({
             <>
               <button
                 onClick={() => fileRef.current?.click()}
-                className="rounded p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
+                className={`rounded p-1.5 ${CHROME_QUIET}`}
                 title="Attach file"
               >
                 <Paperclip size={16} />
@@ -194,7 +195,7 @@ export function EditComposer({
           <button
             onClick={onCancel}
             title="Cancel (Esc)"
-            className="rounded p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
+            className={`rounded p-1.5 ${CHROME_QUIET}`}
           >
             <X size={16} />
           </button>
@@ -202,7 +203,7 @@ export function EditComposer({
             onClick={commit}
             disabled={saving || (draft.trim() === "" && tray.pending.length === 0)}
             title={saveTitle ?? saveLabel}
-            className="flex items-center gap-1.5 rounded bg-[var(--color-accent)] px-2.5 py-1.5 text-xs text-white hover:bg-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+            className={`flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs ${PRIMARY_ACTION}`}
           >
             <Check size={14} />
             {saveLabel}

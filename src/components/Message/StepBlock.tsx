@@ -23,6 +23,7 @@ import { PlanBlock, PlanProposalBlock, toPlanData, toPlanProposal } from "@/comp
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { useDictation, MicButton, DictationMeter } from "@/components/Chat/useDictation";
+import { PRIMARY_ACTION } from "@/lib/chrome";
 
 function prettyJson(s: string): string {
   try {
@@ -591,7 +592,7 @@ export function AskUserCard({
             <button
               onClick={submit}
               disabled={!currentAnswer.trim() || submitting || isStreaming}
-              className="flex items-center gap-1.5 rounded bg-[var(--color-accent)] px-3 py-1.5 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
+              className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-xs ${PRIMARY_ACTION}`}
             >
               {submitting ? <Loader2 size={11} className="animate-spin" /> : <Send size={11} />}
               {total > 1 ? "Submit all" : "Submit"}
@@ -600,7 +601,7 @@ export function AskUserCard({
             <button
               onClick={() => setIdx((v) => v + 1)}
               disabled={!currentAnswer.trim() || submitting || isStreaming}
-              className="rounded bg-[var(--color-accent)] px-3 py-1.5 text-xs text-white disabled:cursor-not-allowed disabled:opacity-50"
+              className={`rounded px-3 py-1.5 text-xs ${PRIMARY_ACTION}`}
             >
               Next →
             </button>

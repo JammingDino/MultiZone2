@@ -2,6 +2,7 @@ import { useState } from "react";
 import { AlertTriangle, FileUp, Server, X } from "lucide-react";
 import { useApp } from "@/store/app";
 import { pickBundleFile } from "@/lib/importSettings";
+import { CHROME_QUIET, PRIMARY_ACTION } from "@/lib/chrome";
 
 /**
  * Standing notice for an install with no provider configured (1.0).
@@ -44,7 +45,7 @@ export function NoProviderBanner() {
               // Clearing the flag brings the full setup screen back.
               void setAppSettings({ onboardingSkipped: false });
             }}
-            className="flex items-center gap-1.5 rounded bg-[var(--color-accent)] px-2.5 py-1 text-white hover:opacity-90"
+            className={`flex items-center gap-1.5 rounded px-2.5 py-1 ${PRIMARY_ACTION}`}
           >
             <Server size={12} />
             Connect a provider
@@ -67,7 +68,7 @@ export function NoProviderBanner() {
       <button
         onClick={() => setHidden(true)}
         aria-label="Dismiss"
-        className="shrink-0 rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
+        className={`shrink-0 rounded p-1 ${CHROME_QUIET}`}
       >
         <X size={13} />
       </button>

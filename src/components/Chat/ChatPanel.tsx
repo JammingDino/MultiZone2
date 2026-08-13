@@ -21,7 +21,7 @@ import { PlanReview } from "@/components/Chat/PlanReview";
 import { TaskPanel } from "@/components/Chat/TaskPanel";
 import { ReplayView } from "@/components/Chat/ReplayView";
 import { resolveBaseModel } from "@/lib/baseZone";
-import { CHROME_ACTIVE, CHROME_OUTLINED, CHROME_QUIET, HEADER_ICON } from "@/lib/chrome";
+import { CHROME_ACTIVE, CHROME_OUTLINED, CHROME_QUIET, HEADER_ICON, PRIMARY_ACTION } from "@/lib/chrome";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 import { usePersistentBool } from "@/lib/uiState";
 import type { FileDiff, StreamEnvelope } from "@/lib/types";
@@ -1264,7 +1264,7 @@ function ToolApprovalBanner({
               // nothing, so the call runs exactly as the model wrote it.
               onClick={() => onApprove(partial ? [...taken].sort((a, b) => a - b) : undefined)}
               disabled={partial && taken.size === 0}
-              className="rounded bg-[var(--color-accent)] px-4 py-1.5 text-xs text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              className={`rounded px-4 py-1.5 text-xs ${PRIMARY_ACTION}`}
             >
               {partial ? `Apply ${taken.size} of ${hunkCount} hunks` : "Approve"}
             </button>

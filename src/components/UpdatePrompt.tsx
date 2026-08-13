@@ -4,6 +4,7 @@ import { AlertTriangle, CheckCircle2, Download, Sparkles } from "lucide-react";
 import { Modal, ModalTitle } from "@/components/common/Modal";
 import { Markdown } from "@/components/Renderers/Markdown";
 import { useUpdater } from "@/lib/useUpdater";
+import { PRIMARY_ACTION } from "@/lib/chrome";
 
 /**
  * Version the user pressed "Skip this version" on. Machine-local UI state — it
@@ -166,7 +167,7 @@ export function UpdatePrompt() {
             </button>
             <button
               onClick={() => void u.downloadAndInstall()}
-              className="flex items-center gap-1.5 rounded-lg bg-[var(--color-accent)] px-3.5 py-1.5 text-[12.5px] font-semibold text-white transition hover:brightness-110"
+              className={`flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-[12.5px] font-semibold ${PRIMARY_ACTION}`}
             >
               <Download size={14} /> Download &amp; install
             </button>
@@ -189,7 +190,7 @@ export function UpdatePrompt() {
             </button>
             <button
               onClick={() => void u.restart()}
-              className="rounded-lg bg-[var(--color-accent)] px-3.5 py-1.5 text-[12.5px] font-semibold text-white transition hover:brightness-110"
+              className={`rounded-lg px-3.5 py-1.5 text-[12.5px] font-semibold ${PRIMARY_ACTION}`}
             >
               Restart now
             </button>

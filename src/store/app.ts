@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { DEFAULT_APP_SETTINGS, type AppSettings, type Chat, type Checkpoint, type RestoreReport, type ChatTagEntry, type ChatTagLink, type ChatZone, type McpServerView, type Memory, type Message, type PendingMessage, type PendingMode, type Plan, type PlanStep, type Project, type Provider, type Skill, type SkillPack, type Tag, type Zone } from "@/lib/types";
 import * as api from "@/lib/tauri";
 import type { SettingsBundle } from "@/lib/settingsBundle";
+import { shade } from "@/lib/color";
 
 /**
  * Chats whose opening turn has already kicked off an auto-title, so the check
@@ -725,7 +726,13 @@ function applyThemeToDom(theme: ThemePrefs) {
   html.classList.toggle("dark", theme.mode === "dark");
   html.style.colorScheme = theme.mode; // makes native form controls (select, input) match the theme
   html.style.setProperty("--color-accent", theme.accent);
-  html.style.setProperty("--color-accent-hover", theme.accent);
+  // Away from the page: lighter on a dark theme, darker on a light one — the
+  // direction the two shipped defaults already went. This used to be set to the
+  // accent itself, which left every filled button inert under the pointer.
+  html.style.setProperty(
+    "--color-accent-hover",
+    shade(theme.accent, theme.mode === "light" ? -0.14 : 0.14),
+  );
   html.classList.toggle("bloom", !!theme.bloomEnabled);
   html.classList.toggle("shadows", !!theme.shadowsEnabled);
   html.style.setProperty("--bloom-intensity", String(theme.bloomIntensity ?? 0.5));

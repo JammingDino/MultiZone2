@@ -15,6 +15,7 @@ import { ZoneForm } from "./ZoneForm";
 import { InstalledZones, useZoneActions } from "./InstalledZones";
 import { Modal, ModalTitle } from "@/components/common/Modal";
 import { BackToSettings } from "@/components/common/BackToSettings";
+import { CHROME_QUIET, PRIMARY_ACTION } from "@/lib/chrome";
 
 type View = "library" | "detail" | "editor";
 
@@ -601,7 +602,7 @@ function LibraryView(props: {
                 <div className="absolute right-0 top-10 z-50 w-[340px] rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-4 shadow-2xl">
                   <div className="mb-3 flex items-center justify-between">
                     <span className="text-[13px] font-semibold">Add a zone to your library</span>
-                    <button onClick={p.onCloseAdd} className="rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)]"><X size={13} /></button>
+                    <button onClick={p.onCloseAdd} className={`rounded p-1 ${CHROME_QUIET}`}><X size={13} /></button>
                   </div>
                   <div
                     onDragOver={p.onDragOver}
@@ -629,7 +630,7 @@ function LibraryView(props: {
                       placeholder="https://…/zone.json"
                       className="h-9 min-w-0 flex-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 text-[12.5px] outline-none focus:border-[var(--color-accent)]"
                     />
-                    <button onClick={p.onAddUrl} className="flex h-9 items-center rounded-lg bg-[var(--color-accent)] px-4 text-[12.5px] font-semibold text-white hover:opacity-90">Add</button>
+                    <button onClick={p.onAddUrl} className={`flex h-9 items-center rounded-lg px-4 text-[12.5px] font-semibold ${PRIMARY_ACTION}`}>Add</button>
                   </div>
                 </div>
               </>

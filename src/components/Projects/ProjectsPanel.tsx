@@ -9,6 +9,7 @@ import { getZoneIcon } from "@/lib/zoneIcons";
 import { IconPicker } from "@/components/common/IconPicker";
 import { ColorPicker } from "@/components/common/ColorPicker";
 import { Modal } from "@/components/common/Modal";
+import { PRIMARY_ACTION } from "@/lib/chrome";
 
 export function ProjectsPanel() {
   const { zones, projects, tags, closeProjectsPanel, refreshProjects, refreshTags } = useApp(
@@ -510,7 +511,7 @@ function KnowledgeSection({ project }: { project: Project }) {
           <button
             onClick={saveConfig}
             disabled={savingCfg}
-            className="rounded bg-[var(--color-accent)] px-2.5 py-1 text-xs text-white disabled:opacity-50"
+            className={`rounded px-2.5 py-1 text-xs ${PRIMARY_ACTION}`}
           >
             {savingCfg ? "Saving…" : "Save settings"}
           </button>

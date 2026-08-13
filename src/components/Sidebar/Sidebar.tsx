@@ -8,6 +8,7 @@ import { getZoneIcon } from "@/lib/zoneIcons";
 import { usePersistentSet } from "@/lib/uiState";
 import { resolveBaseModel } from "@/lib/baseZone";
 import type { Project } from "@/lib/types";
+import { CHROME_QUIET } from "@/lib/chrome";
 
 export function Sidebar() {
   const {
@@ -174,7 +175,7 @@ export function Sidebar() {
           <button
             onClick={() => setSidebarOpen(true)}
             title="Expand sidebar"
-            className="rounded p-1.5 hover:bg-[var(--color-panel-hover)]"
+            className={`rounded p-1.5 ${CHROME_QUIET}`}
           >
             <ChevronRight size={16} className="text-[var(--color-accent)]" />
           </button>
@@ -186,7 +187,7 @@ export function Sidebar() {
             onClick={() => onNewChat()}
             disabled={!canNewChat}
             title={!canNewChat ? "Set a default model or create a zone first" : "New chat"}
-            className="flex items-center justify-center rounded p-2 hover:bg-[var(--color-panel-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+            className={`flex items-center justify-center rounded p-2 ${CHROME_QUIET} disabled:cursor-not-allowed disabled:opacity-50`}
           >
             <Plus size={16} />
           </button>
@@ -197,30 +198,30 @@ export function Sidebar() {
           <button
             onClick={() => openZoneLibrary()}
             title="Configure Zones"
-            className="rounded p-2 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-accent)]"
+            className={`rounded p-2 ${CHROME_QUIET}`}
           >
-            <Layers size={15} />
+            <Layers size={16} />
           </button>
           <button
             onClick={() => openProjectsPanel()}
             title="Manage Projects"
-            className="rounded p-2 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-accent)]"
+            className={`rounded p-2 ${CHROME_QUIET}`}
           >
-            <FolderPlus size={15} />
+            <FolderPlus size={16} />
           </button>
           <button
             onClick={openSettings}
             title="Settings"
-            className="rounded p-2 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-accent)]"
+            className={`rounded p-2 ${CHROME_QUIET}`}
           >
-            <Settings size={15} />
+            <Settings size={16} />
           </button>
           <button
             onClick={openShortcutsHelp}
             title="Keyboard Shortcuts (?)"
-            className="rounded p-2 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-accent)]"
+            className={`rounded p-2 ${CHROME_QUIET}`}
           >
-            <Keyboard size={15} />
+            <Keyboard size={16} />
           </button>
         </div>
       </aside>
@@ -238,21 +239,21 @@ export function Sidebar() {
         <div className="flex items-center gap-0.5">
           <button
             onClick={openShortcutsHelp}
-            className="rounded p-1.5 hover:bg-[var(--color-panel-hover)]"
+            className={`rounded p-1.5 ${CHROME_QUIET}`}
             title="Keyboard Shortcuts (?)"
           >
             <Keyboard size={16} />
           </button>
           <button
             onClick={openSettings}
-            className="rounded p-1.5 hover:bg-[var(--color-panel-hover)]"
+            className={`rounded p-1.5 ${CHROME_QUIET}`}
             title="Settings"
           >
             <Settings size={16} />
           </button>
           <button
             onClick={() => setSidebarOpen(false)}
-            className="rounded p-1.5 hover:bg-[var(--color-panel-hover)]"
+            className={`rounded p-1.5 ${CHROME_QUIET}`}
             title="Collapse sidebar"
           >
             <ChevronLeft size={16} />
@@ -276,7 +277,7 @@ export function Sidebar() {
           className="flex items-center justify-center gap-1.5 rounded-md border border-[var(--color-border)] px-2.5 text-sm text-[var(--color-text-muted)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
           title="New project"
         >
-          <FolderPlus size={15} />
+          <FolderPlus size={16} />
         </button>
       </div>
 
@@ -497,7 +498,7 @@ function ProjectFolderHeader({
       <button
         onClick={onNewChat}
         title="New chat in this project"
-        className="shrink-0 rounded p-0.5 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-accent)]"
+        className={`shrink-0 rounded p-0.5 ${CHROME_QUIET}`}
       >
         <Plus size={13} />
       </button>

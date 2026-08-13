@@ -28,6 +28,7 @@ import { pickBundleFile } from "@/lib/importSettings";
 import { type SkillSeed, serializeSkill, parseSkill } from "@/lib/skillFile";
 import type { ApiBindState, CheckpointUsage, ConnectorCatalog, ConnectorEntry, ConnectorField, DbStats, GlobalKbView, IndexSummary, KbDocument, LifetimeUsage, McpDiagnosis, McpServerView, McpTool, Provider, Skill, SkillPack } from "@/lib/types";
 import { formatBytes, formatCount, formatTokens } from "@/lib/format";
+import { PRIMARY_ACTION } from "@/lib/chrome";
 
 type Tab = "providers" | "zones" | "appearance" | "chat" | "voice" | "speech" | "skills" | "mcp" | "knowledge" | "memory" | "api" | "data";
 
@@ -1629,7 +1630,7 @@ function VoiceCloningSettings() {
             <button
               onClick={createVoice}
               disabled={!name.trim() || !audioPath || busy !== null}
-              className="flex items-center gap-1.5 rounded bg-[var(--color-accent)] px-3 py-1.5 text-xs text-white hover:bg-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+              className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-xs ${PRIMARY_ACTION}`}
             >
               {busy === "creating" ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
               Create voice
@@ -2157,7 +2158,7 @@ function SkillEditor({
           </button>
         )}
         <button onClick={onCancel} className="rounded px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)]">Cancel</button>
-        <button onClick={onSave} disabled={saving || !name.trim()} className="rounded bg-[var(--color-accent)] px-3 py-1.5 text-xs text-white disabled:opacity-50">
+        <button onClick={onSave} disabled={saving || !name.trim()} className={`rounded px-3 py-1.5 text-xs ${PRIMARY_ACTION}`}>
           {skill ? "Save" : "Create skill"}
         </button>
       </div>
@@ -2566,7 +2567,7 @@ function ConnectorCatalogPanel({ onDone, onCancel }: { onDone: () => void; onCan
           <button
             onClick={runImport}
             disabled={importing || !importUrl.trim()}
-            className="shrink-0 rounded bg-[var(--color-accent)] px-3 py-1.5 text-xs text-white disabled:opacity-50"
+            className={`shrink-0 rounded px-3 py-1.5 text-xs ${PRIMARY_ACTION}`}
           >
             {importing ? "Importing…" : "Import"}
           </button>
@@ -2701,7 +2702,7 @@ function ConnectorInstallForm({
           onClick={install}
           disabled={saving || missing.length > 0}
           title={missing.length > 0 ? `Still needs: ${missing.join(", ")}` : undefined}
-          className="rounded bg-[var(--color-accent)] px-3 py-1.5 text-xs text-white disabled:opacity-50"
+          className={`rounded px-3 py-1.5 text-xs ${PRIMARY_ACTION}`}
         >
           {saving ? "Installing…" : "Install"}
         </button>
@@ -2876,7 +2877,7 @@ function McpServerEditor({
 
       <div className="flex items-center justify-end gap-2 border-t border-[var(--color-border)] pt-3">
         <button onClick={onCancel} className="rounded px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)]">Cancel</button>
-        <button onClick={onSave} disabled={saving || !name.trim()} className="rounded bg-[var(--color-accent)] px-3 py-1.5 text-xs text-white disabled:opacity-50">
+        <button onClick={onSave} disabled={saving || !name.trim()} className={`rounded px-3 py-1.5 text-xs ${PRIMARY_ACTION}`}>
           {server ? "Save" : "Add server"}
         </button>
       </div>
@@ -3019,7 +3020,7 @@ function KnowledgeTab() {
         {dirty && (
           <div className="mt-2 flex items-center justify-between gap-2 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 text-[11px] text-[var(--color-text-muted)]">
             <span>Changing the embedding model rebuilds the global index from scratch.</span>
-            <button onClick={saveConfig} disabled={savingCfg} className="rounded bg-[var(--color-accent)] px-2 py-1 text-white disabled:opacity-50">
+            <button onClick={saveConfig} disabled={savingCfg} className={`rounded px-2 py-1 ${PRIMARY_ACTION}`}>
               {savingCfg ? "Saving…" : "Save"}
             </button>
           </div>
@@ -3053,7 +3054,7 @@ function KnowledgeTab() {
                 : dirty ? "Save the embedding settings first."
                 : "Walk the default directory and (re)index it."
             }
-            className="flex items-center gap-1.5 rounded bg-[var(--color-accent)] px-3 py-1.5 text-xs text-white disabled:opacity-50"
+            className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-xs ${PRIMARY_ACTION}`}
           >
             {indexing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
             {indexing ? "Indexing…" : (kb && kb.documentCount > 0 ? "Re-index" : "Index directory")}
@@ -4399,7 +4400,7 @@ function ProviderForm({ value, onClose, onSaved }: { value: Partial<Provider>; o
           {value.id ? "Done" : "Cancel"}
         </button>
         {!value.id && (
-          <button onClick={onCreate} disabled={saving || !name.trim() || !baseUrl.trim()} className="rounded bg-[var(--color-accent)] px-3 py-1 text-xs text-white hover:bg-[var(--color-accent-hover)] disabled:opacity-50">
+          <button onClick={onCreate} disabled={saving || !name.trim() || !baseUrl.trim()} className={`rounded px-3 py-1 text-xs ${PRIMARY_ACTION}`}>
             Add provider
           </button>
         )}

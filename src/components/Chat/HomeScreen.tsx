@@ -3,7 +3,7 @@ import { Send, ChevronDown, Zap, Check, Layers, Settings as SettingsIcon, Loader
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { getZoneIcon } from "@/lib/zoneIcons";
-import { CHROME_ACTIVE, CHROME_OUTLINED, CHROME_QUIET } from "@/lib/chrome";
+import { CHROME_ACTIVE, CHROME_OUTLINED, CHROME_QUIET, PRIMARY_ACTION } from "@/lib/chrome";
 import type { InputPart, Zone } from "@/lib/types";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 import { attachmentToParts } from "@/lib/attachFiles";
@@ -850,7 +850,7 @@ export function HomeScreen() {
             <button
               onClick={start}
               disabled={!canSend}
-              className="shrink-0 flex items-center gap-1.5 rounded-full bg-[var(--color-accent)] px-3 py-1.5 text-sm text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              className={`shrink-0 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm ${PRIMARY_ACTION}`}
               title={quickSelectedButUnavailable ? "Set a default model first" : "Send"}
             >
               {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}

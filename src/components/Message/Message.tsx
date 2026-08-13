@@ -33,6 +33,7 @@ import { useApp } from "@/store/app";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 import { ChevronDown, ChevronRight } from "lucide-react";
+import { CHROME_QUIET } from "@/lib/chrome";
 
 /** Renders a single text chunk, with its own streaming throttle. */
 function TextBlockView({
@@ -354,7 +355,7 @@ function MessagePreviewModal({
           <span className="max-w-[400px] truncate text-sm font-medium">{title}</span>
           <button
             onClick={onClose}
-            className="rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
+            className={`rounded p-1 ${CHROME_QUIET}`}
           >
             <X size={16} />
           </button>

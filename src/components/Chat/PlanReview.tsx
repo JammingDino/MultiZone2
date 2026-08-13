@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import type { Plan, PlanStep } from "@/lib/types";
 import { parsePlanSteps } from "@/lib/types";
+import { CHROME_QUIET, PRIMARY_ACTION } from "@/lib/chrome";
 
 /**
  * The plan the model filed, waiting on the user (0.12.0).
@@ -183,7 +184,7 @@ export function PlanReview({
             onClick={() => onApprove(steps, edited)}
             disabled={busy || !canApprove}
             title={canApprove ? undefined : "Every step needs some text"}
-            className="flex items-center gap-1 rounded bg-[var(--color-accent)] px-3 py-1 text-xs font-medium text-white disabled:opacity-50"
+            className={`flex items-center gap-1 rounded px-3 py-1 text-xs font-medium ${PRIMARY_ACTION}`}
           >
             <Check size={12} /> {edited ? "Approve my version" : "Approve & run"}
           </button>
@@ -296,7 +297,7 @@ function IconBtn({
       disabled={disabled}
       aria-label={label}
       title={label}
-      className="rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)] disabled:opacity-30"
+      className={`rounded p-1 ${CHROME_QUIET} disabled:opacity-30`}
     >
       {children}
     </button>

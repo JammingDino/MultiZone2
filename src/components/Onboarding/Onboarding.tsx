@@ -6,6 +6,7 @@ import { ModelCombobox } from "@/components/common/ModelCombobox";
 import { seedDefaultZones } from "@/lib/defaultZones";
 import { claimSettingsDrop, pickBundleFile } from "@/lib/importSettings";
 import { PROVIDER_PRESETS, presetForBaseUrl } from "@/lib/providerPresets";
+import { PRIMARY_ACTION } from "@/lib/chrome";
 
 /**
  * First-run setup: connect a provider and pick a default model, the minimum
@@ -235,7 +236,7 @@ export function Onboarding() {
             <button
               onClick={onConnect}
               disabled={busy || !name.trim() || !baseUrl.trim()}
-              className="mt-1 flex items-center justify-center gap-1.5 rounded bg-[var(--color-accent)] px-4 py-2 text-sm text-white hover:opacity-90 disabled:opacity-50"
+              className={`mt-1 flex items-center justify-center gap-1.5 rounded px-4 py-2 text-sm ${PRIMARY_ACTION}`}
             >
               {busy ? <Loader2 size={14} className="animate-spin" /> : <ArrowRight size={14} />}
               Connect
@@ -269,7 +270,7 @@ export function Onboarding() {
               <button
                 onClick={onFinish}
                 disabled={busy || !model.trim()}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded bg-[var(--color-accent)] px-4 py-2 text-sm text-white hover:opacity-90 disabled:opacity-50"
+                className={`flex flex-1 items-center justify-center gap-1.5 rounded px-4 py-2 text-sm ${PRIMARY_ACTION}`}
               >
                 {busy ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
                 Start chatting

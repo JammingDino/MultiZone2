@@ -4,7 +4,7 @@ import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { useTts } from "@/store/tts";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
-import { CHROME_ACTIVE, CHROME_OUTLINED, CHROME_QUIET } from "@/lib/chrome";
+import { CHROME_ACTIVE, CHROME_OUTLINED, CHROME_QUIET, PRIMARY_ACTION } from "@/lib/chrome";
 import { useDictation, MicButton, DictationMeter } from "@/components/Chat/useDictation";
 import type { InputPart, PendingMode } from "@/lib/types";
 import { attachmentToParts, type PendingAttachment } from "@/lib/attachFiles";
@@ -545,7 +545,7 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
                       ? "Send to the model at its next step"
                       : "Send when this turn finishes"
                 }
-                className="rounded bg-[var(--color-accent)] p-1.5 text-white hover:bg-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+                className={`rounded p-1.5 ${PRIMARY_ACTION}`}
               >
                 <Send size={16} />
               </button>
@@ -562,7 +562,7 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
             <button
               onClick={() => onSend()}
               disabled={disabled || sending || tray.transcribing || (text.trim() === "" && pending.length === 0)}
-              className="rounded bg-[var(--color-accent)] p-1.5 text-white hover:bg-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+              className={`rounded p-1.5 ${PRIMARY_ACTION}`}
               title={tray.transcribing ? "Waiting for the transcript…" : "Send"}
             >
               <Send size={16} />

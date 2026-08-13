@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { AlertCircle, ChevronDown, ChevronRight, RotateCw, Settings as SettingsIcon, X } from "lucide-react";
 import { useApp } from "@/store/app";
+import { CHROME_QUIET } from "@/lib/chrome";
 
 /**
  * What went wrong with the last turn (1.0).
@@ -165,7 +166,7 @@ function ErrorCard({
         <button
           onClick={onDismiss}
           aria-label="Dismiss"
-          className="shrink-0 rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
+          className={`shrink-0 rounded p-1 ${CHROME_QUIET}`}
         >
           <X size={13} />
         </button>

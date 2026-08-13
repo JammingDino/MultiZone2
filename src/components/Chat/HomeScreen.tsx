@@ -758,10 +758,10 @@ export function HomeScreen() {
                     <div className="absolute bottom-full left-1/2 z-40 mb-1 min-w-[180px] -translate-x-1/2 rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg">
                       <button
                         onClick={() => { setSelectedProjectId(null); setProjectMenuOpen(false); }}
-                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-[var(--color-panel-hover)]"
+                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)]"
                       >
                         <span className="text-[var(--color-text-muted)]">No project</span>
-                        {!selectedProjectId && <Check size={10} className="ml-auto text-[var(--color-accent)]" />}
+                        {!selectedProjectId && <Check size={12} className="ml-auto text-[var(--color-accent)]" />}
                       </button>
                       {projects.length > 0 && <div className="my-1 border-t border-[var(--color-border)]" />}
                       {projects.map((p) => {
@@ -772,7 +772,7 @@ export function HomeScreen() {
                           <button
                             key={p.id}
                             onClick={() => { setSelectedProjectId(p.id); setProjectMenuOpen(false); }}
-                            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-[var(--color-panel-hover)]"
+                            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)]"
                           >
                             <span
                               className="flex h-4 w-4 shrink-0 items-center justify-center rounded"
@@ -781,7 +781,7 @@ export function HomeScreen() {
                               <Icon size={10} color="white" />
                             </span>
                             {p.name}
-                            {selectedProjectId === p.id && <Check size={10} className="ml-auto text-[var(--color-accent)]" />}
+                            {selectedProjectId === p.id && <Check size={12} className="ml-auto text-[var(--color-accent)]" />}
                           </button>
                         );
                       })}
@@ -830,11 +830,11 @@ export function HomeScreen() {
                           <button
                             key={t.id}
                             onClick={() => { setSelectedTagIds((s) => { const n = new Set(s); if (active) n.delete(t.id); else n.add(t.id); return n; }); }}
-                            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-[var(--color-panel-hover)]"
+                            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)]"
                           >
                             <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: t.color ?? "var(--color-accent)" }} />
                             {t.name}
-                            {active && <Check size={10} className="ml-auto text-[var(--color-accent)]" />}
+                            {active && <Check size={12} className="ml-auto text-[var(--color-accent)]" />}
                           </button>
                         );
                       })}

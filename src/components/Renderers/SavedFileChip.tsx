@@ -1,6 +1,7 @@
 import { ExternalLink, FileText } from "lucide-react";
 import * as api from "@/lib/tauri";
 import type { SavedOutput } from "@/components/Renderers/HtmlReportBlock";
+import { CHROME_OUTLINED } from "@/lib/chrome";
 
 /** Compact card for a non-HTML artifact presented via `present_file`
  * (markdown, CSV, JSON, txt). Names the file and opens it in its default app. */
@@ -20,7 +21,7 @@ export function SavedFileChip({ output }: { output: SavedOutput }) {
       </div>
       <button
         onClick={() => api.openPath(output.path).catch((e) => console.error(e))}
-        className="flex flex-shrink-0 items-center gap-1 rounded border border-[var(--color-border)] px-2 py-0.5 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
+        className={`flex flex-shrink-0 items-center gap-1 rounded px-2 py-0.5 ${CHROME_OUTLINED}`}
         title="Open file"
       >
         <ExternalLink size={11} /> Open

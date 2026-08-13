@@ -3,6 +3,7 @@ import { FilePlus2, FilePen, FileX2, Undo2, TriangleAlert, Loader2 } from "lucid
 import type { Checkpoint, CheckpointFile, RestoreReport } from "@/lib/types";
 import { useApp } from "@/store/app";
 import { revealPath } from "@/lib/tauri";
+import { CHROME_QUIET } from "@/lib/chrome";
 
 /**
  * What a turn did to the filesystem, and the way back (0.10.1).
@@ -89,7 +90,7 @@ export function TurnChanges({ chatId, messageIds }: { chatId: string; messageIds
         <button
           onClick={() => run("all", undefined, diverged.length === 0 ? undefined : false)}
           disabled={busy !== null || restorable.length === 0}
-          className="ml-auto flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-[var(--color-panel-hover)] disabled:opacity-50"
+          className={`ml-auto flex items-center gap-1 rounded px-1.5 py-0.5 ${CHROME_QUIET} disabled:opacity-50`}
           title="Put every file this turn changed back the way it was"
         >
           {busy === "all" ? <Loader2 size={12} className="animate-spin" /> : <Undo2 size={12} />}
@@ -163,7 +164,7 @@ function FileRow({
         ) : file.diverged && !forced ? (
           <button
             onClick={onArm}
-            className="rounded px-1.5 py-0.5 text-amber-500 hover:bg-[var(--color-panel-hover)]"
+            className="rounded border border-transparent px-1.5 py-0.5 text-amber-500 transition hover:border-amber-500"
           >
             Revert anyway…
           </button>
@@ -171,7 +172,7 @@ function FileRow({
           <button
             onClick={() => onRevert(forced)}
             disabled={busy !== null}
-            className="flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-[var(--color-panel-hover)] disabled:opacity-50"
+            className={`flex items-center gap-1 rounded px-1.5 py-0.5 ${CHROME_QUIET} disabled:opacity-50`}
           >
             {busy === file.path ? (
               <Loader2 size={12} className="animate-spin" />

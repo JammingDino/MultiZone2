@@ -23,7 +23,7 @@ import { PlanBlock, PlanProposalBlock, toPlanData, toPlanProposal } from "@/comp
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { useDictation, MicButton, DictationMeter } from "@/components/Chat/useDictation";
-import { PRIMARY_ACTION } from "@/lib/chrome";
+import { CHROME_OUTLINED, PRIMARY_ACTION } from "@/lib/chrome";
 
 function prettyJson(s: string): string {
   try {
@@ -583,7 +583,7 @@ export function AskUserCard({
           <button
             onClick={() => setIdx((v) => v - 1)}
             disabled={idx === 0 || submitting || isStreaming}
-            className="rounded border border-[var(--color-border)] px-3 py-1.5 text-xs hover:bg-[var(--color-panel-hover)] disabled:cursor-not-allowed disabled:opacity-30"
+            className={`rounded px-3 py-1.5 text-xs ${CHROME_OUTLINED} disabled:cursor-not-allowed disabled:opacity-30`}
           >
             ← Back
           </button>

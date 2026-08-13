@@ -8,6 +8,7 @@ import {
 import { useApp } from "@/store/app";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 import * as api from "@/lib/tauri";
+import { CHROME_QUIET } from "@/lib/chrome";
 
 const MIN_ZOOM = 0.4;
 const MAX_ZOOM = 6;
@@ -687,7 +688,7 @@ function ZoomButton({
       type="button"
       title={title}
       onClick={onClick}
-      className="flex h-5 w-5 items-center justify-center rounded hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
+      className={`flex h-5 w-5 items-center justify-center rounded ${CHROME_QUIET}`}
     >
       {children}
     </button>

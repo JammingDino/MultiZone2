@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ExternalLink, FileText, Loader2, AlertCircle } from "lucide-react";
 import * as api from "@/lib/tauri";
+import { CHROME_OUTLINED } from "@/lib/chrome";
 
 /** Shape of the `present_file` tool result the backend renders. */
 export interface SavedOutput {
@@ -101,7 +102,7 @@ export function HtmlReportBlock({ output }: { output: SavedOutput }) {
         </div>
         <button
           onClick={() => api.openPath(path).catch((e) => console.error(e))}
-          className="flex flex-shrink-0 items-center gap-1 rounded border border-[var(--color-border)] px-2 py-0.5 text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
+          className={`flex flex-shrink-0 items-center gap-1 rounded px-2 py-0.5 ${CHROME_OUTLINED}`}
           title="Open in browser"
         >
           <ExternalLink size={11} /> Open in browser

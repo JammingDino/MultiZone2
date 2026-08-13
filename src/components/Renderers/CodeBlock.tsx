@@ -4,6 +4,7 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark, oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { MermaidBlock } from "./MermaidBlock";
 import { MathPlotBlock } from "./MathPlotBlock";
+import { CHROME_QUIET } from "@/lib/chrome";
 
 interface Props {
   language: string;
@@ -52,7 +53,7 @@ function RawCode({ language, code }: Props) {
         <span>{language || "code"}</span>
         <button
           onClick={onCopy}
-          className="flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-[var(--color-panel-hover)]"
+          className={`flex items-center gap-1 rounded px-1.5 py-0.5 ${CHROME_QUIET}`}
         >
           {copied ? <Check size={12} /> : <Copy size={12} />}
           {copied ? "copied" : "copy"}

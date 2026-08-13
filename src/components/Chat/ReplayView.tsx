@@ -107,7 +107,6 @@ export function ReplayView({ chatId, onClose }: { chatId: string; onClose: () =>
   return (
     <Modal
       onClose={onClose}
-      className="h-[640px] w-[940px]"
       header={<ModalTitle>Replay this session</ModalTitle>}
     >
       <div

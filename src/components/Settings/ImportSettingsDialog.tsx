@@ -96,6 +96,7 @@ export function ImportSettingsDialog() {
     <Modal
       onClose={busy ? () => {} : close}
       header={<ModalTitle>{result ? "Import complete" : "Import settings"}</ModalTitle>}
+      size="dialog"
       className="w-[560px]"
     >
       <div className="overflow-y-auto px-5 py-4">

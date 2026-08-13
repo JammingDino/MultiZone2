@@ -80,6 +80,7 @@ export function UpdatePrompt() {
   return (
     <Modal
       onClose={close}
+      size="dialog"
       className="w-[560px]"
       header={
         <>

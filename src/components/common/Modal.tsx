@@ -3,23 +3,41 @@ import type { ReactNode } from "react";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 
 /**
+ * The one workspace footprint. Every full panel — Settings, Configure Zones,
+ * Projects/tags, Replay — is this size, so moving between them doesn't shift
+ * the window's centre of gravity. It's the largest of the sizes they used to
+ * be written at individually, so nothing reflows into less room than it had.
+ */
+const WORKSPACE_SIZE = "h-[700px] w-[980px]";
+
+/**
  * Shared modal shell (0.7.3 consistency pass). Standardises the overlay, panel
  * chrome, header height/padding, and close-button placement so every modal —
  * Settings, Zone editor, Zone library, Projects — looks and behaves the same.
  *
- * Callers supply the panel size via `className` (e.g. `h-[700px] w-[800px]`),
- * the left-hand header content via `header` (a title or a row of tabs), and the
- * body as children. Clicking the backdrop or the ✕ calls `onClose`.
+ * Two classes of modal, chosen with `size`:
+ *
+ * - `"workspace"` (the default) is a full panel you work inside. It gets
+ *   {@link WORKSPACE_SIZE} — one size for all of them, defined here rather
+ *   than picked per caller.
+ * - `"dialog"` is an answer to a single question (update prompt, import
+ *   confirmation, shortcuts sheet). It sizes to its content, so the caller
+ *   supplies a width via `className` and leaves the height to grow.
+ *
+ * `header` is the left-hand header content (a title or a row of tabs) and the
+ * body is children. Clicking the backdrop or the ✕ calls `onClose`.
  */
 export function Modal({
   onClose,
   header,
   children,
+  size = "workspace",
   className = "",
 }: {
   onClose: () => void;
   header: ReactNode;
   children: ReactNode;
+  size?: "workspace" | "dialog";
   className?: string;
 }) {
   // Escape closes the modal — or, if a popover inside it is open, that popover
@@ -32,7 +50,7 @@ export function Modal({
       onClick={onClose}
     >
       <div
-        className={`flex max-h-[94vh] max-w-[96vw] flex-col rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] shadow-2xl ${className}`}
+        className={`flex max-h-[94vh] max-w-[96vw] flex-col rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] shadow-2xl ${size === "workspace" ? WORKSPACE_SIZE : ""} ${className}`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border)] px-5">

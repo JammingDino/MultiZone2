@@ -26,7 +26,6 @@ export function ProjectsPanel() {
   return (
     <Modal
       onClose={closeProjectsPanel}
-      className="h-[700px] w-[960px]"
       header={
         <div className="flex items-center gap-1">
           {(["projects", "tags"] as const).map((t) => (

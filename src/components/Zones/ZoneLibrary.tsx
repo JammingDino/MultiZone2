@@ -365,7 +365,7 @@ export function ZoneLibrary() {
   return (
     <Modal
       onClose={leavePanel}
-      className="h-[700px] w-[980px] overflow-hidden"
+      className="overflow-hidden"
       header={
         <>
           {returnTo === "settings" && <BackToSettings onClick={returnFromZoneLibrary} />}

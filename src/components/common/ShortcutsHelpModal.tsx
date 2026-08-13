@@ -5,7 +5,7 @@ const GROUPS: ShortcutGroup[] = [globalShortcutsGroup(), ...CONTEXTUAL_GROUPS];
 
 export function ShortcutsHelpModal({ onClose }: { onClose: () => void }) {
   return (
-    <Modal onClose={onClose} header={<ModalTitle>Keyboard Shortcuts</ModalTitle>} className="h-[560px] w-[480px]">
+    <Modal onClose={onClose} header={<ModalTitle>Keyboard Shortcuts</ModalTitle>} size="dialog" className="h-[560px] w-[480px]">
       <div className="flex-1 overflow-y-auto px-5 py-4">
         <div className="flex flex-col gap-6">
           {GROUPS.map((group) => (

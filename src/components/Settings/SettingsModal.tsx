@@ -46,7 +46,7 @@ export function SettingsModal() {
   const [tab, setTab] = useState<Tab>(isTab(initialTab) ? initialTab : "providers");
 
   return (
-    <Modal onClose={closeSettings} className="h-[620px] w-[820px]" header={<ModalTitle>Settings</ModalTitle>}>
+    <Modal onClose={closeSettings} header={<ModalTitle>Settings</ModalTitle>}>
       <style>{`.input { width: 100%; border: 1px solid var(--color-border); border-radius: 4px; padding: 8px 12px; background: var(--color-panel); font-size: 13px; outline: none; } .input:focus { border-color: var(--color-accent); }`}</style>
         <div className="flex flex-1 overflow-hidden">
           <nav className="flex w-44 flex-col gap-0.5 overflow-y-auto border-r border-[var(--color-border)] p-2 text-sm">

@@ -12,6 +12,17 @@ import * as api from "@/lib/tauri";
 const MIN_ZOOM = 0.4;
 const MAX_ZOOM = 6;
 const ZOOM_STEP = 1.2;
+/** The viewport's `p-3`, in px — the frame's inner box excludes it. */
+const VIEWPORT_PADDING = 12;
+/** Ceiling on the "taller" canvas, as a fraction of the window. Deliberately
+ *  short of the whole thing: this is still a block in a conversation, and
+ *  fullscreen is one button away. */
+const TALL_VIEWPORT_FRACTION = 0.7;
+/** How far "taller" will magnify a diagram that is shorter than that ceiling.
+ *  The mode fills its height, and for a wide, short diagram — a sequence
+ *  diagram especially — filling 70vh unopposed means 3–4x and both edges off
+ *  screen. Two is enough to read labels by while most of the width stays put. */
+const TALL_MAX_SCALE = 2;
 
 // Cache rendered SVGs by source so remounts (theme changes, rare edge cases)
 // reuse the result immediately without re-invoking the mermaid renderer.
@@ -20,12 +31,12 @@ const svgCache = new Map<string, string>();
 /**
  * Broken source → the repaired source the model returned for it. Remounts and
  * re-groups reuse the known fix instead of paying for another repair request,
- * and it keeps a persisted fix applied while the store still holds stale
- * messages.
+ * and it keeps a fix applied while the store still holds stale messages.
+ *
+ * Repairs are only ever started by the user now (0.12.5) — see
+ * `MermaidErrorView`. A diagram that fails to render says so and waits.
  */
 const fixCache = new Map<string, string>();
-/** Sources whose repair failed. One attempt each — never loop on a bad diagram. */
-const fixFailed = new Set<string>();
 
 /**
  * Reads the current theme variables from CSS so Mermaid follows whatever
@@ -116,9 +127,10 @@ export async function renderMermaidSvg(source: string): Promise<string | null> {
 }
 
 /**
- * Identifies the stored `draw_diagram` call behind this block, enabling the
- * hidden auto-repair path (0.9.8). Absent for diagrams from fenced code blocks,
- * which have no tool call to correct — those fall back to the manual button.
+ * Identifies the stored `draw_diagram` call behind this block, which is what
+ * lets a repair be written back in place (0.9.8). Absent for diagrams from
+ * fenced code blocks, which have no tool call to correct — those fall back to
+ * sending the error into the conversation instead.
  */
 export interface MermaidAutoFix {
   chatId: string;
@@ -147,19 +159,52 @@ export function MermaidBlock({
     () => fixCache.get(originalSource) ?? null,
   );
   const [repairing, setRepairing] = useState(false);
+  // Set once a repair has been asked for and come back no better, so the error
+  // view stops offering the same button a second time.
+  const [repairFailed, setRepairFailed] = useState(false);
   const cleanSource = repaired ?? originalSource;
-  // Whether this block has already spent its one repair attempt.
-  const attemptedRef = useRef(false);
   // Held in a ref so a fresh object identity from the parent doesn't re-run the
-  // render effect (and re-trigger a repair) on every re-render.
+  // render effect on every re-render.
   const autoFixRef = useRef(autoFix);
   autoFixRef.current = autoFix;
 
   // A new diagram in the same slot starts over from whatever is known about it.
   useEffect(() => {
-    attemptedRef.current = false;
     setRepairing(false);
+    setRepairFailed(false);
     setRepaired(fixCache.get(originalSource) ?? null);
+  }, [originalSource]);
+
+  /**
+   * Ask the model to correct this source and swap the result in place.
+   *
+   * Only ever reached from the button in the error view. Until 0.12.5 this ran
+   * by itself the moment a diagram failed to parse, which meant a render error
+   * silently spent a model request the user hadn't asked for and couldn't
+   * decline — and on a chat full of broken diagrams, one per block.
+   */
+  const requestRepair = useCallback(async (renderError: string) => {
+    const target = autoFixRef.current;
+    if (!target) return;
+    setRepairing(true);
+    try {
+      const fix = await api.fixDiagram({
+        chatId: target.chatId,
+        messageId: target.messageId ?? null,
+        toolCallId: target.toolCallId ?? null,
+        source: originalSource,
+        error: renderError,
+      });
+      fixCache.set(originalSource, fix.source);
+      setRepaired(fix.source);
+    } catch (e) {
+      // Surface the original error again rather than leaving the user staring
+      // at a stalled progress bar.
+      console.error("diagram repair failed", e);
+      setRepairFailed(true);
+    } finally {
+      setRepairing(false);
+    }
   }, [originalSource]);
 
   useEffect(() => {
@@ -196,44 +241,8 @@ export function MermaidBlock({
         const message = String(e?.message || e);
         document.querySelectorAll(`[id^="d${renderId}"]`).forEach((n) => n.remove());
         if (cancelled) return;
-
-        // One silent repair attempt before the user is told anything: the model
-        // gets this source and this error, nothing else, and the block shows a
-        // progress bar until it comes back.
-        const target = autoFixRef.current;
-        const canRepair =
-          !!target &&
-          !attemptedRef.current &&
-          !fixFailed.has(originalSource) &&
-          cleanSource === originalSource;
-        if (canRepair && target) {
-          attemptedRef.current = true;
-          setRepairing(true);
-          setLoading(false);
-          try {
-            const fix = await api.fixDiagram({
-              chatId: target.chatId,
-              messageId: target.messageId ?? null,
-              toolCallId: target.toolCallId ?? null,
-              source: originalSource,
-              error: message,
-            });
-            fixCache.set(originalSource, fix.source);
-            if (!cancelled) {
-              setRepairing(false);
-              setRepaired(fix.source);
-            }
-            return;
-          } catch (fixError) {
-            // The repair failed — fall through and surface the original error
-            // rather than leaving the user staring at a stalled bar.
-            console.error("diagram auto-repair failed", fixError);
-            fixFailed.add(originalSource);
-            if (cancelled) return;
-            setRepairing(false);
-          }
-        }
-
+        // Say what went wrong and stop. Correcting it is the user's call — see
+        // `requestRepair`.
         setError(message);
         setLoading(false);
         onRenderError?.();
@@ -253,7 +262,9 @@ export function MermaidBlock({
       <MermaidErrorView
         error={error}
         source={cleanSource}
-        repairAttempted={attemptedRef.current}
+        canRepairInPlace={!!autoFix && !repairFailed}
+        onRepair={() => void requestRepair(error)}
+        repairFailed={repairFailed}
       />
     );
   }
@@ -330,11 +341,74 @@ function MermaidViewport({ svg }: { svg: string }) {
     centerY: number;
   } | null>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  // Height of the taller canvas, in px — sized to the diagram it is showing
+  // (see `applyBaseline`). Null until the mode has been opened once.
+  const [tallHeight, setTallHeight] = useState<number | null>(null);
 
-  const reset = useCallback(() => {
-    setZoom(1);
-    setPan({ x: 0, y: 0 });
-  }, []);
+  /**
+   * The view this mode starts in — what "Reset view" returns to, and what
+   * opening a bigger canvas snaps to.
+   *
+   * Inline, 1 already means "all of it": Mermaid renders responsively, so the
+   * SVG has laid itself out to the column width. A bigger canvas is only worth
+   * opening if the diagram grows into it, and the two canvases grow it
+   * differently because their constraints differ:
+   *
+   * - Fullscreen has width to spare, so the diagram scales until whichever edge
+   *   meets the frame first and all of it stays on screen.
+   * - Taller keeps the column's width. Fitting both edges there can only ever
+   *   return 1 — the diagram is already exactly as wide as the column — which
+   *   is why raising the height cap alone did nothing at all. So it fills the
+   *   height instead: a tall diagram shrinks until all of it shows, a short one
+   *   magnifies (up to `TALL_MAX_SCALE`) and overflows into a sideways pan.
+   *   The canvas is then trimmed to whatever that produced, so the mode never
+   *   opens a tall box with the diagram floating in the middle of it.
+   */
+  const applyBaseline = useCallback(() => {
+    const set = (next: number) => {
+      setZoom((z) => (Math.abs(z - next) < 0.001 ? z : next));
+      setPan((p) => (p.x === 0 && p.y === 0 ? p : { x: 0, y: 0 }));
+    };
+    if (!fullscreen && !expanded) {
+      set(1);
+      return;
+    }
+    const v = viewportRef.current;
+    const c = contentRef.current;
+    if (!v || !c) return;
+    // offsetWidth/Height are layout sizes — the transform we are about to
+    // change doesn't affect them, so this doesn't compound across calls.
+    const cw = c.offsetWidth;
+    const ch = c.offsetHeight;
+    if (cw <= 0 || ch <= 0) return;
+
+    if (fullscreen) {
+      const boxW = v.clientWidth - VIEWPORT_PADDING * 2;
+      const boxH = v.clientHeight - VIEWPORT_PADDING * 2;
+      if (boxW <= 0 || boxH <= 0) return;
+      set(clamp(Math.min(boxW / cw, boxH / ch), MIN_ZOOM, MAX_ZOOM));
+      return;
+    }
+
+    // Measured against the ceiling rather than the box's current height, so the
+    // height this sets can't feed back into the next measurement.
+    const ceiling = window.innerHeight * TALL_VIEWPORT_FRACTION - VIEWPORT_PADDING * 2;
+    if (ceiling <= 0) return;
+    const scale = clamp(Math.min(TALL_MAX_SCALE, ceiling / ch), MIN_ZOOM, MAX_ZOOM);
+    setTallHeight(Math.round(Math.min(ceiling, ch * scale) + VIEWPORT_PADDING * 2));
+    set(scale);
+  }, [fullscreen, expanded]);
+
+  // The frame resizes in the same commit that flips the mode, so measure on the
+  // next frame, once layout has settled around the new box. Re-runs for a new
+  // diagram too: a different SVG wants its own starting view.
+  useEffect(() => {
+    const id = requestAnimationFrame(applyBaseline);
+    return () => cancelAnimationFrame(id);
+  }, [applyBaseline, svg]);
+
+  const reset = applyBaseline;
 
   /**
    * Zoom to `next` while keeping the screen point (clientX, clientY) anchored
@@ -465,6 +539,10 @@ function MermaidViewport({ svg }: { svg: string }) {
     if (pointersRef.current.size === 0) dragRef.current = null;
   }, []);
 
+  // Either canvas the user opened deliberately, as opposed to the block's
+  // resting size in the thread.
+  const framed = fullscreen || expanded;
+
   const frame = (
     <div
       className={
@@ -477,15 +555,17 @@ function MermaidViewport({ svg }: { svg: string }) {
       <div
         ref={viewportRef}
         className={`flex justify-center overflow-hidden p-3 select-none [&_svg]:max-w-full [&_svg]:!bg-transparent ${
-          fullscreen ? "min-h-0 flex-1 items-center" : ""
-        }`}
+          framed ? "items-center" : ""
+        } ${fullscreen ? "min-h-0 flex-1" : ""}`}
         style={{
           touchAction: "none",
           cursor: dragRef.current ? "grabbing" : "grab",
-          // Capped against the window rather than at a taller fixed pixel
-          // height: a viewport that doesn't fit on screen just moves the
-          // scrolling problem from inside the diagram to outside it.
-          maxHeight: fullscreen ? undefined : expanded ? "85vh" : "600px",
+          // Taller is an explicit height, not a larger cap. A cap does nothing
+          // at all for a diagram that is already shorter than it — which is
+          // most of them, since the SVG lays itself out to the column width —
+          // so raising it was the reason the button appeared to be dead.
+          height: expanded && !fullscreen && tallHeight != null ? tallHeight : undefined,
+          maxHeight: framed ? undefined : "600px",
         }}
         onWheel={onWheel}
         onPointerDown={onPointerDown}
@@ -494,6 +574,7 @@ function MermaidViewport({ svg }: { svg: string }) {
         onPointerCancel={onPointerUp}
       >
         <div
+          ref={contentRef}
           style={{
             transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
             transformOrigin: "center center",
@@ -605,11 +686,7 @@ function distance(a: { x: number; y: number }, b: { x: number; y: number }): num
   return Math.sqrt(dx * dx + dy * dy);
 }
 
-/**
- * Shown in place of the diagram while the hidden repair request is in flight.
- * The failure itself is not surfaced yet — if the repair lands, the user only
- * ever sees a brief progress bar and then the working diagram.
- */
+/** Shown in place of the diagram while a repair the user asked for is in flight. */
 function MermaidRepairingView() {
   return (
     <div className="my-2 rounded border border-[var(--color-border)] bg-[var(--color-panel)] p-4">
@@ -624,7 +701,7 @@ function MermaidRepairingView() {
         <div>
           <div className="font-medium text-[var(--color-text)]">Tidying up the diagram…</div>
           <div className="text-[var(--color-text-muted)]">
-            The syntax needed a correction. This takes a moment.
+            The model is correcting the syntax. This takes a moment.
           </div>
         </div>
       </div>
@@ -635,14 +712,29 @@ function MermaidRepairingView() {
   );
 }
 
+/**
+ * A diagram that didn't parse, and the offer to do something about it.
+ *
+ * Nothing here happens on its own. There are two ways to ask for a fix and the
+ * cheaper one is preferred: when the block came from a stored `draw_diagram`
+ * call, the model is asked to correct just that source and the result is
+ * written back in place, leaving the conversation untouched. A fenced
+ * ```mermaid block has no tool call to rewrite, so the only route is sending
+ * the error into the chat as a new turn — which is also the fallback once an
+ * in-place repair has been tried and failed.
+ */
 function MermaidErrorView({
   error,
   source,
-  repairAttempted,
+  canRepairInPlace,
+  onRepair,
+  repairFailed,
 }: {
   error: string;
   source: string;
-  repairAttempted?: boolean;
+  canRepairInPlace: boolean;
+  onRepair: () => void;
+  repairFailed: boolean;
 }) {
   const chatId = useApp((s) => s.activeChatId);
   const isStreaming = useApp((s) =>
@@ -650,7 +742,7 @@ function MermaidErrorView({
   );
   const [state, setState] = useState<"idle" | "sending" | "sent">("idle");
 
-  async function requestFix() {
+  async function askInConversation() {
     if (!chatId || isStreaming || state !== "idle") return;
     setState("sending");
     try {
@@ -678,19 +770,23 @@ function MermaidErrorView({
         )}
         {state === "idle" && (
           <button
-            onClick={requestFix}
-            disabled={isStreaming}
+            onClick={canRepairInPlace ? onRepair : askInConversation}
+            disabled={!canRepairInPlace && isStreaming}
+            title={
+              canRepairInPlace
+                ? "Ask the model to correct this diagram, without adding a turn to the chat"
+                : "Send the error into the conversation for the model to answer"
+            }
             className="flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-0.5 text-[var(--color-text-muted)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Wand2 size={11} /> Ask model to fix
           </button>
         )}
       </div>
-      {repairAttempted && (
+      {repairFailed && state === "idle" && (
         <div className="mb-1.5 text-[var(--color-text-muted)]">
-          An automatic repair was attempted in the background and didn't work.
-          Sending the error back into the conversation gives the model the full
-          context to try again.
+          The correction didn't work. Asking again sends the error back into the
+          conversation instead, which gives the model the full context to retry.
         </div>
       )}
       <pre className="whitespace-pre-wrap text-[var(--color-text-muted)]">

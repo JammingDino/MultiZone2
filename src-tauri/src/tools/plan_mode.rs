@@ -27,23 +27,41 @@ use crate::plans;
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
 
-/// Offered when the chat is *not* in plan mode, and only to a zone that has
-/// something to withhold — a read-only zone entering plan mode would change
-/// nothing about what it can do.
+/// Offered whenever the chat is *not* in plan mode and the zone has any tools
+/// (0.12.7 — it used to require a mutating one; see `apply_plan_mode`).
+///
+/// The description is written in the imperative and leads with the triggers,
+/// because the failure this tool actually had was not misuse: it was never being
+/// called. A model asked in plain words for a plan would write one in prose and
+/// never touch the tool, so the user got an answer they could not edit, reorder
+/// or approve — the whole point of the feature — unless they knew to type the
+/// function name themselves.
 pub fn enter_definition() -> Tool {
     Tool {
         tool_type: "function".into(),
         function: ToolFunction {
             name: "enter_plan_mode".into(),
             description:
-                "Switch this chat into plan mode. Call it when the user asks for a plan, or to \
-                 see the plan first, or to hold off until they have agreed — this tool is the \
-                 only way to give them one, so do not write the plan out in prose instead. Call \
-                 it unasked when a request turns out to need more changes, or riskier ones, than \
-                 the user is likely to have pictured — several files, a migration, anything you \
-                 would want agreed before it happens. Your mutating tools are withheld from the \
-                 next step onward; you keep every read-only tool, investigate, and finish with \
-                 `exit_plan_mode`. Do not call it for work you can simply do."
+                "Switch this chat into plan mode: the way to give the user a plan they can read, \
+                 reorder, edit and approve before any of it happens.\n\n\
+                 Call it whenever ANY of these is true:\n\
+                 - The user asks for a plan, an approach, an outline, a strategy, or how you \
+                   would go about something.\n\
+                 - The user asks you to hold off, check with them first, or not start yet.\n\
+                 - The request is a large deliverable — a report, a document, a design, a piece \
+                   of research, a feature — where the shape of the thing should be agreed before \
+                   you spend the effort.\n\
+                 - The work turns out bigger or riskier than the user is likely to have pictured: \
+                   several files, a migration, anything you would want agreed first.\n\n\
+                 This tool is the ONLY way to produce a plan the user can act on. Writing the \
+                 plan out in prose instead does not count and is the specific mistake to avoid — \
+                 prose cannot be reordered, edited or approved, and nothing executes it. If you \
+                 are about to write a numbered list of what you are going to do, call this \
+                 instead.\n\n\
+                 It costs little: your mutating tools (if any) are withheld from the next step \
+                 onward, you keep every read-only tool, you investigate, and you finish with \
+                 `exit_plan_mode`. Do not call it for a question you can simply answer, or for \
+                 work you can simply do in a step or two."
                     .into(),
             parameters: json!({
                 "type": "object",
@@ -213,9 +231,10 @@ pub fn exit_definition() -> Tool {
                  in prose, and do not restate the plan in your answer: they are looking at it. If \
                  you drafted with `draft_plan_step`, call this with no arguments and the draft is \
                  filed as it stands. Otherwise pass the whole plan here. Use it only once you \
-                 have actually read the files involved, and only for work that will change \
-                 something: answer a question or a piece of research directly instead. The turn \
-                 ends here; execution begins when the user approves."
+                 have actually looked into the work — the files, the sources, whatever the \
+                 request rests on. A question with a short answer does not need a plan; a \
+                 substantial deliverable does, whether or not it changes a file. The turn ends \
+                 here; execution begins when the user approves."
                     .into(),
             parameters: json!({
                 "type": "object",
@@ -377,10 +396,7 @@ pub async fn read(args: &Value, db: &SqlitePool, chat_id: &str) -> AppResult<Str
     let all = plans::list_for_chat(db, chat_id).await.unwrap_or_default();
 
     let plan = match wanted {
-        Some(id) => match plans::get(db, id).await {
-            Ok(p) => Some(p),
-            Err(_) => None,
-        },
+        Some(id) => plans::get(db, id).await.ok(),
         None => {
             // The one that matters now, in order: what is running, what the
             // user is being asked about, what is being written, then whatever

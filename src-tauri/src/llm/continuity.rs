@@ -198,9 +198,19 @@ pub fn multi_step_preamble(max_steps: usize, has_plan_tool: bool) -> String {
          outstanding. Tool output on its own is not an answer to the user."
     );
     if has_plan_tool {
+        // Named as progress tracking rather than as planning. The old wording —
+        // "for anything that will take more than about three steps, call
+        // `update_plan` first with the whole plan" — was the closest thing in
+        // the whole prompt to an instruction about planning, and it pointed at
+        // the wrong tool: `update_plan` is a checklist for work already under
+        // way and needs nobody's agreement, while a request for a plan wants
+        // `enter_plan_mode` and the user's approval. A model reading both
+        // reached for the one the prompt actually mentioned (0.12.7).
         s.push_str(
-            "\n- For anything that will take more than about three steps, call `update_plan` \
-             first with the whole plan, then update it as you finish each step.",
+            "\n- Keep the user posted on a long job: for anything taking more than about three \
+             steps, call `update_plan` with the whole checklist and update it as you finish \
+             each step. That is progress reporting on work you are already doing — if the user \
+             wants to agree the work *before* it happens, that is `enter_plan_mode` instead.",
         );
     }
     s
@@ -238,7 +248,8 @@ pub fn final_step_nudge(max_steps: usize) -> String {
 /// can change anything on disk, so the usual reason to be miserly does not
 /// apply; the ceiling and the cancel button remain the real limits.
 pub fn plan_mode_steps(base: usize) -> usize {
-    base.saturating_mul(2).max(PLAN_MODE_MIN_STEPS).min(MAX_MAX_STEPS)
+    base.saturating_mul(2)
+        .clamp(PLAN_MODE_MIN_STEPS, MAX_MAX_STEPS)
 }
 
 /// Floor for a planning turn, so a user who set a small budget for ordinary work

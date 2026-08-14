@@ -968,9 +968,129 @@ pub fn plan_mode_preamble() -> String {
      The plan is also written to a Markdown file, and `read_plan` reads it back — so a plan \
      agreed today is still readable in full next week, after this conversation has been \
      compacted.\n\n\
-     If the request turns out not to need any changes at all — a question, an explanation, a \
-     piece of research — answer it directly and do not call `exit_plan_mode`. Plan mode is for \
-     work that is going to modify something."
+     If the request turns out to be a question with a short answer, answer it and do not call \
+     `exit_plan_mode` — you are already here, so say so briefly rather than filing a two-step \
+     plan for something you could have done. But a substantial deliverable *does* want a plan \
+     whether or not it changes a file: a report, a document, a design, a piece of research, an \
+     analysis. What makes a plan worth having is that the shape of the work should be agreed \
+     before the effort goes in — not whether the work happens to end in a file write."
+        .to_string()
+}
+
+/// The system snippet a chat gets when planning is available and *not* on.
+///
+/// Nothing said so before 0.12.7. Plan mode existed entirely in one tool
+/// description among twenty, and the one thing the prompt did say about planning
+/// pointed at `update_plan` — a different tool, for progress on work already
+/// under way. So a user asking in plain words for a plan reliably got a numbered
+/// list in prose: correct-looking, and impossible to edit, reorder, approve or
+/// execute. This is the missing sentence.
+pub fn plan_offer_preamble() -> String {
+    "## Plans the user can act on\n\n\
+     `enter_plan_mode` is how you give the user a plan. It produces an ordered list of steps \
+     they read, reorder, rewrite and approve, and the approved version becomes the task list you \
+     are then held to. A plan written as prose in your answer is none of those things — nobody \
+     can edit it, nothing executes it, and it is the wrong answer to a request for a plan.\n\n\
+     Call `enter_plan_mode` when the user asks for a plan, an approach, an outline or a strategy; \
+     when they ask you to hold off, check first, or not start yet; when the request is a large \
+     deliverable whose shape should be agreed before the effort goes in; or when work you have \
+     started turns out bigger or riskier than they are likely to have pictured.\n\n\
+     The test is simple: **if you are about to write out a numbered list of what you are going \
+     to do, call `enter_plan_mode` instead.** Do not ask permission to plan first — asking and \
+     then waiting costs the user a round trip to reach a tool you could have called. Answer a \
+     short question directly; do not plan work you can just do in a step or two."
+        .to_string()
+}
+
+/// Phrases that read as "give me a plan".
+///
+/// Deliberately phrases and not the bare word `plan`: this chat is full of
+/// sentences like "the plan I approved yesterday" and "read plan.md", and a
+/// detector that fired on those would spend the user's turn proposing a plan
+/// they did not ask for. Everything here has a requesting verb, a determiner, or
+/// an explicit hold-off attached.
+const PLAN_REQUEST_PHRASES: &[&str] = &[
+    "make a plan",
+    "make me a plan",
+    "write a plan",
+    "write me a plan",
+    "give me a plan",
+    "need a plan",
+    "want a plan",
+    "come up with a plan",
+    "draw up a plan",
+    "draft a plan",
+    "propose a plan",
+    "suggest a plan",
+    "create a plan",
+    "build a plan",
+    "put together a plan",
+    "a plan for",
+    "a plan to",
+    "plan of attack",
+    "plan this",
+    "plan it out",
+    "plan out",
+    "plan first",
+    "plan mode",
+    "planning mode",
+    "detailed plan",
+    "step-by-step plan",
+    "step by step plan",
+    "implementation plan",
+    "before you start",
+    "before we start",
+    "before you begin",
+    "before doing anything",
+    "before you do anything",
+    "don't start until",
+    "do not start until",
+    "how would you approach",
+    "how you would approach",
+    "how would you go about",
+    "what's your approach",
+    "what is your approach",
+    "your approach to",
+    "outline the steps",
+    "outline how",
+    "think this through first",
+];
+
+/// Does this message read as a request for a plan?
+///
+/// Used only to *remind* the model that `enter_plan_mode` exists, never to enter
+/// the mode on the user's behalf — so a false positive costs a sentence in one
+/// request and a false negative costs nothing that the prompt does not already
+/// cover.
+pub fn reads_as_plan_request(text: &str) -> bool {
+    // Normalise the apostrophes a phone or a word processor produces, so
+    // "what’s your approach" matches the same phrase as "what's your approach".
+    let lower = text.to_lowercase().replace(['\u{2019}', '\u{02BC}'], "'");
+    let hay = lower.split_whitespace().collect::<Vec<_>>().join(" ");
+    if hay.is_empty() {
+        return false;
+    }
+    // "plan the migration" — the word as the opening imperative is unambiguous
+    // in a way it is nowhere else in a sentence.
+    if hay.starts_with("plan ") {
+        return true;
+    }
+    PLAN_REQUEST_PHRASES.iter().any(|p| hay.contains(p))
+}
+
+/// The reminder pushed into a turn whose opening message asks for a plan.
+///
+/// A note in the message list rather than another system snippet, deliberately:
+/// it varies with every message, and a volatile snippet at the front of the
+/// system prompt invalidates the prefix cache for the whole conversation behind
+/// it. Phrased as a reminder because the detector is a guess — the model is
+/// better placed to know whether this particular sentence wanted a plan.
+pub fn plan_request_nudge() -> String {
+    "# Note\n\
+     That message reads as a request for a plan. If it is one, `enter_plan_mode` is how you \
+     give them a plan they can reorder, edit and approve — writing the steps out in prose \
+     instead is the thing to avoid, since nothing can act on it. Call it now rather than asking \
+     whether you should. If they meant something else, ignore this."
         .to_string()
 }
 
@@ -1191,6 +1311,51 @@ mod tests {
         // A step with nothing but a name still gets its heading, so the
         // numbering in the file matches the numbering everywhere else.
         assert!(doc.contains("### 2. Bibliography"));
+    }
+
+    /// The sentences users actually type when they want a plan. Every one of
+    /// these produced prose before 0.12.7 unless the user typed the function
+    /// name themselves.
+    #[test]
+    fn plain_requests_for_a_plan_are_recognised() {
+        for s in [
+            "can you make a plan for this",
+            "Plan this out first please",
+            "plan the migration",
+            "I need a plan before we touch anything",
+            "come up with a plan and show me",
+            "what's your approach to the report?",
+            "what’s your approach to the report?", // curly apostrophe
+            "How would you approach writing this?",
+            "give me a detailed plan",
+            "outline the steps you'd take",
+            "don't start until I've seen what you intend",
+            "let's do this in plan mode",
+            "before you start, tell me what you're going to do",
+            "draw up a plan  for   the   rewrite", // odd whitespace
+        ] {
+            assert!(reads_as_plan_request(s), "should have matched: {s}");
+        }
+    }
+
+    /// Precision matters more than recall: the nudge costs a sentence when it is
+    /// right and an unwanted plan proposal when it is wrong, and this app's
+    /// conversations are full of the word "plan" meaning something else.
+    #[test]
+    fn talking_about_a_plan_is_not_asking_for_one() {
+        for s in [
+            "read plan.md and tell me what it says",
+            "the plan I approved yesterday was wrong",
+            "did you finish step 3 of the plan?",
+            "our floor plan is in the attached PDF",
+            "what does the release plan say about 0.13?",
+            "thanks, that plan worked",
+            "approve",
+            "",
+            "   ",
+        ] {
+            assert!(!reads_as_plan_request(s), "should not have matched: {s}");
+        }
     }
 
     #[test]

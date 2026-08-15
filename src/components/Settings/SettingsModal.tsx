@@ -157,9 +157,7 @@ function ZonesTab() {
       </div>
 
       <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-        A zone is an assistant with its own model, prompt and tools. Configure Zones
-        opens the full panel — the installed zones on the left, the library of
-        presets to add on the right.
+        A zone is an assistant with its own model, prompt and tools.
       </p>
 
       {zones.length === 0 ? (
@@ -770,15 +768,14 @@ function AppearanceTab() {
           ]}
         />
         <p className="mt-3 text-xs text-[var(--color-text-muted)]">
-          Export opens your print dialog: choose “Save as PDF”, set Margins to
-          “None” for a single continuous page, and enable “Background graphics”
-          so the theme’s colours are drawn.
+          Export opens your print dialog. Set Margins to “None” for one continuous page, and
+          enable “Background graphics” so the theme’s colours are drawn.
         </p>
 
         <div className="mt-4">
           <ToggleRow
             label="Include sub-agent conversations"
-            description="Fold the sub-agents a run delegated to into the export, nested under the turns that spawned them and marked throughout as zone-to-zone rather than something you said. Applies to Markdown and PDF."
+            description="Nested under the turns that spawned them, and marked as zone-to-zone. Markdown and PDF."
             checked={appSettings.exportSubchats}
             onChange={(exportSubchats) => setAppSettings({ exportSubchats })}
           />
@@ -844,7 +841,7 @@ function CustomCssSection() {
         <div className="flex flex-col gap-2">
           <ToggleRow
             label="Apply custom CSS"
-            description="Your own stylesheet, loaded after the app's own so it wins. Switch it off to get the stock look back without deleting what you wrote."
+            description="Loaded after the app's own, so it wins. Off restores the stock look without deleting it."
             checked={enabled}
             onChange={(customCssEnabled) => setTheme({ customCssEnabled })}
           />
@@ -1004,14 +1001,12 @@ function ChatTab() {
       <section>
         <h3 className="mb-1 text-sm font-medium">Review file edits before they land</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Queue every file a zone writes instead of writing it, and read the batch as a diff before
-          applying it — whole, file by file, or hunk by hunk. The model carries on as if the change
-          had landed (reading the file gives it back its own queued version), so a long task still
-          works; nothing reaches disk until you say so.
+          A zone's writes queue up as a diff you apply whole, by file, or by hunk. The model
+          carries on as if they had landed, so a long task still works.
         </p>
         <ToggleRow
           label="Stage file edits for review"
-          description="Applies to create and edit calls in every chat. Approval prompts and checkpoints keep working as they do now."
+          description="Create and edit calls, in every chat."
           checked={appSettings.reviewQueue}
           onChange={(v) => setAppSettings({ reviewQueue: v })}
         />
@@ -1032,7 +1027,7 @@ function ChatTab() {
       <section>
         <h3 className="mb-1 text-sm font-medium">OCR fallback</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Language hint used when images are OCR'd for a model that can't see them
+          Used when an image is OCR'd for a model that can't see it
           (<span className="font-mono">eng</span>, <span className="font-mono">deu</span>,{" "}
           <span className="font-mono">fra</span>…).
         </p>
@@ -1095,7 +1090,7 @@ function ChatTab() {
         <div className="mt-3">
           <ToggleRow
             label="Show the team's total context"
-            description="The context meter also reports every subagent's context, not just this chat's. Only appears when a chat has subagents."
+            description="Adds every subagent's context to the meter. Only shown when a chat has subagents."
             checked={appSettings.teamContextMeter !== false}
             onChange={(v) => setAppSettings({ teamContextMeter: v })}
           />
@@ -1134,9 +1129,8 @@ function VoiceTab() {
       <section>
         <h3 className="mb-1 text-sm font-medium">Dictation provider</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          The mic button's recordings are transcribed by one of your configured providers. Any provider
-          exposing an OpenAI-compatible <span className="font-mono">/audio/transcriptions</span> endpoint
-          works — OpenAI itself, or a local server like LM Studio serving a whisper model (fully on-device).
+          Any provider with an OpenAI-compatible <span className="font-mono">/audio/transcriptions</span>{" "}
+          endpoint — including a local whisper server, which keeps recordings on this machine.
         </p>
         {providers.length === 0 ? (
           <p className="text-xs text-amber-600 dark:text-amber-400">
@@ -1169,9 +1163,8 @@ function VoiceTab() {
       <section>
         <h3 className="mb-1 text-sm font-medium">Audio uploads</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Drop an audio file into any composer — MP3, WAV, M4A, MP4, FLAC, OGG, WebM — and it is
-          transcribed by the provider above, then sent as text. That is what lets a{" "}
-          <em>text-only</em> model take spoken input: it never sees audio, only the transcript.
+          Drop an audio file into any composer — MP3, WAV, M4A, MP4, FLAC, OGG, WebM — and the
+          transcript is sent as text, so a text-only model can take spoken input.
         </p>
         {(!appSettings.sttProviderId || !appSettings.sttModel) && (
           <p className="mb-3 text-xs text-amber-600 dark:text-amber-400">
@@ -1199,15 +1192,14 @@ function VoiceTab() {
           ]}
         />
         <p className="mt-2 text-xs text-[var(--color-text-muted)]">
-          “As an attachment” is the one that works for long recordings: the whole transcript goes to
-          the model while you type the actual instruction — “summarise this meeting”, “what did I
-          promise to do?”.
+          Long recordings want “as an attachment”, so you can type the instruction —
+          “summarise this meeting” — alongside the transcript.
         </p>
 
         <div className="mt-4">
           <ToggleRow
             label="Include timestamps and language"
-            description="Asks the endpoint for per-segment timings, the detected language and a note on passages it was unsure of. Not every OpenAI-compatible server implements this."
+            description="Per-segment timings and the detected language. Not every server implements it."
             checked={appSettings.sttUploadMetadata}
             onChange={(sttUploadMetadata) => setAppSettings({ sttUploadMetadata })}
           />
@@ -1238,18 +1230,16 @@ function VoiceTab() {
           />
         </div>
         <p className="mt-2 text-xs text-[var(--color-text-muted)]">
-          OpenAI's hosted endpoint rejects anything over 25 MB itself; raise this only for a local
-          or self-hosted server with its own ceiling. Duration is measured before upload, and a
-          format this machine can't decode is uploaded anyway rather than refused on a guess.
+          OpenAI's hosted endpoint refuses anything over 25 MB itself — raise this only for a
+          server with its own ceiling.
         </p>
       </section>
 
       <section>
         <h3 className="mb-1 text-sm font-medium">Language</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          BCP-47-ish language code (e.g. <span className="font-mono">en</span>). Leave empty to auto-detect
-          — which is the better default for both dictation and uploads, since the model identifies the
-          language itself and forcing the wrong one is worse than letting it decide.
+          BCP-47-ish code (e.g. <span className="font-mono">en</span>). Empty auto-detects, which is
+          usually better than forcing one.
         </p>
         <input
           type="text"
@@ -1304,9 +1294,8 @@ function VoiceTab() {
       <section>
         <h3 className="mb-1 text-sm font-medium">Live transcription</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Show words as you speak by re-transcribing the recording on an interval.
-          Each pass is a full request to the provider — free against a local server,
-          billed per call against a hosted one.
+          Re-transcribes the recording on an interval. Each pass is a full request — free against
+          a local server, billed per call against a hosted one.
         </p>
         <ToggleRow
           label="Show words while speaking"
@@ -1412,9 +1401,8 @@ function SpeechSynthesisSettings() {
       <section>
         <h3 className="mb-1 text-sm font-medium">Speech (read aloud)</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Responses can be spoken by one of your configured providers. Any provider exposing an
-          OpenAI-compatible <span className="font-mono">/audio/speech</span> endpoint works — OpenAI itself,
-          or a local server (fully on-device).
+          Any provider with an OpenAI-compatible <span className="font-mono">/audio/speech</span>{" "}
+          endpoint, including a local one.
         </p>
         {providers.length === 0 ? (
           <p className="text-xs text-amber-600 dark:text-amber-400">
@@ -1529,8 +1517,8 @@ function SpeechSynthesisSettings() {
       <section>
         <h3 className="mb-1 text-sm font-medium">Prefetch</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          How many upcoming sentences are synthesized in parallel while the current one plays. Higher
-          removes the gap between sentences but sends more concurrent requests to the provider.
+          Sentences synthesized in parallel while the current one plays. Higher removes the gap
+          between them, at more concurrent requests.
         </p>
         <SliderRow
           label="Sentences ahead"
@@ -1612,10 +1600,9 @@ function VoiceCloningSettings() {
         <h3 className="text-sm font-medium">Voice cloning</h3>
       </div>
       <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-        Some speech models can clone a voice from a short sample (e.g. a local F5-TTS server); most
-        hosted providers (like OpenAI) cannot — they only offer fixed built-in voices. Cloning is
-        handled entirely in-app: your reference clip and its transcript are sent with each request, so
-        no server-side setup is needed. Enable this only if your speech model supports cloning.
+        Some local models (F5-TTS, say) clone a voice from a short sample; hosted ones like OpenAI
+        only offer fixed voices. Your clip and its transcript ride along with each request, so there
+        is nothing to set up server-side.
       </p>
       <ToggleRow
         label="My speech model supports voice cloning"
@@ -1740,9 +1727,8 @@ function ConversationModeSettings() {
     <section>
       <h3 className="mb-1 text-sm font-medium">Conversation mode (hands-free)</h3>
       <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-        Chain dictation and speech into a continuous loop: after a spoken response finishes, the mic
-        starts listening again so you can reply by voice. Speaking interrupts playback (barge-in).
-        Requires both a dictation provider and a speech provider above.
+        The mic reopens when a spoken response finishes, and speaking interrupts playback. Needs
+        both a dictation and a speech provider above.
       </p>
       <ToggleRow
         label="Enable conversation mode"
@@ -1809,9 +1795,9 @@ function SkillsTab() {
       <section>
         <h3 className="mb-1 text-sm font-medium">Skills</h3>
         <p className="text-xs text-[var(--color-text-muted)]">
-          Global, on-demand instruction sets. Any zone with the <span className="font-mono">Skills</span> tool
-          sees the name + description of every enabled skill and can load its full instructions itself when a
-          request matches — like any other tool call. Write the description as the use case that should trigger it.
+          On-demand instruction sets. A zone with the <span className="font-mono">Skills</span> tool sees
+          every enabled skill's description and loads the full text itself when one matches — so write
+          the description as the use case that should trigger it.
         </p>
       </section>
 
@@ -1990,10 +1976,9 @@ function SkillPacksSection() {
         </div>
       </div>
       <p className="text-xs text-[var(--color-text-muted)]">
-        Skills published as a folder — <span className="font-mono">SKILL.md</span> plus reference pages and
-        scripts — installed by their own CLI. They appear in every agent's catalog alongside the skills above,
-        and an agent reads the extra files through <span className="font-mono">load_skill</span>, so no
-        filesystem access is needed. Edit them where they were installed, not here.
+        Skills published as a folder — <span className="font-mono">SKILL.md</span> plus reference pages
+        and scripts — installed by their own CLI. They join the catalog above; edit them where they
+        were installed, not here.
       </p>
 
       {showHelp && (
@@ -2352,14 +2337,13 @@ function McpTab() {
       <section>
         <h3 className="mb-1 text-sm font-medium">MCP servers</h3>
         <p className="text-xs text-[var(--color-text-muted)]">
-          Connect external <span className="font-mono">Model Context Protocol</span> servers — local
-          commands (stdio) or remote endpoints (SSE/HTTP). On connect, MultiZone fetches the server's
-          tools; set a danger level per tool, then enable specific tools per zone in the zone editor.
-          MCP tool calls go through the same approval pipeline as built-in tools.
+          Local commands (stdio) or remote endpoints (SSE/HTTP). Connecting fetches the server's
+          tools; give each a danger level here, then enable the ones you want per zone in the zone
+          editor. They go through the same approval pipeline as built-in tools.
         </p>
         <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-          Start from the <strong>catalog</strong> if you can: an entry knows the command, the
-          variables and where each credential comes from, so all it asks you for is the credential.
+          Prefer the <strong>catalog</strong>: an entry already knows the command and the variables,
+          so all it asks you for is the credential.
         </p>
       </section>
 
@@ -2690,8 +2674,8 @@ function ConnectorCatalogPanel({ onDone, onCancel }: { onDone: () => void; onCan
         <div className="mb-1 flex items-center gap-1.5 text-xs font-medium"><Download size={12} /> Import entries from a URL</div>
         <p className="mb-2 text-[11px] text-[var(--color-text-muted)]">
           A JSON file holding one entry, a list of them, or an object with an
-          <span className="font-mono"> entries </span> array. Imported entries are files in the
-          connectors folder; one sharing an id with a shipped entry replaces it.
+          <span className="font-mono"> entries </span> array. One sharing an id with a shipped entry
+          replaces it.
         </p>
         <div className="flex items-center gap-2">
           <input
@@ -3163,11 +3147,10 @@ function KnowledgeTab() {
       <section>
         <h3 className="mb-1 text-sm font-medium">Knowledge</h3>
         <p className="text-xs text-[var(--color-text-muted)]">
-          Set a <span className="font-medium">default embedding model</span> — new projects inherit it
-          automatically — and index your <span className="font-medium">default directory</span> into a
-          global knowledge base that chats without a project can search via the{" "}
-          <code className="rounded bg-[var(--color-bg)] px-1">search_local_files</code> tool. For a local
-          model, add Ollama as a provider and pick something like{" "}
+          New projects inherit the default embedding model, and the default directory is indexed
+          into a knowledge base that project-less chats search with{" "}
+          <code className="rounded bg-[var(--color-bg)] px-1">search_local_files</code>. To keep it
+          local, add Ollama as a provider and pick something like{" "}
           <code className="rounded bg-[var(--color-bg)] px-1">nomic-embed-text</code>.
         </p>
       </section>
@@ -3503,9 +3486,8 @@ function ApiTab() {
       <section>
         <h3 className="mb-1 text-sm font-medium">Local HTTP API</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Exposes a local REST + SSE API (bound to 127.0.0.1) so external tools or scripts can
-          list and create chats, pick zones/projects, and send messages — the same capabilities as
-          the app. Requests must include your bearer token.
+          A local REST + SSE API on 127.0.0.1 with the same capabilities as the app — chats,
+          zones, projects, messages. Every request needs your bearer token.
         </p>
         <div
           onClick={() => !busy && apply({ apiEnabled: !appSettings.apiEnabled })}
@@ -3754,10 +3736,10 @@ function DataTab() {
       <section>
         <h3 className="mb-1 text-sm font-medium">Plaintext markdown storage</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Keep every chat as a real <span className="font-mono">.md</span> file you can read, edit, and version
-          outside the app. The database stays the source of truth, but the files sync both ways: chats are written
-          out as you go, and edits you make to a file on disk (message text, title) are pulled back in. Zone configs
-          are written as JSON in a <span className="font-mono">zones/</span> subfolder alongside.
+          Every chat as a real <span className="font-mono">.md</span> file you can read, edit and
+          version. The database stays the source of truth, but the sync runs both ways — edits you
+          make on disk are pulled back in. Zone configs go alongside as JSON in{" "}
+          <span className="font-mono">zones/</span>.
         </p>
 
         <ToggleRow
@@ -3822,7 +3804,7 @@ function DataTab() {
       <section>
         <h3 className="mb-1 text-sm font-medium">Reset</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Permanently deletes the database, all chats, zones, projects, tags, and attachments. The app will exit — on next launch everything starts fresh.
+          Deletes the database and everything in it. The app exits, and next launch starts fresh.
         </p>
 
         {resetStage === "idle" && (
@@ -3923,9 +3905,9 @@ function CheckpointStorageSection() {
     <section>
       <h3 className="mb-1 text-sm font-medium">File checkpoints</h3>
       <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-        Before a turn changes a file, its previous contents are kept so the turn can be reverted from the
-        transcript. Content shared between turns is stored once. The newest checkpoint is never removed, whatever
-        the limits below say — the turn that just ran stays revertible.
+        A turn's files are kept as they were before it ran, so it can be reverted from the
+        transcript. The newest checkpoint survives the limits below, whatever they say — the turn
+        that just ran stays revertible.
       </p>
 
       {usage && (
@@ -4079,11 +4061,10 @@ function SettingsTransferSection() {
     <section>
       <h3 className="mb-1 text-sm font-medium">Settings backup & transfer</h3>
       <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-        Save your setup — providers, zones, skills, MCP servers, global memories, preferences and
-        theme — as a single JSON file, and import it into another install. Chats aren't included (use
-        the markdown storage above for those), and neither are machine-specific paths or the local
-        API token, so the other install keeps its own. You can also just drop a settings file onto
-        the window at any time.
+        Providers, zones, skills, MCP servers, global memories, preferences and theme as one JSON
+        file. Chats are not included — the markdown storage above covers those — and neither are
+        machine-specific paths or the local API token. Dropping a settings file on the window
+        imports it too.
       </p>
 
       <ToggleRow

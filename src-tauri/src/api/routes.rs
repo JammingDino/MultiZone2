@@ -132,6 +132,9 @@ pub const ROUTES: &[RouteDef] = &[
     r("GET", "/api/chats/:id/checkpoints", "Turns in this chat that changed files"),
     r("GET", "/api/chats/:id/checkpoints/since/:messageId", "Turns that changed files after a message"),
     r("POST", "/api/chats/:id/restore-to/:messageId", "Rewind the tree to how it stood at a message"),
+    r("POST", "/api/chats/:id/rewind-to/:messageId", "Rewind the tree to a message, reversibly"),
+    r("POST", "/api/chats/:id/rewind-forward", "Walk the most recent rewind forward again"),
+    r("GET", "/api/chats/:id/rewind-status", "Whether this chat has a rewind to walk forward"),
     r("POST", "/api/checkpoints/:id/restore", "Put a turn's files back; optional path subset and force"),
     r("GET", "/api/checkpoints/usage", "What the checkpoint store is holding"),
     r("POST", "/api/checkpoints/prune", "Apply the configured retention limits now"),
@@ -285,6 +288,9 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("checkpoints::list_checkpoints", Route("GET /api/chats/:id/checkpoints")),
     ("checkpoints::checkpoints_since_message", Route("GET /api/chats/:id/checkpoints/since/:messageId")),
     ("checkpoints::restore_to_message", Route("POST /api/chats/:id/restore-to/:messageId")),
+    ("checkpoints::rewind_to_message", Route("POST /api/chats/:id/rewind-to/:messageId")),
+    ("checkpoints::rewind_forward", Route("POST /api/chats/:id/rewind-forward")),
+    ("checkpoints::rewind_status", Route("GET /api/chats/:id/rewind-status")),
     ("checkpoints::restore_checkpoint", Route("POST /api/checkpoints/:id/restore")),
     ("checkpoints::checkpoint_usage", Route("GET /api/checkpoints/usage")),
     ("checkpoints::prune_checkpoints", Route("POST /api/checkpoints/prune")),
@@ -908,6 +914,34 @@ pub async fn restore_to_message(
         .await?,
     )
     .into_response())
+}
+
+pub async fn rewind_to_message(
+    State(st): State<ApiState>,
+    Path((id, message_id)): Path<(String, String)>,
+    Json(body): Json<Value>,
+) -> ApiResult<Response> {
+    Ok(Json(
+        commands::checkpoints::rewind_to_message(app_state(&st), id, message_id, b(&body, "force"))
+            .await?,
+    )
+    .into_response())
+}
+
+pub async fn rewind_forward(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> ApiResult<Response> {
+    Ok(Json(commands::checkpoints::rewind_forward(app_state(&st), id, b(&body, "force")).await?)
+        .into_response())
+}
+
+pub async fn rewind_status(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+) -> ApiResult<Response> {
+    Ok(Json(commands::checkpoints::rewind_status(app_state(&st), id).await?).into_response())
 }
 
 pub async fn restore_checkpoint(

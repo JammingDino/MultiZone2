@@ -630,6 +630,12 @@ pub async fn since_message(
     let all = list_for_chat(db, chat_id).await?;
     let mut keep = Vec::new();
     for cp in all {
+        // A rewind mark records where the tree stood, it never moved it — so it
+        // is not one of the changes a rewind has to undo. Leaving it in would
+        // also consume the forward step of a rewind the user hasn't taken yet.
+        if cp.label.as_deref() == Some(REWIND_MARK) {
+            continue;
+        }
         let anchor_ts = match &cp.message_id {
             Some(mid) => {
                 let ts: Option<(i64,)> =
@@ -674,6 +680,192 @@ pub async fn restore_to_message(
         reports.push(restore(db, &cp.id, None, force).await?);
     }
     Ok(reports)
+}
+
+// ─── Rewind, and the way back out of one ──────────────────────────────────────
+//
+// Rewinding used to be reachable only as a side-effect of branching, and it was
+// a one-way trip: putting the tree back three turns threw away everything those
+// turns wrote, and "actually, I did want that edit" had no answer. A rewind now
+// leaves a *mark* — one checkpoint holding the state of every path it is about
+// to move, taken before it moves any of them — so walking forward again is the
+// same restore in the other direction.
+
+/// Label on the bookkeeping checkpoint a rewind leaves behind. Chosen so it is
+/// distinguishable from a turn's checkpoint (labelled with the tool that opened
+/// it) and from `restore`'s own per-restore undo (`revert`).
+const REWIND_MARK: &str = "rewind";
+
+/// The result of a rewind: what moved, and the mark it can be walked back from.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RewindReport {
+    /// The mark to walk forward from, or `None` when the rewind found nothing
+    /// to undo and so left no trace.
+    pub mark_id: Option<String>,
+    pub reports: Vec<RestoreReport>,
+}
+
+/// Whether this chat has a rewind that can be walked forward, and how much of
+/// one — read by the transcript to decide whether to offer the button at all.
+#[derive(Debug, Clone, Serialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RewindStatus {
+    pub can_forward: bool,
+    /// Paths the forward step would put back.
+    pub forward_files: i64,
+    /// When the rewind that left this mark was taken.
+    pub forward_at: Option<i64>,
+    /// The message the rewind was taken at, so the transcript can offer the way
+    /// forward at the same place the user asked to go back — and still offer it
+    /// after a restart, which an in-memory note could not.
+    pub forward_message_id: Option<String>,
+}
+
+/// Snapshot every path the coming rewind will touch, as one checkpoint.
+///
+/// `INSERT OR IGNORE`, not `OR REPLACE`: a path edited by several of the turns
+/// being undone must be recorded once, at its *current* state, because that is
+/// the single state walking forward has to get back to.
+async fn mark_current(
+    db: &SqlitePool,
+    chat_id: &str,
+    message_id: &str,
+    later: &[Checkpoint],
+) -> AppResult<String> {
+    let mark_id = open_checkpoint(db, chat_id, &new_id(), None, REWIND_MARK).await?;
+    // Anchored to the message the rewind was taken at, so the way forward is
+    // offered where the user asked to go back. Harmless to `since_message`,
+    // which skips marks outright.
+    sqlx::query("UPDATE checkpoints SET message_id = ?1 WHERE id = ?2")
+        .bind(message_id)
+        .bind(&mark_id)
+        .execute(db)
+        .await?;
+    for cp in later {
+        for file in &cp.files {
+            let (existed, hash, size, unstorable) = match snapshot(Path::new(&file.path)) {
+                Snapshot::Absent => (0i64, None, None, None),
+                Snapshot::Stored { hash, size } => (1, Some(hash), Some(size as i64), None),
+                Snapshot::Unstorable(why) => (1, None, None, Some(why)),
+            };
+            sqlx::query(
+                "INSERT OR IGNORE INTO checkpoint_files
+                   (checkpoint_id, path, display_path, existed, before_hash, before_size, unstorable)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            )
+            .bind(&mark_id)
+            .bind(&file.path)
+            .bind(&file.display_path)
+            .bind(existed)
+            .bind(&hash)
+            .bind(size)
+            .bind(&unstorable)
+            .execute(db)
+            .await?;
+        }
+    }
+    Ok(mark_id)
+}
+
+/// Record what the rewind left on disk, so walking forward can tell a file the
+/// user has since hand-edited from one that is still as the rewind left it.
+async fn seal_mark(db: &SqlitePool, mark_id: &str) -> AppResult<()> {
+    let paths: Vec<(String,)> =
+        sqlx::query_as("SELECT path FROM checkpoint_files WHERE checkpoint_id = ?1")
+            .bind(mark_id)
+            .fetch_all(db)
+            .await?;
+    for (path,) in paths {
+        let after = current_hash(Path::new(&path));
+        sqlx::query(
+            "UPDATE checkpoint_files SET after_hash = ?1 WHERE checkpoint_id = ?2 AND path = ?3",
+        )
+        .bind(&after)
+        .bind(mark_id)
+        .bind(&path)
+        .execute(db)
+        .await?;
+    }
+    Ok(())
+}
+
+/// Put the working tree back to how it stood at `message_id`, reversibly.
+///
+/// [`restore_to_message`] with a mark taken first. A rewind that finds nothing
+/// to undo leaves no mark, so the forward button never appears for a move that
+/// never happened.
+pub async fn rewind_to_message(
+    db: &SqlitePool,
+    chat_id: &str,
+    message_id: &str,
+    force: bool,
+) -> AppResult<RewindReport> {
+    let later = since_message(db, chat_id, message_id).await?;
+    if later.is_empty() {
+        return Ok(RewindReport { mark_id: None, reports: Vec::new() });
+    }
+    let mark_id = mark_current(db, chat_id, message_id, &later).await?;
+
+    let mut reports = Vec::new();
+    for cp in &later {
+        reports.push(restore(db, &cp.id, None, force).await?);
+    }
+    seal_mark(db, &mark_id).await?;
+    Ok(RewindReport { mark_id: Some(mark_id), reports })
+}
+
+/// The mark a forward step would act on: the newest rewind in this chat that
+/// has not been walked forward yet.
+async fn pending_mark(
+    db: &SqlitePool,
+    chat_id: &str,
+) -> AppResult<Option<(String, i64, Option<String>)>> {
+    let row: Option<(String, i64, Option<String>)> = sqlx::query_as(
+        "SELECT id, created_at, message_id FROM checkpoints
+          WHERE chat_id = ?1 AND label = ?2 AND restored_at IS NULL
+          ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(chat_id)
+    .bind(REWIND_MARK)
+    .fetch_optional(db)
+    .await?;
+    Ok(row)
+}
+
+/// Walk the most recent rewind forward — back to the state the tree was in
+/// before it. `None` when there is no rewind to undo.
+///
+/// Consumes the mark (the restore stamps `restored_at`), so successive calls
+/// walk out through nested rewinds one at a time rather than repeating the
+/// newest one.
+pub async fn rewind_forward(
+    db: &SqlitePool,
+    chat_id: &str,
+    force: bool,
+) -> AppResult<Option<RestoreReport>> {
+    let Some((mark_id, ..)) = pending_mark(db, chat_id).await? else {
+        return Ok(None);
+    };
+    Ok(Some(restore(db, &mark_id, None, force).await?))
+}
+
+/// Whether this chat has somewhere forward to go.
+pub async fn rewind_status(db: &SqlitePool, chat_id: &str) -> AppResult<RewindStatus> {
+    let Some((mark_id, created_at, message_id)) = pending_mark(db, chat_id).await? else {
+        return Ok(RewindStatus::default());
+    };
+    let (files,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM checkpoint_files WHERE checkpoint_id = ?1")
+            .bind(&mark_id)
+            .fetch_one(db)
+            .await?;
+    Ok(RewindStatus {
+        can_forward: true,
+        forward_files: files,
+        forward_at: Some(created_at),
+        forward_message_id: message_id,
+    })
 }
 
 // ─── Retention ────────────────────────────────────────────────────────────────

@@ -1221,6 +1221,25 @@ export interface RestoreReport {
   undoCheckpointId: string | null;
 }
 
+/** The outcome of a rewind: what moved, and the mark it can be undone from. */
+export interface RewindReport {
+  /** Null when the rewind found nothing to undo, and so left no trace. */
+  markId: string | null;
+  reports: RestoreReport[];
+}
+
+/** Whether a chat has a rewind that can be walked forward again. */
+export interface RewindStatus {
+  canForward: boolean;
+  /** Paths the forward step would put back. */
+  forwardFiles: number;
+  /** When the rewind that left this mark was taken. */
+  forwardAt: number | null;
+  /** The message it was taken at — the way forward is offered in the same place
+   *  the user asked to go back. */
+  forwardMessageId: string | null;
+}
+
 /** Groups the zone editor's tool list is sorted into, in display order (0.9.0). */
 export const TOOL_CATEGORIES = ["Files", "Web", "Knowledge", "Agents", "System"] as const;
 export type ToolCategory = (typeof TOOL_CATEGORIES)[number];

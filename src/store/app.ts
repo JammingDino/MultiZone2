@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { DEFAULT_APP_SETTINGS, type AppSettings, type Chat, type Checkpoint, type RestoreReport, type ChatTagEntry, type ChatTagLink, type ChatZone, type McpServerView, type Memory, type Message, type PendingMessage, type PendingMode, type Plan, type PlanStep, type Project, type Provider, type Skill, type SkillPack, type Tag, type Zone } from "@/lib/types";
+import { DEFAULT_APP_SETTINGS, type AppSettings, type Chat, type Checkpoint, type RestoreReport, type RewindReport, type RewindStatus, type ChatTagEntry, type ChatTagLink, type ChatZone, type McpServerView, type Memory, type Message, type PendingMessage, type PendingMode, type Plan, type PlanStep, type Project, type Provider, type Skill, type SkillPack, type Tag, type Zone } from "@/lib/types";
 import * as api from "@/lib/tauri";
 import type { SettingsBundle } from "@/lib/settingsBundle";
 import { shade } from "@/lib/color";
@@ -298,6 +298,18 @@ interface AppStore {
     paths?: string[],
     force?: boolean,
   ) => Promise<RestoreReport>;
+  /** Whether each chat has a rewind that can be walked forward again (1.1).
+   *  Refreshed alongside `checkpointsByChat`, which is the same question about
+   *  the same store asked in the other direction. */
+  rewindByChat: Record<string, RewindStatus>;
+  /** Put the tree back to how it stood at a message, reversibly. */
+  rewindToMessage: (
+    chatId: string,
+    messageId: string,
+    force?: boolean,
+  ) => Promise<RewindReport>;
+  /** Undo the most recent rewind in this chat. Null when there was none. */
+  rewindForward: (chatId: string, force?: boolean) => Promise<RestoreReport | null>;
   /** Current visual theme. Persisted via the backend settings table. */
   theme: ThemePrefs;
   setTheme: (theme: Partial<ThemePrefs>) => Promise<void>;
@@ -823,6 +835,7 @@ export const useApp = create<AppStore>((set, get) => ({
   pendingImport: null,
   statsByMessage: {},
   checkpointsByChat: {},
+  rewindByChat: {},
   theme: DEFAULT_THEME,
   appSettings: DEFAULT_APP_SETTINGS,
   appSettingsLoaded: false,
@@ -941,8 +954,28 @@ export const useApp = create<AppStore>((set, get) => ({
   },
 
   async loadCheckpoints(chatId) {
-    const checkpoints = await api.listCheckpoints(chatId);
-    set((s) => ({ checkpointsByChat: { ...s.checkpointsByChat, [chatId]: checkpoints } }));
+    const [checkpoints, rewind] = await Promise.all([
+      api.listCheckpoints(chatId),
+      api.rewindStatus(chatId),
+    ]);
+    set((s) => ({
+      checkpointsByChat: { ...s.checkpointsByChat, [chatId]: checkpoints },
+      rewindByChat: { ...s.rewindByChat, [chatId]: rewind },
+    }));
+  },
+
+  async rewindToMessage(chatId, messageId, force) {
+    const report = await api.rewindToMessage(chatId, messageId, force);
+    // Re-read rather than patch: the rewind changed what is on disk, which is
+    // what decides whether the remaining turns still read as revertible.
+    await get().loadCheckpoints(chatId);
+    return report;
+  },
+
+  async rewindForward(chatId, force) {
+    const report = await api.rewindForward(chatId, force);
+    await get().loadCheckpoints(chatId);
+    return report;
   },
 
   async revertCheckpoint(chatId, checkpointId, paths, force) {

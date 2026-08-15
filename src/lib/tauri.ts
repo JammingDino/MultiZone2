@@ -15,6 +15,8 @@ import type {
   StagedEdit,
   PruneOutcome,
   RestoreReport,
+  RewindReport,
+  RewindStatus,
   DbStats,
   IndexSummary,
   InputPart,
@@ -236,6 +238,22 @@ export const checkpointsSinceMessage = (chatId: string, messageId: string) =>
  */
 export const restoreToMessage = (chatId: string, messageId: string, force?: boolean) =>
   invoke<RestoreReport[]>("restore_to_message", { chatId, messageId, force: force ?? false });
+
+/**
+ * Rewind the tree to how it stood at `messageId`, reversibly (1.1). Unlike
+ * `restoreToMessage` it leaves a mark, so `rewindForward` can put the tree back
+ * the way it was.
+ */
+export const rewindToMessage = (chatId: string, messageId: string, force?: boolean) =>
+  invoke<RewindReport>("rewind_to_message", { chatId, messageId, force: force ?? false });
+
+/** Walk the most recent rewind forward again. Null when there is none. */
+export const rewindForward = (chatId: string, force?: boolean) =>
+  invoke<RestoreReport | null>("rewind_forward", { chatId, force: force ?? false });
+
+/** Whether this chat has a rewind that can be walked forward. */
+export const rewindStatus = (chatId: string) =>
+  invoke<RewindStatus>("rewind_status", { chatId });
 
 /**
  * The last bind outcome — the same row `/api/health` reports, so the panel and

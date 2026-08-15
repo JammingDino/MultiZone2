@@ -71,6 +71,42 @@ pub async fn restore_to_message(
     checkpoints::restore_to_message(&state.db, &chat_id, &message_id, force.unwrap_or(false)).await
 }
 
+/// Rewind the working tree to how it stood at `message_id`, reversibly.
+///
+/// [`restore_to_message`] is the one-way version kept for branching. This one
+/// leaves a mark first, so [`rewind_forward`] can put the tree back the way it
+/// was — "undo that run" and "no, I did want it after all" are the same button
+/// pointed in two directions.
+#[tauri::command]
+pub async fn rewind_to_message(
+    state: State<'_, AppState>,
+    chat_id: String,
+    message_id: String,
+    force: Option<bool>,
+) -> AppResult<checkpoints::RewindReport> {
+    checkpoints::rewind_to_message(&state.db, &chat_id, &message_id, force.unwrap_or(false)).await
+}
+
+/// Walk the most recent rewind in this chat forward again. `null` when there is
+/// no rewind left to undo.
+#[tauri::command]
+pub async fn rewind_forward(
+    state: State<'_, AppState>,
+    chat_id: String,
+    force: Option<bool>,
+) -> AppResult<Option<checkpoints::RestoreReport>> {
+    checkpoints::rewind_forward(&state.db, &chat_id, force.unwrap_or(false)).await
+}
+
+/// Whether this chat has a rewind that can be walked forward, and how big it is.
+#[tauri::command]
+pub async fn rewind_status(
+    state: State<'_, AppState>,
+    chat_id: String,
+) -> AppResult<checkpoints::RewindStatus> {
+    checkpoints::rewind_status(&state.db, &chat_id).await
+}
+
 /// What the checkpoint store is holding, for Settings → Data.
 #[tauri::command]
 pub async fn checkpoint_usage(state: State<'_, AppState>) -> AppResult<checkpoints::CheckpointUsage> {

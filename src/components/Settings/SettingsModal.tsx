@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { X, Plus, Trash2, RefreshCw, Server, Palette, MessageSquare, Database, AlertTriangle, Loader2, Folder, FolderOpen, Globe, Copy, Check, Brain, Sparkles, FileUp, FileDown, Plug, Wifi, WifiOff, Library, Layers, ChevronDown, ChevronRight, Mic, Volume2, AudioLines, Stethoscope, ExternalLink, Download } from "lucide-react";
+import { X, Plus, Trash2, RefreshCw, Server, Palette, MessageSquare, Database, AlertTriangle, Loader2, Folder, FolderOpen, Globe, Copy, Check, Brain, Sparkles, FileUp, FileDown, Plug, Wifi, WifiOff, Library, Layers, ChevronDown, ChevronRight, Mic, Volume2, AudioLines, Stethoscope, ExternalLink, Download, Search } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useApp } from "@/store/app";
 import type { BackgroundEffect, GlassStyle, ThemeColorKey } from "@/store/app";
@@ -194,63 +194,116 @@ function ProvidersTab() {
   );
   const zones = useApp((s) => s.zones);
   const baseZoneId = useApp((s) => s.appSettings.baseZoneId);
-  const [editing, setEditing] = useState<Partial<Provider> | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [filter, setFilter] = useState("");
 
   // There is no separate "default provider" setting (0.9.9) — the base zone in
   // Settings → Chat names one, and that is the provider everything falls back
   // to. Shown here so the Providers list still says which one that is.
   const baseProvider = resolveBaseProvider(providers, zones, baseZoneId);
 
+  // A list of a dozen endpoints is a list you scroll rather than read, and the
+  // editor used to open above it — so clicking the ninth provider scrolled the
+  // one you wanted off the top. Rows are one line each and open in place, and a
+  // filter appears once there are enough of them to be worth filtering.
+  const q = filter.trim().toLowerCase();
+  const shown = q
+    ? providers.filter(
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          p.baseUrl.toLowerCase().includes(q) ||
+          (p.defaultModel ?? "").toLowerCase().includes(q),
+      )
+    : providers;
+
   return (
     <>
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-3 flex items-center justify-between gap-2">
         <h3 className="text-sm font-medium">Providers</h3>
         <button
-          onClick={() => setEditing({ name: "", baseUrl: "", apiKey: "" })}
+          onClick={() => { setOpenId(null); setAdding(true); }}
           className="flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
         >
           <Plus size={12} /> Add provider
         </button>
       </div>
 
-      {/* The form sits above the list: when you add a provider on an install
-          that already has several, a form appended below the list opens
-          off-screen and looks like nothing happened. */}
-      {editing && (
+      {providers.length > 5 && (
+        <div className="relative mb-2">
+          <Search
+            size={12}
+            className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
+          />
+          <input
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="Filter providers"
+            className="input !pl-7 text-xs"
+          />
+        </div>
+      )}
+
+      {adding && (
         <ProviderForm
-          value={editing}
-          onClose={() => setEditing(null)}
-          onSaved={async () => { await refreshProviders(); setEditing(null); }}
+          value={{ name: "", baseUrl: "", apiKey: "" }}
+          onClose={() => setAdding(false)}
+          onDeleted={async () => { await refreshProviders(); setAdding(false); }}
         />
       )}
 
-      <div className="flex flex-col gap-2">
-        {providers.map((p) => (
-          <div
-            key={p.id}
-            onClick={() => setEditing(p)}
-            className="cursor-pointer rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3 text-sm hover:border-[var(--color-accent)]"
-          >
-            <div className="font-medium">{p.name}</div>
-            <div className="text-xs text-[var(--color-text-muted)]">{p.baseUrl}</div>
-            <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">
-              Default model: {p.defaultModel ? <span className="font-mono">{p.defaultModel}</span> : <span className="italic">none set</span>}
+      <div className="flex flex-col gap-1">
+        {shown.map((p) => {
+          const open = openId === p.id;
+          return (
+            <div
+              key={p.id}
+              className={`rounded border bg-[var(--color-bg)] ${
+                open ? "border-[var(--color-accent)]" : "border-[var(--color-border)]"
+              }`}
+            >
+              <button
+                onClick={() => setOpenId(open ? null : p.id)}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:text-[var(--color-accent)]"
+              >
+                <ChevronRight
+                  size={12}
+                  className={`shrink-0 text-[var(--color-text-muted)] transition-transform ${open ? "rotate-90" : ""}`}
+                />
+                <span className="shrink-0 font-medium">{p.name}</span>
+                <span className="truncate text-xs text-[var(--color-text-muted)]">{p.baseUrl}</span>
+                <span className="ml-auto shrink-0 font-mono text-[11px] text-[var(--color-text-muted)]">
+                  {p.defaultModel || ""}
+                </span>
+              </button>
+              {open && (
+                <div className="border-t border-[var(--color-border)] p-3">
+                  <ProviderForm
+                    value={p}
+                    onClose={() => setOpenId(null)}
+                    onDeleted={async () => { await refreshProviders(); setOpenId(null); }}
+                  />
+                </div>
+              )}
             </div>
-          </div>
-        ))}
-        {providers.length === 0 && (
+          );
+        })}
+        {providers.length === 0 && !adding && (
           <div className="rounded border border-dashed border-[var(--color-border)] p-6 text-center text-xs text-[var(--color-text-muted)]">
             No providers yet. Add one to get started.
+          </div>
+        )}
+        {providers.length > 0 && shown.length === 0 && (
+          <div className="p-4 text-center text-xs text-[var(--color-text-muted)]">
+            Nothing matches “{filter}”.
           </div>
         )}
       </div>
 
       {baseProvider && (
         <p className="mt-4 text-xs text-[var(--color-text-muted)]">
-          <span className="font-medium text-[var(--color-text)]">{baseProvider.name}</span> is what
-          MultiZone falls back to — it's the provider behind your base zone (Settings → Chat), or
-          the first provider here when no base zone is set. Change it by pointing your base zone at
-          a different provider.
+          Everything falls back to <span className="font-medium text-[var(--color-text)]">{baseProvider.name}</span>,
+          the provider behind your base zone (Settings → Chat).
         </p>
       )}
     </>
@@ -4223,8 +4276,19 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
   );
 }
 
-function ProviderForm({ value, onClose, onSaved }: { value: Partial<Provider>; onClose: () => void; onSaved: () => void }) {
+/**
+ * The provider editor, which saves itself.
+ *
+ * It used to autosave only once a provider existed, and existing meant having
+ * pressed "Add provider" — so a new provider could not be tested until it had
+ * been saved, and the one thing you want to do with an endpoint and a key you
+ * just typed is find out whether they work. A name and a base URL is enough to
+ * be a provider, so as soon as both are filled the row is written and the form
+ * carries on editing it. There is no save button in either direction.
+ */
+function ProviderForm({ value, onClose, onDeleted }: { value: Partial<Provider>; onClose: () => void; onDeleted: () => void }) {
   const refreshProviders = useApp((s) => s.refreshProviders);
+  const [id, setId] = useState<string | null>(value.id ?? null);
   const [name, setName] = useState(value.name ?? "");
   const [baseUrl, setBaseUrl] = useState(value.baseUrl ?? "");
   const [apiKey, setApiKey] = useState(value.apiKey ?? "");
@@ -4232,7 +4296,6 @@ function ProviderForm({ value, onClose, onSaved }: { value: Partial<Provider>; o
   const [models, setModels] = useState<string[]>([]);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
   const [presetId, setPresetId] = useState<string | null>(null);
 
   // Auto-load the model list when editing an existing provider.
@@ -4252,54 +4315,39 @@ function ProviderForm({ value, onClose, onSaved }: { value: Partial<Provider>; o
     return () => { cancelled = true; };
   }, [value.id]);
 
-  // Autosave for existing providers: debounce 500 ms after any field change.
+  // Autosave, debounced past a burst of typing. The first write is what creates
+  // a new provider, so `id` is adopted from what comes back.
   useEffect(() => {
-    if (!value.id) return;
     if (!name.trim() || !baseUrl.trim()) return;
     const timer = setTimeout(async () => {
       try {
-        await api.upsertProvider({
-          id: value.id,
+        const saved = await api.upsertProvider({
+          id: id ?? undefined,
           name: name.trim(),
           baseUrl: baseUrl.trim(),
           apiKey: apiKey.trim() || null,
           defaultModel: defaultModel.trim() || null,
         });
+        if (!id) setId(saved.id);
         await refreshProviders();
       } catch (e) {
         console.error("provider autosave failed", e);
       }
     }, 500);
     return () => clearTimeout(timer);
-  }, [name, baseUrl, apiKey, defaultModel, value.id]);
-
-  async function onCreate() {
-    if (!name.trim() || !baseUrl.trim()) return;
-    setSaving(true);
-    try {
-      await api.upsertProvider({
-        id: value.id,
-        name: name.trim(),
-        baseUrl: baseUrl.trim(),
-        apiKey: apiKey.trim() || null,
-        defaultModel: defaultModel.trim() || null,
-      });
-      onSaved();
-    } finally { setSaving(false); }
-  }
+  }, [name, baseUrl, apiKey, defaultModel, id]);
 
   async function onDelete() {
-    if (!value.id) return;
-    await api.deleteProvider(value.id);
-    onSaved();
+    if (id) await api.deleteProvider(id);
+    onDeleted();
   }
 
   async function onTest() {
-    if (!value.id) { setTestResult("Save the provider first to test models."); return; }
+    if (!id) { setTestResult("Fill in a name and base URL first."); return; }
     setTesting(true);
     setTestResult(null);
     try {
-      const list = await api.fetchModels(value.id);
+      const list = await api.fetchModels(id);
       setModels(list);
       setTestResult(`Found ${list.length} model${list.length === 1 ? "" : "s"}.`);
     } catch (e: any) {
@@ -4318,7 +4366,7 @@ function ProviderForm({ value, onClose, onSaved }: { value: Partial<Provider>; o
   const preset = PROVIDER_PRESETS.find((p) => p.id === presetId) ?? presetForBaseUrl(baseUrl);
 
   return (
-    <div className="mb-4 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+    <div className={value.id ? "" : "mb-4 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3"}>
       {!value.id && (
         <div className="mb-3">
           <div className="mb-1.5 text-xs text-[var(--color-text-muted)]">
@@ -4388,22 +4436,15 @@ function ProviderForm({ value, onClose, onSaved }: { value: Partial<Provider>; o
         <div className="my-2 rounded bg-[var(--color-panel)] p-2 text-xs text-[var(--color-text-muted)]">{testResult}</div>
       )}
       <div className="mt-3 flex justify-end gap-2">
-        {value.id && (
-          <button onClick={onDelete} className="flex items-center gap-1 rounded border border-[var(--color-danger)] px-2 py-1 text-xs text-[var(--color-danger)] hover:bg-[var(--color-danger)] hover:text-white">
-            <Trash2 size={12} /> Delete
-          </button>
-        )}
+        <button onClick={onDelete} className="flex items-center gap-1 rounded border border-[var(--color-danger)] px-2 py-1 text-xs text-[var(--color-danger)] hover:bg-[var(--color-danger)] hover:text-white">
+          <Trash2 size={12} /> {id ? "Delete" : "Discard"}
+        </button>
         <button onClick={onTest} disabled={testing} className="flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-50">
           <RefreshCw size={12} className={testing ? "animate-spin" : ""} /> Test
         </button>
         <button onClick={onClose} className="rounded border border-[var(--color-border)] px-2 py-1 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]">
-          {value.id ? "Done" : "Cancel"}
+          Done
         </button>
-        {!value.id && (
-          <button onClick={onCreate} disabled={saving || !name.trim() || !baseUrl.trim()} className={`rounded px-3 py-1 text-xs ${PRIMARY_ACTION}`}>
-            Add provider
-          </button>
-        )}
       </div>
     </div>
   );

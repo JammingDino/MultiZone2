@@ -2415,20 +2415,75 @@ function McpTab() {
               )}
 
               {s.tools.length > 0 && (
-                <div className="mt-3 flex flex-col gap-1.5 border-t border-[var(--color-border)] pt-2">
-                  <div className="text-[11px] font-medium text-[var(--color-text-muted)]">
-                    Tools ({s.tools.length})
-                  </div>
-                  {s.tools.map((t) => (
-                    <McpToolRow key={t.id} tool={t} onSetDanger={(lvl) => setDanger(t.id, lvl)} />
-                  ))}
-                </div>
+                <McpToolList tools={s.tools} onSetDanger={setDanger} />
               )}
               {s.tools.length === 0 && s.status.state === "connected" && (
                 <div className="mt-2 text-[11px] text-[var(--color-text-muted)]">This server advertised no tools.</div>
               )}
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A server's tools, folded away by default.
+ *
+ * A connected GitHub server advertises 47 of them, each with a description and
+ * a danger dropdown — expanded, one server filled several screens and finding
+ * the next one meant scrolling past all of it. The count is on the summary line,
+ * which is what you want to know most of the time; the filter appears once the
+ * list is long enough that scanning it is the slow part.
+ */
+function McpToolList({
+  tools,
+  onSetDanger,
+}: {
+  tools: McpTool[];
+  onSetDanger: (toolId: string, level: number) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState("");
+
+  const q = filter.trim().toLowerCase();
+  const shown = q
+    ? tools.filter(
+        (t) =>
+          t.name.toLowerCase().includes(q) ||
+          (t.description ?? "").toLowerCase().includes(q),
+      )
+    : tools;
+
+  return (
+    <div className="mt-3 border-t border-[var(--color-border)] pt-2">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-1 text-[11px] font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+      >
+        <ChevronRight size={11} className={`transition-transform ${open ? "rotate-90" : ""}`} />
+        Tools ({tools.length})
+      </button>
+
+      {open && (
+        <div className="mt-2 flex flex-col gap-1.5">
+          {tools.length > 8 && (
+            <input
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Filter tools"
+              className="input text-xs"
+            />
+          )}
+          {shown.map((t) => (
+            <McpToolRow key={t.id} tool={t} onSetDanger={(lvl) => onSetDanger(t.id, lvl)} />
+          ))}
+          {shown.length === 0 && (
+            <div className="py-2 text-center text-[11px] text-[var(--color-text-muted)]">
+              Nothing matches “{filter}”.
+            </div>
+          )}
         </div>
       )}
     </div>

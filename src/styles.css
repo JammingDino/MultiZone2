@@ -547,7 +547,14 @@ input[type="color"]:hover { border-color: var(--color-accent); }
 }
 .markdown .katex-display {
   margin: 0.5em 0;
+  /* A wide equation scrolls sideways. `overflow-x` on its own computes
+   * `overflow-y` to `auto` too, and KaTeX's struts overrun the line box by a
+   * fraction of a pixel — enough to hang a vertical scrollbar off every single
+   * display equation. Clip that axis instead, with a little room so tall
+   * glyphs (integrals, stacked fractions) aren't shaved. */
   overflow-x: auto;
+  overflow-y: hidden;
+  padding-block: 3px;
 }
 
 /* ===== function-plot (MathPlotBlock) theme awareness ===== */

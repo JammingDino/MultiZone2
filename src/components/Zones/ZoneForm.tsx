@@ -384,6 +384,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
   }, [zone?.id]);
   const mcpServers = useApp((s) => s.mcpServers);
   const refreshMcpServers = useApp((s) => s.refreshMcpServers);
+  const refreshZones = useApp((s) => s.refreshZones);
   const [ceHeadless, setCeHeadless] = useState(false);
   const [ttsVoice, setTtsVoice] = useState("");
   // Thinking is on by default for new zones (0.9.4) — most current models
@@ -532,9 +533,8 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
     setToolConfig((tc) => buildToolConfig(tc, v));
   }
 
-  async function onSave() {
-    if (!name.trim() || !model.trim()) return;
-    setSaving(true);
+  /** Everything the editor holds, in the shape `upsert_zone` takes. */
+  function buildPayload() {
     // Fold the per-zone TTS voice (0.8.1) into the tool_config JSON so it rides
     // along with the rest of the zone config rather than needing its own column.
     let finalToolConfig = toolConfig;
@@ -552,29 +552,72 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
       else delete obj.tool_descriptions;
       finalToolConfig = JSON.stringify(obj, null, 2);
     } catch { /* keep raw toolConfig if it isn't valid JSON */ }
+    return {
+      id: zone?.id,
+      name: name.trim(),
+      providerId,
+      model: model.trim(),
+      systemPrompt: systemPrompt.trim() || null,
+      temperature,
+      maxTokens: maxTokens ? parseInt(maxTokens, 10) : null,
+      topP: topP ? parseFloat(topP) : null,
+      toolsEnabled: JSON.stringify(tools),
+      toolConfig: finalToolConfig,
+      thinkingEnabled,
+      includeThinkingInContext,
+      isLeader,
+      icon,
+      accentColor,
+    };
+  }
+
+  /** Create a new zone. Editing an existing one saves itself — see below. */
+  async function onCreate() {
+    if (!name.trim() || !model.trim()) return;
+    setSaving(true);
     try {
-      const saved = await api.upsertZone({
-        id: zone?.id,
-        name: name.trim(),
-        providerId,
-        model: model.trim(),
-        systemPrompt: systemPrompt.trim() || null,
-        temperature,
-        maxTokens: maxTokens ? parseInt(maxTokens, 10) : null,
-        topP: topP ? parseFloat(topP) : null,
-        toolsEnabled: JSON.stringify(tools),
-        toolConfig: finalToolConfig,
-        thinkingEnabled,
-        includeThinkingInContext,
-        isLeader,
-        icon,
-        accentColor,
-      });
-      onSaved(saved);
+      onSaved(await api.upsertZone(buildPayload()));
     } finally {
       setSaving(false);
     }
   }
+
+  /**
+   * Autosave (1.1).
+   *
+   * The zone editor is five sections of settings behind a scroll and a nav
+   * rail, and it ended in a Save button you had to remember on the way out —
+   * so the common way to use it was to change a tool, close it, and find out
+   * later that nothing had been saved. An existing zone now writes itself a
+   * beat after you stop, and the button is gone. Creating one still takes the
+   * explicit action, because a half-typed zone should not become a real one.
+   *
+   * The debounce is also what makes switching zones safe: for one render after
+   * `zone` changes the fields still hold the *previous* zone's values, and a
+   * write then would copy them onto the new zone. The reset effect refills them
+   * in the same commit cycle, which cancels that timer long before it fires.
+   */
+  useEffect(() => {
+    if (!zone?.id) return;
+    if (!name.trim() || !model.trim()) return;
+    const timer = setTimeout(async () => {
+      setSaving(true);
+      try {
+        await api.upsertZone(buildPayload());
+        await refreshZones();
+      } catch (e) {
+        console.error("zone autosave failed", e);
+      } finally {
+        setSaving(false);
+      }
+    }, 600);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    zone?.id, name, providerId, model, systemPrompt, temperature, maxTokens, topP,
+    tools, toolConfig, descOverrides, ttsVoice, thinkingEnabled,
+    includeThinkingInContext, isLeader, icon, accentColor,
+  ]);
 
   async function handleDelete() {
     if (!zone) return;
@@ -1197,7 +1240,12 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
         </nav>
       </div>
 
-      <div className="flex justify-end gap-2 border-t border-[var(--color-border)] px-4 py-3">
+      <div className="flex items-center justify-end gap-2 border-t border-[var(--color-border)] px-4 py-3">
+        {zone && (
+          <span className="mr-auto text-[11px] text-[var(--color-text-muted)]">
+            {saving ? "Saving…" : "Changes save as you make them"}
+          </span>
+        )}
         {zone && (
           <button
             onClick={handleDelete}
@@ -1206,14 +1254,16 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
             <Trash2 size={12} /> Delete
           </button>
         )}
-        <button
-          onClick={onSave}
-          disabled={saving || !name.trim() || !model.trim()}
-          className="rounded px-3 py-1.5 text-xs text-white disabled:opacity-50"
-          style={{ background: activeColor }}
-        >
-          {zone ? "Save" : "Create zone"}
-        </button>
+        {!zone && (
+          <button
+            onClick={onCreate}
+            disabled={saving || !name.trim() || !model.trim()}
+            className="rounded px-3 py-1.5 text-xs text-white disabled:opacity-50"
+            style={{ background: activeColor }}
+          >
+            Create zone
+          </button>
+        )}
       </div>
 
       <style>{`.input { width: 100%; border: 1px solid var(--color-border); border-radius: 4px; padding: 6px 8px; background: var(--color-panel); font-size: 13px; } .input:focus { border-color: var(--color-accent); outline: none; }`}</style>

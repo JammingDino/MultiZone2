@@ -174,6 +174,7 @@ function ProjectForm({
   const [directory, setDirectory] = useState<string | null>(null);
   const [defaultContextEnabled, setDefaultContextEnabled] = useState(false);
   const [saving, setSaving] = useState(false);
+  const refreshProjects = useApp((s) => s.refreshProjects);
 
   useEffect(() => {
     if (project) {
@@ -199,23 +200,43 @@ function ProjectForm({
   const activeColor = accentColor ?? "var(--color-accent)";
   const PreviewIcon = getZoneIcon(icon);
 
-  async function onSave() {
+  function payload() {
+    return {
+      id: project?.id,
+      name: name.trim(),
+      icon,
+      accentColor,
+      defaultZoneId,
+      contextSnippet: contextSnippet.trim() || null,
+      directory: directory || null,
+      defaultContextEnabled,
+    };
+  }
+
+  async function onCreate() {
     if (!name.trim()) return;
     setSaving(true);
     try {
-      const saved = await api.upsertProject({
-        id: project?.id,
-        name: name.trim(),
-        icon,
-        accentColor,
-        defaultZoneId,
-        contextSnippet: contextSnippet.trim() || null,
-        directory: directory || null,
-        defaultContextEnabled,
-      });
-      onSaved(saved);
+      onSaved(await api.upsertProject(payload()));
     } finally { setSaving(false); }
   }
+
+  // An existing project saves itself, like the zone and provider editors. The
+  // debounce is what makes switching projects safe — see ZoneForm.
+  useEffect(() => {
+    if (!project?.id || !name.trim()) return;
+    const timer = setTimeout(async () => {
+      setSaving(true);
+      try {
+        await api.upsertProject(payload());
+        await refreshProjects();
+      } catch (e) {
+        console.error("project autosave failed", e);
+      } finally { setSaving(false); }
+    }, 600);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project?.id, name, icon, accentColor, defaultZoneId, contextSnippet, directory, defaultContextEnabled]);
 
   async function onDelete() {
     if (!project) return;
@@ -332,15 +353,22 @@ function ProjectForm({
         )}
       </div>
 
-      <div className="flex justify-end gap-2 border-t border-[var(--color-border)] px-4 py-3">
+      <div className="flex items-center justify-end gap-2 border-t border-[var(--color-border)] px-4 py-3">
+        {project && (
+          <span className="mr-auto text-[11px] text-[var(--color-text-muted)]">
+            {saving ? "Saving…" : "Changes save as you make them"}
+          </span>
+        )}
         {project && (
           <button onClick={onDelete} className="flex items-center gap-1 rounded border border-[var(--color-danger)] px-3 py-1.5 text-xs text-[var(--color-danger)] hover:bg-[var(--color-danger)] hover:text-white">
             <Trash2 size={12} /> Delete
           </button>
         )}
-        <button onClick={onSave} disabled={saving || !name.trim()} className="rounded px-3 py-1.5 text-xs text-white disabled:opacity-50" style={{ background: activeColor }}>
-          {project ? "Save" : "Create project"}
-        </button>
+        {!project && (
+          <button onClick={onCreate} disabled={saving || !name.trim()} className="rounded px-3 py-1.5 text-xs text-white disabled:opacity-50" style={{ background: activeColor }}>
+            Create project
+          </button>
+        )}
       </div>
     </>
   );
@@ -500,8 +528,8 @@ function KnowledgeSection({ project }: { project: Project }) {
           <AlertTriangle size={12} className="mt-0.5 shrink-0 text-amber-500" />
           <span>
             {indexed
-              ? "Changing the embedding model rebuilds the index from scratch (different vector space). Saving clears the current index — re-index afterwards."
-              : "Save the embedding settings, then index the directory."}
+              ? "Applying this discards the current index — the vectors belong to the old model. Re-index afterwards."
+              : "Apply the embedding settings, then index the directory."}
           </span>
         </div>
       )}
@@ -513,16 +541,16 @@ function KnowledgeSection({ project }: { project: Project }) {
             disabled={savingCfg}
             className={`rounded px-2.5 py-1 text-xs ${PRIMARY_ACTION}`}
           >
-            {savingCfg ? "Saving…" : "Save settings"}
+            {savingCfg ? "Applying…" : "Apply & rebuild"}
           </button>
         )}
         <button
           onClick={runIndex}
           disabled={indexing || !configured || dirty || !hasDir}
           title={
-            !hasDir ? "Set and save a project directory first."
-              : !configured ? "Choose and save an embedding provider + model first."
-              : dirty ? "Save the embedding settings first."
+            !hasDir ? "Set a project directory first."
+              : !configured ? "Choose an embedding provider and model first."
+              : dirty ? "Apply the embedding change first."
               : "Walk the directory and (re)build the index."
           }
           className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-50"
@@ -717,13 +745,14 @@ function TagForm({
   const [color, setColor] = useState<string | null>(null);
   const [contextSnippet, setContextSnippet] = useState("");
   const [saving, setSaving] = useState(false);
+  const refreshTags = useApp((s) => s.refreshTags);
 
   useEffect(() => {
     if (tag) { setName(tag.name); setColor(tag.color ?? null); setContextSnippet(tag.contextSnippet ?? ""); }
     else { setName(""); setColor(null); setContextSnippet(""); }
   }, [tag?.id]);
 
-  async function onSave() {
+  async function onCreate() {
     if (!name.trim()) return;
     setSaving(true);
     try {
@@ -731,6 +760,21 @@ function TagForm({
       onSaved(saved);
     } finally { setSaving(false); }
   }
+
+  // An existing tag saves itself; see ProjectEditor.
+  useEffect(() => {
+    if (!tag?.id || !name.trim()) return;
+    const timer = setTimeout(async () => {
+      setSaving(true);
+      try {
+        await api.upsertTag({ id: tag.id, name: name.trim(), color, contextSnippet: contextSnippet.trim() || null });
+        await refreshTags();
+      } catch (e) {
+        console.error("tag autosave failed", e);
+      } finally { setSaving(false); }
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [tag?.id, name, color, contextSnippet]);
 
   async function onDelete() {
     if (!tag) return;
@@ -764,15 +808,22 @@ function TagForm({
         </label>
       </div>
 
-      <div className="flex justify-end gap-2 border-t border-[var(--color-border)] px-4 py-3">
+      <div className="flex items-center justify-end gap-2 border-t border-[var(--color-border)] px-4 py-3">
+        {tag && (
+          <span className="mr-auto text-[11px] text-[var(--color-text-muted)]">
+            {saving ? "Saving…" : "Changes save as you make them"}
+          </span>
+        )}
         {tag && (
           <button onClick={onDelete} className="flex items-center gap-1 rounded border border-[var(--color-danger)] px-3 py-1.5 text-xs text-[var(--color-danger)] hover:bg-[var(--color-danger)] hover:text-white">
             <Trash2 size={12} /> Delete
           </button>
         )}
-        <button onClick={onSave} disabled={saving || !name.trim()} className="rounded px-3 py-1.5 text-xs text-white disabled:opacity-50" style={{ background: activeColor }}>
-          {tag ? "Save" : "Create tag"}
-        </button>
+        {!tag && (
+          <button onClick={onCreate} disabled={saving || !name.trim()} className="rounded px-3 py-1.5 text-xs text-white disabled:opacity-50" style={{ background: activeColor }}>
+            Create tag
+          </button>
+        )}
       </div>
     </>
   );

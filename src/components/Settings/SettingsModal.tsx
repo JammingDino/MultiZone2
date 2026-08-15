@@ -2150,8 +2150,9 @@ function SkillEditor({
   const [content, setContent] = useState(skill?.content ?? seed?.content ?? "");
   const [enabled, setEnabled] = useState(skill?.enabled ?? true);
   const [saving, setSaving] = useState(false);
+  const refreshSkills = useApp((s) => s.refreshSkills);
 
-  async function onSave() {
+  async function onCreate() {
     if (!name.trim()) return;
     setSaving(true);
     try {
@@ -2159,6 +2160,22 @@ function SkillEditor({
       onDone();
     } finally { setSaving(false); }
   }
+
+  // An existing skill saves itself: this is a page of prose you scroll, and a
+  // Save button at the bottom of one is a Save button you leave without pressing.
+  useEffect(() => {
+    if (!skill?.id || !name.trim()) return;
+    const timer = setTimeout(async () => {
+      setSaving(true);
+      try {
+        await api.upsertSkill({ id: skill.id, name: name.trim(), description: description.trim() || null, content, enabled });
+        await refreshSkills();
+      } catch (e) {
+        console.error("skill autosave failed", e);
+      } finally { setSaving(false); }
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [skill?.id, name, description, content, enabled]);
 
   async function onExport() {
     const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "skill";
@@ -2210,10 +2227,21 @@ function SkillEditor({
             <FileDown size={12} /> Export
           </button>
         )}
-        <button onClick={onCancel} className="rounded px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)]">Cancel</button>
-        <button onClick={onSave} disabled={saving || !name.trim()} className={`rounded px-3 py-1.5 text-xs ${PRIMARY_ACTION}`}>
-          {skill ? "Save" : "Create skill"}
-        </button>
+        {skill ? (
+          <>
+            <span className="text-[11px] text-[var(--color-text-muted)]">
+              {saving ? "Saving…" : "Changes save as you make them"}
+            </span>
+            <button onClick={onDone} className="rounded px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)]">Done</button>
+          </>
+        ) : (
+          <>
+            <button onClick={onCancel} className="rounded px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)]">Cancel</button>
+            <button onClick={onCreate} disabled={saving || !name.trim()} className={`rounded px-3 py-1.5 text-xs ${PRIMARY_ACTION}`}>
+              Create skill
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
@@ -2888,30 +2916,42 @@ function McpServerEditor({
   const [enabled, setEnabled] = useState(server?.enabled ?? true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const refreshMcpServers = useApp((s) => s.refreshMcpServers);
 
-  async function onSave() {
-    if (!name.trim()) return;
-    if (transport === "stdio" && !command.trim()) { setError("A stdio server needs a command."); return; }
-    if (transport === "sse" && !url.trim()) { setError("An SSE/HTTP server needs a URL."); return; }
+  /** What's wrong with the form as it stands, or null when it can be written. */
+  function invalid(): string | null {
+    if (!name.trim()) return "A server needs a name.";
+    if (transport === "stdio" && !command.trim()) return "A stdio server needs a command.";
+    if (transport === "sse" && !url.trim()) return "An SSE/HTTP server needs a URL.";
     if (env.trim()) {
-      try { JSON.parse(env); } catch { setError("Env must be valid JSON (e.g. {\"API_KEY\":\"…\"})."); return; }
+      try { JSON.parse(env); } catch { return "Env must be valid JSON (e.g. {\"API_KEY\":\"…\"})."; }
     }
     if (headers.trim()) {
-      try { JSON.parse(headers); } catch { setError("Headers must be valid JSON (e.g. {\"Authorization\":\"Bearer …\"})."); return; }
+      try { JSON.parse(headers); } catch { return "Headers must be valid JSON (e.g. {\"Authorization\":\"Bearer …\"})."; }
     }
+    return null;
+  }
+
+  function payload() {
+    return {
+      id: server?.id,
+      name: name.trim(),
+      transport,
+      command: transport === "stdio" ? command.trim() : null,
+      url: transport === "sse" ? url.trim() : null,
+      env: transport === "stdio" ? env.trim() || null : null,
+      headers: transport === "sse" ? headers.trim() || null : null,
+      enabled,
+    };
+  }
+
+  async function onCreate() {
+    const problem = invalid();
+    if (problem) { setError(problem); return; }
     setSaving(true);
     setError("");
     try {
-      await api.upsertMcpServer({
-        id: server?.id,
-        name: name.trim(),
-        transport,
-        command: transport === "stdio" ? command.trim() : null,
-        url: transport === "sse" ? url.trim() : null,
-        env: transport === "stdio" ? env.trim() || null : null,
-        headers: transport === "sse" ? headers.trim() || null : null,
-        enabled,
-      });
+      await api.upsertMcpServer(payload());
       onDone();
     } catch (e) {
       setError(String(e));
@@ -2919,6 +2959,25 @@ function McpServerEditor({
       setSaving(false);
     }
   }
+
+  // An existing server saves itself. A half-typed JSON blob is simply not
+  // written — the reason says so and the last good version stays on disk.
+  useEffect(() => {
+    if (!server?.id) return;
+    const problem = invalid();
+    setError(problem ?? "");
+    if (problem) return;
+    const timer = setTimeout(async () => {
+      setSaving(true);
+      try {
+        await api.upsertMcpServer(payload());
+        await refreshMcpServers();
+      } catch (e) {
+        setError(String(e));
+      } finally { setSaving(false); }
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [server?.id, name, transport, command, url, env, headers, enabled]);
 
   return (
     <div className="flex flex-col gap-3">
@@ -2984,13 +3043,24 @@ function McpServerEditor({
       )}
 
       <div className="flex items-center justify-end gap-2 border-t border-[var(--color-border)] pt-3">
-        <button onClick={onCancel} className="rounded px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)]">Cancel</button>
-        <button onClick={onSave} disabled={saving || !name.trim()} className={`rounded px-3 py-1.5 text-xs ${PRIMARY_ACTION}`}>
-          {server ? "Save" : "Add server"}
-        </button>
+        {server ? (
+          <>
+            <span className="mr-auto text-[11px] text-[var(--color-text-muted)]">
+              {saving ? "Saving…" : "Changes save as you make them"}
+            </span>
+            <button onClick={onDone} className="rounded px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)]">Done</button>
+          </>
+        ) : (
+          <>
+            <button onClick={onCancel} className="rounded px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)]">Cancel</button>
+            <button onClick={onCreate} disabled={saving || !name.trim()} className={`rounded px-3 py-1.5 text-xs ${PRIMARY_ACTION}`}>
+              Add server
+            </button>
+          </>
+        )}
       </div>
       <p className="text-[11px] text-[var(--color-text-muted)]">
-        After saving, click <span className="font-medium">Connect</span> to fetch this server's tools.
+        Click <span className="font-medium">Connect</span> to fetch this server's tools.
       </p>
     </div>
   );
@@ -3127,9 +3197,12 @@ function KnowledgeTab() {
         </div>
         {dirty && (
           <div className="mt-2 flex items-center justify-between gap-2 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 text-[11px] text-[var(--color-text-muted)]">
-            <span>Changing the embedding model rebuilds the global index from scratch.</span>
-            <button onClick={saveConfig} disabled={savingCfg} className={`rounded px-2 py-1 ${PRIMARY_ACTION}`}>
-              {savingCfg ? "Saving…" : "Save"}
+            {/* Not a save button: applying this *discards* the existing index,
+                because the vectors belong to the old model's space. It stays an
+                explicit press for the same reason a delete does. */}
+            <span>Applying this discards the global index — it has to be rebuilt.</span>
+            <button onClick={saveConfig} disabled={savingCfg} className={`shrink-0 rounded px-2 py-1 ${PRIMARY_ACTION}`}>
+              {savingCfg ? "Applying…" : "Apply & rebuild"}
             </button>
           </div>
         )}
@@ -3158,8 +3231,8 @@ function KnowledgeTab() {
             disabled={indexing || !configured || !dir || dirty}
             title={
               !dir ? "Choose a default directory first."
-                : !configured ? "Set and save an embedding provider + model first."
-                : dirty ? "Save the embedding settings first."
+                : !configured ? "Set an embedding provider and model first."
+                : dirty ? "Apply the embedding change first."
                 : "Walk the default directory and (re)index it."
             }
             className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-xs ${PRIMARY_ACTION}`}

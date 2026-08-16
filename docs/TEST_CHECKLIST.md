@@ -200,6 +200,13 @@ so what needs eyes is the rendering and the approval path.
 - [ ] A tool whose result is prose rather than JSON still shows its output, with no empty visual above it
 - [ ] Replay on a subchat renders visuals too (its messages were never opened in the transcript)
 
+**Image-only chat titles (0.13.4)**
+
+- [ ] 🔁 Send **an image with no text** as the first message. The chat gets a title naming what is in the picture — not a blank row, not "New Chat", not "Image Attachment" ⚙️ *(needs a vision-capable model)*
+- [ ] The same with **auto-title off** (Settings → Chat): the chat reads "Image", or "3 Images" for several — never an empty row
+- [ ] The same against a **non-vision** model: a title still appears rather than a blank
+- [ ] A message with both an image and text still titles from the text
+
 **Session log in the PDF (0.13.4)**
 
 - [ ] Settings → Appearance → Chat export carries **Append the session log**, and it is **off** on a fresh install and on an existing one that has never seen it

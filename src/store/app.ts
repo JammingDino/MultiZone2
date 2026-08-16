@@ -1355,10 +1355,28 @@ export const useApp = create<AppStore>((set, get) => ({
             .map((p) => p.text!)
             .join(" ")
             .trim();
-          const title = text.length > 80 ? text.slice(0, 77) + "…" : text;
-          api.renameChat(chatId, title).catch(console.error);
-          get().setChatTitle(chatId, title);
-          get().refreshChats().catch(console.error);
+          // A chat opened with only a screenshot has no text here, and this
+          // used to rename it to the empty string — a sidebar row with an icon
+          // and nothing beside it. Name the attachment instead.
+          const images = parts.filter(
+            (p) => p.type === "image_url" || p.type === "hidden_image",
+          ).length;
+          const title = text
+            ? text.length > 80
+              ? text.slice(0, 77) + "…"
+              : text
+            : images === 1
+              ? "Image"
+              : images > 1
+                ? `${images} Images`
+                : "";
+          // Never rename to nothing: leaving "New Chat" is worse than a good
+          // title and better than a blank row.
+          if (title) {
+            api.renameChat(chatId, title).catch(console.error);
+            get().setChatTitle(chatId, title);
+            get().refreshChats().catch(console.error);
+          }
         } catch { /* ignore parse errors */ }
       }
     }

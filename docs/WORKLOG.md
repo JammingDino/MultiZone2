@@ -55,6 +55,48 @@ else, make the local environment resemble that place before believing it.
 
 ---
 
+## 2026-08-16 (0.13.4) — Image-only chats had no title
+
+Reported: a chat opened with just an image stays "New Chat", or shows a blank
+row beside a blank icon.
+
+The obvious diagnosis — "the image isn't being sent to the title generator" —
+was wrong. `build_title_context` has handled vision since it was written: it
+sends the first image at low detail for a vision-capable model, and a
+`[image attachment]` stand-in for one that cannot see. Nothing was missing
+there.
+
+The actual cause was three separate fallbacks, each assuming text exists:
+
+1. **Auto-title off.** The frontend derives the title from the message's text
+   parts, and for an image-only message that is `""` — so it called
+   `renameChat(chatId, "")`. That is the blank row exactly.
+2. **Auto-title on, model reply rejected.** `clean_title_candidate` is strict
+   (and should be); when it rejects, `fallback_title` takes the first message's
+   text, which is empty, and returns "New Chat".
+3. **The instruction.** It asks for "a noun phrase naming the topic". Ask that
+   of a wordless turn and models name the *medium* — "Image Attachment",
+   "Uploaded Screenshot". Technically correct, and useless in a list where
+   every image chat gets the same one.
+
+Fixed at all three: the frontend names the attachment and never renames to
+nothing; `fallback_title` counts images in the stored content; and a wordless
+image gets its own instruction telling the model to name what the picture
+shows, explicitly not the words "image", "photo", "screenshot" or "attachment".
+
+The fallback titles are deliberately plain — "Image", "3 Images". They stand in
+for a model-written title, and a guess dressed up as a description
+("Screenshot of a Terminal") would be worse than admitting the app only knows
+an image arrived.
+
+5 tests, including the malformed-JSON case, since that content is read back out
+of the database. `cargo test --lib`: 197 passed. `tsc --noEmit` clean, build
+green.
+
+Bundled into 0.13.4 as asked, alongside the session-log setting.
+
+---
+
 ## 2026-08-16 (0.13.4) — The session log becomes opt-in
 
 The PDF export always appended the session log. It is now a setting,

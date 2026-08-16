@@ -853,6 +853,17 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [x] **Runtime-test:** a search step shows the engine strip, and a blocked engine shows as failed
 - [x] **Runtime-test:** a PDF export of a turn that edited a file and ran a command carries the diff and the console
 
+### 0.13.4 — The session log becomes opt-in, and image-only chats get titles
+
+**Image-only chats were left unnamed** — a blank row beside a blank icon, or "New Chat" forever. Three separate causes, all of them a path reaching for text that a wordless message does not have:
+
+- [x] With auto-title **off**, the frontend derived the title from the message's text parts and renamed the chat to the **empty string** ([store/app.ts](../src/store/app.ts)). It now names the attachment ("Image", "3 Images"), and never renames to nothing — keeping "New Chat" is worse than a good title and better than a blank row
+- [x] With auto-title **on**, a model reply that failed `clean_title_candidate` fell back to the first message's text, which was empty, so `fallback_title` returned "New Chat". It now counts the images in the stored content and names them
+- [x] The instruction asked for "a title for the message above… a noun phrase naming the topic". Asked that of a wordless turn, models name the *medium* — "Image Attachment", "Uploaded Screenshot" — which is a noun phrase, and useless as a row in a list where every such chat gets the same one. A wordless image now gets its own instruction: name what the image shows, not that it is an image
+- [x] The image itself was already being sent (`build_title_context` has handled vision since it was written, with a `[image attachment]` stand-in for models that cannot see) — so this was never a missing capability, only three fallbacks that assumed text
+- [x] 5 tests covering the counting, the fallback titles, and which instruction each shape of message gets. `cargo test --lib`: 197 passed
+- [ ] **Runtime-test:** send an image with no text to a vision model — the title names what is in the picture, not "Image Attachment"
+
 ### 0.13.4 — The session log becomes opt-in
 
 - [x] `pdfExportSessionLog` (default **off**) beside the other Chat export settings in Settings → Appearance. The log is the run as *recorded* — every turn started and finished, every tool run, the approvals declined — which is evidence rather than reading, and on a long run it is a table of hundreds of rows appended to a document usually exported for its conversation

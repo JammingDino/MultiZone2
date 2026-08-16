@@ -120,7 +120,7 @@ Needs two builds: install version N, then publish N+1.
 - [ ] With a newer release published, the update is detected and its notes shown
 - [ ] Download shows progress and completes
 - [ ] Restart lands on the new version
-- [ ] 🔁 The published release actually contains `latest.json` (missing signing secrets produce installers but no manifest — the failure is silent and only visible to already-installed users)
+- [x] 🔁 The published release actually contains a **signed** `latest.json` — missing signing secrets produce installers but no manifest, and the failure is silent and only visible to already-installed users. *Verified from the tree rather than by eye: `updater/latest.json` carries a real signature per platform for v0.13.0. Re-check by running `node -e "const m=require('./updater/latest.json'); console.log(Object.entries(m.platforms).map(([k,v])=>k+' '+v.signature.length))"` — a zero-length or absent signature means the secrets stopped being read.*
 - [ ] Settings, chats, zones, and skills all survive the update
 
 ## 10. Uninstall 🖥️

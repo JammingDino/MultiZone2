@@ -161,11 +161,22 @@ most likely to be wrong in a way local testing cannot see. Give it a fixture
 test: a sample `latest.json` in, the expected rewritten form out. Pure function,
 no network, runs in CI.
 
-**Still a real blocker:** `TAURI_SIGNING_PRIVATE_KEY` and its password must be
-added to repo secrets. Until they are, every published build ships without a
-signed manifest and existing installs silently stop seeing updates. This is the
-single highest-consequence open item in the 1.0 list and it is a settings page,
-not an engineering task.
+**Not a blocker after all.** An earlier revision of this file called the signing
+secrets missing. They are set, and the tree proves it: `updater/latest.json`
+carries a real 420-character signature per platform for v0.13.0, with URLs
+already rewritten to the token-authenticated asset endpoints. Both the signing
+step and the manifest rewrite are working in production.
+
+**What a local clone sees.** Nothing, and that is correct. GitHub secrets are
+readable only by workflows, so a local build produces unsigned bundles and
+prints `MULTIZONE_UPDATER_TOKEN not set — this build cannot check for updates`.
+Neither matters for a build that will never be published; use the throwaway
+keypair above when rehearsing the update flow locally.
+
+**What is genuinely still unverified** is the receiving half: nobody has watched
+an installed build discover an update, download it, and restart into the new
+version. Three releases have shipped, so this needs no special setup — install
+the previous one, publish the next, watch it.
 
 ---
 

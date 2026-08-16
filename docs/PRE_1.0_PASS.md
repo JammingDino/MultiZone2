@@ -187,15 +187,24 @@ Restart is never automatic: the app holds unsent composer text and in-flight
 turns, and pulling the process out from under a running agent to save one click
 is a bad trade.
 
-### ⚠️ Action required before this works
+### ✅ Done — the secrets are set
 
 A keypair was generated at `~/.tauri/multizone.key` (+ `.pub`). The public half
-is already in `tauri.conf.json`. **Two repo secrets must be added by hand:**
+is in `tauri.conf.json`, and both repo secrets are configured:
 
 | Secret | Value |
 | --- | --- |
 | `TAURI_SIGNING_PRIVATE_KEY` | contents of `~/.tauri/multizone.key` |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | empty (the key was generated without one) |
+
+Confirmed by the published manifest rather than by the settings page: every
+platform entry in [updater/latest.json](../updater/latest.json) carries a real
+signature, which only a build holding the private key can produce.
+
+A local clone cannot read either secret — GitHub only exposes them to workflows
+— so a local `tauri build` produces unsigned bundles and the compile prints
+`MULTIZONE_UPDATER_TOKEN not set`. Both are expected and neither affects
+published builds.
 
 Two things to know:
 

@@ -5,6 +5,45 @@ alone. Newest first. Detail belongs in the linked docs; this is the thread.
 
 ---
 
+## 2026-08-16 (updater) — Correction: the signing secrets were never missing
+
+Docs only, no code.
+
+I recorded "the signing secrets are not in the repo" as the highest-consequence
+open item in the 1.0 list. It was wrong, and it was wrong in a way I could have
+checked from the tree at the time.
+
+**The evidence is `updater/latest.json`**, which is committed. Every platform
+entry for v0.13.0 carries a real 420-character signature — something only a
+build holding the private key can produce — and every URL is already the
+token-authenticated API asset endpoint, which means `rewrite-updater-manifest.mjs`
+is working in production too. The whole CI half of the update path is proven by
+an artifact that was sitting in the repository.
+
+What misled me: a local clone genuinely cannot see the secrets, and the compile
+prints `MULTIZONE_UPDATER_TOKEN not set — this build cannot check for updates`
+on every local build. That warning is about the *local* binary and is expected;
+GitHub exposes secrets only to workflows, so a local build produces unsigned
+bundles, which is correct for a build that will never be published.
+
+Corrected in RELEASE_PLAN.md (both the 1.0.0 blocker line and the 0.9.12
+auto-updater entry), TEST_STRATEGY.md §4, PRE_1.0_PASS.md's "action required"
+block, and the earlier worklog entry.
+
+**What is still genuinely unverified** is the receiving half: nobody has watched
+an installed build find an update, download it and restart into the new version.
+Three releases have shipped, so it needs no special setup — install the previous
+one, publish the next, watch it.
+
+The checklist item is now ticked with a command that re-checks it from the tree,
+so the next person confirms this in seconds instead of inferring it:
+
+```
+node -e "const m=require('./updater/latest.json'); console.log(Object.entries(m.platforms).map(([k,v])=>k+' '+v.signature.length))"
+```
+
+---
+
 ## 2026-08-16 (0.13.3) — The bug that hid all of it, then the rest
 
 Version 0.13.3, **`releaseBuild` set to `true`** — the next push publishes.
@@ -305,10 +344,9 @@ The updater can be verified end to end locally with a throwaway keypair and two
 builds served from `python -m http.server`, without touching the release
 pipeline where a build is a publish. Uninstall is a snapshot diff on a VM.
 
-Four new items were added to the 1.0.0 list, led by the one with the highest
-consequence: **the `TAURI_SIGNING_PRIVATE_KEY` secrets are still not in the
-repo**, so every published build ships without a signed manifest and every
-existing install silently stops seeing updates.
+Four new items were added to the 1.0.0 list, led by what was then believed to be
+the highest-consequence one: the `TAURI_SIGNING_PRIVATE_KEY` secrets being
+absent. **That was wrong — see the correction on 2026-08-16 (updater).**
 
 ### Decisions taken
 

@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 
 import {
   ChevronRight,
   ChevronDown,
-  Wrench,
   Brain,
   CheckCircle2,
   AlertCircle,
@@ -21,6 +20,7 @@ import { HtmlReportBlock } from "@/components/Renderers/HtmlReportBlock";
 import { SavedFileChip } from "@/components/Renderers/SavedFileChip";
 import { PlanBlock, PlanProposalBlock, toPlanData, toPlanProposal } from "@/components/Renderers/PlanBlock";
 import { ToolVisual, hasToolVisual } from "./visuals/ToolVisual";
+import { familyIcon } from "./visuals/familyIcon";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { useDictation, MicButton, DictationMeter } from "@/components/Chat/useDictation";
@@ -177,6 +177,9 @@ function ToolStepView({
       : null;
 
   const status = baseStatus === "done" && mermaidFailed ? "error" : baseStatus;
+  // A run of twenty steps was a column of identical wrenches; the family glyph
+  // is the one thing that makes a collapsed rail scannable.
+  const StepIcon = familyIcon(name);
 
   const statusIcon =
     status === "running" || status === "pending" ? (
@@ -196,7 +199,7 @@ function ToolStepView({
         className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--color-panel-hover)]"
       >
         {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        <Wrench
+        <StepIcon
           size={12}
           className={`text-[var(--color-accent)]${pending ? " animate-pulse" : ""}`}
         />
@@ -263,9 +266,13 @@ function ToolStepView({
           parsedResult={parsedResult}
           isError={isError}
           isSetupIssue={isSetupIssue}
-          /* The lifted visual is already on screen; a second copy in the tab
-             would be the duplication compact mode exists to avoid. */
-          hasOwnVisual={!!renderedView || hideVisual}
+          /* Only a visual rendered *by this card* counts as already on screen.
+             `hideVisual` must not be included: the activity rail sets it on
+             every step, and the lifting it refers to only ever applies to the
+             `existing` family (plans, diagrams, plots, saved files) — which
+             `ToolVisual` returns nothing for anyway. Including it suppressed
+             every family card in the rail, which is the whole chat. */
+          hasOwnVisual={!!renderedView}
         />
       )}
     </div>
@@ -305,8 +312,9 @@ function ToolTabs({
   const visual = showVisual ? (
     <ToolVisual name={name} args={args} parsed={parsedResult} isError={isError} />
   ) : null;
-  const initial: "visual" | "input" | "output" = visual ? "visual" : isError ? "input" : "input";
-  const [tab, setTab] = useState<"visual" | "input" | "output">(initial);
+  // Visual is the landing tab whenever there is one — expanding a step is a
+  // request to see what the tool did, not to read its arguments back.
+  const [tab, setTab] = useState<"visual" | "input" | "output">(visual ? "visual" : "input");
   const active = tab === "visual" && !visual ? "input" : tab;
 
   return (

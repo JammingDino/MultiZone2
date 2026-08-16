@@ -820,6 +820,73 @@ const NO_PREVIEW = new Set([
   ...SEARCH_TOOLS,
 ]);
 
+/**
+ * A file write as its diff (0.13.3 export fidelity).
+ *
+ * The screen shows an edit as a diff, and the export used to show it as a
+ * preview of `{"path": "...", "ok": true}` — which says a file changed and not
+ * what changed about it. Built from the call's arguments, exactly as on screen.
+ */
+function renderDiffVisual(item: TraceToolItem, p: Palette): string {
+  const name = item.call.function.name;
+  const args = (item.args ?? {}) as Record<string, unknown>;
+  const removed =
+    name === "create_file" ? [] : String(args.old_text ?? "").split("\n").filter((l, i, a) => l !== "" || i < a.length - 1);
+  const added = String(name === "create_file" ? (args.content ?? "") : (args.new_text ?? ""))
+    .split("\n")
+    .filter((l, i, a) => l !== "" || i < a.length - 1);
+  if (removed.length === 0 && added.length === 0) return "";
+
+  const rows = [
+    ...removed.slice(0, DIFF_LINES).map((l) => ({ sign: "-", text: l })),
+    ...added.slice(0, DIFF_LINES).map((l) => ({ sign: "+", text: l })),
+  ]
+    .map(
+      (r) =>
+        `<div class="dl ${r.sign === "+" ? "dadd" : "drem"}"><span class="ds">${r.sign}</span>${escapeHtml(
+          r.text,
+        )}</div>`,
+    )
+    .join("");
+  const elided =
+    removed.length > DIFF_LINES || added.length > DIFF_LINES
+      ? `<div class="dl dmore">… ${Math.max(0, removed.length - DIFF_LINES) + Math.max(0, added.length - DIFF_LINES)} more lines</div>`
+      : "";
+  return `<div class="diff" style="border-color:${p.border}">
+    <div class="dcount">+${added.length} −${removed.length}</div>${rows}${elided}
+  </div>`;
+}
+
+/** A command, what it printed, and how it ended. */
+function renderTerminalVisual(item: TraceToolItem, p: Palette): string {
+  const args = (item.args ?? {}) as Record<string, unknown>;
+  const body = (item.result ?? {}) as Record<string, unknown>;
+  const command = String(args.command ?? args.code ?? args.input ?? "");
+  const stdout = String(body.stdout ?? "");
+  const stderr = String(body.stderr ?? "");
+  const exit = typeof body.exit_code === "number" ? body.exit_code : null;
+  if (!command && !stdout && !stderr) return "";
+
+  // Tail-anchored, matching the screen: the end of a long run is the part that
+  // carries the outcome.
+  const tail = (s: string) => {
+    const lines = s.replace(/\r\n/g, "\n").split("\n");
+    const shown = lines.slice(-PREVIEW_LINES);
+    return (lines.length > shown.length ? "…\n" : "") + shown.join("\n");
+  };
+
+  return `<div class="term" style="border-color:${p.border}">
+    ${command ? `<div class="tcmd">$ ${escapeHtml(command)}</div>` : ""}
+    ${stdout ? `<pre class="preview">${escapeHtml(tail(stdout))}</pre>` : ""}
+    ${stderr ? `<pre class="preview terr">${escapeHtml(tail(stderr))}</pre>` : ""}
+    ${exit !== null ? `<div class="texit ${exit === 0 ? "eok" : "ebad"}">exit ${exit}</div>` : ""}
+  </div>`;
+}
+
+const DIFF_LINES = 24;
+const DIFF_TOOLS = new Set(["create_file", "edit_file"]);
+const TERMINAL_TOOLS = new Set(["run_command", "execute_code", "wsl_exec"]);
+
 function renderToolCard(
   item: TraceToolItem,
   visuals: VisualCache,
@@ -848,6 +915,10 @@ function renderToolCard(
       : renderPreview(item);
   } else if (SEARCH_TOOLS.has(name)) {
     visual = renderSearchVisual(body, accent);
+  } else if (DIFF_TOOLS.has(name)) {
+    visual = renderDiffVisual(item, p);
+  } else if (TERMINAL_TOOLS.has(name)) {
+    visual = renderTerminalVisual(item, p);
   }
   if (!visual && !NO_PREVIEW.has(name)) visual = renderPreview(item);
 
@@ -1353,6 +1424,26 @@ export async function buildChatPrintHtml(
   .terr { margin-top: 7px; padding: 7px 9px; border-radius: 6px; font-size: 10px;
     background: #f8717114; border: 1px solid #f8717144; color: ${p.text}; white-space: pre-wrap; }
   .thint { display: block; margin-top: 4px; color: ${p.muted}; }
+
+  /* ── Diffs and terminals (0.13.3) — the export shows what the screen showed ── */
+  .diff { margin-top: 7px; border: 1px solid ${p.border}; border-radius: 6px; overflow: hidden;
+    font-family: ${mono}; font-size: 9.5px; line-height: 1.5; }
+  .dcount { padding: 3px 8px; background: ${p.code}; color: ${p.muted}; font-size: 9px;
+    border-bottom: 1px solid ${p.border}; }
+  .dl { padding: 0 8px; white-space: pre-wrap; word-break: break-word; }
+  .ds { display: inline-block; width: 10px; color: ${p.muted}; }
+  .dadd { background: #34d39914; color: ${p.text}; }
+  .drem { background: #f8717114; color: ${p.muted}; }
+  .dmore { color: ${p.muted}; padding: 2px 8px; }
+  .term { margin-top: 7px; border: 1px solid ${p.border}; border-radius: 6px; overflow: hidden; }
+  .tcmd { font-family: ${mono}; font-size: 9.5px; padding: 5px 9px; background: ${p.code};
+    color: ${p.text}; white-space: pre-wrap; word-break: break-word;
+    border-bottom: 1px solid ${p.border}; }
+  .term .preview { margin: 0; border: 0; border-radius: 0; }
+  .texit { padding: 3px 9px; font-size: 9px; font-family: ${mono};
+    border-top: 1px solid ${p.border}; }
+  .eok { color: #34d399; }
+  .ebad { color: #f87171; }
 
   /* ── Plans ── */
   .plan { margin-top: 8px; }

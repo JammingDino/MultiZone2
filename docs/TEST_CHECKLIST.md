@@ -200,6 +200,18 @@ so what needs eyes is the rendering and the approval path.
 - [ ] A tool whose result is prose rather than JSON still shows its output, with no empty visual above it
 - [ ] Replay on a subchat renders visuals too (its messages were never opened in the transcript)
 
+**The rest of the families, and export (0.13.3)**
+
+- [ ] 🔁 **Visuals appear in the chat itself, not only in Replay.** Expand a tool step in a normal conversation — the Visual tab is there and is the one it lands on. (The activity rail's `hideVisual` flag used to suppress every family card, and the rail is the whole chat)
+- [ ] A `smart_search` step shows the engine strip; an engine that was blocked or rate-limited shows as failed rather than being silently absent ⚙️
+- [ ] `smart_fetch` shows the page title, domain and word count; `smart_crawl` shows one row per page and reports pages read vs errored
+- [ ] `http_request` shows a status pill — green 2xx, red 4xx/5xx — with headers folded and the body shaped, not escaped
+- [ ] Memory shows its scope; a skill shows its files; `change_zone` and `tag_chat` read as one line
+- [ ] `get_current_datetime` renders as a plain line with no card around it
+- [ ] Step icons differ by family — a collapsed run is not a column of identical wrenches
+- [ ] **PDF export** of a turn that edited a file and ran a command carries the `+/−` diff and the console with its exit code
+- [ ] Markdown export of the same turn is unchanged in structure (no stray HTML)
+
 **Multizone legibility (0.13.2)**
 
 - [ ] A `spawn_subagent` step shows the zone, the task, a status pill and the reply — not a JSON object with the answer as one escaped string

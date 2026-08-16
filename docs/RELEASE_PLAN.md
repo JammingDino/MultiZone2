@@ -841,10 +841,17 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ### 0.13.3 — The rest, and export
 
-- [ ] Families 6, 7, 8: `smart_search` (engine strip showing which engines contributed, returned nothing, or failed — information the tool already returns and nobody currently sees), `smart_fetch` / `smart_crawl` (page cards, crawl shape), `http_request` (method/URL, status pill, request and response panes)
-- [ ] Families 11, 12, 13: memory (scope chip, previous value struck on overwrite), skills (name, description, tool chips, diff on update), state changes (`before → after` in one line; a token bar for `compact_context`; `get_current_datetime` as an inline line with no card at all)
-- [ ] Export fidelity: families 1, 5 and 9 get a text form in Markdown and PDF export rather than dropping to a summary line
-- [ ] Activity rail in compact mode shows family icons rather than one wrench for everything
+*Status: built, `npx tsc --noEmit` clean and `npm run build` green.*
+
+- [x] **Fixed first — the visuals only rendered in replay.** The activity rail sets `hideVisual` on every step, and the tab strip was treating that as "this card already shows a visual", so every family card was suppressed in the rail — which is the whole chat. Replay bypasses the rail, which is why it alone worked. `hideVisual` refers only to the *lifted* visuals (plans, diagrams, plots, saved files), and `ToolVisual` returns nothing for that family anyway, so the flag has no business in the condition
+- [x] Visual is unambiguously the landing tab wherever one exists — expanding a step is a request to see what the tool did, not to read its arguments back
+- [x] Families 6 and 7 ([WebVisual.tsx](../src/components/Message/visuals/WebVisual.tsx)): `smart_search` ranked results with domains, and the **engine strip** — which engines contributed and which failed, information the tool has always returned and nobody could see, so a result merged from six engines looked identical to one from the single engine that happened to answer. `smart_fetch` / `smart_crawl` as page cards with word counts, per-page errors, and the crawl's shape (pages read, errored, truncated)
+- [x] Family 8 ([HttpVisual.tsx](../src/components/Message/visuals/HttpVisual.tsx)): method, URL, a status pill (2xx green, 4xx/5xx red, 3xx amber — a redirect that wasn't followed is a fact, not a failure), response headers folded away, and the body shaped rather than escaped. `app_control` shares the family, since it speaks the same shape against the app's own API
+- [x] Families 11, 12, 13 ([StateVisual.tsx](../src/components/Message/visuals/StateVisual.tsx)): memory with scope chips and the trim notice, skills with description and file chips, and the state changes as single lines. `get_current_datetime` renders with **no card at all** — a bordered panel around "it is Tuesday" makes the transcript worse
+- [x] Export fidelity ([export.ts](../src/lib/export.ts)): file writes export as a real `+/−` diff and shell tools as command / output / exit code, both tail-anchored like the screen. Sub-agents already nest their transcripts under the spawning turn, so an agent card there would have duplicated what the export does better
+- [x] Family icons on step cards ([familyIcon.tsx](../src/components/Message/visuals/familyIcon.tsx)) — a run of twenty steps was a column of identical wrenches, and the strip is usually read collapsed
+- [ ] **Runtime-test:** a search step shows the engine strip, and a blocked engine shows as failed
+- [ ] **Runtime-test:** a PDF export of a turn that edited a file and ran a command carries the diff and the console
 
 ---
 

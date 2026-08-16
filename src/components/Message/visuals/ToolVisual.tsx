@@ -7,6 +7,9 @@ import { TreeVisual } from "./TreeVisual";
 import { MatchVisual } from "./MatchVisual";
 import { AgentVisual } from "./AgentVisual";
 import { BoardVisual, ClaimRefusal } from "./BoardVisual";
+import { WebVisual } from "./WebVisual";
+import { HttpVisual } from "./HttpVisual";
+import { MemoryVisual, SkillVisual, ChangeVisual } from "./StateVisual";
 
 /**
  * The family dispatch, shared by the step card and the replay (0.13.1).
@@ -67,6 +70,17 @@ export function ToolVisual({
       return record ? <AgentVisual name={name} args={args} result={record} /> : null;
     case "board":
       return record ? <BoardVisual name={name} args={args} result={record} /> : null;
+    case "web":
+    case "page":
+      return record ? <WebVisual name={name} args={args} result={record} /> : null;
+    case "http":
+      return record ? <HttpVisual name={name} args={args} result={record} /> : null;
+    case "memory":
+      return record ? <MemoryVisual name={name} args={args} result={record} /> : null;
+    case "skill":
+      return record ? <SkillVisual name={name} args={args} result={record} /> : null;
+    case "state":
+      return record ? <ChangeVisual name={name} args={args} result={record} /> : null;
     case "existing":
       // Rendered by `renderToolOutput` above the tabs, or carrying no result
       // worth shaping (`ask_user`).

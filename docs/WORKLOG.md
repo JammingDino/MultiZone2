@@ -5,6 +5,65 @@ alone. Newest first. Detail belongs in the linked docs; this is the thread.
 
 ---
 
+## 2026-08-16 (0.13.3) — The bug that hid all of it, then the rest
+
+Version 0.13.3, **`releaseBuild` set to `true`** — the next push publishes.
+
+### The bug
+
+The visuals rendered in Replay and nowhere else. The activity rail passes
+`hideVisual` on *every* step, and the tab strip read that as "this card already
+shows a visual", so it suppressed the family card for every tool in the rail —
+and the rail is the whole chat. Replay bypasses it, which is exactly why it was
+the one place that worked.
+
+`hideVisual` only ever meant "the lifted visual is on screen elsewhere", and
+lifting only applies to the `existing` family (plans, diagrams, plots, saved
+files) — which `ToolVisual` returns nothing for anyway. The flag had no business
+in that condition. Removed, and the landing tab is now unambiguously Visual
+wherever one exists.
+
+Worth recording as a lesson: the feature typechecked, built, and was verified in
+the one surface that didn't exercise the real code path.
+
+### Built (0.13.3)
+
+- **Web and page cards.** `smart_search` gets the **engine strip** — which
+  engines contributed, which failed. The tool has always returned this and
+  nobody could see it, so a result merged from six engines looked identical to
+  one from the single engine that happened to answer. `smart_fetch` and
+  `smart_crawl` render as page cards with word counts, per-page errors and the
+  crawl's shape.
+- **HTTP.** Method, URL, status pill — 2xx green, 4xx/5xx red, 3xx amber,
+  because a redirect that wasn't followed is a fact rather than a failure —
+  headers folded, body shaped rather than escaped. `app_control` shares the
+  family since it speaks the same shape against the app's own API.
+- **Memory, skills, state.** Scope chips, file chips, and one-line before/after.
+  `get_current_datetime` renders with *no card at all*: a bordered panel around
+  "it is Tuesday" makes the transcript worse.
+- **Export fidelity.** A file write exports as a real `+/−` diff and a shell
+  tool as command / output / exit code, both tail-anchored like the screen.
+  Sub-agent transcripts already nest under the spawning turn, so an agent card
+  there would have duplicated what the export does better — left alone
+  deliberately.
+- **Family icons on step cards.** A run of twenty steps was a column of
+  identical wrenches, and the strip is usually read collapsed.
+
+0.13.x is now complete: 14 families, every built-in tool mapped, MCP tools on
+the shaped fallback, and the raw call one click away throughout.
+
+### Verified
+
+`npx tsc --noEmit` clean · `npm run build` green · `npm test` 7 passed.
+
+### Not verified
+
+The new families have not been seen in the shell. The two worth doing first are
+in TEST_CHECKLIST §11d: the engine strip with an engine actually blocked, and a
+PDF export of a turn that both edited a file and ran a command.
+
+---
+
 ## 2026-08-16 (0.13.2) — A Multizone run you can read
 
 Version 0.13.2. 0.13.1's remaining item closed and 0.13.2 built.

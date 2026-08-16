@@ -5,6 +5,42 @@ alone. Newest first. Detail belongs in the linked docs; this is the thread.
 
 ---
 
+## 2026-08-16 (backlog) — Study mode
+
+Docs only. Added a study mode to the Post-1.0 backlog, with NotebookLM as the
+reference — grounded answering over a project's own sources, plus the artifacts
+a reader actually uses: study guide, briefing, FAQ, timeline, mind map,
+flashcards, quizzes, audio overview.
+
+The useful part of writing it up was the audit of what already exists. The
+corpus (knowledge base with a re-indexing watcher), the citations, the diagram
+renderer, TTS and the HTML report renderer are all built, so most of the
+artifacts are a skill plus an existing renderer. Two things are genuinely
+missing and they are the ones that make it a study tool rather than a chat with
+a document:
+
+- **Source-only grounding**, where the refusal is the feature. A study tool that
+  quietly fills a gap from the model's own knowledge is worse than none, because
+  the gap is invisible exactly where the user is least able to catch it.
+  Mechanically it is close to plan mode — a chat state that withholds tools and
+  constrains the prompt — which is a shape already built once.
+- **Spaced repetition**, which is new state, a scheduler and a UI of its own.
+
+Also corrected COMPETITORS.md, which had dismissed NotebookLM's multimedia as
+"out of scope; listed for completeness". Video is fairly out of scope; audio was
+undersold — an audio overview is TTS over a corpus we already index, and we
+already ship TTS. The larger miss was that the analysis never named the study
+tooling at all, which is the thing NotebookLM is actually used for, and the
+clearest case where local-first is the product argument rather than a principle:
+using NotebookLM means uploading the material, which rules it out for anything
+under NDA, unpublished, or personal.
+
+Noted in the entry that this must not be scheduled as one release. The artifacts
+are cheap and shippable on their own, and they are the honest test of whether
+anyone wants the retention machinery at all.
+
+---
+
 ## 2026-08-16 (updater) — Correction: the signing secrets were never missing
 
 Docs only, no code.

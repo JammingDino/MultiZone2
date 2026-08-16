@@ -969,6 +969,35 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 - [ ] Code interface: chat window for local models working on codebases; uses RAG from 0.4.3; requires design session
 - [ ] **File editing as an engine, not a tool.** Cursor and Antigravity handle multi-file editing categorically better than we do, and the gap is structural rather than a missing feature: they apply *edits* (search/replace or diff hunks, validated against the file as it currently is) where our `write_file` rewrites a whole file from whatever the model remembers of it. A real edit engine means a hunk format, fuzzy anchoring that survives a file having moved on, a syntax check before the write lands, and a failure that reports "the anchor no longer matches" instead of silently clobbering. This is the prerequisite for the code interface above and is scoped with it, not before it. 0.10.x's checkpoints and 0.10.2's diff review are the parts of this problem worth solving early, because they help every existing file tool immediately
+- [ ] **Study mode.** A mode for learning a body of material rather than working on it. The user brings sources into a project — lecture notes, a spec, a textbook chapter, a stack of papers — and the app helps them *know* it. NotebookLM is the reference implementation and the citation-UX benchmark; it is also cloud-only and requires handing Google the sources, which is the whole argument for us having one.
+
+  Per the "build components before modes" principle, this is a mode and belongs *after* its components. Most of them already exist:
+
+  | Needs | State |
+  | --- | --- |
+  | Per-project source corpus | Built — the knowledge base, with a file watcher that re-indexes on save |
+  | Inline citations back to the source | Built — `search_local_files` returns source, chunk and score; citations render and survive export |
+  | Diagrams for a mind map | Built — `render_graph` draws Mermaid |
+  | Spoken output for an audio overview | Built — TTS (0.8.1), including speech pipelining |
+  | A document a study artifact can be produced into | Built — `present_file` and the HTML report renderer |
+  | Reusable per-task instructions | Built — skills |
+  | **Source-only grounding** | **Missing** — the mode's whole premise |
+  | **Durable study state** | **Missing** — what has been asked, what was wrong, when it is due again |
+  | **Retrieval good enough to trust** | **Partly** — see 0.14.4; embedding-only search is weakest on the exact-term lookups a learner makes ("what does it say about *X*") |
+
+  What the mode itself would add:
+
+  - **Grounded answering.** Answers drawn only from the project's sources, with every claim carrying a citation, and an explicit *"the sources don't cover this"* when they don't. The refusal is the feature — a study tool that quietly fills gaps from the model's own knowledge is worse than no study tool, because the gap is invisible exactly where the user is least able to catch it. Mechanically this is close to plan mode: a chat state that withholds tools and constrains the system prompt, which is a shape we have already built once.
+  - **Study artifacts, generated from the corpus:** study guide, briefing document, FAQ, timeline, mind map, slide deck. Each one is a skill plus a renderer, and several of the renderers exist.
+  - **Flashcards and quizzes**, with the answers checked against the sources rather than against the model's opinion, and a wrong answer that cites the passage the reader should re-read.
+  - **Spaced repetition.** The genuinely new engineering: a schedule per card (SM-2 is a day's work and good enough), stored per project, surfaced as "12 cards due" rather than requiring the user to remember to revise. This is the part that makes it a study *tool* rather than a chat with a document.
+  - **Audio overview** — a two-voice discussion of the corpus through the existing TTS, which is the feature people actually talk about NotebookLM for and which we can do locally.
+  - **Progress**, per project: which sources have been covered, which are untouched, where the wrong answers cluster.
+
+  Deliberately *not* in scope: video overviews. They are a production pipeline, not a feature, and the value is mostly novelty.
+
+  Sizing note: the artifacts are cheap because the components exist. Grounding is a mode. Spaced repetition is new state with a scheduler and needs a UI of its own. Do not schedule this as one release — the artifacts alone are worth shipping before any of the retention machinery, and they are also the honest test of whether anyone uses it.
+
 - [ ] Mobile: Tauri mobile target (iOS/Android)
 - [ ] Deep research mode: multi-step sourced research using subchats; requires design session before scheduling
 - [ ] Zone snapshot/versioning: save zone config at chat creation time so editing a zone does not alter historical context

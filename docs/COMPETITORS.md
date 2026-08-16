@@ -157,7 +157,9 @@ Worth noting this is a differentiator, not just a saving: no competitor in this 
 
 **Shadow persona (Msty).** A background agent silently monitoring and correcting a conversation. Now cheap to build on top of the leader/sub-agent machinery — the pieces exist.
 
-**Multimedia output (NotebookLM).** Audio/video summaries. Out of scope; listed for completeness.
+**Multimedia output (NotebookLM).** Audio/video summaries. Video is out of scope — a production pipeline, not a feature. Audio is *not*, and this entry undersold it: an audio overview is TTS over a corpus we already index, and we already ship TTS. Reconsidered as part of study mode, now in the backlog ([RELEASE_PLAN.md](RELEASE_PLAN.md#backlog--unscheduled)).
+
+**Study tooling (NotebookLM).** The gap this analysis missed. NotebookLM's pull is not that it summarises — it is that it turns a pile of sources into study guides, briefings, FAQs, timelines, mind maps, flashcards and quizzes, all grounded in *your* sources and cited back to them. We have the corpus, the citations, the diagram renderer and the speech; what we lack is the grounded mode and any notion of retention. It is also the clearest case where local-first is the product argument rather than a principle: NotebookLM requires uploading the material, which rules it out for anything under NDA, unpublished, or personal. Scoped in the backlog.
 
 **Discoverability of orchestration.** The strongest differentiators (multizone, subchats, teamwork) are also the least self-explanatory. Competitors with weaker features market them harder. The Team library helps; a first-run demo of a leader run would help more.
 

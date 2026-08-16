@@ -814,15 +814,21 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [x] Family 14 stays where it renders (above the tabs) and is marked `existing` in the map, so the tab strip doesn't show a second copy
 - [x] One height cap (320px, own scroll) across the tabs and every family
 - [x] Streaming-safe: the pending-arguments pane is unchanged, the tab strip only appears once there is a result
-- [ ] **Runtime-test:** an MCP tool result renders shaped rather than raw (needs a configured MCP server)
-- [ ] **Runtime-test:** a long `run_command` output tail-anchors and stays inside its own scroll
+- [x] **Runtime-tested:** an MCP tool result renders shaped rather than raw ✅
+- [x] **Runtime-tested:** a long `run_command` output tail-anchors and stays inside its own scroll ✅
 
 ### 0.13.1 — The tools a run is made of
 
-- [ ] Family 5 (terminal): `run_command`, `execute_code`, `wsl_exec` and the five `terminal_*` tools — command line, ANSI-parsed output with stderr tinted, exit-code pill, duration, tail-anchored for long output
-- [ ] Family 2 (file card): `read_file`, `create_folder`, `move_file`, `copy_file`, `delete_file` — path, size, lines, language, first lines highlighted; `from → to` for move and copy; PDF reads show which pages were extracted
-- [ ] Family 3 (tree): `list_directory`, `find_files` — indented tree with counts and *explicit* truncation
-- [ ] Family 4 (match list): `search_file_text`, `search_local_files` — hits grouped by file with the term highlighted; knowledge hits carry score and source document
+*Status: built, `npx tsc --noEmit` clean and `npm run build` green. The two runtime checks carried over from 0.13.0 both passed.*
+
+- [x] Family 5 (terminal) — landed in 0.13.0
+- [x] Family 2 (file card) ([FileVisual.tsx](../src/components/Message/visuals/FileVisual.tsx)): `read_file`, `create_folder`, `move_file`, `copy_file`, `delete_file` — path (clickable, reveals in the file manager), size, line count, extension, and the first 15 lines as text rather than as an escaped JSON string. `from → to` on one line for move and copy; a delete shows the path struck through
+- [x] Family 3 (tree) ([TreeVisual.tsx](../src/components/Message/visuals/TreeVisual.tsx)): `list_directory` renders the nested object it returns as an indented tree with folder and file counts, and the backend's `…` depth marker reads as an ellipsis rather than a file; `find_files` groups its flat list by folder. Truncation is always stated — a listing that silently stopped at the limit is how someone concludes a file isn't there
+- [x] Family 4 (match list) ([MatchVisual.tsx](../src/components/Message/visuals/MatchVisual.tsx)): `search_file_text` hits grouped by file with per-file counts and the term highlighted (matched literally, not compiled — the query is a regex by default and a highlight that throws would take the card down with it); `search_local_files` passages carry their similarity score and source document
+- [x] The dispatch moved out of `StepBlock` into [ToolVisual.tsx](../src/components/Message/visuals/ToolVisual.tsx), shared with replay
+- [x] **Replay shows the same visuals** ([ReplayView.tsx](../src/components/Chat/ReplayView.tsx)). Replay is opened precisely when something went wrong, so a worse view of a call there than in the transcript was the wrong way round. The raw output stays below the visual under its own label; a tool returning prose rather than JSON is unchanged
+- [ ] PDF reads show which pages were extracted (`read_file` already reports it)
+- [ ] Family components have no tests — there is still no frontend test runner (see [TEST_STRATEGY.md](TEST_STRATEGY.md))
 
 ### 0.13.2 — Making a Multizone run legible
 

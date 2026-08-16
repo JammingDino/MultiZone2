@@ -5,6 +5,61 @@ alone. Newest first. Detail belongs in the linked docs; this is the thread.
 
 ---
 
+## 2026-08-16 (0.13.1) — Families 2–4, and replay gets the visuals too
+
+### Confirmed working in the app
+
+Both 0.13.0 runtime checks passed, ticked in TEST_CHECKLIST §11d:
+
+- An MCP tool result renders shaped rather than raw JSON.
+- A long `run_command` output tail-anchors and stays inside its own scroll.
+
+### Built
+
+**Replay renders the same visuals as the transcript.** This was the ordering
+mistake worth fixing early: replay is opened precisely when something went
+wrong, so showing a worse view of a tool call there than in the chat was
+backwards. The family dispatch moved out of `StepBlock` into `ToolVisual.tsx`
+and both call it. Raw output stays below the visual under its own label, and a
+tool returning prose rather than JSON behaves exactly as before.
+
+**Family 2 — file card.** `read_file` shows path, size, line count, extension
+and the first 15 lines *as text*; previously it was the file's own content
+escaped inside a JSON string, which is the worst possible way to look at a file.
+Paths are clickable and reveal in the OS file manager. Move and copy read
+`from → to`; a delete shows the path struck through.
+
+**Family 3 — tree.** `list_directory` returns a nested object (folder → children,
+file → extension) that is compact to send and unreadable to look at; it now
+draws as an indented tree with counts, and the backend's `…` depth marker reads
+as an ellipsis rather than as a file called "…". `find_files` groups its flat
+list by folder. Truncation is stated explicitly — a listing that silently
+stopped at the limit is how someone concludes a file isn't there.
+
+**Family 4 — match list.** Hits grouped by file with per-file counts and the
+term highlighted. The highlight matches literally rather than compiling the
+query: `search_file_text` takes a regex by default, and a highlight that threw
+on the user's own pattern would take the whole card down with it.
+Knowledge-base passages carry their score and source document.
+
+One design point worth recording: `hasToolVisual` promises the tab strip that a
+card exists, so the family components must never render nothing. Their
+degenerate cases (a write with no path, an image read that came back as content
+parts) fall back to the shaped view rather than leaving an empty pane behind a
+tab the reader was invited to click.
+
+### Verified
+
+`npx tsc --noEmit` clean · `npm run build` green · `npm test` 7 passed.
+
+### Not verified
+
+The new families and the replay integration have not been seen in the shell —
+new checks are in TEST_CHECKLIST §11d, including replay on a subchat, whose
+messages were never opened in the transcript.
+
+---
+
 ## 2026-08-16 (later) — 0.13.0 built, and the edit primitive fixed
 
 Version bumped to **0.13.0** across `package.json`, `Cargo.toml` and

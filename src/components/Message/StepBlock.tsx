@@ -20,10 +20,7 @@ import { MermaidBlock, type MermaidAutoFix } from "@/components/Renderers/Mermai
 import { HtmlReportBlock } from "@/components/Renderers/HtmlReportBlock";
 import { SavedFileChip } from "@/components/Renderers/SavedFileChip";
 import { PlanBlock, PlanProposalBlock, toPlanData, toPlanProposal } from "@/components/Renderers/PlanBlock";
-import { familyOf } from "./visuals/families";
-import { Shaped } from "./visuals/Shaped";
-import { EditVisual } from "./visuals/EditVisual";
-import { TerminalVisual } from "./visuals/TerminalVisual";
+import { ToolVisual, hasToolVisual } from "./visuals/ToolVisual";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { useDictation, MicButton, DictationMeter } from "@/components/Chat/useDictation";
@@ -304,7 +301,10 @@ function ToolTabs({
   isSetupIssue: boolean;
   hasOwnVisual: boolean;
 }) {
-  const visual = hasOwnVisual ? null : renderFamilyVisual(name, args, parsedResult, isError);
+  const showVisual = !hasOwnVisual && hasToolVisual(name, parsedResult, isError);
+  const visual = showVisual ? (
+    <ToolVisual name={name} args={args} parsed={parsedResult} isError={isError} />
+  ) : null;
   const initial: "visual" | "input" | "output" = visual ? "visual" : isError ? "input" : "input";
   const [tab, setTab] = useState<"visual" | "input" | "output">(initial);
   const active = tab === "visual" && !visual ? "input" : tab;
@@ -370,41 +370,6 @@ function Tab({
       {label}
     </button>
   );
-}
-
-/**
- * The family dispatch. A tool with no family — every MCP tool, and any built-in
- * whose family isn't implemented yet — gets the shaped fallback, which is the
- * point: nothing renders as raw JSON by default any more.
- */
-function renderFamilyVisual(
-  name: string,
-  args: any,
-  parsed: any,
-  isError: boolean,
-): React.ReactNode {
-  // An error is the visual, in whatever form it arrived. The Output tab holds
-  // the unedited text; a card repeating it adds nothing.
-  if (isError || parsed === null || parsed === undefined) return null;
-
-  switch (familyOf(name)) {
-    case "diff":
-      return <EditVisual name={name} args={args} result={asRecord(parsed)} />;
-    case "terminal": {
-      const rec = asRecord(parsed);
-      return rec ? <TerminalVisual name={name} args={args} result={rec} /> : null;
-    }
-    case "existing":
-      // Rendered above the tabs by renderToolOutput, or has no result worth
-      // shaping (ask_user).
-      return null;
-    default:
-      return <Shaped value={parsed} />;
-  }
-}
-
-function asRecord(v: any): Record<string, unknown> | null {
-  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
 }
 
 function SetupIssueBanner({

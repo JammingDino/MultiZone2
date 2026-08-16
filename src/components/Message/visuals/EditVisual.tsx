@@ -1,5 +1,6 @@
 import { DiffView } from "@/components/common/DiffView";
 import type { DiffLine, FileDiff } from "@/lib/types";
+import { Shaped } from "./Shaped";
 
 /**
  * Family 1 — a file write as the diff it is (0.13.0).
@@ -25,13 +26,17 @@ export function EditVisual({
     (typeof result?.path === "string" && result.path) ||
     (typeof args?.path === "string" && args.path) ||
     "";
-  if (!path) return null;
 
-  const diff =
-    name === "create_file"
+  const diff = path
+    ? name === "create_file"
       ? creationDiff(path, String(args?.content ?? ""))
-      : editDiff(path, String(args?.old_text ?? ""), String(args?.new_text ?? ""));
-  if (!diff) return null;
+      : editDiff(path, String(args?.old_text ?? ""), String(args?.new_text ?? ""))
+    : null;
+
+  // A write with no path, or an edit whose arguments never arrived, is a shape
+  // this component cannot draw — but the tab has already been offered, so it
+  // owes the reader something better than an empty pane.
+  if (!diff) return <Shaped value={result ?? args} />;
 
   const note =
     result && result.matched === "whitespace-tolerant"

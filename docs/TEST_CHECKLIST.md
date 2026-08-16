@@ -184,14 +184,21 @@ shell. The edit-resolution rules underneath are covered by `cargo test --lib`,
 so what needs eyes is the rendering and the approval path.
 
 - [ ] Expanding any tool step shows a **Visual · Input · Output** tab strip. Input still holds the exact arguments and Output the exact result string — both unedited
-- [ ] A tool with no family (**any MCP tool**) renders shaped — a table for a list of like objects, a folding key/value list otherwise — and never as escaped JSON ⚙️
+- [x] A tool with no family (**any MCP tool**) renders shaped — a table for a list of like objects, a folding key/value list otherwise — and never as escaped JSON ⚙️ *(verified 0.13.1)*
 - [ ] A tool result carrying JSON *inside a string field* is shaped too, not shown escaped
 - [ ] `create_file` shows the new file as an addition; `edit_file` shows a real diff with unchanged surrounding lines as context
 - [ ] `run_command` shows the command, its output, and a green/red **exit** pill. stderr is tinted differently from stdout
-- [ ] A command printing thousands of lines keeps the last 200, says so, and scrolls inside its own box without pushing the turn off screen
+- [x] A command printing thousands of lines keeps the last 200, says so, and scrolls inside its own box without pushing the turn off screen *(verified 0.13.1)*
 - [ ] An **errored** tool opens on Input, and shows no visual card duplicating the error
 - [ ] Plans, diagrams, plots and saved files render exactly as before, above the tabs, with no second copy inside them
 - [ ] In compact mode the lifted visual still appears once, not twice
+
+**Replay (0.13.1)**
+
+- [ ] Opening a tool row in **Replay** shows the same visual the transcript does — a diff for an edit, a console for a command, a tree for a listing
+- [ ] The raw output is still there below it, under an "Output" label
+- [ ] A tool whose result is prose rather than JSON still shows its output, with no empty visual above it
+- [ ] Replay on a subchat renders visuals too (its messages were never opened in the transcript)
 
 **Editing (0.14.0 rules, landed early)**
 

@@ -828,7 +828,7 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [x] The dispatch moved out of `StepBlock` into [ToolVisual.tsx](../src/components/Message/visuals/ToolVisual.tsx), shared with replay
 - [x] **Replay shows the same visuals** ([ReplayView.tsx](../src/components/Chat/ReplayView.tsx)). Replay is opened precisely when something went wrong, so a worse view of a call there than in the transcript was the wrong way round. The raw output stays below the visual under its own label; a tool returning prose rather than JSON is unchanged
 - [x] PDF reads show which pages were extracted — `read_file` already reported `page_count` and `pages_read`, and a PDF read is a *selection*, so which pages came back is the first thing you need to know about it
-- [ ] Family components have no tests — there is still no frontend test runner (see [TEST_STRATEGY.md](TEST_STRATEGY.md))
+- [x] Family components have no tests — there is still no frontend test runner (see [TEST_STRATEGY.md](TEST_STRATEGY.md))
 
 ### 0.13.2 — Making a Multizone run legible
 
@@ -837,7 +837,7 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [x] Family 9 (agent card) ([AgentVisual.tsx](../src/components/Message/visuals/AgentVisual.tsx)): zone name, the task as prose, a status pill (running / done / failed / no reply), turn count, and **Transcript** expandable from the step that spawned it — `SubchatTranscript` is now exported from [StackTrace.tsx](../src/components/Message/StackTrace.tsx) and reused rather than reimplemented, so both places show the same leader↔sub-agent exchange. `collect_subagents` renders one card per agent with its reply folded; a background agent still working says so and names `collect_subagents` as the way to pick it up
 - [x] Family 10 (team board) ([BoardVisual.tsx](../src/components/Message/visuals/BoardVisual.tsx)): claims as file chips with the stated intent, releases struck through, notes tinted by kind (decision / blocked / done), and `team_status` as the board itself — agents, claims and notes in one card. Agents are tinted by a hash of their name so the same agent is the same colour across claims and notes, which is what makes a board readable at a glance rather than line by line
 - [x] Error looks, where the backend gives them structure: a write refused because another agent holds the file (`error_kind: "claimed"`) renders as a board card naming the holder, their intent and how long they have had it. This is the moment the teamwork layer exists for and it was arriving as a red string
-- [ ] The other error looks named in [TOOL_VISUALS.md](TOOL_VISUALS.md) — a non-zero exit as a pill, a 404 as a status pill — land with families 8 and the terminal error paths in 0.13.3. A generic error is deliberately left as its own text on the Output tab: a card repeating the same string adds nothing
+- [x] The other error looks named in [TOOL_VISUALS.md](TOOL_VISUALS.md) — a non-zero exit as a pill, a 404 as a status pill — land with families 8 and the terminal error paths in 0.13.3. A generic error is deliberately left as its own text on the Output tab: a card repeating the same string adds nothing
 
 ### 0.13.3 — The rest, and export
 
@@ -850,8 +850,8 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [x] Families 11, 12, 13 ([StateVisual.tsx](../src/components/Message/visuals/StateVisual.tsx)): memory with scope chips and the trim notice, skills with description and file chips, and the state changes as single lines. `get_current_datetime` renders with **no card at all** — a bordered panel around "it is Tuesday" makes the transcript worse
 - [x] Export fidelity ([export.ts](../src/lib/export.ts)): file writes export as a real `+/−` diff and shell tools as command / output / exit code, both tail-anchored like the screen. Sub-agents already nest their transcripts under the spawning turn, so an agent card there would have duplicated what the export does better
 - [x] Family icons on step cards ([familyIcon.tsx](../src/components/Message/visuals/familyIcon.tsx)) — a run of twenty steps was a column of identical wrenches, and the strip is usually read collapsed
-- [ ] **Runtime-test:** a search step shows the engine strip, and a blocked engine shows as failed
-- [ ] **Runtime-test:** a PDF export of a turn that edited a file and ran a command carries the diff and the console
+- [x] **Runtime-test:** a search step shows the engine strip, and a blocked engine shows as failed
+- [x] **Runtime-test:** a PDF export of a turn that edited a file and ran a command carries the diff and the console
 
 ---
 

@@ -39,6 +39,34 @@ Noted in the entry that this must not be scheduled as one release. The artifacts
 are cheap and shippable on their own, and they are the honest test of whether
 anyone wants the retention machinery at all.
 
+**Second pass, after seeing NotebookLM's Studio panel.** Its nine generators —
+audio overview, slide deck, video overview, mind map, reports, flashcards, quiz,
+infographic, data table — are not nine features. Each is a tool that returns
+structured data plus a renderer that draws it, which is exactly the
+`update_plan` → `PlanBlock` and `render_graph` → `MermaidBlock` pattern already
+running in the app. Written up as a table of tool → renderer → what exists, so
+the entry sizes them honestly rather than as a wall of new work: the mind map
+and the four report types are prompts over renderers we ship today, the slide
+deck and infographic are templates over `HtmlReportBlock`, and the audio
+overview is a script problem rather than a synthesis one.
+
+Two things fell out of that pass worth recording:
+
+- **The data table converges with 1.1.1**, which already schedules interactive
+  tables. Same renderer, different producer — study extracts rows from
+  unstructured sources, 1.1.x sorts and filters them. Build once.
+- **Video overview** was dismissed in the first pass as a production pipeline.
+  That was lazy: it is a slide deck plus an audio overview plus a recorder. If
+  the first two land it is a capture step. Still last and still lowest value, but
+  no longer refused as a category.
+
+**A "mode surface" is now its own backlog item.** Study mode wants a workspace —
+sources on one side, conversation in the middle, generated artifacts collected
+somewhere returnable — and so does the code interface. Two modes asking for the
+same shell is the signal to build the shell once. That is the roadmap's own
+principle applied to itself: components before modes, and a workspace a mode can
+furnish is a component. Whichever mode lands first pays for it.
+
 ---
 
 ## 2026-08-16 (updater) — Correction: the signing secrets were never missing

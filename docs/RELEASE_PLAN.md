@@ -988,15 +988,27 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
   What the mode itself would add:
 
   - **Grounded answering.** Answers drawn only from the project's sources, with every claim carrying a citation, and an explicit *"the sources don't cover this"* when they don't. The refusal is the feature — a study tool that quietly fills gaps from the model's own knowledge is worse than no study tool, because the gap is invisible exactly where the user is least able to catch it. Mechanically this is close to plan mode: a chat state that withholds tools and constrains the system prompt, which is a shape we have already built once.
-  - **Study artifacts, generated from the corpus:** study guide, briefing document, FAQ, timeline, mind map, slide deck. Each one is a skill plus a renderer, and several of the renderers exist.
-  - **Flashcards and quizzes**, with the answers checked against the sources rather than against the model's opinion, and a wrong answer that cites the passage the reader should re-read.
   - **Spaced repetition.** The genuinely new engineering: a schedule per card (SM-2 is a day's work and good enough), stored per project, surfaced as "12 cards due" rather than requiring the user to remember to revise. This is the part that makes it a study *tool* rather than a chat with a document.
-  - **Audio overview** — a two-voice discussion of the corpus through the existing TTS, which is the feature people actually talk about NotebookLM for and which we can do locally.
   - **Progress**, per project: which sources have been covered, which are untouched, where the wrong answers cluster.
 
-  Deliberately *not* in scope: video overviews. They are a production pipeline, not a feature, and the value is mostly novelty.
+  **Study tools.** NotebookLM's Studio panel is a row of one-click generators, and that maps cleanly onto the architecture we already have: a tool the model calls, returning structured data, rendered by a block renderer and made exportable. The same pattern as `update_plan` → `PlanBlock` or `render_graph` → `MermaidBlock`. Each row below is one tool plus one renderer, not a feature:
 
-  Sizing note: the artifacts are cheap because the components exist. Grounding is a mode. Spaced repetition is new state with a scheduler and needs a UI of its own. Do not schedule this as one release — the artifacts alone are worth shipping before any of the retention machinery, and they are also the honest test of whether anyone uses it.
+  | Tool | Renderer | What exists already |
+  | --- | --- | --- |
+  | `make_mind_map` | Mermaid | **All of it** — `render_graph` draws this today; it needs a prompt and a source-grounded input, not code |
+  | `make_report` (study guide / briefing / FAQ / timeline) | Markdown + `present_file` | **All of it.** Four artifacts that differ only by their skill |
+  | `make_flashcards` | New — a card deck with flip and self-rating | Data model is trivial; the renderer is small; the *scheduling* behind it is the real work |
+  | `make_quiz` | New — question list with answer checking | Grading must cite the passage, so it leans on the same retrieval as everything else |
+  | `make_data_table` | New — but **1.1.1 already schedules interactive tables** (sort, filter, copy). Same renderer, different producer: here it extracts rows from unstructured sources | Converges with 1.1.x; build once |
+  | `make_slide_deck` | New — HTML slides | `HtmlReportBlock` renders and presents arbitrary HTML today, so this is a template and a print stylesheet |
+  | `make_infographic` | HTML report | Same renderer again. This is a *design* problem, not an engineering one — an infographic nobody would print is worse than the table it replaced |
+  | `make_audio_overview` | Existing audio playback | TTS ships; the work is a two-voice script and turn-taking, not synthesis |
+
+  **Video overview**, previously dismissed here as out of scope, deserves a more honest line: it is a slide deck plus an audio overview plus a recorder. If the first two land, the third is a capture step rather than a production pipeline. Still last, still lowest value, but no longer a category we refuse.
+
+  **Its own interface.** Like the code interface, this wants a workspace rather than a chat panel: sources down one side, the conversation in the middle, generated artifacts collected somewhere they can be returned to. That is the second time this shape has come up in the backlog, which is the signal — **build one mode surface and let both use it**, rather than two bespoke shells that duplicate every affordance. The principle is the roadmap's own: components before modes, and "a workspace a mode can furnish" is a component. Whichever mode lands first should pay for it, and it should be scoped as its own item before either.
+
+  Sizing note: the artifacts are cheap because the components exist. Grounding is a mode. Spaced repetition is new state with a scheduler. The interface is shared with the code interface and should be scoped separately. Do not schedule this as one release — the artifacts alone are worth shipping before any of the retention machinery, and they are also the honest test of whether anyone uses it.
 
 - [ ] Mobile: Tauri mobile target (iOS/Android)
 - [ ] Deep research mode: multi-step sourced research using subchats; requires design session before scheduling

@@ -41,7 +41,7 @@ Semantic versioning. Each release is tagged `vMAJOR.MINOR.PATCH`.
 | **1.0.0** | Hardening & Public Release | Planned |
 | **1.1.x** | In-chat rendering — charts from data, richer artifacts | Planned |
 | **1.2.x** | Signed-in connectors — OAuth, keychain, per-scope consent | Planned |
-| **Post-1.0** | Code interface + edit engine, Diffusion LLM, Mobile | Backlog |
+| **Post-1.0** | Code interface + edit engine, study mode, shared mode surface, Diffusion LLM, Mobile | Backlog |
 
 ---
 
@@ -207,8 +207,9 @@ The "Connect Google" button, and the same again per provider: an OAuth client wi
 
 | Feature | Notes |
 | --- | --- |
-| Code interface + edit engine | Claude Code-style chat window for local models working on codebases; uses RAG/embeddings from 0.4.x for repo understanding. Scoped with it: replacing whole-file `write_file` with a real edit engine (diff hunks validated against the file as it currently is, fuzzy anchoring, syntax check before the write lands). Cursor and Antigravity are categorically better here and the gap is structural, not a missing feature — but the parts worth pulling forward are 0.10.x's checkpoints and diff review, which help every existing file tool immediately |
-| Study mode | A grounded mode for learning a body of material rather than working on it: answers restricted to the project's own sources, and the study artifacts a reader actually uses — study guide, briefing, FAQ, timeline, mind map, flashcards, quizzes, audio overview. NotebookLM is the reference. Most of the components already exist here (per-project knowledge base, inline citations, `render_graph`, TTS, skills, HTML reports), and the parts that don't are the interesting ones: source-only grounding that *refuses* rather than fills gaps, and durable study state — what you have been quizzed on, what you got wrong, when to see it again. Sized in [RELEASE_PLAN.md](RELEASE_PLAN.md#backlog--unscheduled) |
+| Code interface + edit engine | Claude Code-style chat window for local models working on codebases; uses RAG/embeddings from 0.4.x for repo understanding. Scoped with it: replacing whole-file `write_file` with a real edit engine (diff hunks validated against the file as it currently is, fuzzy anchoring, syntax check before the write lands). Cursor and Antigravity are categorically better here and the gap is structural, not a missing feature — but the parts worth pulling forward are 0.10.x's checkpoints and diff review, which help every existing file tool immediately. Wants the shared mode surface below rather than a shell of its own |
+| Study mode | A grounded mode for learning a body of material rather than working on it: answers restricted to the project's own sources, plus a set of study *tools* — mind map, study guide/briefing/FAQ/timeline, flashcards, quiz, data table, slide deck, infographic, audio overview — each one a tool with a renderer, which is the `update_plan` → `PlanBlock` pattern we already use. Most components exist (knowledge base, citations, `render_graph`, TTS, skills, HTML reports); the missing parts are source-only grounding that *refuses* rather than fills gaps, and durable study state. Wants a workspace rather than a chat panel — see "mode surface" below. Sized in [RELEASE_PLAN.md](RELEASE_PLAN.md#backlog--unscheduled) |
+| Mode surface | A workspace shell a mode can furnish — a source/context rail, the conversation, and a collected set of generated artifacts. Wanted by both the code interface and study mode, which is the signal to build it once rather than grow two bespoke shells that duplicate every affordance. Components before modes: whichever mode lands first pays for it, and it is scoped as its own item before either |
 | Diffusion LLM support | Text generation via diffusion-first models (e.g. Mercury Coder); architecturally distinct from autoregressive — isolated pipeline |
 | Mobile app | Tauri mobile target (iOS/Android); post-desktop-stable |
 | Multi-user/team | Shared zones, shared projects, access control |

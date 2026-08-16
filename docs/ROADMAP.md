@@ -35,6 +35,9 @@ Semantic versioning. Each release is tagged `vMAJOR.MINOR.PATCH`.
 | **0.10.x** | Reversible work — checkpoints, undo, review before apply | Planned |
 | **0.11.x** | The app sets itself up — API refresh, an API tool, connector catalog | In progress — API refresh and the API tool done; connectors open |
 | **0.12.x** | Planning & task control — plan mode, live task state, replay, chat-window pass | Built — runtime testing open |
+| **0.13.x** | Tool visuals — a look for every tool, raw call one click away | Planned |
+| **0.14.x** | The agent floor — edit reliability, runaway guardrails, retrieval, spend | Planned |
+| **0.15.x** | Smaller lifts — chat search, palette, MCP resources, saved runs | Planned |
 | **1.0.0** | Hardening & Public Release | Planned |
 | **1.1.x** | In-chat rendering — charts from data, richer artifacts | Planned |
 | **1.2.x** | Signed-in connectors — OAuth, keychain, per-scope consent | Planned |
@@ -149,6 +152,30 @@ The `plan` tool gives a model a checklist. What it does not give the user is a s
 **0.12.3 — the chat window earns its space.** The record and the chrome around it, since a replay nobody can read and a header nobody can parse are the same kind of failure. Replay stops being only the event log: the conversation is already stored, so it is woven into the same timeline — what was asked, what each zone answered, and every tool call with its arguments, its output and how long it took — which is what makes "where did that number come from?" answerable after the fact. The header row goes from five glyph sizes to one, the spend chip becomes a legible dollar sign, and the zone control drops the model id it was spending its width on. The permanent project/tag bar becomes a header chip that opens it, so a chat that is filed nowhere no longer pays a row of the window to say so, and the jump from the landing view to a conversation is animated rather than cut. Launch stops flashing: the appearance is restored from a cache before the first paint, and the app's mark is drawn over it for the half-second the rest of the window takes to arrive.
 
 **Done when:** a user can ask for a plan, rewrite it, watch it execute step by step, intervene mid-run without losing the turn, and afterwards replay exactly what happened — including what every tool returned.
+
+---
+
+### 0.13.x — Tool visuals
+
+A tool step that isn't a plan, a plot, a diagram or a saved file renders as escaped JSON — 47 of 52 tools, including the ones an agent run is mostly made of. The release gives every tool a look: 14 visual families rather than 52 bespoke cards, a Visual/Input/Output tab strip so the exact arguments and the exact result string stay one click away instead of being the only thing on offer, and a shaped fallback so the unbounded set of MCP tools never drops to raw JSON either. The diff view this needs for file edits already exists — it was built for the approval prompt in 0.10.2 and the step card has simply never called it. The largest single gain is in Multizone mode, where a leader's step list is currently the least legible part of the app: sub-agent spawns become cards you can open the transcript from, and the team board — claims, refusals, notes — becomes visible for the first time. Full spec in [TOOL_VISUALS.md](TOOL_VISUALS.md).
+
+**Done when:** no tool renders as raw JSON by default, every tool step exposes its unmodified input and output in one click, and a Multizone run can be read from the step list without opening the tracer.
+
+---
+
+### 0.14.x — The agent floor
+
+A comparison pass against roughly twenty open-source agents and clients ([BORROWABLES.md](BORROWABLES.md)) put our orchestration, review and checkpointing ahead of most of the field — the teamwork lock layer has no equivalent in anything surveyed — and our *primitives* behind it. `edit_file` requires a byte-exact match and, when the anchor appears twice, silently edits the first one and reports success. There is no 429 path in the LLM client. Nothing stops a background sub-agent repeating a failing call until the task budget is gone, and nobody is watching a background sub-agent. Auto-approval's top notch is *Everything*, which the README tells people to select before a long run. Retrieval is embedding-only, so an exact error string is the query it handles worst.
+
+This release fixes the layer underneath: an edit that refuses ambiguity, tolerates whitespace and syntax-checks itself; loop detection, backoff and explicit caps; per-category approval with shell prefix rules; the project's own `AGENTS.md` and a ranked repo map so seven agents don't rediscover the layout seven times; hybrid retrieval with a rerank; and cost in currency per sub-agent. It closes with an eval harness, because the premise of the whole panel is that it beats a single local model and there is presently no way to know.
+
+**Done when:** an edit either lands correctly or explains itself, a runaway sub-agent stops on its own, a rate limit costs a retry rather than a panel member, and the panel's benchmark score is a number we can produce on demand.
+
+---
+
+### 0.15.x — Smaller lifts
+
+The remainder of the comparison: cross-chat search, a command palette, fork scope options, MCP resources and prompts, saved parameterised runs, and a global-shortcut quick assistant. Independently useful, none load-bearing for 1.0, and grouped so they can be dropped or deferred as a block if 1.0 needs the room.
 
 ---
 

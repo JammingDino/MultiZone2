@@ -798,6 +798,95 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## 0.13.x — Tool visuals
+
+*Every tool step that isn't a plan, a plot, a diagram or a saved file renders as escaped JSON in a `<pre>`. That is 47 of 52 tools, including the ones an agent run is mostly made of — edits, shell, sub-agents, the team board. Full design in [TOOL_VISUALS.md](TOOL_VISUALS.md); the short version is 14 visual families, a Visual/Input/Output tab strip so the raw call is one click away rather than the only thing on offer, and a shaped fallback so MCP tools never drop to raw JSON either.*
+
+### 0.13.0 — The dispatch, the tabs, and the fallback
+
+- [ ] `renderToolOutput` becomes a family lookup rather than an if-chain: a tool joins a family by adding one line to a map, and an unmapped tool gets the fallback
+- [ ] Visual / Input / Output tabs on every tool step. Visual is the default tab where one exists; Input pre-opens when the result is an error, because that is the tab you wanted
+- [ ] Shaped fallback replacing raw JSON everywhere: an array of objects becomes a table, an object a collapsible key/value list, a bare string markdown. This is the most-used renderer in the system once MCP tools are counted, so it is built first and built properly
+- [ ] Families 1 and 14 wired in the same pass — `DiffView` (read-only) for `create_file` / `edit_file`, and the four existing renderers moved into the family map instead of being special cases
+- [ ] One height cap (~320px, own scroll) shared by every family, so a step can never push the turn off screen
+- [ ] Streaming-safe: header and Input update while arguments stream; the visual renders once the result lands
+
+### 0.13.1 — The tools a run is made of
+
+- [ ] Family 5 (terminal): `run_command`, `execute_code`, `wsl_exec` and the five `terminal_*` tools — command line, ANSI-parsed output with stderr tinted, exit-code pill, duration, tail-anchored for long output
+- [ ] Family 2 (file card): `read_file`, `create_folder`, `move_file`, `copy_file`, `delete_file` — path, size, lines, language, first lines highlighted; `from → to` for move and copy; PDF reads show which pages were extracted
+- [ ] Family 3 (tree): `list_directory`, `find_files` — indented tree with counts and *explicit* truncation
+- [ ] Family 4 (match list): `search_file_text`, `search_local_files` — hits grouped by file with the term highlighted; knowledge hits carry score and source document
+
+### 0.13.2 — Making a Multizone run legible
+
+- [ ] Family 9 (agent card): `spawn_subagent`, `send_subchat_message`, `collect_subagents`, `list_subchats`, `read_subchat` — zone avatar, task line, status pill, turn count, and **Open transcript** reachable from the step that caused it rather than only from the stack tracer
+- [ ] Family 10 (team board): `claim_files`, `release_files`, `post_note`, `team_status` — file chips tinted by owning agent with the stated intent on hover; a refused write names who holds the file and since when; `team_status` renders as the board itself
+- [ ] Error looks per family: the error is the visual, in the family's own language — a refused write shows the claim, a non-zero exit shows the pill and stderr, a 404 shows the status pill
+
+### 0.13.3 — The rest, and export
+
+- [ ] Families 6, 7, 8: `smart_search` (engine strip showing which engines contributed, returned nothing, or failed — information the tool already returns and nobody currently sees), `smart_fetch` / `smart_crawl` (page cards, crawl shape), `http_request` (method/URL, status pill, request and response panes)
+- [ ] Families 11, 12, 13: memory (scope chip, previous value struck on overwrite), skills (name, description, tool chips, diff on update), state changes (`before → after` in one line; a token bar for `compact_context`; `get_current_datetime` as an inline line with no card at all)
+- [ ] Export fidelity: families 1, 5 and 9 get a text form in Markdown and PDF export rather than dropping to a summary line
+- [ ] Activity rail in compact mode shows family icons rather than one wrench for everything
+
+---
+
+## 0.14.x — The agent floor
+
+*A comparison pass against ~20 open-source agents and clients ([BORROWABLES.md](BORROWABLES.md)) found the gaps clustered in one place. Orchestration, review, checkpointing and coordination are ahead of most of the field — teamwork locks have no equivalent in anything surveyed. What is behind is the layer underneath: the edit primitive, the retry path, the retrieval, the guardrails on a runaway turn. A panel of seven agents amplifies whatever is under it, including a bad edit primitive.*
+
+### 0.14.0 — An edit that is hard to get wrong
+
+- [ ] `edit_file` counts occurrences before writing and refuses with the count when it is not 1. Today `replacen(.., 1)` takes the first hit silently, which is a wrong edit that reports success — the worst failure mode a file tool has
+- [ ] On no match, retry with whitespace-normalised and indentation-shifted comparison before giving up, so a trailing space does not cost a turn
+- [ ] Syntax check after the write, auto-revert with the parse error on failure. Kept to syntax only: a guardrail earns its place by having a false-positive rate near zero, which a parser has and a linter does not
+- [ ] Windowed `read_file` — an offset/limit view with the file's line count reported, so a large file does not have to arrive whole to be edited
+- [ ] This is the cheap 80% of the backlog's "file editing as an engine" and does not wait on the code interface
+
+### 0.14.1 — Guardrails on a runaway turn
+
+- [ ] Loop detection: hash `(tool_name, arguments, result)` per step over a window of the last ~12. Four identical triples stops the turn and surfaces it; three consecutive identical errors fails it with the error. Also catch the alternating pair, which is the shape a stuck agent takes when it fixes one thing by breaking another
+- [ ] Surfaced in the stack tracer, and — for a background sub-agent, which nobody is watching — raised to the parent
+- [ ] Backoff and cooldown in `llm/client.rs`: exponential backoff with jitter on 429 and 5xx, per-provider cooldown after three failures in a window. There is currently no 429 path at all, and a seven-member panel meets rate limits long before one chat does
+- [ ] Optional fallback zone per zone, so a leader loses a provider rather than a panel member
+- [ ] Explicit caps beside the existing turn budget: delegation depth, total spend, and a handoff-back termination
+
+### 0.14.2 — Approval that isn't all-or-nothing
+
+- [ ] Per-category auto-approval (read / edit / shell / MCP / spawn) replacing the single global setting whose top notch is *Everything* — which the README currently tells people to select before any long run, because a sub-agent cannot show a prompt
+- [ ] Shell allow-prefix and deny-prefix lists, longest match wins, so "allow `git`, deny `git push`" resolves correctly
+- [ ] Per-zone overrides: a scout gets read and search, an implementer gets edit inside the project root, nobody gets unreviewed shell by default
+
+### 0.14.3 — What the agent knows before it starts
+
+- [ ] Read the project's own `AGENTS.md` / `CLAUDE.md` into every zone's system prompt for that project. Our project memory is good and entirely private to us; most repos an agent meets already carry one of these files
+- [ ] Path-triggered rules: a convention that fires the first time a matching file is read, keeping directory-specific instructions out of the base prompt
+- [ ] Repo map — tree-sitter symbol index, ranked by a PageRank over the reference graph, rendered into a fixed token budget and injected at session start. Seven agents currently pay the rediscovery cost seven times
+- [ ] Per-project lint and test commands run after an edit batch, output fed back as the next turn's input — so "the implementer thinks it is done" becomes evidence, and a compete-mode leader can choose between two diffs on something other than prose
+
+### 0.14.4 — Retrieval and spend
+
+- [ ] Hybrid retrieval: BM25 over FTS5 fused with the existing cosine score at roughly equal weight, then a cross-encoder rerank of the top ~20 down to ~8. Embedding-only search misses exact-token queries — an error string, a config key, a function name — which is most of what a coding agent looks up. Same RRF shape `smart_search` already uses, applied to the local index
+- [ ] A bundled, refreshable model price table; cost in currency per turn and per sub-agent, built on the existing cache-aware token accounting. The header chip currently shows billed tokens behind a dollar sign — this makes the glyph honest
+- [ ] Eval harness: point a zone or team config at SWE-bench Verified instances and report pass rate. The premise of the whole panel is that it beats a single local model, and there is currently no way to know
+
+---
+
+## 0.15.x — Smaller lifts
+
+*The rest of [BORROWABLES.md](BORROWABLES.md) — each independently useful, none load-bearing for 1.0.*
+
+- [ ] Cross-chat full-text search over messages (FTS5 is already available). Subchats multiply the number of conversations by the size of the panel and there is currently no way to find one
+- [ ] Command palette over zones, chats, settings and skills — everything reachable is a named thing behind a menu. Note `Ctrl/Cmd+K` is already bound to composer focus and would need rebinding
+- [ ] Fork scope options: visible path / with branches / all, and standalone vs continuation context
+- [ ] MCP `resources/list` as attachable context and `prompts/list` as slash commands — we call `tools/list` and `tools/call` only, so two protocol calls buy a whole surface
+- [ ] Saved parameterised runs: prompt template + zone + parameters in one shareable file. Zone teams already encode who does the work; this encodes the task
+- [ ] Quick assistant — a global-shortcut mini window over the base zone, the fast end of the fast-to-thorough spectrum the roadmap describes
+
+---
+
 ## 1.0.0 — Hardening & Public Release
 
 - [ ] Performance: measure and optimize startup time, first message render, large chat (500+ messages) scroll — fixed the main structural cause of wasted re-renders: `Sidebar`/`ChatPanel`/`MessageThread`/`ChatList`/`ZoneEditor`/`ProjectsPanel`/`SettingsModal` subscribed to the whole zustand store unfiltered, so *any* state change anywhere re-rendered all of them; converted to shallow/per-field selectors, and `UserMessage`/`BotTurnView` are now memoized (with a custom comparator for `BotTurnView` since `groupMessages` rebuilds turn objects each call) so a streaming token only re-renders the turn actually generating, not the whole history. Still open: no virtualization for very long (500+) message lists, and no measured before/after startup or first-paint numbers.

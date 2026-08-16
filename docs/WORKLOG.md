@@ -5,6 +5,77 @@ alone. Newest first. Detail belongs in the linked docs; this is the thread.
 
 ---
 
+## 2026-08-16 (later) — 0.13.0 built, and the edit primitive fixed
+
+Version bumped to **0.13.0** across `package.json`, `Cargo.toml` and
+`tauri.conf.json`.
+
+**`releaseBuild` was set to `false`.** It had been left `true` by commit
+`47c7870` ("marked for release"), which was never pushed — so with the bump, the
+next push to main would have published this UI as a release without it ever
+having run in the Tauri shell. Flip it back when you actually want to ship.
+
+### Built
+
+**0.14.0's edit fix, landed early** (`tools/filesystem.rs`). 0.13.0's diff
+visual is only honest if the edit it draws is the edit that happened, so this
+came first.
+
+- Ambiguity is refused with the count, or applied to all with `replace_all`.
+  Previously `replacen(.., 1)` edited the first occurrence and reported success.
+- An empty `old_text` — which passed `contains` and inserted at offset zero — and
+  a no-op edit are both refused.
+- A failed exact match retries line-wise ignoring indentation and trailing
+  whitespace, re-indenting the replacement onto the file's own indentation.
+  Ambiguous tolerant matches are refused too.
+- A syntax check reverts the write when the file breaks, reported only as a
+  *regression* (parsed before, doesn't after) so the checker's own blind spots
+  cancel out. JSON is really parsed; C-like files get a bracket scan that
+  understands strings and comments.
+- `resolve_edit` is shared with `review::proposal`, so the approval diff and the
+  applied edit cannot drift apart.
+
+15 new tests. One of them found a real bug in the bracket scanner: a file ending
+inside a `//` comment was treated as unterminated.
+
+**0.13.0 tool visuals.** Family map over all built-in tools, Visual/Input/Output
+tabs, shaped fallback, `DiffView` finally called from the step card, and the
+terminal family pulled forward from 0.13.1. Errored steps open on Input.
+
+**Testing infrastructure**, from TEST_STRATEGY.md's recommended order:
+
+- `.github/workflows/ci.yml` — build, `npm test`, `cargo test --lib` on every
+  push and PR. Nothing ran between releases before this.
+- The updater manifest rewrite is now a pure function with 7 fixture tests,
+  including the percent-encoded-filename case that would publish a manifest with
+  unrewritten URLs and silently stop every install updating.
+
+### Verified
+
+| Check | Result |
+| --- | --- |
+| `cargo test --lib` | 192 passed, 0 failed |
+| `npx tsc --noEmit` | clean |
+| `npm run build` | green |
+| `npm test` | 7 passed |
+| `cargo build --lib` | clean at 0.13.0 |
+
+### Not verified
+
+- **Nothing has run in the Tauri shell.** Every visual is typechecked and built,
+  not seen. Runtime checks are in TEST_CHECKLIST.md §11d.
+- The CI workflow has never executed — it cannot until something is pushed.
+- The edit rules are covered by unit tests; the *approval prompt* showing the
+  same diff has not been exercised end to end in the app.
+
+### Still open from the same releases
+
+Windowed `read_file` (0.14.0), families 2/3/4 and 6–13 (0.13.1–0.13.3), and the
+mock streaming provider — the one item on the test strategy with the highest
+value per hour, and the one that closes "no dropped tokens" for good.
+
+---
+
 ## 2026-08-16 — Comparison pass, tool visuals spec, 1.0 test strategy
 
 Docs only. No source changed, nothing to runtime-test.

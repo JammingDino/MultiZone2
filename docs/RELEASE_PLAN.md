@@ -853,6 +853,12 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [x] **Runtime-test:** a search step shows the engine strip, and a blocked engine shows as failed
 - [x] **Runtime-test:** a PDF export of a turn that edited a file and ran a command carries the diff and the console
 
+### 0.13.4 — The session log becomes opt-in
+
+- [x] `pdfExportSessionLog` (default **off**) beside the other Chat export settings in Settings → Appearance. The log is the run as *recorded* — every turn started and finished, every tool run, the approvals declined — which is evidence rather than reading, and on a long run it is a table of hundreds of rows appended to a document usually exported for its conversation
+- [x] PDF only. The Markdown export keeps its log unconditionally: a markdown file is far more often the machine-readable copy, and the reason to suppress the log — page after page of table in a document someone will read — does not apply to it
+- [ ] **Runtime-test:** off by default on an existing install, and the toggle changes the exported document
+
 ---
 
 ## 0.14.x — The agent floor

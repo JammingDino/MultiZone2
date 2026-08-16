@@ -742,6 +742,20 @@ export interface AppSettings {
    */
   pdfExportTheme: "app" | "dark" | "light";
   /**
+   * Whether a chat's PDF export closes with the session log — the run as it was
+   * *recorded*: every turn started and finished, every tool run, the approvals
+   * declined, the failures the prose never mentions.
+   *
+   * Off by default (0.13.4). It is evidence rather than reading, and on a long
+   * run it is a table of hundreds of rows appended to a document usually being
+   * exported for someone who wants the conversation. Turn it on when the export
+   * is a record — a bug report, an audit, showing what an agent actually did.
+   *
+   * PDF only: the Markdown export keeps its own log section, since a markdown
+   * file is far more often the machine-readable copy.
+   */
+  pdfExportSessionLog: boolean;
+  /**
    * Whether a chat export folds in the sub-agent conversations the run spawned
    * (0.9.11), nested under the turns that started them and labelled as
    * agent-to-agent throughout.
@@ -996,6 +1010,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   pdfMode: "images",
   pdfExportDetail: "steps",
   pdfExportTheme: "app",
+  pdfExportSessionLog: false,
   exportSubchats: true,
   perspectiveMode: "parallel",
   perspectiveLayout: "stacked",

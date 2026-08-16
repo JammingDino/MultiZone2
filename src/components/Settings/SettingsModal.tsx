@@ -772,12 +772,18 @@ function AppearanceTab() {
           enable “Background graphics” so the theme’s colours are drawn.
         </p>
 
-        <div className="mt-4">
+        <div className="mt-4 flex flex-col gap-3">
           <ToggleRow
             label="Include sub-agent conversations"
             description="Nested under the turns that spawned them, and marked as zone-to-zone. Markdown and PDF."
             checked={appSettings.exportSubchats}
             onChange={(exportSubchats) => setAppSettings({ exportSubchats })}
+          />
+          <ToggleRow
+            label="Append the session log"
+            description="Closes the PDF with the run as recorded — every turn and tool, timed from the first. Evidence rather than reading, so it is off unless you want it. PDF only."
+            checked={appSettings.pdfExportSessionLog}
+            onChange={(pdfExportSessionLog) => setAppSettings({ pdfExportSessionLog })}
           />
         </div>
       </section>

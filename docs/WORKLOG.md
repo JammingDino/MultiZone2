@@ -5,6 +5,32 @@ alone. Newest first. Detail belongs in the linked docs; this is the thread.
 
 ---
 
+## 2026-08-16 (0.13.4) — The session log becomes opt-in
+
+The PDF export always appended the session log. It is now a setting,
+`pdfExportSessionLog`, sitting with the other Chat export controls in
+Settings → Appearance, **off by default**.
+
+The reasoning for off: the log is the run as *recorded* rather than as read —
+every turn started and finished, every tool run, every approval declined. That
+is evidence, and it is what you want for a bug report or an audit. It is not
+what you want appended to a document being handed to someone who asked for the
+conversation, where a long run means page after page of table.
+
+Scoped to the PDF, as asked. The Markdown export keeps its log section
+unconditionally: a markdown file is far more often the machine-readable copy,
+and the reason to suppress the log — pages of table in a document a person
+reads — does not apply to it. Said so in the setting's own description rather
+than leaving it to be discovered.
+
+Existing installs get the default: `loadAppSettings` merges per key over
+`DEFAULT_APP_SETTINGS`, so a stored blob without the key picks up `false`.
+
+`npx tsc --noEmit` clean · `npm run build` green · `npm test` 7 passed. Version
+0.13.4, `releaseBuild` still true.
+
+---
+
 ## 2026-08-16 (backlog) — Study mode
 
 Docs only. Added a study mode to the Post-1.0 backlog, with NotebookLM as the

@@ -200,6 +200,13 @@ so what needs eyes is the rendering and the approval path.
 - [ ] A tool whose result is prose rather than JSON still shows its output, with no empty visual above it
 - [ ] Replay on a subchat renders visuals too (its messages were never opened in the transcript)
 
+**Session log in the PDF (0.13.4)**
+
+- [ ] Settings → Appearance → Chat export carries **Append the session log**, and it is **off** on a fresh install and on an existing one that has never seen it
+- [ ] With it off, a PDF export ends at the conversation — no "Session log" table
+- [ ] With it on, the log is appended, timed from the first event
+- [ ] The Markdown export still carries its own log section either way — the setting is PDF-only
+
 **The rest of the families, and export (0.13.3)**
 
 - [ ] 🔁 **Visuals appear in the chat itself, not only in Replay.** Expand a tool step in a normal conversation — the Visual tab is there and is the one it lands on. (The activity rail's `hideVisual` flag used to suppress every family card, and the rail is the whole chat)

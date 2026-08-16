@@ -135,9 +135,15 @@ export type ExportDetail = "steps" | "rails" | "text";
 
 export interface ExportOptions {
   detail: ExportDetail;
+  /**
+   * Append the session log — the run as recorded rather than as read (0.13.4).
+   * Off unless asked for: it is evidence, and on a long run it is hundreds of
+   * rows on the end of a document usually exported for its conversation.
+   */
+  sessionLog?: boolean;
 }
 
-const DEFAULT_OPTIONS: ExportOptions = { detail: "steps" };
+const DEFAULT_OPTIONS: ExportOptions = { detail: "steps", sessionLog: false };
 
 interface RenderedMessage {
   role: "user" | "assistant";
@@ -1538,7 +1544,7 @@ export async function buildChatPrintHtml(
       : ""
   }
   ${body}
-  ${renderSessionLog(data.events, p)}
+  ${options.sessionLog ? renderSessionLog(data.events, p) : ""}
 </body>
 </html>`;
 }

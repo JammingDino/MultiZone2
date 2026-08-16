@@ -5,6 +5,56 @@ alone. Newest first. Detail belongs in the linked docs; this is the thread.
 
 ---
 
+## 2026-08-16 (CI) — Both jobs failed on their first real run
+
+The CI workflow I added last session had never executed — it cannot until
+something is pushed, which I noted at the time. It ran on the v0.13.3 push and
+both jobs failed. Both were defects in the workflow, not in the code, and both
+were the same shape: **verified on this machine, which differs from the runner
+in exactly the way that mattered.**
+
+### Script tests — `Could not find 'scripts/**/*.test.mjs'`
+
+`node --test` only learned to expand glob patterns in Node **22**. The runner
+was pinned to 20, which took the pattern as a literal path. Locally it passes
+because this machine runs 22.16.
+
+Fixed by moving CI to Node 22, and **release.yml with it** — a release built on
+a different Node major than CI verifies is a gap that only shows up in a
+published build. Node 20 is also past end of life.
+
+### Rust tests — `frontendDist "../dist" doesn't exist`
+
+`tauri::generate_context!()` resolves `frontendDist` at *compile* time, so the
+library will not build without `../dist` — even though no test in it reads a
+frontend asset. It passes locally for the dullest possible reason: `dist/` has
+been sitting in this working tree since the first build.
+
+Reproduced properly by moving `dist` aside, which failed with the runner's exact
+error, then fixed with a placeholder `dist/index.html` and confirmed green
+(192 passed) before restoring the real one.
+
+The placeholder is deliberate over building the real frontend in that job: it
+keeps the Rust job independent of the Node one, and building the frontend there
+would mean a duplicate `npm ci` on a job already spending 13 minutes in rustc,
+to embed files nothing under test reads.
+
+### Merge
+
+`origin/main` had CI's post-v0.13.3 bump to 0.13.4. This branch was already at
+0.13.4, so the only conflict was `releaseBuild` — kept `true`, since the intent
+to publish is this branch's rather than the bot's. `updater/latest.json` came
+across unchanged, still describing v0.13.3 with both signatures intact.
+
+### Lesson worth keeping
+
+Twice now — the replay-only rendering bug, and this — something was reported
+working on the strength of a surface that did not exercise the real path. The
+cheap habit that would have caught this one: when a check can only run somewhere
+else, make the local environment resemble that place before believing it.
+
+---
+
 ## 2026-08-16 (0.13.4) — The session log becomes opt-in
 
 The PDF export always appended the session log. It is now a setting,

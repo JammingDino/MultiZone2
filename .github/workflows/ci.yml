@@ -26,9 +26,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 22, not 20: `node --test` only learned to expand glob patterns in 22,
+      # so on 20 `npm test` passes "scripts/**/*.test.mjs" through as a literal
+      # path and fails with "Could not find". 20 is also past end-of-life, and
+      # development happens on 22 — CI running a different major than the one
+      # everything is written against is how a green local run fails here.
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - run: npm ci
@@ -52,9 +57,21 @@ jobs:
         with:
           workspaces: src-tauri -> target
 
-      # The library alone — no Tauri bundling, no WebView2, no frontend assets
-      # needed. wreq links BoringSSL, so cmake/perl/NASM come from the runner
-      # image rather than being installed here.
+      # `tauri::generate_context!()` resolves `frontendDist` at *compile* time,
+      # so the lib will not build unless ../dist exists — even though no test
+      # here touches a frontend asset. A placeholder is enough and keeps this
+      # job independent of the Node one: building the real frontend would add a
+      # duplicate npm install to a job that already spends 13 minutes in rustc,
+      # to embed files nothing under test reads.
+      - name: Placeholder frontend build output
+        shell: bash
+        run: |
+          mkdir -p dist
+          [ -f dist/index.html ] || echo '<!doctype html><title>ci</title>' > dist/index.html
+
+      # The library alone — no Tauri bundling, no WebView2. wreq links
+      # BoringSSL, so cmake/perl/NASM come from the runner image rather than
+      # being installed here.
       - name: cargo test
         working-directory: src-tauri
         run: cargo test --lib

@@ -20,6 +20,10 @@ import { MermaidBlock, type MermaidAutoFix } from "@/components/Renderers/Mermai
 import { HtmlReportBlock } from "@/components/Renderers/HtmlReportBlock";
 import { SavedFileChip } from "@/components/Renderers/SavedFileChip";
 import { PlanBlock, PlanProposalBlock, toPlanData, toPlanProposal } from "@/components/Renderers/PlanBlock";
+import { familyOf } from "./visuals/families";
+import { Shaped } from "./visuals/Shaped";
+import { EditVisual } from "./visuals/EditVisual";
+import { TerminalVisual } from "./visuals/TerminalVisual";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { useDictation, MicButton, DictationMeter } from "@/components/Chat/useDictation";
@@ -254,33 +258,153 @@ function ToolStepView({
       )}
 
       {open && (
-        <div className="space-y-2 border-t border-[var(--color-border)] p-2 text-xs">
-          <Section label="Arguments">
-            <pre className="max-h-[280px] overflow-auto whitespace-pre-wrap text-[var(--color-text-muted)]">
-              {toolCall.function.arguments
-                ? prettyJson(toolCall.function.arguments)
-                : "(none)"}
-            </pre>
-          </Section>
-          {resultText !== null && (
-            <Section
-              label={isError ? (isSetupIssue ? "Details" : "Error") : "Output"}
-            >
-              <pre
-                className={`max-h-[280px] overflow-auto whitespace-pre-wrap ${
-                  isError && !isSetupIssue
-                    ? "text-[var(--color-danger)]"
-                    : "text-[var(--color-text-muted)]"
-                }`}
-              >
-                {prettyJson(resultText)}
-              </pre>
-            </Section>
-          )}
-        </div>
+        <ToolTabs
+          name={name}
+          args={args}
+          argumentsText={toolCall.function.arguments}
+          resultText={resultText}
+          parsedResult={parsedResult}
+          isError={isError}
+          isSetupIssue={isSetupIssue}
+          /* The lifted visual is already on screen; a second copy in the tab
+             would be the duplication compact mode exists to avoid. */
+          hasOwnVisual={!!renderedView || hideVisual}
+        />
       )}
     </div>
   );
+}
+
+/**
+ * Visual · Input · Output (0.13.0).
+ *
+ * The expanded card used to be two `<pre>` blocks of escaped JSON, which is the
+ * right thing to have available and the wrong thing to land on. The visual
+ * leads; the exact arguments and the exact result string stay one click away,
+ * because when something has gone wrong they are what you need — and on an
+ * error the Input tab is where the answer usually is, so that is where the card
+ * opens.
+ */
+function ToolTabs({
+  name,
+  args,
+  argumentsText,
+  resultText,
+  parsedResult,
+  isError,
+  isSetupIssue,
+  hasOwnVisual,
+}: {
+  name: string;
+  args: any;
+  argumentsText: string;
+  resultText: string | null;
+  parsedResult: any;
+  isError: boolean;
+  isSetupIssue: boolean;
+  hasOwnVisual: boolean;
+}) {
+  const visual = hasOwnVisual ? null : renderFamilyVisual(name, args, parsedResult, isError);
+  const initial: "visual" | "input" | "output" = visual ? "visual" : isError ? "input" : "input";
+  const [tab, setTab] = useState<"visual" | "input" | "output">(initial);
+  const active = tab === "visual" && !visual ? "input" : tab;
+
+  return (
+    <div className="border-t border-[var(--color-border)] text-xs">
+      <div className="flex items-center gap-1 px-2 pt-2">
+        {visual && <Tab id="visual" active={active} onPick={setTab} label="Visual" />}
+        <Tab id="input" active={active} onPick={setTab} label="Input" />
+        {resultText !== null && (
+          <Tab
+            id="output"
+            active={active}
+            onPick={setTab}
+            label={isError ? (isSetupIssue ? "Details" : "Error") : "Output"}
+          />
+        )}
+      </div>
+      <div className="p-2">
+        {active === "visual" && visual}
+        {active === "input" && (
+          <pre className="max-h-[320px] overflow-auto whitespace-pre-wrap text-[var(--color-text-muted)]">
+            {argumentsText ? prettyJson(argumentsText) : "(none)"}
+          </pre>
+        )}
+        {active === "output" && resultText !== null && (
+          <pre
+            className={`max-h-[320px] overflow-auto whitespace-pre-wrap ${
+              isError && !isSetupIssue
+                ? "text-[var(--color-danger)]"
+                : "text-[var(--color-text-muted)]"
+            }`}
+          >
+            {prettyJson(resultText)}
+          </pre>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Tab({
+  id,
+  active,
+  onPick,
+  label,
+}: {
+  id: "visual" | "input" | "output";
+  active: string;
+  onPick: (t: "visual" | "input" | "output") => void;
+  label: string;
+}) {
+  const on = active === id;
+  return (
+    <button
+      onClick={() => onPick(id)}
+      className={`rounded px-2 py-1 text-[11px] transition-colors ${
+        on
+          ? "bg-[var(--color-panel-hover)] text-[var(--color-text)]"
+          : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+/**
+ * The family dispatch. A tool with no family — every MCP tool, and any built-in
+ * whose family isn't implemented yet — gets the shaped fallback, which is the
+ * point: nothing renders as raw JSON by default any more.
+ */
+function renderFamilyVisual(
+  name: string,
+  args: any,
+  parsed: any,
+  isError: boolean,
+): React.ReactNode {
+  // An error is the visual, in whatever form it arrived. The Output tab holds
+  // the unedited text; a card repeating it adds nothing.
+  if (isError || parsed === null || parsed === undefined) return null;
+
+  switch (familyOf(name)) {
+    case "diff":
+      return <EditVisual name={name} args={args} result={asRecord(parsed)} />;
+    case "terminal": {
+      const rec = asRecord(parsed);
+      return rec ? <TerminalVisual name={name} args={args} result={rec} /> : null;
+    }
+    case "existing":
+      // Rendered above the tabs by renderToolOutput, or has no result worth
+      // shaping (ask_user).
+      return null;
+    default:
+      return <Shaped value={parsed} />;
+  }
+}
+
+function asRecord(v: any): Record<string, unknown> | null {
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
 }
 
 function SetupIssueBanner({

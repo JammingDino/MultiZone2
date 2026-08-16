@@ -804,12 +804,18 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ### 0.13.0 — The dispatch, the tabs, and the fallback
 
-- [ ] `renderToolOutput` becomes a family lookup rather than an if-chain: a tool joins a family by adding one line to a map, and an unmapped tool gets the fallback
-- [ ] Visual / Input / Output tabs on every tool step. Visual is the default tab where one exists; Input pre-opens when the result is an error, because that is the tab you wanted
-- [ ] Shaped fallback replacing raw JSON everywhere: an array of objects becomes a table, an object a collapsible key/value list, a bare string markdown. This is the most-used renderer in the system once MCP tools are counted, so it is built first and built properly
-- [ ] Families 1 and 14 wired in the same pass — `DiffView` (read-only) for `create_file` / `edit_file`, and the four existing renderers moved into the family map instead of being special cases
-- [ ] One height cap (~320px, own scroll) shared by every family, so a step can never push the turn off screen
-- [ ] Streaming-safe: header and Input update while arguments stream; the visual renders once the result lands
+*Status: built, `npx tsc --noEmit` clean and `npm run build` green; not yet exercised in the Tauri shell — runtime checks listed in section 11d of [TEST_CHECKLIST.md](TEST_CHECKLIST.md).*
+
+- [x] Family lookup ([visuals/families.ts](../src/components/Message/visuals/families.ts)) rather than an if-chain: every built-in tool is mapped to one of 14 families, a new tool joins by adding a line, and an unmapped tool — every MCP tool, by definition — gets the shaped fallback. The map is exhaustive even where the family isn't implemented yet, so the intended grouping is written down rather than rediscovered
+- [x] Visual / Input / Output tabs on every tool step (`ToolTabs` in [StepBlock.tsx](../src/components/Message/StepBlock.tsx)). Visual leads where one exists; the card opens on Input when the result is an error, because that is the tab the answer is usually on
+- [x] Shaped fallback ([Shaped.tsx](../src/components/Message/visuals/Shaped.tsx)): an array of uniform objects becomes a table, an object a key/value list with nested values folded below the first level, a long or multi-line string becomes text. A string that is itself JSON is shaped too — several tools return a document in a string field, and showing it escaped is the exact problem this solves
+- [x] Family 1 wired to the existing `DiffView` in read-only mode ([EditVisual.tsx](../src/components/Message/visuals/EditVisual.tsx)). The diff is built from the call's own arguments, not from disk: what this step did, not what the file looks like after four more edits. Common leading and trailing lines stay context, so one changed line inside a ten-line anchor reads as one changed line. Reports a whitespace-tolerant match or a multi-occurrence replace when 0.14.0's resolver says so
+- [x] Family 5 (terminal) brought forward from 0.13.1 — it was the same shape as family 1 and is most of what an agent run does: command line, stdout, stderr tinted, exit-code pill, tail-anchored at 200 lines, ANSI escapes stripped rather than printed
+- [x] Family 14 stays where it renders (above the tabs) and is marked `existing` in the map, so the tab strip doesn't show a second copy
+- [x] One height cap (320px, own scroll) across the tabs and every family
+- [x] Streaming-safe: the pending-arguments pane is unchanged, the tab strip only appears once there is a result
+- [ ] **Runtime-test:** an MCP tool result renders shaped rather than raw (needs a configured MCP server)
+- [ ] **Runtime-test:** a long `run_command` output tail-anchors and stays inside its own scroll
 
 ### 0.13.1 — The tools a run is made of
 
@@ -839,11 +845,14 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ### 0.14.0 — An edit that is hard to get wrong
 
-- [ ] `edit_file` counts occurrences before writing and refuses with the count when it is not 1. Today `replacen(.., 1)` takes the first hit silently, which is a wrong edit that reports success — the worst failure mode a file tool has
-- [ ] On no match, retry with whitespace-normalised and indentation-shifted comparison before giving up, so a trailing space does not cost a turn
-- [ ] Syntax check after the write, auto-revert with the parse error on failure. Kept to syntax only: a guardrail earns its place by having a false-positive rate near zero, which a parser has and a linter does not
+*The first three items landed early, in 0.13.0, because 0.13.0's diff visual is only honest if the edit it draws is the edit that happened. Covered by 15 tests; `cargo test --lib` 192 passed.*
+
+- [x] `edit_file` counts occurrences before writing and refuses with the count when it is not 1, or takes them all when `replace_all` is set. `replacen(.., 1)` used to take the first hit silently — a wrong edit that reports success, the worst failure mode a file tool has. An empty `old_text` (which passed `contains` and inserted at offset zero) and an edit that changes nothing are refused too
+- [x] On no exact match, retry line-wise ignoring indentation and trailing whitespace, and re-indent the replacement onto the indentation the file actually uses — otherwise an anchor quoted without its leading spaces silently de-indents the block it edits. Refused again, with the count, if the tolerant match is itself ambiguous
+- [x] Resolution lives in one function ([`resolve_edit`](../src-tauri/src/tools/filesystem.rs)) which `review::proposal` also calls, so the diff a user approves is the diff that lands rather than two implementations of the same rule
+- [x] Syntax check after the write, auto-revert with the reason. Reported only as a *regression* — parsed before, doesn't after — so a checker that misreads a construct misreads it in both versions and cancels its own blind spot out; an already-broken file isn't blamed on this edit and the edit that repairs one is let through. JSON is really parsed; C-like files get a bracket scan that understands strings and comments, and skips single quotes in Rust where a lifetime and a char literal need a real lexer to tell apart
 - [ ] Windowed `read_file` — an offset/limit view with the file's line count reported, so a large file does not have to arrive whole to be edited
-- [ ] This is the cheap 80% of the backlog's "file editing as an engine" and does not wait on the code interface
+- [x] This is the cheap 80% of the backlog's "file editing as an engine" and did not wait on the code interface
 
 ### 0.14.1 — Guardrails on a runaway turn
 

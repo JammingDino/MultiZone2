@@ -177,6 +177,32 @@ Needs two builds: install version N, then publish N+1.
 - [ ] The splash does not reappear when the window is reloaded mid-session, and never appears twice
 - [ ] ⚙️ Clearing the webview's localStorage (or a fresh install) launches on the defaults with no stale palette or size
 
+## 11d. Tool visuals & editing (0.13.0)
+
+Everything here typechecks and builds; none of it has been seen in the Tauri
+shell. The edit-resolution rules underneath are covered by `cargo test --lib`,
+so what needs eyes is the rendering and the approval path.
+
+- [ ] Expanding any tool step shows a **Visual · Input · Output** tab strip. Input still holds the exact arguments and Output the exact result string — both unedited
+- [ ] A tool with no family (**any MCP tool**) renders shaped — a table for a list of like objects, a folding key/value list otherwise — and never as escaped JSON ⚙️
+- [ ] A tool result carrying JSON *inside a string field* is shaped too, not shown escaped
+- [ ] `create_file` shows the new file as an addition; `edit_file` shows a real diff with unchanged surrounding lines as context
+- [ ] `run_command` shows the command, its output, and a green/red **exit** pill. stderr is tinted differently from stdout
+- [ ] A command printing thousands of lines keeps the last 200, says so, and scrolls inside its own box without pushing the turn off screen
+- [ ] An **errored** tool opens on Input, and shows no visual card duplicating the error
+- [ ] Plans, diagrams, plots and saved files render exactly as before, above the tabs, with no second copy inside them
+- [ ] In compact mode the lifted visual still appears once, not twice
+
+**Editing (0.14.0 rules, landed early)**
+
+- [ ] 🔁 An `edit_file` whose `old_text` appears **twice** is refused with the count — it must not silently edit the first one
+- [ ] The same call with `replace_all: true` changes every occurrence
+- [ ] An anchor with a stray trailing space, or quoted without its leading indentation, still applies — and the replacement lands at the file's own indentation, not the model's
+- [ ] An edit that breaks a `.json` or `.rs` file's syntax is **reverted on disk** and reported as reverted
+- [ ] An edit that *repairs* an already-broken file is allowed through
+- [ ] 🔁 The approval prompt's diff matches what actually lands, including for a whitespace-tolerant match (preview and execution now share `resolve_edit` — if these ever disagree, that sharing has been broken)
+- [ ] Review mode: staging, narrowing to some hunks, and applying still work against the shared resolver
+
 ## 12. Performance
 
 - [ ] Cold start time recorded: ______

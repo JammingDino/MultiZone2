@@ -5,6 +5,8 @@ import { TerminalVisual } from "./TerminalVisual";
 import { FileVisual } from "./FileVisual";
 import { TreeVisual } from "./TreeVisual";
 import { MatchVisual } from "./MatchVisual";
+import { AgentVisual } from "./AgentVisual";
+import { BoardVisual, ClaimRefusal } from "./BoardVisual";
 
 /**
  * The family dispatch, shared by the step card and the replay (0.13.1).
@@ -29,11 +31,26 @@ export function ToolVisual({
   parsed: any;
   isError: boolean;
 }): React.ReactElement | null {
-  // An error is its own visual, in whatever words it arrived in. The Output tab
-  // holds the unedited text and a card repeating it adds nothing.
-  if (isError || parsed === null || parsed === undefined) return null;
+  if (parsed === null || parsed === undefined) return null;
 
   const record = asRecord(parsed);
+
+  if (isError) {
+    // Most errors are their own visual already: the Output tab holds the
+    // unedited text and a card repeating it adds nothing. The exception is a
+    // failure the backend gave *structure* to — a write refused because another
+    // agent holds the file is the moment the teamwork layer exists for, and it
+    // was reaching the reader as a red string.
+    if (record?.error_kind === "claimed") {
+      return (
+        <ClaimRefusal
+          message={String(record.error ?? "")}
+          next={typeof record.next === "string" ? record.next : undefined}
+        />
+      );
+    }
+    return null;
+  }
 
   switch (familyOf(name)) {
     case "diff":
@@ -46,6 +63,10 @@ export function ToolVisual({
       return record ? <TreeVisual name={name} args={args} result={record} /> : null;
     case "match":
       return record ? <MatchVisual name={name} args={args} result={record} /> : null;
+    case "agent":
+      return record ? <AgentVisual name={name} args={args} result={record} /> : null;
+    case "board":
+      return record ? <BoardVisual name={name} args={args} result={record} /> : null;
     case "existing":
       // Rendered by `renderToolOutput` above the tabs, or carrying no result
       // worth shaping (`ask_user`).
@@ -57,7 +78,8 @@ export function ToolVisual({
 
 /** Whether a tool's result gets a visual at all, without rendering one. */
 export function hasToolVisual(name: string, parsed: any, isError: boolean): boolean {
-  if (isError || parsed === null || parsed === undefined) return false;
+  if (parsed === null || parsed === undefined) return false;
+  if (isError) return asRecord(parsed)?.error_kind === "claimed";
   return familyOf(name) !== "existing";
 }
 

@@ -5,6 +5,58 @@ alone. Newest first. Detail belongs in the linked docs; this is the thread.
 
 ---
 
+## 2026-08-16 (0.13.2) — A Multizone run you can read
+
+Version 0.13.2. 0.13.1's remaining item closed and 0.13.2 built.
+
+### Built
+
+**Agent cards (family 9).** The leader's step list was the least legible part of
+the app: a spawn rendered as a JSON object whose most useful field — the
+sub-agent's entire answer — was one escaped string. Now: zone name, the task as
+prose, a status pill, and **Transcript** expanding in place.
+
+`SubchatTranscript` is exported from `StackTrace.tsx` and reused rather than
+reimplemented, so the step and the tracer show the same leader↔sub-agent
+exchange and cannot drift. A background spawn reads as still working and names
+`collect_subagents` as the way to pick it up, which is the thing a leader
+forgets to do.
+
+**The team board (family 10).** The differentiator nothing else surveyed has,
+and until now completely invisible. Claims render as file chips with the stated
+intent, releases struck through, notes tinted by kind, and `team_status` as the
+board itself. Agents are tinted by a hash of their name, so the same agent is
+the same colour in the claims list and in the notes feed — that consistency is
+what makes a board scannable rather than something read line by line.
+
+**One error look, where the backend earned it.** A write refused because
+another agent holds the file carries `error_kind: "claimed"` plus the holder,
+their intent and the hold duration. That is the exact moment the teamwork layer
+exists for and it was arriving as a red string; it now renders as a board card.
+
+Generic errors are deliberately still their own text on the Output tab. A card
+repeating the same string adds nothing, and "every error gets a card" would
+have been the kind of consistency that costs more than it returns.
+
+**PDF page facts** (0.13.1's last open item). `read_file` already reported
+`page_count` and `pages_read`; a PDF read is a *selection*, so which pages came
+back leads the card.
+
+### Verified
+
+`npx tsc --noEmit` clean · `npm run build` green · `npm test` 7 passed.
+Checked by hand that `StackTrace` imports nothing from the visuals, so the new
+`AgentVisual → StackTrace` edge is not an import cycle.
+
+### Not verified
+
+Nothing in 0.13.2 has run in the shell. New checks are in TEST_CHECKLIST §11d —
+the refused-write one needs two agents in one session (have one claim a file,
+then have the other write it), which is also the least likely thing to be
+exercised by accident.
+
+---
+
 ## 2026-08-16 (0.13.1) — Families 2–4, and replay gets the visuals too
 
 ### Confirmed working in the app

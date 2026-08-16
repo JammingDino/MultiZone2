@@ -69,6 +69,12 @@ export function FileVisual({
       icon={FileText}
       path={path}
       facts={[
+        // A PDF read is a selection, not the whole document — which pages came
+        // back is the first thing you need to know about it, and the tool
+        // already reports it.
+        typeof result.page_count === "number"
+          ? `${str(result.pages_read) || "pages"} of ${result.page_count}`
+          : null,
         lines.length ? `${lines.length} line${lines.length === 1 ? "" : "s"}` : null,
         content ? bytes(content.length) : null,
         language(path),

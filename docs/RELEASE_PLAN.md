@@ -827,14 +827,17 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [x] Family 4 (match list) ([MatchVisual.tsx](../src/components/Message/visuals/MatchVisual.tsx)): `search_file_text` hits grouped by file with per-file counts and the term highlighted (matched literally, not compiled — the query is a regex by default and a highlight that throws would take the card down with it); `search_local_files` passages carry their similarity score and source document
 - [x] The dispatch moved out of `StepBlock` into [ToolVisual.tsx](../src/components/Message/visuals/ToolVisual.tsx), shared with replay
 - [x] **Replay shows the same visuals** ([ReplayView.tsx](../src/components/Chat/ReplayView.tsx)). Replay is opened precisely when something went wrong, so a worse view of a call there than in the transcript was the wrong way round. The raw output stays below the visual under its own label; a tool returning prose rather than JSON is unchanged
-- [ ] PDF reads show which pages were extracted (`read_file` already reports it)
+- [x] PDF reads show which pages were extracted — `read_file` already reported `page_count` and `pages_read`, and a PDF read is a *selection*, so which pages came back is the first thing you need to know about it
 - [ ] Family components have no tests — there is still no frontend test runner (see [TEST_STRATEGY.md](TEST_STRATEGY.md))
 
 ### 0.13.2 — Making a Multizone run legible
 
-- [ ] Family 9 (agent card): `spawn_subagent`, `send_subchat_message`, `collect_subagents`, `list_subchats`, `read_subchat` — zone avatar, task line, status pill, turn count, and **Open transcript** reachable from the step that caused it rather than only from the stack tracer
-- [ ] Family 10 (team board): `claim_files`, `release_files`, `post_note`, `team_status` — file chips tinted by owning agent with the stated intent on hover; a refused write names who holds the file and since when; `team_status` renders as the board itself
-- [ ] Error looks per family: the error is the visual, in the family's own language — a refused write shows the claim, a non-zero exit shows the pill and stderr, a 404 shows the status pill
+*Status: built, `npx tsc --noEmit` clean and `npm run build` green; not yet exercised in the Tauri shell.*
+
+- [x] Family 9 (agent card) ([AgentVisual.tsx](../src/components/Message/visuals/AgentVisual.tsx)): zone name, the task as prose, a status pill (running / done / failed / no reply), turn count, and **Transcript** expandable from the step that spawned it — `SubchatTranscript` is now exported from [StackTrace.tsx](../src/components/Message/StackTrace.tsx) and reused rather than reimplemented, so both places show the same leader↔sub-agent exchange. `collect_subagents` renders one card per agent with its reply folded; a background agent still working says so and names `collect_subagents` as the way to pick it up
+- [x] Family 10 (team board) ([BoardVisual.tsx](../src/components/Message/visuals/BoardVisual.tsx)): claims as file chips with the stated intent, releases struck through, notes tinted by kind (decision / blocked / done), and `team_status` as the board itself — agents, claims and notes in one card. Agents are tinted by a hash of their name so the same agent is the same colour across claims and notes, which is what makes a board readable at a glance rather than line by line
+- [x] Error looks, where the backend gives them structure: a write refused because another agent holds the file (`error_kind: "claimed"`) renders as a board card naming the holder, their intent and how long they have had it. This is the moment the teamwork layer exists for and it was arriving as a red string
+- [ ] The other error looks named in [TOOL_VISUALS.md](TOOL_VISUALS.md) — a non-zero exit as a pill, a 404 as a status pill — land with families 8 and the terminal error paths in 0.13.3. A generic error is deliberately left as its own text on the Output tab: a card repeating the same string adds nothing
 
 ### 0.13.3 — The rest, and export
 

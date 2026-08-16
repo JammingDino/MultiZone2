@@ -200,6 +200,16 @@ so what needs eyes is the rendering and the approval path.
 - [ ] A tool whose result is prose rather than JSON still shows its output, with no empty visual above it
 - [ ] Replay on a subchat renders visuals too (its messages were never opened in the transcript)
 
+**Multizone legibility (0.13.2)**
+
+- [ ] A `spawn_subagent` step shows the zone, the task, a status pill and the reply — not a JSON object with the answer as one escaped string
+- [ ] **Transcript** expands inside that step and shows the same leader↔sub-agent exchange the stack tracer does
+- [ ] A `background: true` spawn reads as still running and names `collect_subagents` as the way to pick it up; `collect_subagents` then shows one card per agent
+- [ ] `team_status` renders as a board — agents, claims, notes — and the same agent is the same colour in the claims list and the notes feed
+- [ ] `claim_files` shows the claimed paths and the stated intent; a conflict names who holds the file and for how long
+- [ ] 🔁 **A write refused by another agent's claim** renders as a board card naming the holder and their intent, not as a red error string. (Needs two agents in one session: have one claim a file, then have the other write it)
+- [ ] An ordinary single-zone chat shows none of the teamwork UI
+
 **Editing (0.14.0 rules, landed early)**
 
 - [ ] 🔁 An `edit_file` whose `old_text` appears **twice** is refused with the count — it must not silently edit the first one

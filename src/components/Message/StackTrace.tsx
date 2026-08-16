@@ -228,8 +228,11 @@ function SubchatNodeRow({
 
 /** Lazily-loaded inline transcript of a subchat — its primary user/assistant
  * turns. User turns are the leader's prompts; assistant turns are the
- * sub-agent's answers. */
-function SubchatTranscript({ subchatId }: { subchatId: string }) {
+ * sub-agent's answers.
+ *
+ * Exported since 0.13.2 so the agent-card visual can offer the same transcript
+ * from the step that spawned the sub-agent, rather than only from the tracer. */
+export function SubchatTranscript({ subchatId }: { subchatId: string }) {
   const [messages, setMessages] = useState<Message[] | null>(null);
   const [error, setError] = useState(false);
 

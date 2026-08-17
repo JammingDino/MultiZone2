@@ -122,6 +122,13 @@ pub fn run() {
         // one of the two requests.
         .plugin(build_updater_plugin())
         .plugin(tauri_plugin_process::init())
+        // OS notifications (0.14.3), for the two moments a run stops and waits
+        // for a person: a tool approval and an `ask_user`. Both block the turn
+        // indefinitely — the approval until its five-minute timeout auto-denies
+        // and the sub-agent stalls with no visible cause — and both are most
+        // likely to happen while the user is in another window, since the whole
+        // point of a long agentic run is not watching it.
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let handle = app.handle().clone();
             tauri::async_runtime::block_on(async move {

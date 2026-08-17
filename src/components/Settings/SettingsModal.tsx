@@ -1051,6 +1051,21 @@ function ChatTab() {
       </section>
 
       <section>
+        <h3 className="mb-1 text-sm font-medium">Notifications</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          A run that needs you stops until you answer — an approval times out after five minutes and
+          the agent behind it stalls with no visible cause. Since the reason to start a long run is
+          not to sit watching it, the app says so.
+        </p>
+        <ToggleRow
+          label="Tell me when a run is waiting on me"
+          description="Approvals and questions only, and only when the window is in the background. Finished turns never notify."
+          checked={appSettings.notifyWhenWaiting}
+          onChange={(v) => setAppSettings({ notifyWhenWaiting: v })}
+        />
+      </section>
+
+      <section>
         <h3 className="mb-1 text-sm font-medium">Command rules</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
           One command prefix per line, matched on whole words. <strong>Longest match wins</strong>,

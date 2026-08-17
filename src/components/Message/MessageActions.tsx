@@ -256,9 +256,31 @@ export function MessageActions({
                 />
               )}
               <StatRow
-                label="Generation time"
+                label="Total time"
                 value={formatDuration(stats.durationMs)}
               />
+              {/* The two reasons total time and generation time differ, each
+                  named (0.14.3). Without them a turn reads as a slow model when
+                  it was a slow tool, or — the case this was built for — a
+                  provider running at fifty tok/s while a prompt waited two
+                  minutes for someone to walk back to their desk. */}
+              {(stats.toolMs ?? 0) > 0 && (
+                <StatRow label="…of which tools ran" value={formatDuration(stats.toolMs ?? 0)} />
+              )}
+              {(stats.approvalMs ?? 0) > 0 && (
+                <StatRow
+                  label="…of which awaited approval"
+                  value={formatDuration(stats.approvalMs ?? 0)}
+                />
+              )}
+              {((stats.toolMs ?? 0) > 0 || (stats.approvalMs ?? 0) > 0) && (
+                <StatRow
+                  label="Generating"
+                  value={formatDuration(
+                    Math.max(0, stats.durationMs - (stats.toolMs ?? 0) - (stats.approvalMs ?? 0)),
+                  )}
+                />
+              )}
               <StatRow
                 label="Output tokens (est.)"
                 value={formatTokens(estimateTokens(stats.contentChars))}
@@ -669,11 +691,15 @@ function formatSpeed(stats: {
   reasoningChars: number;
   toolCallChars?: number;
   toolMs?: number;
+  approvalMs?: number;
 }) {
-  // tok/s reflects generation throughput, so discount time spent executing
-  // tools (the model isn't producing tokens then). Overall duration is shown
-  // separately, in full.
-  const genMs = stats.durationMs - (stats.toolMs ?? 0);
+  // tok/s reflects generation throughput, so discount time the model was not
+  // generating: tools executing, and — much more starkly — an approval prompt
+  // sitting unanswered (0.14.3). A turn where someone took two minutes to press
+  // Approve reported 1.0 tok/s from a provider running at fifty, which is a
+  // number about the person, not the model. Overall duration is shown
+  // separately, in full, and both waits get their own rows.
+  const genMs = stats.durationMs - (stats.toolMs ?? 0) - (stats.approvalMs ?? 0);
   if (genMs <= 0) return "—";
   // Speed includes thinking and tool-call tokens — both are tokens the model
   // produced, so both affect throughput.

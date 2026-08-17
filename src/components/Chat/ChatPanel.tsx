@@ -11,6 +11,7 @@ import { ConversationIndicator } from "./ConversationIndicator";
 import { ContextMeter } from "./ContextMeter";
 import { ReviewQueue } from "./ReviewQueue";
 import { DiffView } from "@/components/common/DiffView";
+import { IntentVisual, rulePrefixes, shellCommandOf } from "@/components/Message/visuals/IntentVisual";
 import { HomeScreen } from "./HomeScreen";
 import { SettingsModal } from "@/components/Settings/SettingsModal";
 import { ZoneLibrary } from "@/components/Zones/ZoneLibrary";
@@ -1193,6 +1194,8 @@ function ToolApprovalBanner({
   onDeny: () => void;
 }) {
   const [showArgs, setShowArgs] = useState(false);
+  const appSettings = useApp((s) => s.appSettings);
+  const setAppSettings = useApp((s) => s.setAppSettings);
   // Everything is taken by default: the prompt asks whether to run the model's
   // call, and starting with hunks deselected would quietly make "Approve" mean
   // something the user never chose.
@@ -1201,13 +1204,36 @@ function ToolApprovalBanner({
   );
 
   let argsDisplay = toolArguments;
+  let parsedArgs: any = null;
   try {
-    argsDisplay = JSON.stringify(JSON.parse(toolArguments), null, 2);
+    parsedArgs = JSON.parse(toolArguments);
+    argsDisplay = JSON.stringify(parsedArgs, null, 2);
   } catch { /* leave as-is */ }
 
-  const displayName = toolName.replace(/_/g, " ");
   const hunkCount = diff?.hunks.length ?? 0;
   const partial = hunkCount > 0 && taken.size < hunkCount;
+
+  // Shell calls can be answered *permanently* from here (0.14.3). Walking to
+  // Settings to write a rule you have just been asked about, while a turn sits
+  // blocked waiting for you, is a trip nobody makes — so the rule gets written
+  // where the question is asked.
+  const command = shellCommandOf(toolName, parsedArgs);
+  const prefixes = command ? rulePrefixes(command) : [];
+  const [rulePrefix, setRulePrefix] = useState<string | null>(null);
+  const chosenPrefix = rulePrefix ?? prefixes[prefixes.length - 1] ?? null;
+
+  /** Add a prefix to the global allow or deny list, then answer this call. */
+  function addRule(list: "shellAllow" | "shellDeny") {
+    if (!chosenPrefix) return;
+    const current = appSettings.approvals[list];
+    if (!current.includes(chosenPrefix)) {
+      setAppSettings({
+        approvals: { ...appSettings.approvals, [list]: [...current, chosenPrefix] },
+      });
+    }
+    if (list === "shellAllow") onApprove(partial ? [...taken].sort((a, b) => a - b) : undefined);
+    else onDeny();
+  }
 
   function toggle(index: number) {
     setTaken((s) => {
@@ -1229,29 +1255,34 @@ function ToolApprovalBanner({
               </span>
             )}
           </div>
-          <p className="mb-2 text-xs text-[var(--color-text-muted)]">
-            {zoneName ? `${zoneName} wants to run ` : "The model wants to run "}
-            <span className="font-mono font-medium text-[var(--color-text)]">{displayName}</span>
-          </p>
-          {diff && (
-            <div className="mb-2">
-              <DiffView
-                diff={diff}
-                selected={hunkCount > 1 ? taken : undefined}
-                onToggleHunk={hunkCount > 1 ? toggle : undefined}
-              />
-              {hunkCount > 1 && (
-                <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
-                  Untick a hunk to leave it out — the rest is written as proposed.
-                </p>
-              )}
-            </div>
-          )}
+          {/* What the call will actually do, drawn the way the step card draws
+              what it did (0.14.3). A diff, when the backend previewed one, is
+              already the best possible answer to "what will this do"; anything
+              else gets the intent visual. Raw JSON stays available, one click
+              down, for the times the shaped view is not enough. */}
+          <div className="mb-2">
+            {diff ? (
+              <>
+                <DiffView
+                  diff={diff}
+                  selected={hunkCount > 1 ? taken : undefined}
+                  onToggleHunk={hunkCount > 1 ? toggle : undefined}
+                />
+                {hunkCount > 1 && (
+                  <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+                    Untick a hunk to leave it out — the rest is written as proposed.
+                  </p>
+                )}
+              </>
+            ) : (
+              <IntentVisual name={toolName} args={parsedArgs} />
+            )}
+          </div>
           <button
             onClick={() => setShowArgs((v) => !v)}
             className="mb-2 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
           >
-            {showArgs ? "Hide" : "Show"} {diff ? "raw arguments" : "arguments"}
+            {showArgs ? "Hide" : "Show"} raw arguments
           </button>
           {showArgs && (
             <pre className="mb-3 overflow-x-auto rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-2 text-[11px] font-mono leading-relaxed text-[var(--color-text-muted)]">
@@ -1275,6 +1306,48 @@ function ToolApprovalBanner({
               Deny
             </button>
           </div>
+
+          {/* Answer this one, or answer every command like it (0.14.3). The
+              prefix is chosen rather than typed, and it is shown in full — a
+              standing rule about every future command starting this way is not
+              something to agree to by pressing a button labelled "always". */}
+          {chosenPrefix && (
+            <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-[var(--color-border)] pt-2 text-[11px]">
+              <span className="text-[var(--color-text-muted)]">Rule for</span>
+              {prefixes.length > 1 ? (
+                <select
+                  value={chosenPrefix}
+                  onChange={(e) => setRulePrefix(e.target.value)}
+                  className="rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-1.5 py-0.5 font-mono text-[11px]"
+                >
+                  {prefixes.map((p) => (
+                    <option key={p} value={p}>
+                      {p} …
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <code className="rounded bg-[var(--color-bg)] px-1.5 py-0.5">{chosenPrefix} …</code>
+              )}
+              <button
+                onClick={() => addRule("shellAllow")}
+                title={`Run anything starting with "${chosenPrefix}" without asking, from now on`}
+                className="rounded border border-[var(--color-border)] px-2 py-0.5 hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+              >
+                Always allow
+              </button>
+              <button
+                onClick={() => addRule("shellDeny")}
+                title={`Refuse anything starting with "${chosenPrefix}", from now on`}
+                className="rounded border border-[var(--color-border)] px-2 py-0.5 hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]"
+              >
+                Never allow
+              </button>
+              <span className="text-[var(--color-text-muted)]">
+                — saved to Settings → Chat → Command rules
+              </span>
+            </div>
+          )}
     </div>
   );
 }

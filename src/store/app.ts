@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { DEFAULT_APP_SETTINGS, type AppSettings, type Chat, type Checkpoint, type RestoreReport, type RewindReport, type RewindStatus, type ChatTagEntry, type ChatTagLink, type ChatZone, type McpServerView, type Memory, type Message, type PendingMessage, type PendingMode, type Plan, type PlanStep, type Project, type Provider, type Skill, type SkillPack, type Tag, type Zone } from "@/lib/types";
 import * as api from "@/lib/tauri";
 import type { SettingsBundle } from "@/lib/settingsBundle";
+import { clearAttention, notifyWaiting } from "@/lib/notify";
 import { shade } from "@/lib/color";
 
 /**
@@ -67,6 +68,11 @@ export interface MessageStats {
   /** Cumulative time tools spent *executing* this turn. Excluded from tok/s so
    *  throughput reflects generation, not tool wall-clock. */
   toolMs: number;
+  /** Cumulative time this turn sat waiting for a human to approve a tool call
+   *  (0.14.3). Excluded from tok/s for the same reason as `toolMs`, and more
+   *  starkly: a turn where someone took two minutes to press Approve reported
+   *  1 tok/s from a provider that was running at fifty. */
+  approvalMs: number;
 }
 
 /**
@@ -90,7 +96,27 @@ export interface TurnAggregate {
   /** Start time of the tool currently executing (null when none is running).
    *  Lets the live banner discount the in-progress tool's time from tok/s. */
   toolStartedAt: number | null;
+  /** Cumulative time spent waiting for a human to answer an approval (0.14.3). */
+  approvalMs: number;
+  /** When the approval currently on screen was raised, or null. */
+  approvalStartedAt: number | null;
+  /**
+   * Recent output, for the *live* rate (0.14.3): `[timestamp, chars]` pairs,
+   * pruned to the last few seconds.
+   *
+   * The turn average and the current rate are different questions. "How fast is
+   * this provider going right now" is what someone watches a stream to learn —
+   * and it is the number that tells them a local model has fallen off a cliff,
+   * or that switching provider did anything. A whole-turn average cannot show
+   * either: it is dragged down by every pause that already happened and moves
+   * more slowly the longer the turn runs.
+   */
+  recentChars: [number, number][];
 }
+
+/** Window for the live rate. Long enough to survive the gaps between streamed
+ *  chunks, short enough to follow a provider that changes speed. */
+export const LIVE_RATE_WINDOW_MS = 5_000;
 
 export function freshTurn(startedAt = Date.now()): TurnAggregate {
   return {
@@ -101,6 +127,9 @@ export function freshTurn(startedAt = Date.now()): TurnAggregate {
     toolCallChars: 0,
     toolMs: 0,
     toolStartedAt: null,
+    approvalMs: 0,
+    approvalStartedAt: null,
+    recentChars: [],
   };
 }
 
@@ -123,31 +152,71 @@ function applyTurnEvent(
         ...turn,
         firstTokenAt: turn.firstTokenAt ?? now,
         contentChars: turn.contentChars + event.delta.length,
+        recentChars: pushSample(turn.recentChars, now, event.delta.length),
       };
     case "thinking_token":
       return {
         ...turn,
         firstTokenAt: turn.firstTokenAt ?? now,
         reasoningChars: turn.reasoningChars + event.delta.length,
+        recentChars: pushSample(turn.recentChars, now, event.delta.length),
       };
     case "tool_call_args_delta":
       // Tool arguments are generated tokens too — they cost the model time, so
       // they count toward the turn's output and throughput.
-      return { ...turn, toolCallChars: turn.toolCallChars + event.delta.length };
-    case "tool_call_executing":
-      // Mark when execution began so its wall-clock can be excluded from tok/s
-      // (the model isn't generating while a tool runs).
-      return { ...turn, toolStartedAt: now };
-    case "tool_call_result":
-      if (turn.toolStartedAt === null) return turn;
       return {
         ...turn,
+        toolCallChars: turn.toolCallChars + event.delta.length,
+        recentChars: pushSample(turn.recentChars, now, event.delta.length),
+      };
+    case "tool_call_executing":
+      // Mark when execution began so its wall-clock can be excluded from tok/s
+      // (the model isn't generating while a tool runs). Reaching here also means
+      // any approval was answered — approved calls execute, denied ones never
+      // emit this.
+      return { ...turn, toolStartedAt: now, ...closeApproval(turn, now) };
+    case "tool_approval_required":
+      // The clock that made a 50 tok/s provider report 1.0 (0.14.3). Held
+      // separately from tool time: "the tools were slow" and "nobody was at the
+      // keyboard" are different facts about a turn, and only one of them is
+      // about the machine.
+      return { ...turn, approvalStartedAt: turn.approvalStartedAt ?? now };
+    case "tool_call_result": {
+      // A denial produces a result with no execution, so the approval clock is
+      // closed here too rather than only on the approved path.
+      const approval = closeApproval(turn, now);
+      if (turn.toolStartedAt === null) return { ...turn, ...approval };
+      return {
+        ...turn,
+        ...approval,
         toolMs: turn.toolMs + (now - turn.toolStartedAt),
         toolStartedAt: null,
       };
+    }
     default:
       return turn;
   }
+}
+
+/** Append an output sample and drop everything outside the live window. */
+function pushSample(
+  samples: [number, number][],
+  now: number,
+  chars: number,
+): [number, number][] {
+  const cutoff = now - LIVE_RATE_WINDOW_MS;
+  const kept = samples.filter(([at]) => at >= cutoff);
+  kept.push([now, chars]);
+  return kept;
+}
+
+/** Stop the approval clock, if one is running. */
+function closeApproval(turn: TurnAggregate, now: number): Partial<TurnAggregate> {
+  if (turn.approvalStartedAt === null) return {};
+  return {
+    approvalMs: turn.approvalMs + (now - turn.approvalStartedAt),
+    approvalStartedAt: null,
+  };
 }
 
 /**
@@ -176,6 +245,9 @@ function statsFromTurn(
     // Any tool still marked running shouldn't normally happen at save time,
     // but count it rather than under-reporting tool time.
     toolMs: (turn?.toolMs ?? 0) + (turn?.toolStartedAt != null ? now - turn.toolStartedAt : 0),
+    approvalMs:
+      (turn?.approvalMs ?? 0) +
+      (turn?.approvalStartedAt != null ? now - turn.approvalStartedAt : 0),
   };
 }
 
@@ -273,6 +345,17 @@ interface AppStore {
    */
   errorsByChat: Record<string, ChatError[]>;
   dismissChatErrors: (chatId: string) => void;
+
+  /**
+   * Chats stopped by the session spend limit (0.14.3), keyed by chat.
+   *
+   * Separate from `errorsByChat` because it is not a failure and not
+   * dismissable: the run is stopped and stays stopped until the limit is raised
+   * or removed. Cleared when that happens, or when the chat is retried.
+   */
+  spendLimitByChat: Record<string, { spent: number; cap: number; midTurn: boolean; at: number }>;
+  /** Raise (or remove, with 0) the session limit and resume the stopped chat. */
+  raiseSpendLimit: (chatId: string, newCap: number) => Promise<void>;
 
   /**
    * Messages the user sent while a turn was still running, per chat, waiting to
@@ -839,6 +922,7 @@ export const useApp = create<AppStore>((set, get) => ({
   pendingApprovalByChat: {},
   routingByChat: {},
   errorsByChat: {},
+  spendLimitByChat: {},
   pendingImport: null,
   statsByMessage: {},
   checkpointsByChat: {},
@@ -993,6 +1077,23 @@ export const useApp = create<AppStore>((set, get) => ({
     return report;
   },
   applyStreamEvent(chatId, event, perspectiveZoneId) {
+    // Tell the user when a run has stopped and is waiting for *them* (0.14.3).
+    // Done before the reducers and outside them, because a notification is a
+    // side effect and the reducers below must stay pure — and because both of
+    // these are the same event whether the primary or a perspective raised it.
+    if (get().appSettings.notifyWhenWaiting) {
+      if (event.type === "tool_approval_required") {
+        const chat = get().chats.find((c) => c.id === chatId);
+        void notifyWaiting(
+          "Waiting for your approval",
+          `${event.name.replace(/_/g, " ")} in ${chat?.title || "a chat"}`,
+        );
+      } else if (event.type === "tool_call_result" && event.name === "ask_user") {
+        const chat = get().chats.find((c) => c.id === chatId);
+        void notifyWaiting("A question for you", chat?.title || "A chat is waiting on an answer");
+      }
+    }
+
     // Route perspective events to the separate perspective streams map. A
     // perspective runs the same agentic loop as the primary, so it emits the
     // full set of token/tool/approval events — handled here mirroring the
@@ -1008,6 +1109,7 @@ export const useApp = create<AppStore>((set, get) => ({
         const statsByMessage = { ...s.statsByMessage };
         const pendingApprovalByChat = { ...s.pendingApprovalByChat };
         const errorsByChat = { ...s.errorsByChat };
+        const spendLimitByChat = { ...s.spendLimitByChat };
         const msgs = messagesByChat[chatId] ?? [];
         const current = chatPersp[perspectiveZoneId];
 
@@ -1125,6 +1227,17 @@ export const useApp = create<AppStore>((set, get) => ({
               { message: event.label, at: now, zoneId: perspectiveZoneId, kind: "runaway" },
             ];
             break;
+          case "spend_limit":
+            // The limit is the session's, so whichever lane reaches it first
+            // stops the whole thing — the notice belongs to the chat, not to
+            // this zone's column, and every other lane is about to stop too.
+            spendLimitByChat[chatId] = {
+              spent: event.spent,
+              cap: event.cap,
+              midTurn: event.midTurn,
+              at: now,
+            };
+            break;
           case "done":
           case "cancelled":
             delete chatPersp[perspectiveZoneId];
@@ -1142,6 +1255,7 @@ export const useApp = create<AppStore>((set, get) => ({
           statsByMessage,
           pendingApprovalByChat,
           errorsByChat,
+          spendLimitByChat,
         };
       });
       return;
@@ -1159,6 +1273,7 @@ export const useApp = create<AppStore>((set, get) => ({
       const routingByChat = { ...s.routingByChat };
       const errorsByChat = { ...s.errorsByChat };
       const pendingByChat = { ...s.pendingByChat };
+      const spendLimitByChat = { ...s.spendLimitByChat };
       const current = streaming[chatId];
 
       /** Drop queued-message chips the backend says are no longer pending. */
@@ -1328,6 +1443,19 @@ export const useApp = create<AppStore>((set, get) => ({
           ];
           break;
 
+        case "spend_limit":
+          // Not an error and not a completion — a decision waiting on the user.
+          // Held per chat rather than pushed into `errorsByChat` because it has
+          // actions attached and must not be dismissable into oblivion: the run
+          // really is stopped until someone answers it.
+          spendLimitByChat[chatId] = {
+            spent: event.spent,
+            cap: event.cap,
+            midTurn: event.midTurn,
+            at: now,
+          };
+          break;
+
         case "done":
         case "cancelled":
           delete streaming[chatId];
@@ -1347,6 +1475,7 @@ export const useApp = create<AppStore>((set, get) => ({
         routingByChat,
         errorsByChat,
         pendingByChat,
+        spendLimitByChat,
       };
     });
 
@@ -1545,6 +1674,20 @@ export const useApp = create<AppStore>((set, get) => ({
       });
     }
   },
+  async raiseSpendLimit(chatId, newCap) {
+    await get().setAppSettings({ maxSessionTokens: Math.max(0, Math.round(newCap)) });
+    set((s) => {
+      const spendLimitByChat = { ...s.spendLimitByChat };
+      delete spendLimitByChat[chatId];
+      return { spendLimitByChat };
+    });
+    // Resume where it stopped. The user's message is already in the transcript
+    // with nothing answering it — a stopped turn never wrote one — so this
+    // continues the run rather than re-asking, which is what "raise it and carry
+    // on" has to mean if the limit is to be usable rather than merely correct.
+    await api.regenerateResponse(chatId);
+  },
+
   async respondApproval(chatId, zoneId, approved, hunks) {
     set((s) => ({
       pendingApprovalByChat: {
@@ -1552,6 +1695,12 @@ export const useApp = create<AppStore>((set, get) => ({
         [chatId]: dropApproval(s.pendingApprovalByChat[chatId], zoneId),
       },
     }));
+    // Answered, so stop the window asking for attention — but only once nothing
+    // else is waiting, or clearing one approval would un-flag a panel with six
+    // more outstanding.
+    if (!Object.values(get().pendingApprovalByChat).some((l) => l?.length)) {
+      void clearAttention();
+    }
     await api.respondToolApproval(chatId, zoneId ?? null, approved, hunks);
   },
   async setTheme(partial) {

@@ -1,7 +1,7 @@
 {
   "name": "multizone",
   "private": true,
-  "version": "0.14.2",
+  "version": "0.14.3",
   "releaseBuild": true,
   "type": "module",
   "scripts": {
@@ -21,6 +21,7 @@
     "@tauri-apps/api": "^2.1.1",
     "@tauri-apps/plugin-dialog": "^2.0.1",
     "@tauri-apps/plugin-fs": "^2.0.3",
+    "@tauri-apps/plugin-notification": "^2.3.3",
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-updater": "^2.10.1",
     "function-plot": "^1.25.1",

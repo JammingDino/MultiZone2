@@ -5,6 +5,108 @@ alone. Newest first. Detail belongs in the linked docs; this is the thread.
 
 ---
 
+## 2026-08-17 (0.14.3) — What the first real run showed
+
+Everything here came from using 0.14.1 and 0.14.2 rather than from the plan.
+
+### The spend limit did not stop anything
+
+A session limited to 0.1M went past it during the first test and kept
+answering afterwards — just without tools. That is not what a limit is. The
+user set a number meaning "do not spend more than this"; the app read it as a
+suggestion.
+
+The 0.14.1 design was the bug in miniature: on reaching the limit it gave the
+model one more tool-free step to explain itself. That step is **another paid
+request, and the largest kind** — a wrap-up re-sends the entire context. A
+limit that spends past itself to apologise for spending is not a limit.
+
+Now: the loop ends at the boundary, no further request, in this chat or any
+other in the session. The user is told by the app, for free.
+
+And it asks. The card carries the numbers and three answers: a specific higher
+limit computed from what was *actually spent* (offering 110k to a session
+already 26% past 100k is not an offer), a much higher one, or none. Taking one
+raises the limit and **continues the stopped run** — a limit you have to raise
+and then re-ask is one people turn off permanently. Leaving it alone is an
+answer too, and the card says so rather than nagging.
+
+Made visible before it bites: `126.4k/100k` on the header chip, amber at 80%,
+red at 100%, and a bar in the popover — the only bar there, because it is the
+only number with an end. Labelled *spend, not context*, which is the confusion
+that meter invites by design: context is how big the next request is, spend is
+what the whole session has been billed, and only one of them stops a run.
+
+### "The model wants to run run command"
+
+That is what the approval prompt said. The command itself — the entire content
+of the decision — was behind a link that unfolded raw JSON.
+
+Approving a shell call without reading the command is not approval, it is
+assent, and the prompt was asking for assent. It now draws the call the way the
+step card draws a finished one, same families, so what you approve looks like
+what you will later inspect. Raw arguments stay one click down.
+
+The other half, and the better half: a rule can be written *from the prompt*.
+*Always allow* / *Never allow*, with the prefix chosen from a short list
+(`npm run build` → `npm run build`, `npm run`, `npm`) and shown in full, saved
+to the same lists Settings edits. Walking to Settings to write a rule about a
+call you are being asked about, while the turn sits blocked waiting for you, is
+a trip nobody makes.
+
+### Notifications, for the two moments that block
+
+A tool approval and an `ask_user`. Both stop a run indefinitely — the approval
+until its five-minute timeout auto-denies it and leaves the agent stalled with
+no visible cause — and both are most likely to arrive while you are somewhere
+else, because the reason to start a long run is not to sit watching it.
+
+Only when the window is in the background: a toast about something already on
+screen is noise. Taskbar attention always, OS notification when unfocused,
+cleared when nothing is waiting any more.
+
+A finished turn deliberately does **not** notify. Completion is the expected
+outcome, and a toast for every one of them is how people learn to dismiss
+toasts unread — including the two that mean a run is blocked on them.
+
+### 1.0 tok/s from a provider running at fifty
+
+Both halves of that number were wrong.
+
+The live figure was a whole-turn average, which cannot answer the question
+someone watching a stream is actually asking: *how fast is this provider going
+right now*. An average is dragged down by every pause already in the turn and
+moves more slowly the longer it runs, so a model falling off a cliff and a
+provider swap that changed nothing look the same. It is now a rolling
+five-second window, falling back to the average when nothing is streaming —
+where a rolling window would read a truthful, useless zero.
+
+The final figure excluded tool time but not the two minutes the turn spent
+waiting for someone to press Approve. That is a number about the person, not
+the model. Approval wait is now tracked separately and excluded, and the stats
+card names both waits — `…of which tools ran`, `…of which awaited approval` —
+so the gap between total time and generating time is never a mystery.
+
+### A field-name mismatch nobody could see
+
+`StreamPayload` serialised `message_id` and `zone_id`; every reader in the
+frontend used `messageId` and `zoneName`. `rename_all` renames variants, not
+fields. Both reads were silently `undefined` — the routing chip named no zone —
+and nothing threw, because a wrong field name across that boundary is not a
+type error on either side of it. Fixed with `rename_all_fields`, which is what
+the TypeScript types had always described.
+
+### Verified
+
+| Check | Result |
+| --- | --- |
+| `cargo test --lib` | 246 passed, 0 failed |
+| `npm run check:all` | clean |
+| The new frontend logic | **untested** — there is still no frontend test runner (TEST_STRATEGY item 2); the rolling-rate window, the prefix suggestions and the limit card are all covered only by the typechecker |
+| Notifications, live | **not yet** — needs a real background window |
+
+---
+
 ## 2026-08-17 (0.14.2) — Approval that isn't all-or-nothing
 
 The shipped advice, in the README, was: before a long run set auto-approval to

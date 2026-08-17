@@ -147,6 +147,18 @@ export function ContextMeter({ chatId }: { chatId: string }) {
   const scopedSpend = showTeam ? sessionSpent : chatSpent;
   const buttonSpend = scopedSpend && scopedSpend.requests > 0 ? scopedSpend : null;
 
+  // The session spend limit (0.14.3), which is a different thing from every
+  // other number in this popover and the one most easily confused with them.
+  // Context is how big the next request is; this is what the whole session has
+  // *cost*, against a ceiling the user set, and it is the only figure here that
+  // can stop a run. Always the session total — a limit that a leader could
+  // stay under while its panel spent freely would not be a limit.
+  const spendLimit = useApp((s) => s.appSettings.maxSessionTokens);
+  const limitSpent = sessionSpent?.totalTokens ?? 0;
+  const limitPct = spendLimit > 0 ? Math.min(1, limitSpent / spendLimit) : 0;
+  const limitState =
+    spendLimit <= 0 ? null : limitPct >= 1 ? "over" : limitPct >= 0.8 ? "near" : "under";
+
   if (messages.length === 0 && baseline === 0) return null;
 
   return (
@@ -182,6 +194,22 @@ export function ContextMeter({ chatId }: { chatId: string }) {
                 where the number is explained either way. */}
             <DollarSign size={HEADER_ICON} />
             <span className="font-mono">{formatTokens(buttonSpend.totalTokens)}</span>
+            {/* Against the limit, when there is one (0.14.3). Two figures rather
+                than a bar: at this size a bar is a coloured smudge, and "126.4k
+                / 100k" is the whole story in six characters. */}
+            {limitState && (
+              <span
+                className={`font-mono ${
+                  limitState === "over"
+                    ? "text-[var(--color-danger)]"
+                    : limitState === "near"
+                      ? "text-amber-400"
+                      : "text-[var(--color-text-muted)]"
+                }`}
+              >
+                /{formatTokens(spendLimit)}
+              </span>
+            )}
           </span>
         )}
       </button>
@@ -238,6 +266,41 @@ export function ContextMeter({ chatId }: { chatId: string }) {
                 <div className="mt-1 border-t border-[var(--color-border)] pt-1">
                   <MeterRow label="Billed total" value={chatSpent.totalTokens} strong />
                 </div>
+              </div>
+            )}
+
+            {/* The limit, drawn as the one bar in this popover — because it is
+                the one number here with an end. Everything above it grows; this
+                fills up, and when it is full the session stops. */}
+            {limitState && (
+              <div className="mt-2 border-t border-[var(--color-border)] pt-2">
+                <div className="mb-1 flex items-baseline justify-between gap-3">
+                  <span className="font-medium text-[var(--color-text)]">Session limit</span>
+                  <span className="font-mono text-[10px] text-[var(--color-text-muted)]">
+                    {Math.round(limitPct * 100)}%
+                  </span>
+                </div>
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--color-border)]">
+                  <div
+                    className={`h-full rounded-full transition-all ${
+                      limitState === "over"
+                        ? "bg-[var(--color-danger)]"
+                        : limitState === "near"
+                          ? "bg-amber-400"
+                          : "bg-[var(--color-accent)]"
+                    }`}
+                    style={{ width: `${Math.max(2, limitPct * 100)}%` }}
+                  />
+                </div>
+                <div className="mt-1 flex items-baseline justify-between gap-3 font-mono text-[10px] text-[var(--color-text-muted)]">
+                  <span>{formatTokens(limitSpent)} spent</span>
+                  <span>{formatTokens(spendLimit)} limit</span>
+                </div>
+                <p className="mt-1 text-[10px] leading-relaxed text-[var(--color-text-muted)]">
+                  {limitState === "over"
+                    ? "Reached — nothing further runs in this session until the limit is raised in Settings → Chat."
+                    : "Spend, not context: every request the whole session has been billed for, added up. When it fills, the session stops."}
+                </p>
               </div>
             )}
 

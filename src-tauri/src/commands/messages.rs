@@ -110,8 +110,17 @@ pub enum InputPart {
     HiddenImage { data_url: String },
 }
 
+/// One event of a streamed turn, as the frontend receives it.
+///
+/// `rename_all_fields` was missing until 0.14.3, and the container-level
+/// `rename_all` only renames *variants* — so `message_id` and `zone_id` went
+/// out as snake_case while [types.ts](../../../src/lib/types.ts) declared, and
+/// every reader used, `messageId` and `zoneName`. Those reads were quietly
+/// `undefined`: the routing chip named no zone, and the streaming state carried
+/// no message id. Nothing threw, which is why it survived — a wrong field name
+/// across this boundary is not a type error on either side of it.
 #[derive(Debug, Clone, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")]
 pub enum StreamPayload<'a> {
     UserMessageSaved { message: &'a Message },
     AssistantStart { message_id: String },
@@ -152,6 +161,12 @@ pub enum StreamPayload<'a> {
     /// one tool-free step follows so the model can report — but the reason is
     /// surfaced now, while the repeated calls are still on screen.
     Runaway { kind: &'static str, label: String },
+    /// The session spend limit stopped the run (0.14.3). Unlike every other
+    /// ending this one is a *decision waiting on the user*: nothing more will
+    /// run, in this chat or any other in the session, until the limit is raised
+    /// or turned off. The numbers travel with it so the prompt can offer a
+    /// specific new limit rather than a text box.
+    SpendLimit { spent: i64, cap: i64, mid_turn: bool },
     Done,
     Error { message: String },
 }
@@ -1547,44 +1562,52 @@ async fn run_participant_turn(
             deliver_steers(ctx, sink, chat_id, &mut api_messages).await?;
         }
 
-        // The session spend ceiling (0.14.1), checked at the step boundary for
-        // the same reason the user's stop request is: a turn is stopped between
-        // steps, never mid-call. Counted over the whole sub-agent session, not
-        // this chat — the panel is what spends, and a leader stopping while its
-        // seven members keep going would be a cap in name only.
-        if spend_cap > 0 && !stop_after_step {
+        // The session spend ceiling (0.14.1, made a real stop in 0.14.3).
+        //
+        // Checked at the step boundary, and what happens there is a **hard
+        // stop**: the loop ends here, with no further request to the provider.
+        //
+        // 0.14.1 gave the model one more tool-free step to explain itself, the
+        // same wrap-up the step budget uses. That was wrong, and the reason is
+        // the whole point of this setting: another step is *another paid
+        // request*, and the largest kind — a wrap-up re-sends the entire
+        // context. A limit that spends past itself to apologise for spending is
+        // not a limit. The user is told instead, by the app, for free.
+        if spend_cap > 0 {
             match crate::commands::usage::session_spent_tokens(&ctx.db, chat_id).await {
                 Ok(spent) if spent >= spend_cap => {
-                    tracing::info!("session spend cap reached: {spent}/{spend_cap} tokens");
+                    tracing::info!("session spend limit reached: {spent}/{spend_cap} tokens");
                     crate::events::record(
                         &ctx.db,
                         chat_id,
                         Some(&turn_id),
                         persp,
-                        "spend_cap",
+                        "spend_limit",
                         format!(
-                            "Stopped: this session has spent {spent} tokens, over the {spend_cap} limit"
+                            "Stopped: this session has spent {spent} tokens of its {spend_cap} limit"
                         ),
                         Some(serde_json::json!({ "spent": spent, "cap": spend_cap })),
                     )
                     .await;
-                    push_system_note(
-                        &mut api_messages,
-                        format!(
-                            "# Out of budget\n\
-                             This session has spent {spent} tokens, which is over the limit of \
-                             {spend_cap} set for it, and your tools are switched off for this \
-                             message. Answer now with what you already have: what you did, what \
-                             you found, and exactly what remains. Do not say you will continue — \
-                             you cannot, until the user raises the limit."
-                        ),
+                    sink.emit_for(
+                        chat_id,
+                        persp,
+                        StreamPayload::SpendLimit {
+                            spent,
+                            cap: spend_cap,
+                            // Mid-turn: work was done and is in the transcript
+                            // above, which changes what the user is deciding
+                            // about.
+                            mid_turn: step > 0,
+                        },
                     );
-                    stop_after_step = true;
+                    sink.emit_for(chat_id, persp, StreamPayload::Done);
+                    return Ok(());
                 }
                 Ok(_) => {}
-                // A cap that cannot be read must not end the turn — a failed
+                // A limit that cannot be read must not end the turn — a failed
                 // count is our problem, not the user's run.
-                Err(e) => tracing::warn!("spend cap check failed: {e}"),
+                Err(e) => tracing::warn!("spend limit check failed: {e}"),
             }
         }
 

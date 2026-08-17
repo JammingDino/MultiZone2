@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Loader2, Wrench, Cog, Brain } from "lucide-react";
-import { useApp, type StreamingState, type TurnAggregate } from "@/store/app";
+import { LIVE_RATE_WINDOW_MS, useApp, type StreamingState, type TurnAggregate } from "@/store/app";
 import { formatTokens } from "@/lib/format";
 
 /**
@@ -34,6 +34,9 @@ function ZoneStatusLine({
   const toolCallChars = turn?.toolCallChars ?? 0;
   const toolMs = turn?.toolMs ?? 0;
   const toolStartedAt = turn?.toolStartedAt ?? null;
+  const approvalMs = turn?.approvalMs ?? 0;
+  const approvalStartedAt = turn?.approvalStartedAt ?? null;
+  const recentChars = turn?.recentChars;
   const elapsed = useLiveElapsed(firstTokenAt);
   const accent = useApp((s) => s.zones.find((z) => z.id === zoneId)?.accentColor ?? null);
 
@@ -70,20 +73,39 @@ function ZoneStatusLine({
   }
 
   const liveTokens = estimateTokens(contentChars + reasoningChars + toolCallChars);
-  // Generation time excludes tool execution: completed tool runs (toolMs) plus
-  // the tool currently running (reconstructed from the same live clock, since
-  // now = firstTokenAt + elapsed). While a tool runs this grows in lock-step
-  // with elapsed, so genElapsed — and thus tok/s — holds steady, while the
-  // overall timer keeps ticking.
+  // Generation time excludes tool execution and any wait for an approval:
+  // completed runs (toolMs / approvalMs) plus whichever is in flight,
+  // reconstructed from the same live clock since now = firstTokenAt + elapsed.
+  // While a tool runs or a prompt sits unanswered this grows in lock-step with
+  // elapsed, so genElapsed — and the average — holds steady while the overall
+  // timer keeps ticking.
   const activeToolMs =
     toolStartedAt !== null && firstTokenAt !== null
       ? Math.max(0, firstTokenAt + elapsed - toolStartedAt)
       : 0;
-  const genElapsed = Math.max(0, elapsed - toolMs - activeToolMs);
-  // Live throughput: tokens produced so far over generation time. Needs a little
-  // elapsed time before it's meaningful, so hold off under ~300 ms.
-  const liveTps =
+  const activeApprovalMs =
+    approvalStartedAt !== null && firstTokenAt !== null
+      ? Math.max(0, firstTokenAt + elapsed - approvalStartedAt)
+      : 0;
+  const genElapsed = Math.max(
+    0,
+    elapsed - toolMs - activeToolMs - approvalMs - activeApprovalMs,
+  );
+
+  // Two different questions, and the live one is what a person watching a
+  // stream is actually asking (0.14.3): **how fast is this provider going right
+  // now**. A whole-turn average cannot answer it — it is dragged down by every
+  // pause already in the turn and moves more slowly the longer the turn runs,
+  // so a model that has fallen off a cliff, or a provider swap that changed
+  // nothing, both look like a number drifting.
+  //
+  // So: the rate over the last few seconds while output is arriving, and the
+  // turn average once it stops (during a tool run, an approval, or a gap), where
+  // a rolling window would read a truthful but useless 0.
+  const rollingTps = useRollingRate(recentChars);
+  const averageTps =
     genElapsed > 300 && liveTokens > 0 ? liveTokens / (genElapsed / 1000) : null;
+  const liveTps = rollingTps ?? averageTps;
 
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 py-0.5 text-xs text-[var(--color-text-muted)]">
@@ -132,6 +154,42 @@ export function PerspectiveStatusLine({
 }) {
   const turn = useApp((s) => s.perspectiveTurnByChat[chatId]?.[zoneId]);
   return <ZoneStatusLine streaming={streaming} turn={turn} zoneId={zoneId} />;
+}
+
+/**
+ * Tokens per second over the last few seconds, or null when nothing has arrived
+ * in that window.
+ *
+ * Null rather than zero on purpose. Output stops for ordinary reasons — a tool
+ * is running, an approval is on screen, the provider is between chunks — and
+ * "0 tok/s" during any of them is a true statement about the window and a false
+ * impression about the provider. The caller falls back to the turn average,
+ * which is the honest number when nothing is streaming.
+ *
+ * The window is re-evaluated on a timer rather than only when samples arrive,
+ * so the reading decays as output stops instead of freezing at its last value.
+ */
+function useRollingRate(samples: [number, number][] | undefined): number | null {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => tick((n) => n + 1), 250);
+    return () => window.clearInterval(id);
+  }, []);
+
+  if (!samples?.length) return null;
+  const now = Date.now();
+  const cutoff = now - LIVE_RATE_WINDOW_MS;
+  const inWindow = samples.filter(([at]) => at >= cutoff);
+  if (inWindow.length < 2) return null;
+
+  // Measure from the first sample in the window rather than from the window's
+  // own start: a stream two seconds old has not been running for five, and
+  // dividing by five would report a third of the truth.
+  const from = inWindow[0][0];
+  const seconds = (now - from) / 1000;
+  if (seconds < 0.5) return null;
+  const chars = inWindow.reduce((n, [, c]) => n + c, 0);
+  return estimateTokens(chars) / seconds;
 }
 
 /**

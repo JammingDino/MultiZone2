@@ -592,7 +592,13 @@ export type StreamEvent =
   | { type: "pending_cleared"; ids: string[] }
   | { type: "cancelled" }
   /** Loop detection stopped the run (0.14.1); one tool-free step still follows. */
-  | { type: "runaway"; kind: "repeat" | "stuck_error" | "oscillation"; label: string }
+  | { type: "runaway"; kind: "repeat" | "stuck_error" | "oscillation" | "handoff"; label: string }
+  /**
+   * The session spend limit stopped the run (0.14.3). A hard stop: no further
+   * request is made, in this chat or any other in the session, until the limit
+   * is raised or removed.
+   */
+  | { type: "spend_limit"; spent: number; cap: number; midTurn: boolean }
   | { type: "done" }
   | { type: "error"; message: string };
 
@@ -779,6 +785,17 @@ export interface AppSettings {
    * refusal rather than a prompt: writing the rule down *is* the answer.
    */
   approvals: ApprovalPolicy;
+  /**
+   * Notify when a run stops and waits for you — a tool approval or an
+   * `ask_user` (0.14.3). The window's taskbar entry is highlighted, and an OS
+   * notification is posted if the window is in the background.
+   *
+   * Only those two events, and only when you are looking elsewhere. A finished
+   * turn does not notify: completion is the expected outcome, and a toast for
+   * every one of them teaches people to dismiss toasts unread — including the
+   * two that mean a run is blocked on them.
+   */
+  notifyWhenWaiting: boolean;
   maxToolSteps: number;
   /**
    * Ceiling on the billed tokens one session — a chat plus every sub-agent
@@ -1076,6 +1093,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   apiToken: "",
   autoApproveLevel: "all",
   approvals: { categories: {}, shellAllow: [], shellDeny: [] },
+  notifyWhenWaiting: true,
   maxToolSteps: 30,
   maxSessionTokens: 0,
   pdfMode: "images",

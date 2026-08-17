@@ -6,6 +6,7 @@ import {
   ChevronRight,
   ClipboardList,
   Ban,
+  BookOpen,
   FileText,
   Flag,
   MessageSquare,
@@ -481,6 +482,7 @@ function kindLabel(kind: string): string {
     tool_result: "tool output",
     tool_failed: "tool failed",
     runaway: "loop stopped",
+    instructions: "directory rules",
   };
   return map[kind] ?? kind;
 }
@@ -492,6 +494,8 @@ function KindIcon({ kind }: { kind: string }) {
   if (kind === "denial" || kind === "cancelled" || kind === "runaway")
     return <Ban className={`${cls} text-amber-400`} />;
   if (kind === "file_change") return <FileText className={`${cls} text-[var(--color-accent)]`} />;
+  if (kind === "instructions")
+    return <BookOpen className={`${cls} text-[var(--color-text-muted)]`} />;
   if (kind.startsWith("plan")) return <ClipboardList className={`${cls} text-[var(--color-accent)]`} />;
   if (kind === "zone_switch") return <Users className={`${cls} text-[var(--color-text-muted)]`} />;
   if (kind === "turn_start" || kind === "turn_end")

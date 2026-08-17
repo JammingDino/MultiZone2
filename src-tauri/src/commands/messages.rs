@@ -1567,6 +1567,15 @@ async fn run_participant_turn(
     let max_steps = max_tool_steps(&ctx.db).await;
     // 0 = no ceiling, which is the default (see `max_session_tokens`).
     let spend_cap = max_session_tokens(&ctx.db, chat_id).await;
+    // Path-triggered rules (0.14.5): the directories whose own instructions this
+    // turn has already answered for, carrying the ones that turned out to hold
+    // nothing as well — a model working through twenty files in one folder pays
+    // for the lookup once. Per turn, because the note lives only in this turn's
+    // request body; the next turn rebuilds from the database, where it was
+    // deliberately never stored.
+    let project_instructions = project_instructions_enabled(&ctx.db).await;
+    let mut instructions_seen: std::collections::HashSet<std::path::PathBuf> =
+        std::collections::HashSet::new();
     // Stall recovery state, tracked across the whole turn.
     let mut used_tools_this_turn = false;
     let mut nudges_used = 0usize;
@@ -2428,6 +2437,37 @@ async fn run_participant_turn(
                 tool_call_id: Some(tc.id.clone()),
                 name: Some(tc.function.name.clone()),
             });
+
+            // Path-triggered rules (0.14.5). A directory deeper in the tree can
+            // carry its own `AGENTS.md` — `src/generated/` saying "never edit
+            // these by hand" is the common one — and those rules become relevant
+            // exactly when a file under them is opened. Delivered here rather
+            // than in the base prompt, because a repository's every
+            // directory-specific rule up front is context spent on folders the
+            // turn never visits.
+            if approved && !failed && project_instructions {
+                if let Some(note) = crate::instructions::triggered(
+                    &tc.function.name,
+                    &call_arguments,
+                    project_dir.as_deref(),
+                    &mut instructions_seen,
+                ) {
+                    crate::events::record(
+                        &ctx.db,
+                        chat_id,
+                        Some(&turn_id),
+                        persp,
+                        "instructions",
+                        "Read this directory's own instructions".to_string(),
+                        Some(serde_json::json!({
+                            "tool": tc.function.name,
+                            "arguments": crate::events::summarize_args(&call_arguments),
+                        })),
+                    )
+                    .await;
+                    push_system_note(&mut api_messages, note);
+                }
+            }
 
             // Nothing further from a step that has already been judged a loop.
             // The remaining calls of this step are the same loop continuing.

@@ -19,6 +19,7 @@
 //!   own rule is common and useful; putting every such rule in the base prompt
 //!   would spend the context budget on directories the turn never visits.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 /// Filenames read as instructions, in the order they are emitted.
@@ -169,6 +170,67 @@ pub fn render(files: &[InstructionFile], header: Header) -> Option<String> {
         ));
     }
     Some(out)
+}
+
+/// Tools whose arguments name one file the model is working on, and therefore
+/// a directory whose conventions have just become relevant.
+///
+/// Reads and writes, not searches: `find_files` sweeping a tree is not the
+/// model deciding to work in a directory, and treating it as such would fire
+/// every rule in the repository on one glob.
+const TRIGGERING_TOOLS: [&str; 3] = ["read_file", "edit_file", "create_file"];
+
+/// Instructions for the directory a tool call just touched, the first time it
+/// is touched.
+///
+/// `seen` is this turn's record of which directories have already been
+/// answered for — including the ones that turned out to carry nothing, so a
+/// model working through twenty files in one folder pays for the lookup once.
+///
+/// Only directories strictly *below* the working directory are considered:
+/// everything at or above it is already in the system prompt, and repeating it
+/// mid-turn would spend context to say something the model has been told and
+/// tell it, by implication, that this copy matters more.
+pub fn triggered(
+    tool: &str,
+    arguments: &str,
+    working_dir: Option<&str>,
+    seen: &mut HashSet<PathBuf>,
+) -> Option<String> {
+    if !TRIGGERING_TOOLS.contains(&tool) {
+        return None;
+    }
+    let root = PathBuf::from(working_dir.map(str::trim).filter(|d| !d.is_empty())?);
+    let raw = serde_json::from_str::<serde_json::Value>(arguments)
+        .ok()?
+        .get("path")?
+        .as_str()?
+        .trim()
+        .to_string();
+    let file = crate::tools::filesystem::resolve_path(&raw, working_dir);
+
+    // Outermost first, matching `collect`, and stopping at the working
+    // directory: a file two folders down picks up both folders' rules in the
+    // order a person would read them.
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    let mut cur = file.parent()?.to_path_buf();
+    while cur != root && cur.starts_with(&root) {
+        dirs.push(cur.clone());
+        match cur.parent() {
+            Some(p) if p != cur => cur = p.to_path_buf(),
+            _ => break,
+        }
+    }
+    dirs.reverse();
+
+    let mut files: Vec<InstructionFile> = Vec::new();
+    for dir in dirs {
+        if !seen.insert(dir.clone()) {
+            continue;
+        }
+        files.extend(read_dir_instructions(&dir));
+    }
+    render(&files, Header::Triggered)
 }
 
 #[cfg(test)]
@@ -332,5 +394,97 @@ mod tests {
         let t = Tree::new("blank");
         t.write("AGENTS.md", "   \n\n");
         assert!(block(&t.0).is_none());
+    }
+
+    // ── Path-triggered rules ─────────────────────────────────────────────────
+
+    fn read(path: &str) -> String {
+        serde_json::json!({ "path": path }).to_string()
+    }
+
+    #[test]
+    fn reading_a_file_fires_its_directorys_rules() {
+        let t = Tree::new("trigger");
+        t.write("src/generated/AGENTS.md", "Never edit these by hand.");
+        let dir = t.0.to_string_lossy().to_string();
+        let mut seen = HashSet::new();
+        let note = triggered("read_file", &read("src/generated/api.ts"), Some(&dir), &mut seen)
+            .expect("expected the directory's rules");
+        assert!(note.contains("Never edit these by hand."));
+        assert!(note.contains("Directory instructions"));
+    }
+
+    /// The point of the mechanism: it fires once. A model working through
+    /// twenty files in one folder is not told the same thing twenty times.
+    #[test]
+    fn a_directory_fires_only_once_per_turn() {
+        let t = Tree::new("once");
+        t.write("src/generated/AGENTS.md", "Never edit these by hand.");
+        let dir = t.0.to_string_lossy().to_string();
+        let mut seen = HashSet::new();
+        assert!(triggered("read_file", &read("src/generated/a.ts"), Some(&dir), &mut seen).is_some());
+        assert!(triggered("read_file", &read("src/generated/b.ts"), Some(&dir), &mut seen).is_none());
+    }
+
+    /// A directory with no rules is remembered too, so twenty reads of an
+    /// ordinary folder cost one lookup rather than twenty.
+    #[test]
+    fn a_directory_without_rules_is_remembered_as_well() {
+        let t = Tree::new("nothing");
+        t.dir("src");
+        let dir = t.0.to_string_lossy().to_string();
+        let mut seen = HashSet::new();
+        assert!(triggered("read_file", &read("src/a.ts"), Some(&dir), &mut seen).is_none());
+        assert!(seen.contains(&t.0.join("src")));
+    }
+
+    /// The root file is already in the system prompt. Repeating it mid-turn
+    /// would spend context saying something the model has been told, and imply
+    /// that this copy of it matters more.
+    #[test]
+    fn the_working_directorys_own_rules_do_not_fire_again() {
+        let t = Tree::new("noroot");
+        t.write("AGENTS.md", "Root rules.");
+        let dir = t.0.to_string_lossy().to_string();
+        let mut seen = HashSet::new();
+        assert!(triggered("read_file", &read("a.ts"), Some(&dir), &mut seen).is_none());
+    }
+
+    /// Nested directories fire in reading order, outermost first.
+    #[test]
+    fn nested_directories_fire_outermost_first() {
+        let t = Tree::new("nested");
+        t.write("src/AGENTS.md", "Src rules.");
+        t.write("src/generated/AGENTS.md", "Generated rules.");
+        let dir = t.0.to_string_lossy().to_string();
+        let mut seen = HashSet::new();
+        let note = triggered("read_file", &read("src/generated/a.ts"), Some(&dir), &mut seen).unwrap();
+        let src = note.find("Src rules.").expect("src rules missing");
+        let gen = note.find("Generated rules.").expect("generated rules missing");
+        assert!(src < gen, "the nearer rules should be read last");
+    }
+
+    /// A sweep over the tree is not the model deciding to work in a directory.
+    #[test]
+    fn a_search_does_not_fire_every_rule_in_the_repository() {
+        let t = Tree::new("sweep");
+        t.write("src/generated/AGENTS.md", "Never edit these by hand.");
+        let dir = t.0.to_string_lossy().to_string();
+        let mut seen = HashSet::new();
+        assert!(triggered("find_files", &read("src/generated/a.ts"), Some(&dir), &mut seen).is_none());
+        assert!(triggered("search_file_text", &read("src/generated/a.ts"), Some(&dir), &mut seen).is_none());
+    }
+
+    /// A path outside the working directory has no directory chain to walk,
+    /// and inventing one would read a file the project never claimed.
+    #[test]
+    fn a_file_outside_the_working_directory_fires_nothing() {
+        let t = Tree::new("outside");
+        t.write("elsewhere/AGENTS.md", "Not this project's rules.");
+        let inside = t.dir("project");
+        let dir = inside.to_string_lossy().to_string();
+        let mut seen = HashSet::new();
+        let path = t.0.join("elsewhere/a.ts").to_string_lossy().to_string();
+        assert!(triggered("read_file", &read(&path), Some(&dir), &mut seen).is_none());
     }
 }

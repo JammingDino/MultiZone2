@@ -2100,24 +2100,33 @@ async fn run_participant_turn(
                 .get(&tc.function.name)
                 .copied()
                 .unwrap_or_else(|| tools::tool_safety_by_name(&tc.function.name));
-            let decision =
-                policy.decide(&tc.function.name, &tc.function.arguments, tool_safety);
+            let decision = policy.decide(
+                &tc.function.name,
+                &tc.function.arguments,
+                tool_safety,
+                project_dir.as_deref(),
+            );
 
-            // A denied shell prefix is refused here, on the same path plan mode
-            // uses: the user already answered this question by writing the rule
-            // down, and turning it into a prompt would ask it again.
-            if let crate::approvals::Decision::Deny(reason) = &decision {
+            // A denied shell prefix or edit path is refused here, on the same
+            // path plan mode uses: the user already answered this question by
+            // writing the rule down, and turning it into a prompt would ask it
+            // again.
+            if let crate::approvals::Decision::Deny { reason, rule } = &decision {
                 crate::events::record(
                     &ctx.db,
                     chat_id,
                     Some(&turn_id),
                     persp,
                     "denial",
-                    format!("`{}` was refused by a command rule", tc.function.name),
+                    format!(
+                        "`{}` was refused by {}",
+                        tc.function.name,
+                        if *rule == "editDeny" { "a path rule" } else { "a command rule" }
+                    ),
                     Some(serde_json::json!({
                         "tool": tc.function.name,
                         "arguments": crate::events::summarize_args(&tc.function.arguments),
-                        "rule": "shellDeny",
+                        "rule": rule,
                     })),
                 )
                 .await;

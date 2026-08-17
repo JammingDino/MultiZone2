@@ -192,3 +192,57 @@ export function rulePrefixes(command: string): string[] {
   }
   return [...new Set(out)];
 }
+
+/**
+ * The path a write-ish call will touch, or null for anything else — the same
+ * hook as `shellCommandOf`, for the path rules (0.14.5).
+ *
+ * `move_file` and `copy_file` have two, and the destination is the one a rule
+ * should be written about: it is where the bytes end up.
+ */
+export function editPathOf(name: string, args: any): string | null {
+  // By name rather than by family: `read_file` shares the file card with
+  // `delete_file`, and offering a rule about where edits may land from a read
+  // prompt would write a rule the user was never asked about. This list is the
+  // frontend's copy of the backend's edit category (`approvals::category_for`).
+  const EDITS = [
+    "create_file",
+    "edit_file",
+    "delete_file",
+    "move_file",
+    "copy_file",
+    "create_folder",
+  ];
+  if (!EDITS.includes(name)) return null;
+  const a = (args ?? {}) as Record<string, unknown>;
+  for (const key of ["to", "path"]) {
+    const v = a[key];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return null;
+}
+
+/**
+ * Directories worth offering as a path rule, narrowest first: a write to
+ * `src/components/Chat/ChatPanel.tsx` suggests its own folder, then its parent,
+ * then the project.
+ *
+ * Narrowest first — and so pre-selected — because the broad end of this list is
+ * a much larger grant than the broad end of a command list. "Anything under the
+ * project" is a reasonable rule to *choose*; it is not a reasonable rule to
+ * arrive at by pressing a button labelled "always".
+ */
+export function pathRulePrefixes(path: string): string[] {
+  const unix = path.replace(/\\/g, "/").replace(/\/+$/, "");
+  const relative = !/^([a-zA-Z]:\/|\/|~)/.test(unix);
+  const parts = unix.split("/").filter((p) => p && p !== ".");
+  const out: string[] = [];
+  // Drop the filename, then walk up. Three at most, for the same reason the
+  // command list stops at three.
+  for (let n = parts.length - 1; n >= 1 && out.length < 3; n--) {
+    const dir = parts.slice(0, n).join("/");
+    if (dir && dir !== "~") out.push(relative ? dir : (unix.startsWith("/") ? `/${dir}` : dir));
+  }
+  if (relative) out.push("{project}");
+  return [...new Set(out)];
+}

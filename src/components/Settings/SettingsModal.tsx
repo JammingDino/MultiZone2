@@ -1099,6 +1099,40 @@ function ChatTab() {
       </section>
 
       <section>
+        <h3 className="mb-1 text-sm font-medium">Where edits may land</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          One path per line, matched a whole folder at a time — <code>{"{project}"}</code> stands
+          for whichever project the chat is in. Longest match wins, so allowing{" "}
+          <code>{"{project}"}</code> and denying <code>{"{project}/.git"}</code> reads the way it
+          looks. The category above decides <em>whether</em> edits are approved; this decides{" "}
+          <strong>where</strong>.
+        </p>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          Listing anything under <em>Edit without asking</em> makes it a boundary: an edit outside
+          every line is prompted even when the Edit category is set to auto — being asked about
+          exactly those is the reason to draw one.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <PrefixList
+            label="Edit without asking"
+            placeholder={"{project}\nC:\\Users\\me\\scratch"}
+            value={appSettings.approvals.editAllow}
+            onChange={(editAllow) =>
+              setAppSettings({ approvals: { ...appSettings.approvals, editAllow } })
+            }
+          />
+          <PrefixList
+            label="Never edit"
+            placeholder={"{project}/.git\n{project}/node_modules"}
+            value={appSettings.approvals.editDeny}
+            onChange={(editDeny) =>
+              setAppSettings({ approvals: { ...appSettings.approvals, editDeny } })
+            }
+          />
+        </div>
+      </section>
+
+      <section>
         <h3 className="mb-1 text-sm font-medium">Review file edits before they land</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
           A zone's writes queue up as a diff you apply whole, by file, or by hunk. The model

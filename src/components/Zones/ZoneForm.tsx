@@ -14,7 +14,13 @@ import { ALL_TOOLS, TOOL_CATEGORIES, mcpToolEnableId } from "@/lib/types";
 import { useApp } from "@/store/app";
 import { DEFAULT_ZONES } from "@/lib/defaultZones";
 
-const EMPTY_APPROVALS: ApprovalPolicy = { categories: {}, shellAllow: [], shellDeny: [] };
+const EMPTY_APPROVALS: ApprovalPolicy = {
+  categories: {},
+  shellAllow: [],
+  shellDeny: [],
+  editAllow: [],
+  editDeny: [],
+};
 
 /** Zone override categories, short labels — the long descriptions live in
  * Settings, where the global policy is set and explained. */
@@ -36,6 +42,8 @@ function parseApprovals(raw: string | null | undefined): ApprovalPolicy {
       categories: v.categories ?? {},
       shellAllow: v.shellAllow ?? [],
       shellDeny: v.shellDeny ?? [],
+      editAllow: v.editAllow ?? [],
+      editDeny: v.editDeny ?? [],
     };
   } catch {
     return EMPTY_APPROVALS;
@@ -48,7 +56,9 @@ function serializeApprovals(p: ApprovalPolicy): string | null {
   const empty =
     Object.keys(p.categories).length === 0 &&
     p.shellAllow.length === 0 &&
-    p.shellDeny.length === 0;
+    p.shellDeny.length === 0 &&
+    p.editAllow.length === 0 &&
+    p.editDeny.length === 0;
   return empty ? null : JSON.stringify(p);
 }
 
@@ -1242,7 +1252,9 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
             {([
               ["shellAllow", "Run without asking", "npm run test"],
               ["shellDeny", "Never run", "git push"],
-            ] as ["shellAllow" | "shellDeny", string, string][]).map(([key, label, placeholder]) => (
+              ["editAllow", "Edit without asking", "{project}"],
+              ["editDeny", "Never edit", "{project}/.git"],
+            ] as ["shellAllow" | "shellDeny" | "editAllow" | "editDeny", string, string][]).map(([key, label, placeholder]) => (
               <label key={key} className="block">
                 <span className="mb-1 block text-[11px] font-medium">{label}</span>
                 <textarea
@@ -1262,9 +1274,12 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
             ))}
           </div>
           <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
-            Command prefixes, one per line — <strong>added to</strong> the global lists rather than
-            replacing them, since a deny list you can drop by configuring something else is not a
-            deny list. Longest match wins.
+            Command prefixes and paths, one per line — <strong>added to</strong> the global lists
+            rather than replacing them, since a deny list you can drop by configuring something
+            else is not a deny list. Longest match wins. In the path lists{" "}
+            <code>{"{project}"}</code> is the chat's own project directory, and anything under{" "}
+            <em>Edit without asking</em> makes those paths a boundary: an edit outside them is
+            prompted even where the Edit category says auto.
           </p>
         </Field>
 

@@ -581,6 +581,17 @@ export interface ApprovalPolicy {
   shellAllow: string[];
   /** Command prefixes that are refused outright. */
   shellDeny: string[];
+  /**
+   * Paths an edit may touch without being asked about (0.14.5). `{project}`
+   * stands for the chat's own working directory.
+   *
+   * Unlike `shellAllow`, a non-empty list here is a *boundary*: an edit outside
+   * every entry is asked about even when the edit category is auto-approved,
+   * because being asked about exactly those is the reason to draw one.
+   */
+  editAllow: string[];
+  /** Paths an edit is refused outright, longest match winning over `editAllow`. */
+  editDeny: string[];
 }
 
 /** Stream event payloads emitted by the backend over the `stream` event. */
@@ -793,6 +804,9 @@ export interface AppSettings {
    * `shellAllow` / `shellDeny` are command prefixes, longest match wins — so
    * "allow `git`, deny `git push`" resolves the way it reads. A deny is a
    * refusal rather than a prompt: writing the rule down *is* the answer.
+   *
+   * `editAllow` / `editDeny` are the same shape over paths (0.14.5), and answer
+   * *where* an edit may land rather than whether edits are approved at all.
    */
   approvals: ApprovalPolicy;
   /**
@@ -1102,7 +1116,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   apiPort: 8765,
   apiToken: "",
   autoApproveLevel: "all",
-  approvals: { categories: {}, shellAllow: [], shellDeny: [] },
+  approvals: { categories: {}, shellAllow: [], shellDeny: [], editAllow: [], editDeny: [] },
   notifyWhenWaiting: true,
   maxToolSteps: 30,
   maxSessionTokens: 0,

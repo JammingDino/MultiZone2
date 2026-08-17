@@ -11,7 +11,13 @@ import { ConversationIndicator } from "./ConversationIndicator";
 import { ContextMeter } from "./ContextMeter";
 import { ReviewQueue } from "./ReviewQueue";
 import { DiffView } from "@/components/common/DiffView";
-import { IntentVisual, rulePrefixes, shellCommandOf } from "@/components/Message/visuals/IntentVisual";
+import {
+  IntentVisual,
+  editPathOf,
+  pathRulePrefixes,
+  rulePrefixes,
+  shellCommandOf,
+} from "@/components/Message/visuals/IntentVisual";
 import { HomeScreen } from "./HomeScreen";
 import { SettingsModal } from "@/components/Settings/SettingsModal";
 import { ZoneLibrary } from "@/components/Zones/ZoneLibrary";
@@ -1213,17 +1219,28 @@ function ToolApprovalBanner({
   const hunkCount = diff?.hunks.length ?? 0;
   const partial = hunkCount > 0 && taken.size < hunkCount;
 
-  // Shell calls can be answered *permanently* from here (0.14.3). Walking to
-  // Settings to write a rule you have just been asked about, while a turn sits
-  // blocked waiting for you, is a trip nobody makes — so the rule gets written
-  // where the question is asked.
+  // Shell calls can be answered *permanently* from here (0.14.3), and edits by
+  // where they land (0.14.5). Walking to Settings to write a rule you have just
+  // been asked about, while a turn sits blocked waiting for you, is a trip
+  // nobody makes — so the rule gets written where the question is asked.
   const command = shellCommandOf(toolName, parsedArgs);
-  const prefixes = command ? rulePrefixes(command) : [];
+  const editPath = command ? null : editPathOf(toolName, parsedArgs);
+  const prefixes = command
+    ? rulePrefixes(command)
+    : editPath
+      ? pathRulePrefixes(editPath)
+      : [];
   const [rulePrefix, setRulePrefix] = useState<string | null>(null);
-  const chosenPrefix = rulePrefix ?? prefixes[prefixes.length - 1] ?? null;
+  // A command list is broadest-last and a path list narrowest-first, and both
+  // pre-select the *narrower* end: the default has to be the rule someone would
+  // have written without thinking about it, not the largest one on offer.
+  const chosenPrefix = rulePrefix ?? (command ? prefixes[prefixes.length - 1] : prefixes[0]) ?? null;
+  const [allowList, denyList] = editPath
+    ? (["editAllow", "editDeny"] as const)
+    : (["shellAllow", "shellDeny"] as const);
 
   /** Add a prefix to the global allow or deny list, then answer this call. */
-  function addRule(list: "shellAllow" | "shellDeny") {
+  function addRule(list: "shellAllow" | "shellDeny" | "editAllow" | "editDeny") {
     if (!chosenPrefix) return;
     const current = appSettings.approvals[list];
     if (!current.includes(chosenPrefix)) {
@@ -1231,8 +1248,9 @@ function ToolApprovalBanner({
         approvals: { ...appSettings.approvals, [list]: [...current, chosenPrefix] },
       });
     }
-    if (list === "shellAllow") onApprove(partial ? [...taken].sort((a, b) => a - b) : undefined);
-    else onDeny();
+    if (list === "shellAllow" || list === "editAllow") {
+      onApprove(partial ? [...taken].sort((a, b) => a - b) : undefined);
+    } else onDeny();
   }
 
   function toggle(index: number) {
@@ -1330,21 +1348,31 @@ function ToolApprovalBanner({
                 <code className="rounded bg-[var(--color-bg)] px-1.5 py-0.5">{chosenPrefix} …</code>
               )}
               <button
-                onClick={() => addRule("shellAllow")}
-                title={`Run anything starting with "${chosenPrefix}" without asking, from now on`}
+                onClick={() => addRule(allowList)}
+                title={
+                  editPath
+                    ? `Edit anything inside "${chosenPrefix}" without asking, from now on`
+                    : `Run anything starting with "${chosenPrefix}" without asking, from now on`
+                }
                 className="rounded border border-[var(--color-border)] px-2 py-0.5 hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
               >
                 Always allow
               </button>
               <button
-                onClick={() => addRule("shellDeny")}
-                title={`Refuse anything starting with "${chosenPrefix}", from now on`}
+                onClick={() => addRule(denyList)}
+                title={
+                  editPath
+                    ? `Refuse every edit inside "${chosenPrefix}", from now on`
+                    : `Refuse anything starting with "${chosenPrefix}", from now on`
+                }
                 className="rounded border border-[var(--color-border)] px-2 py-0.5 hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]"
               >
                 Never allow
               </button>
               <span className="text-[var(--color-text-muted)]">
-                — saved to Settings → Chat → Command rules
+                {editPath
+                  ? "— saved to Settings → Chat → Where edits may land"
+                  : "— saved to Settings → Chat → Command rules"}
               </span>
             </div>
           )}

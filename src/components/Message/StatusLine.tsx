@@ -36,6 +36,8 @@ function ZoneStatusLine({
   const toolStartedAt = turn?.toolStartedAt ?? null;
   const approvalMs = turn?.approvalMs ?? 0;
   const approvalStartedAt = turn?.approvalStartedAt ?? null;
+  const prefillMs = turn?.prefillMs ?? 0;
+  const prefillStartedAt = turn?.prefillStartedAt ?? null;
   const recentChars = turn?.recentChars;
   const elapsed = useLiveElapsed(firstTokenAt);
   const accent = useApp((s) => s.zones.find((z) => z.id === zoneId)?.accentColor ?? null);
@@ -45,6 +47,13 @@ function ZoneStatusLine({
   if (firstTokenAt === null) {
     icon = <Loader2 size={12} className="animate-spin" />;
     label = "Waiting for first token…";
+  } else if (prefillStartedAt !== null) {
+    // A step that has been asked for and has sent nothing back yet: the model is
+    // re-reading the conversation, including whatever the last tool returned.
+    // Named rather than shown as "Generating…", because the difference between
+    // "the model is slow" and "the context is large" is the whole diagnosis.
+    icon = <Loader2 size={12} className="animate-spin" />;
+    label = "Reading the conversation…";
   } else if (streaming.phase === "thinking") {
     icon = <Brain size={12} className="animate-pulse text-violet-400" />;
     label = "Thinking…";
@@ -87,9 +96,16 @@ function ZoneStatusLine({
     approvalStartedAt !== null && firstTokenAt !== null
       ? Math.max(0, firstTokenAt + elapsed - approvalStartedAt)
       : 0;
+  // Prefill too (0.14.4): after every tool result the model re-encodes a context
+  // that has just grown, and it is not generating while it does. On a long
+  // agentic turn this is most of the wall clock.
+  const activePrefillMs =
+    prefillStartedAt !== null && firstTokenAt !== null
+      ? Math.max(0, firstTokenAt + elapsed - prefillStartedAt)
+      : 0;
   const genElapsed = Math.max(
     0,
-    elapsed - toolMs - activeToolMs - approvalMs - activeApprovalMs,
+    elapsed - toolMs - activeToolMs - approvalMs - activeApprovalMs - prefillMs - activePrefillMs,
   );
 
   // Two different questions, and the live one is what a person watching a

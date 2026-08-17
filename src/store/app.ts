@@ -73,6 +73,10 @@ export interface MessageStats {
    *  starkly: a turn where someone took two minutes to press Approve reported
    *  1 tok/s from a provider that was running at fifty. */
   approvalMs: number;
+  /** Cumulative time spent encoding input before output resumed, on every step
+   *  after the first (0.14.4). Also excluded from tok/s — the model is reading,
+   *  not writing, and on a long agentic turn this is most of the clock. */
+  prefillMs: number;
 }
 
 /**
@@ -100,6 +104,20 @@ export interface TurnAggregate {
   approvalMs: number;
   /** When the approval currently on screen was raised, or null. */
   approvalStartedAt: number | null;
+  /**
+   * Cumulative **prefill** — time the model spent encoding its input before
+   * streaming anything back, on every step after the first (0.14.4).
+   *
+   * The first step's prefill is the time-to-first-token, which is already
+   * outside the turn's clock because that clock starts at the first token. But
+   * a multi-step turn prefills *again* after every tool result, re-encoding a
+   * context that has just grown — and on a long agentic turn that is most of
+   * the wall clock. Counting it as generation time is how a fast provider
+   * reports a slow number.
+   */
+  prefillMs: number;
+  /** When the current step began encoding, or null once its output started. */
+  prefillStartedAt: number | null;
   /**
    * Recent output, for the *live* rate (0.14.3): `[timestamp, chars]` pairs,
    * pruned to the last few seconds.
@@ -129,6 +147,8 @@ export function freshTurn(startedAt = Date.now()): TurnAggregate {
     toolStartedAt: null,
     approvalMs: 0,
     approvalStartedAt: null,
+    prefillMs: 0,
+    prefillStartedAt: null,
     recentChars: [],
   };
 }
@@ -147,12 +167,23 @@ function applyTurnEvent(
 ): TurnAggregate | undefined {
   if (!turn) return turn;
   switch (event.type) {
+    case "assistant_start":
+      // A new step of the agentic loop: the model is now re-encoding the whole
+      // context, which is not generation. Only tracked once the turn has
+      // produced something — the *first* step's encode is the time-to-first-
+      // token, and the turn's clock has not started yet, so counting it here
+      // would subtract it twice.
+      return {
+        ...turn,
+        prefillStartedAt: turn.firstTokenAt === null ? null : now,
+      };
     case "token":
       return {
         ...turn,
         firstTokenAt: turn.firstTokenAt ?? now,
         contentChars: turn.contentChars + event.delta.length,
         recentChars: pushSample(turn.recentChars, now, event.delta.length),
+        ...closePrefill(turn, now),
       };
     case "thinking_token":
       return {
@@ -160,14 +191,17 @@ function applyTurnEvent(
         firstTokenAt: turn.firstTokenAt ?? now,
         reasoningChars: turn.reasoningChars + event.delta.length,
         recentChars: pushSample(turn.recentChars, now, event.delta.length),
+        ...closePrefill(turn, now),
       };
     case "tool_call_args_delta":
       // Tool arguments are generated tokens too — they cost the model time, so
-      // they count toward the turn's output and throughput.
+      // they count toward the turn's output and throughput, and their first
+      // delta ends the encode just as a content token would.
       return {
         ...turn,
         toolCallChars: turn.toolCallChars + event.delta.length,
         recentChars: pushSample(turn.recentChars, now, event.delta.length),
+        ...closePrefill(turn, now),
       };
     case "tool_call_executing":
       // Mark when execution began so its wall-clock can be excluded from tok/s
@@ -219,6 +253,15 @@ function closeApproval(turn: TurnAggregate, now: number): Partial<TurnAggregate>
   };
 }
 
+/** Stop the prefill clock: output has started arriving for this step. */
+function closePrefill(turn: TurnAggregate, now: number): Partial<TurnAggregate> {
+  if (turn.prefillStartedAt === null) return {};
+  return {
+    prefillMs: turn.prefillMs + (now - turn.prefillStartedAt),
+    prefillStartedAt: null,
+  };
+}
+
 /**
  * The per-message stats readout for a finished assistant message, computed from
  * the turn aggregate rather than the last loop iteration — otherwise a
@@ -248,6 +291,9 @@ function statsFromTurn(
     approvalMs:
       (turn?.approvalMs ?? 0) +
       (turn?.approvalStartedAt != null ? now - turn.approvalStartedAt : 0),
+    prefillMs:
+      (turn?.prefillMs ?? 0) +
+      (turn?.prefillStartedAt != null ? now - turn.prefillStartedAt : 0),
   };
 }
 
@@ -1675,7 +1721,11 @@ export const useApp = create<AppStore>((set, get) => ({
     }
   },
   async raiseSpendLimit(chatId, newCap) {
-    await get().setAppSettings({ maxSessionTokens: Math.max(0, Math.round(newCap)) });
+    // This chat's session, not everyone's (0.14.4). Lifting a ceiling to let
+    // *this* piece of work finish is a statement about this piece of work; the
+    // global setting stays the default for chats that have not said otherwise.
+    await api.setChatSpendLimit(chatId, Math.max(0, Math.round(newCap)));
+    await get().refreshChats();
     set((s) => {
       const spendLimitByChat = { ...s.spendLimitByChat };
       delete spendLimitByChat[chatId];

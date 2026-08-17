@@ -5,6 +5,65 @@ alone. Newest first. Detail belongs in the linked docs; this is the thread.
 
 ---
 
+## 2026-08-17 (0.14.4) — Whose limit, and what the clock was measuring
+
+Two corrections, both the same kind of mistake: a number that was accurate
+about something other than what it claimed to describe.
+
+### The limit belonged to everyone
+
+Raising it from the card in one chat raised it everywhere, because it was a
+single app setting. That is the opposite of what someone means by lifting a
+ceiling to let *this* piece of work finish — they have decided about this task,
+not about every future one.
+
+Chats now carry their own `spend_limit`, resolved against the **session root**.
+The root matters: spend is counted across a chat and every sub-agent under it,
+so a sub-agent holding a ceiling of its own would be a limit inside a limit,
+and whichever was smaller would silently win without saying so.
+
+`NULL` inherits the global default; `0` means unmetered. That is why the column
+is nullable rather than defaulted to zero — "no limit" is an answer somebody
+gave, and it has to be distinguishable from never having been asked.
+
+The Settings value stays, and its copy now says what it actually is: the
+default for chats that have not chosen.
+
+The API drift test caught the new command before I did, which is the second
+time that test has paid for itself. It is now `POST /api/chats/:id/spend-limit`
+rather than a GUI-only exemption, because provisioning a chat with a budget is
+exactly the sort of thing a script would want.
+
+### The clock was counting reading as writing
+
+After every tool result the model re-encodes the whole conversation — which has
+just grown by that tool's output — before it streams anything back. On a
+ten-step turn that prefill is most of the wall clock, and all of it was being
+counted as generation time.
+
+Tracked per step and excluded now. The subtlety worth writing down: the *first*
+step's prefill must not be counted, because it is the time-to-first-token and
+the turn's clock does not start until the first token arrives. Counting it here
+would subtract it twice and report a speed higher than the provider ever
+reached. So the prefill clock only starts on steps after the turn has produced
+something.
+
+The status line says **"Reading the conversation…"** during it rather than
+"Generating…". The difference between "the model is slow" and "the context is
+large" is the entire diagnosis, and the previous label hid it. The stats card
+carries `…of which read the context` beside the tool and approval rows.
+
+### Verified
+
+| Check | Result |
+| --- | --- |
+| `cargo test --lib` | 246 passed, 0 failed |
+| `npm run check:all` | clean |
+| Per-chat limits, two chats side by side | **not yet** |
+| tok/s against a provider's own logs | **not yet** — the number to compare against is the point of the change |
+
+---
+
 ## 2026-08-17 (0.14.3) — What the first real run showed
 
 Everything here came from using 0.14.1 and 0.14.2 rather than from the plan.

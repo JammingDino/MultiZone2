@@ -73,6 +73,13 @@ export const setChatZone = (id: string, zoneId: string | null) =>
   invoke<void>("set_chat_zone", { id, zoneId });
 export const setChatSmart = (id: string, smart: boolean) =>
   invoke<void>("set_chat_smart", { id, smart });
+/**
+ * This session's own spend ceiling (0.14.4). `null` hands it back to the global
+ * default; `0` means unmetered. Written to the session root, so setting it from
+ * a sub-agent's chat still describes the whole session.
+ */
+export const setChatSpendLimit = (chatId: string, limit: number | null) =>
+  invoke<void>("set_chat_spend_limit", { chatId, limit });
 // Plan mode & plans (0.12.0)
 export const setChatPlanMode = (chatId: string, on: boolean) =>
   invoke<void>("set_chat_plan_mode", { chatId, on });

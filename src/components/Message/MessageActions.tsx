@@ -273,11 +273,25 @@ export function MessageActions({
                   value={formatDuration(stats.approvalMs ?? 0)}
                 />
               )}
-              {((stats.toolMs ?? 0) > 0 || (stats.approvalMs ?? 0) > 0) && (
+              {(stats.prefillMs ?? 0) > 0 && (
+                <StatRow
+                  label="…of which read the context"
+                  value={formatDuration(stats.prefillMs ?? 0)}
+                />
+              )}
+              {((stats.toolMs ?? 0) > 0 ||
+                (stats.approvalMs ?? 0) > 0 ||
+                (stats.prefillMs ?? 0) > 0) && (
                 <StatRow
                   label="Generating"
                   value={formatDuration(
-                    Math.max(0, stats.durationMs - (stats.toolMs ?? 0) - (stats.approvalMs ?? 0)),
+                    Math.max(
+                      0,
+                      stats.durationMs -
+                        (stats.toolMs ?? 0) -
+                        (stats.approvalMs ?? 0) -
+                        (stats.prefillMs ?? 0),
+                    ),
                   )}
                 />
               )}
@@ -692,14 +706,17 @@ function formatSpeed(stats: {
   toolCallChars?: number;
   toolMs?: number;
   approvalMs?: number;
+  prefillMs?: number;
 }) {
-  // tok/s reflects generation throughput, so discount time the model was not
-  // generating: tools executing, and — much more starkly — an approval prompt
-  // sitting unanswered (0.14.3). A turn where someone took two minutes to press
-  // Approve reported 1.0 tok/s from a provider running at fifty, which is a
-  // number about the person, not the model. Overall duration is shown
-  // separately, in full, and both waits get their own rows.
-  const genMs = stats.durationMs - (stats.toolMs ?? 0) - (stats.approvalMs ?? 0);
+  // tok/s reflects generation throughput, so discount every stretch where the
+  // model was not generating: tools executing, an approval prompt sitting
+  // unanswered (0.14.3), and the encode at the start of each step after the
+  // first (0.14.4). A turn where someone took two minutes to press Approve
+  // reported 1.0 tok/s from a provider running at fifty — a number about the
+  // person, not the model. Total duration is shown separately, in full, and
+  // each wait gets its own row.
+  const genMs =
+    stats.durationMs - (stats.toolMs ?? 0) - (stats.approvalMs ?? 0) - (stats.prefillMs ?? 0);
   if (genMs <= 0) return "—";
   // Speed includes thinking and tool-call tokens — both are tokens the model
   // produced, so both affect throughput.

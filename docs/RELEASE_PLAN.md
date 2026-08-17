@@ -938,7 +938,17 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [ ] **Runtime-test:** a session set below what it has already spent stops on the next message, offers a raise, and continues when one is taken
 - [ ] **Runtime-test:** an approval arriving while the window is in the background raises a notification, and the taskbar entry clears once answered
 
-### 0.14.4 — What the agent knows before it starts
+### 0.14.4 — Whose limit, and what the clock was measuring
+
+*Two corrections from the next run, both of the same kind: a number that was right about something other than what it claimed to describe.*
+
+- [x] **The spend limit is per session, not global.** Raising it from the card in one chat raised it for every chat — the opposite of what lifting a ceiling to let *this* piece of work finish is supposed to mean. Chats gain their own `spend_limit` (migration 038), resolved against the **session root** so a chat and its sub-agents share one ceiling: a sub-agent with a limit of its own would be a limit inside a limit, and whichever was smaller would silently win. The Settings value stays, now as the default for chats that have not chosen. `NULL` inherits and `0` means unmetered, which is why the column is nullable rather than zero-defaulted — "no limit" is an answer, not the absence of one. Reachable over the API as well (`POST /api/chats/:id/spend-limit`), which the drift test insisted on
+- [x] **tok/s no longer counts prefill.** After every tool result the model re-encodes a context that has just grown, and on a long agentic turn that is most of the wall clock — counted, until now, as generation time. It is tracked per step and excluded, and the first step's encode is deliberately *not* counted twice: that one is the time-to-first-token, and the turn's clock only starts at the first token
+- [x] The status line names it — **"Reading the conversation…"** rather than "Generating…", because the difference between "the model is slow" and "the context is large" is the whole diagnosis — and the stats card carries `…of which read the context` beside the tool and approval rows
+- [ ] **Runtime-test:** two chats, one with a raised limit, and the other still stops at the default
+- [ ] **Runtime-test:** a ten-step turn against a local model reports a tok/s close to what the provider's own logs show
+
+### 0.14.5 — What the agent knows before it starts
 
 - [ ] Edit constrained to a path, not just to a category — carried over from 0.14.2, where the per-zone approval work landed without it. "This zone may edit inside the project root" is a matcher with its own rules about what a prefix of a path means (case, separators, symlinks, `..`), which is the same shape as 0.14.2's shell lists and deserves the same treatment rather than a boolean bolted onto a category
 - [ ] Read the project's own `AGENTS.md` / `CLAUDE.md` into every zone's system prompt for that project. Our project memory is good and entirely private to us; most repos an agent meets already carry one of these files
@@ -946,7 +956,7 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [ ] Repo map — tree-sitter symbol index, ranked by a PageRank over the reference graph, rendered into a fixed token budget and injected at session start. Seven agents currently pay the rediscovery cost seven times
 - [ ] Per-project lint and test commands run after an edit batch, output fed back as the next turn's input — so "the implementer thinks it is done" becomes evidence, and a compete-mode leader can choose between two diffs on something other than prose
 
-### 0.14.5 — Retrieval and spend
+### 0.14.6 — Retrieval and spend
 
 - [ ] Hybrid retrieval: BM25 over FTS5 fused with the existing cosine score at roughly equal weight, then a cross-encoder rerank of the top ~20 down to ~8. Embedding-only search misses exact-token queries — an error string, a config key, a function name — which is most of what a coding agent looks up. Same RRF shape `smart_search` already uses, applied to the local index
 - [ ] A bundled, refreshable model price table; cost in currency per turn and per sub-agent, built on the existing cache-aware token accounting. The header chip currently shows billed tokens behind a dollar sign — this makes the glyph honest

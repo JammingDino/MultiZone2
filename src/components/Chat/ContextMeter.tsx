@@ -153,7 +153,11 @@ export function ContextMeter({ chatId }: { chatId: string }) {
   // *cost*, against a ceiling the user set, and it is the only figure here that
   // can stop a run. Always the session total — a limit that a leader could
   // stay under while its panel spent freely would not be a limit.
-  const spendLimit = useApp((s) => s.appSettings.maxSessionTokens);
+  // This session's own ceiling if it has set one, otherwise the global default
+  // (0.14.4). `0` is a real answer — unmetered — so only `null` inherits.
+  const globalLimit = useApp((s) => s.appSettings.maxSessionTokens);
+  const ownLimit = useApp((s) => s.chats.find((c) => c.id === chatId)?.spendLimit ?? null);
+  const spendLimit = ownLimit ?? globalLimit;
   const limitSpent = sessionSpent?.totalTokens ?? 0;
   const limitPct = spendLimit > 0 ? Math.min(1, limitSpent / spendLimit) : 0;
   const limitState =
@@ -298,8 +302,11 @@ export function ContextMeter({ chatId }: { chatId: string }) {
                 </div>
                 <p className="mt-1 text-[10px] leading-relaxed text-[var(--color-text-muted)]">
                   {limitState === "over"
-                    ? "Reached — nothing further runs in this session until the limit is raised in Settings → Chat."
+                    ? "Reached — nothing further runs in this session until the limit is raised."
                     : "Spend, not context: every request the whole session has been billed for, added up. When it fills, the session stops."}
+                  {ownLimit !== null
+                    ? " This chat's own limit."
+                    : " The default from Settings → Chat; raising it here would set one for this chat alone."}
                 </p>
               </div>
             )}

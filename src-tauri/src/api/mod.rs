@@ -205,6 +205,7 @@ fn build_router(state: ApiState) -> Router {
         )
         .route("/api/chats/:id/zone", post(set_chat_zone))
         .route("/api/chats/:id/smart", post(h::set_chat_smart))
+        .route("/api/chats/:id/spend-limit", post(h::set_chat_spend_limit))
         .route("/api/chats/:id/plan-mode", post(h::set_chat_plan_mode))
         .route("/api/chats/:id/plans", get(h::list_plans))
         .route("/api/chats/:id/plans/pending", get(h::pending_plan))

@@ -989,11 +989,16 @@ function ChatTab() {
       <section>
         <h3 className="mb-1 text-sm font-medium">Session token limit</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          A ceiling on what one session — a chat and every sub-agent under it — may spend before
-          the run is stopped and made to report. Counted on the requests themselves, so a
-          ten-step turn that re-sends 50k of context ten times counts as 500k. <strong>0 is
-          off</strong>, which is the default: against a model on your own machine a long session
-          costs nothing but time. Set it when tokens are money and a panel is running unattended.
+          A ceiling on what one session — a chat and every sub-agent under it — may spend before the
+          run is <strong>stopped</strong>. Counted on the requests themselves, so a ten-step turn
+          that re-sends 50k of context ten times counts as 500k. <strong>0 is off</strong>, which is
+          the default: against a model on your own machine a long session costs nothing but time.
+          Set it when tokens are money and a panel is running unattended.
+        </p>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          This is the <strong>default for chats that have not set their own</strong>. Raising the
+          limit from the card in a chat that has hit it applies to that chat alone, which is what
+          lifting a ceiling to let one piece of work finish is supposed to mean.
         </p>
         <div className="flex items-center gap-3">
           <input

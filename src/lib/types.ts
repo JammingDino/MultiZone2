@@ -89,6 +89,16 @@ export interface Chat {
    * plan (or the user) turns it off.
    */
   planMode: boolean;
+  /**
+   * This session's own spend ceiling in billed tokens (0.14.4), or null to use
+   * the global default from Settings.
+   *
+   * `0` is a real value meaning *no limit* — which is why null, not zero, means
+   * "not set". Raising the limit from the card in one chat writes it here, so
+   * it applies to this session and no other; it is stored on the session root,
+   * since spend is counted across a chat and every sub-agent under it.
+   */
+  spendLimit: number | null;
   createdAt: number;
   updatedAt: number;
 }

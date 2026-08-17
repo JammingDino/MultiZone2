@@ -205,6 +205,7 @@ pub fn run() {
             commands::chats::rename_chat,
             commands::chats::set_chat_zone,
             commands::chats::set_chat_smart,
+            commands::messages::set_chat_spend_limit,
             commands::plans::set_chat_plan_mode,
             commands::plans::list_plans,
             commands::plans::pending_plan,

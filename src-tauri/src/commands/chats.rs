@@ -11,7 +11,7 @@ use tauri::{AppHandle, Emitter, State};
 /// `commands::messages` — `query_as::<Chat>` fails to decode if the list and the
 /// struct drift, so there must only ever be one of these.
 pub const CHAT_COLS: &str =
-    "id, title, zone_id, project_id, project_context_enabled, knowledge_enabled, perspective_mode, smart_routing, parent_chat_id, branched_from_message_id, initiated_by_zone_id, context_summary, context_summary_through, plan_mode, created_at, updated_at";
+    "id, title, zone_id, project_id, project_context_enabled, knowledge_enabled, perspective_mode, smart_routing, parent_chat_id, branched_from_message_id, initiated_by_zone_id, context_summary, context_summary_through, plan_mode, spend_limit, created_at, updated_at";
 
 /// The global default for whether new chats start with knowledge enabled, read
 /// from the `knowledgeDefaultEnabled` field of the `app_settings` JSON blob.

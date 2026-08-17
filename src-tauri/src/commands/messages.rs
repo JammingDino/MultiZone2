@@ -36,8 +36,16 @@ async fn max_tool_steps(db: &SqlitePool) -> usize {
     continuity::clamp_steps(configured)
 }
 
-/// Session token ceiling from the user's `maxSessionTokens` setting (0.14.1).
-/// `0` — the default — means no ceiling.
+/// The spend ceiling for this chat's session, in billed tokens. `0` means none.
+///
+/// **This session's own limit first, the global setting as the default**
+/// (0.14.4). Raising the ceiling from the card in one chat used to raise it
+/// everywhere, which is the opposite of what lifting a limit to let *this*
+/// piece of work finish is supposed to mean.
+///
+/// Resolved against the session root, since spend is counted across a chat and
+/// every sub-agent under it — a sub-agent with a ceiling of its own would be a
+/// limit inside a limit, and whichever was smaller would silently win.
 ///
 /// Off by default, deliberately. This is a local-first app where the usual case
 /// is a model on the same machine, where a long session costs nothing but time;
@@ -46,7 +54,22 @@ async fn max_tool_steps(db: &SqlitePool) -> usize {
 /// seven-member panel is spending it unattended, and the number belongs to
 /// whoever is paying. Loop detection, which is on for everyone, is what catches
 /// the runaway *shape*.
-async fn max_session_tokens(db: &SqlitePool) -> i64 {
+async fn max_session_tokens(db: &SqlitePool, chat_id: &str) -> i64 {
+    // `Some(0)` is a real answer — "this session runs unmetered" — so it has to
+    // beat the global default rather than read as unset.
+    if let Ok(root) = crate::tools::teamwork::session_root(db, chat_id).await {
+        let own: Option<Option<i64>> =
+            sqlx::query_scalar("SELECT spend_limit FROM chats WHERE id = ?1")
+                .bind(&root)
+                .fetch_optional(db)
+                .await
+                .ok()
+                .flatten();
+        if let Some(limit) = own.flatten() {
+            return limit.max(0);
+        }
+    }
+
     let raw: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key = 'app_settings'")
         .fetch_optional(db)
         .await
@@ -57,6 +80,27 @@ async fn max_session_tokens(db: &SqlitePool) -> i64 {
         .and_then(|v| v.get("maxSessionTokens").and_then(|n| n.as_i64()))
         .filter(|n| *n > 0)
         .unwrap_or(0)
+}
+
+/// Set (or clear, with `None`) a session's own spend limit (0.14.4).
+///
+/// Always written to the session root: raising the limit from inside a
+/// sub-agent's chat is still a statement about the whole session, which is the
+/// thing being measured.
+#[tauri::command]
+pub async fn set_chat_spend_limit(
+    state: State<'_, AppState>,
+    chat_id: String,
+    limit: Option<i64>,
+) -> AppResult<()> {
+    let root = crate::tools::teamwork::session_root(&state.db, &chat_id).await?;
+    sqlx::query("UPDATE chats SET spend_limit = ?1, updated_at = ?2 WHERE id = ?3")
+        .bind(limit.map(|n| n.max(0)))
+        .bind(now_ts())
+        .bind(&root)
+        .execute(&state.db)
+        .await?;
+    Ok(())
 }
 
 /// One-shot overrides for a single send, chosen from the input bar's advanced
@@ -1505,7 +1549,7 @@ async fn run_participant_turn(
     // silently off the end of a tool result (see `llm::continuity`).
     let max_steps = max_tool_steps(&ctx.db).await;
     // 0 = no ceiling, which is the default (see `max_session_tokens`).
-    let spend_cap = max_session_tokens(&ctx.db).await;
+    let spend_cap = max_session_tokens(&ctx.db, chat_id).await;
     // Stall recovery state, tracked across the whole turn.
     let mut used_tools_this_turn = false;
     let mut nudges_used = 0usize;

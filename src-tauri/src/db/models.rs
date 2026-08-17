@@ -109,6 +109,13 @@ pub struct Chat {
     /// this chat's requests and the model's job is to propose a plan the user
     /// approves. Cleared when a plan is approved, or by the user.
     pub plan_mode: bool,
+    /// This session's own spend ceiling in billed tokens (0.14.4), or `None` to
+    /// use the global default. `Some(0)` is a real answer meaning *no limit* —
+    /// which is why this is an `Option` rather than a plain `0`-means-unset.
+    ///
+    /// Read from and written to the session root, since spend is counted across
+    /// a chat and every sub-agent under it.
+    pub spend_limit: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
 }

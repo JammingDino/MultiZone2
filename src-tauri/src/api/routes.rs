@@ -93,6 +93,7 @@ pub const ROUTES: &[RouteDef] = &[
     r("DELETE", "/api/chats/:id/participant-messages", "Delete one participant's latest-round messages"),
     r("POST", "/api/chats/:id/zone", "Set the chat's primary zone"),
     r("POST", "/api/chats/:id/smart", "Turn Smart chat routing on or off"),
+    r("POST", "/api/chats/:id/spend-limit", "This session's token ceiling ({limit}: a number, 0 for unmetered, null to inherit the global default)"),
     r("POST", "/api/chats/:id/plan-mode", "Turn plan mode on or off for a chat ({on: bool})"),
     r("GET", "/api/chats/:id/plans", "Every plan this chat has proposed, approved or run"),
     r("GET", "/api/chats/:id/plans/pending", "The plan waiting on the user, if any"),
@@ -245,6 +246,7 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("chats::generate_title", Route("POST /api/chats/:id/generate-title")),
     ("chats::set_chat_zone", Route("POST /api/chats/:id/zone")),
     ("chats::set_chat_smart", Route("POST /api/chats/:id/smart")),
+    ("messages::set_chat_spend_limit", Route("POST /api/chats/:id/spend-limit")),
     ("chats::set_chat_project", Route("POST /api/chats/:id/project")),
     // Plan mode and plans (0.12.0). The reads are ordinary reads; approving a
     // plan is the user's decision, so it is a control route like the rest.
@@ -653,6 +655,18 @@ pub async fn set_chat_smart(
 ) -> ApiResult<StatusCode> {
     let smart = b(&body, "smart").unwrap_or(false);
     commands::chats::set_chat_smart(app_state(&st), id, smart).await?;
+    Ok(NO_CONTENT)
+}
+
+/// `{ "limit": 500000 }` sets this session's ceiling, `{ "limit": 0 }` runs it
+/// unmetered, and `{}` — or a null — hands it back to the global default.
+pub async fn set_chat_spend_limit(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> ApiResult<StatusCode> {
+    let limit = body.get("limit").and_then(Value::as_i64);
+    commands::messages::set_chat_spend_limit(app_state(&st), id, limit).await?;
     Ok(NO_CONTENT)
 }
 

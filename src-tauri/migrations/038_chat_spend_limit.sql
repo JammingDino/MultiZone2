@@ -1,0 +1,16 @@
+-- Per-chat session spend limit (0.14.4).
+--
+-- The limit was a single app setting, so raising it from the card in one chat
+-- raised it for every chat — the opposite of what someone means when they lift
+-- a ceiling to let *this* piece of work finish.
+--
+-- NULL means "use the global default", which is why this is nullable rather
+-- than zero-defaulted: 0 is a real value here (no limit), and a chat that has
+-- never expressed an opinion must be distinguishable from one that has chosen
+-- to be unmetered. Raising the limit on a chat writes a number here; the global
+-- setting goes on being the default for chats that have not.
+--
+-- Stored on the session *root* by the code that writes it: spend is counted
+-- over a chat and every sub-agent under it, so a sub-agent with its own ceiling
+-- would be a limit inside a limit.
+ALTER TABLE chats ADD COLUMN spend_limit INTEGER;

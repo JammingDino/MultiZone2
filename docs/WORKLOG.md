@@ -5,6 +5,64 @@ alone. Newest first. Detail belongs in the linked docs; this is the thread.
 
 ---
 
+## 2026-08-17 (0.14.2) — Approval that isn't all-or-nothing
+
+The shipped advice, in the README, was: before a long run set auto-approval to
+*Everything*, because a sub-agent cannot show you a prompt. Read the warning,
+turn the safety off, hope.
+
+The slider could not express anything better, because it measures the wrong
+thing. "How dangerous is this tool" and "what kind of work do I want to be
+asked about" are different axes. `delete_file` and `run_command` are both
+danger 2; someone who lets an agent edit a repo has not thereby agreed to let
+it run arbitrary commands. Reading files all day is nobody's idea of twenty
+useful prompts.
+
+**Seven categories**, not the five the plan scoped: read, edit, shell, web,
+MCP, sub-agents, app state. Web earned its own — "search the web but do not
+touch my files" is a real policy someone holds. App state earned its own
+because `app_control` rewriting the user's own app belongs nowhere else.
+
+Each is auto / ask / **inherit**, and inherit is a real third state rather than
+a styled default. An install that never opens the panel has to keep behaving
+exactly as it did, which means "undecided" must be representable. An unknown
+tool categorises as app state, not read: a tool this build does not recognise
+is the last thing to wave through.
+
+**Shell prefix lists.** Longest match wins, so "allow `git`, deny `git push`"
+reads the way it resolves. Two details that matter more than they look:
+
+- Prefixes match on **whole words**. Allowing `git` must not allow `gitleaks`.
+- A tie goes to deny. Two equal-length rules disagreeing is a configuration
+  mistake, and the safe reading of a mistake is the strict one.
+
+A denied command is refused outright, not prompted. The user answered that
+question by writing the rule down; asking again would be asking it twice.
+
+**Per-zone overrides** merge per key, so a zone with an opinion about shell
+does not silently discard the global decision about reads. Zone prefix lists
+are *added to* the global ones — a deny list that can be dropped by configuring
+something else is not a deny list.
+
+### Deferred, deliberately
+
+"An implementer gets edit inside the project root" is in the plan for this
+release and is **not** here. The category answers whether editing is
+auto-approved, not where. A path constraint wants the same treatment the shell
+lists got — a real matcher with its own rules about what a prefix means — and
+bolting a boolean onto a category would have shipped something that reads like
+a guarantee it cannot make. Moved to 0.14.3, next to the project-root work.
+
+### Verified
+
+| Check | Result |
+| --- | --- |
+| `cargo test --lib` | 246 passed, 0 failed (12 new) |
+| `npm run check` | clean |
+| A zone with shell on *Ask* and `npm run test` allowed | **not yet** — needs a live run |
+
+---
+
 ## 2026-08-17 (0.14.1) — Guardrails on a runaway turn
 
 ### What the step budget was not doing

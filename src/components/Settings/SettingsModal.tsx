@@ -2273,6 +2273,14 @@ function McpTab() {
 
   useEffect(() => { refreshMcpServers().catch(console.error); }, [refreshMcpServers]);
 
+  // The launch autostart connects servers in parallel and reports each one as it
+  // settles. Opening this tab while that is still in flight would otherwise show
+  // stale "Disconnected" pills that never update.
+  useEffect(() => {
+    const un = api.onMcpStatusChanged(() => { refreshMcpServers().catch(console.error); });
+    return () => { un.then((f) => f()).catch(() => {}); };
+  }, [refreshMcpServers]);
+
   async function connect(s: McpServerView) {
     setBusyId(s.id);
     setErrorById((e) => ({ ...e, [s.id]: "" }));
@@ -2346,6 +2354,11 @@ function McpTab() {
           Local commands (stdio) or remote endpoints (SSE/HTTP). Connecting fetches the server's
           tools; give each a danger level here, then enable the ones you want per zone in the zone
           editor. They go through the same approval pipeline as built-in tools.
+        </p>
+        <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+          Every enabled server connects on launch, so its tools and their descriptions are current
+          before the first message. Turn a server off with its own switch to stop it starting;
+          <strong> Connect</strong> here is for reconnecting after a change or a failure.
         </p>
         <p className="mt-1 text-xs text-[var(--color-text-muted)]">
           Prefer the <strong>catalog</strong>: an entry already knows the command and the variables,

@@ -320,6 +320,18 @@ export const disconnectMcpServer = (id: string) =>
   invoke<void>("disconnect_mcp_server", { id });
 export const setMcpToolDanger = (toolId: string, dangerLevel: number) =>
   invoke<void>("set_mcp_tool_danger", { toolId, dangerLevel });
+/**
+ * Emitted as each enabled server settles during the launch autostart (0.14.0).
+ * Servers connect in parallel and a stdio one can take several seconds of npx,
+ * so Settings → MCP subscribes rather than reading status once on mount — which
+ * would otherwise show every row as "Disconnected" for as long as the window
+ * happened to open before the servers came up.
+ */
+export function onMcpStatusChanged(
+  handler: (e: { serverId: string }) => void,
+): Promise<UnlistenFn> {
+  return listen<{ serverId: string }>("mcp-status-changed", (e) => handler(e.payload));
+}
 
 // Connectors (0.11.2) — the catalog an MCP server is installed from, and the
 // diagnosis for one that will not connect.

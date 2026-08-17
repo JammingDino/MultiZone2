@@ -150,6 +150,11 @@ pub fn run() {
                 handle.manage(state);
                 // Launch the HTTP API server if the user has enabled it.
                 commands::api::start_if_enabled(&handle).await;
+                // Bring every enabled MCP server up (0.14.0). Returns as soon as
+                // the servers are read from the database — each connection runs
+                // in its own task, so npx starting three stdio servers is not in
+                // front of the first window paint.
+                commands::mcp::start_enabled(&handle).await;
                 // Start the knowledge directory watcher (live auto re-index).
                 {
                     let st = handle.state::<AppState>();

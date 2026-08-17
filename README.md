@@ -181,6 +181,13 @@ headers it needs, what has to be installed first, and a link to the page each cr
 from. Installing one writes the server and stops — nothing is launched or contacted until you
 press **Connect**, and then you set a danger level per tool and enable the ones you want per zone.
 
+**From the next launch on, enabled servers start themselves** (0.14.0). Every server whose own
+switch is on connects in the background as the app opens, so its tool list is current before the
+first message rather than after the first tool call, and a server that has broken since you last
+used it shows as a red row in Settings instead of surfacing as a failed step mid-turn. Turning a
+server off is how you stop it starting; **Connect** is now for reconnecting after a change or a
+failure.
+
 The shipped set covers Gmail, GitHub, Context7, Tavily search, the reference filesystem server and
 Playwright. It is a JSON file, not code: **Import entries from a URL** adds more (one entry, a list,
 or `{ "entries": [...] }`), they land as files in the app's `connectors/` folder, and an imported

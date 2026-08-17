@@ -27,7 +27,7 @@
 //! transcript.
 
 use std::collections::hash_map::DefaultHasher;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
 
 /// How many recent calls are considered. Long enough to see an oscillation with
@@ -53,6 +53,12 @@ pub enum Runaway {
     StuckError { tool: String, error: String, times: usize },
     /// Two calls alternating: `a`, `b`, `a`, `b`.
     Oscillation { a: String, b: String },
+    /// A leader handing work to the same sub-agent over and over inside one
+    /// turn. Distinct from a repeat: each message differs, so the triples never
+    /// match, and the sub-agent really is doing something each time. What is
+    /// wrong is the shape — delegate, read the answer, delegate again, without
+    /// the leader ever doing anything with what came back.
+    Handoff { subchat: String, times: usize },
 }
 
 impl Runaway {
@@ -67,6 +73,7 @@ impl Runaway {
             Runaway::Repeat { .. } => "repeat",
             Runaway::StuckError { .. } => "stuck_error",
             Runaway::Oscillation { .. } => "oscillation",
+            Runaway::Handoff { .. } => "handoff",
         }
     }
 
@@ -82,6 +89,9 @@ impl Runaway {
             }
             Runaway::Oscillation { a, b } => {
                 format!("Stopped: `{a}` and `{b}` were alternating without progress")
+            }
+            Runaway::Handoff { times, .. } => {
+                format!("Stopped: work was handed to the same sub-agent {times} times in one turn")
             }
         }
     }
@@ -106,6 +116,10 @@ impl Runaway {
                 "You have been alternating between `{a}` and `{b}`, returning to each one after \
                  the other, without the results changing."
             ),
+            Runaway::Handoff { subchat, times } => format!(
+                "You have handed work to the sub-agent `{subchat}` {times} times in this one turn, \
+                 without doing anything with what it sent back."
+            ),
         };
         format!(
             "{evidence}\n\nThis run has been stopped and your tools have been withdrawn — repeating \
@@ -127,11 +141,37 @@ struct Step {
     error: Option<String>,
 }
 
+/// Delegation calls to one sub-agent, in one turn, before the leader is stopped
+/// (0.14.1). Generous on purpose: briefing three specialists and following each
+/// one up twice is ordinary leader work, and the panel is the product. Seven is
+/// where "coordinating" has become "asking again".
+const MAX_HANDOFFS_PER_TURN: usize = 7;
+
+/// The tools that hand work to a sub-agent.
+fn delegation_target(tool: &str, arguments: &str) -> Option<String> {
+    if !matches!(tool, "spawn_subagent" | "send_subchat_message") {
+        return None;
+    }
+    let args: serde_json::Value = serde_json::from_str(arguments).ok()?;
+    // `send_subchat_message` names the subchat; `spawn_subagent` names a zone,
+    // which is the right key for it — spawning eight one-shot agents from the
+    // same zone in one turn is the same pattern as messaging one eight times.
+    let key = args
+        .get("subchat_id")
+        .or_else(|| args.get("zone"))
+        .or_else(|| args.get("zone_id"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("(unnamed)");
+    Some(key.to_string())
+}
+
 /// Per-turn state. Created fresh for every turn — a repeat across two turns is
 /// the user asking twice, not an agent looping.
 #[derive(Debug, Default)]
 pub struct LoopGuard {
     recent: VecDeque<Step>,
+    /// Delegation calls per target this turn.
+    handoffs: HashMap<String, usize>,
 }
 
 impl LoopGuard {
@@ -164,7 +204,23 @@ impl LoopGuard {
         self.stuck_error()
             .or_else(|| self.repeat())
             .or_else(|| self.oscillation())
+            .or_else(|| self.handoff(tool, arguments))
             .unwrap_or(Runaway::None)
+    }
+
+    /// The delegation cap. Unlike the other three rules this one is a plain
+    /// count rather than a pattern: a leader that keeps re-briefing the same
+    /// sub-agent sends a *different* message each time, so nothing repeats and
+    /// nothing alternates — and the turn can run its whole budget as two agents
+    /// pass the same task back and forth.
+    fn handoff(&mut self, tool: &str, arguments: &str) -> Option<Runaway> {
+        let target = delegation_target(tool, arguments)?;
+        let count = self.handoffs.entry(target.clone()).or_insert(0);
+        *count += 1;
+        (*count >= MAX_HANDOFFS_PER_TURN).then(|| Runaway::Handoff {
+            subchat: target,
+            times: *count,
+        })
     }
 
     /// The same failure, consecutively. Checked first: when a call is both
@@ -342,6 +398,57 @@ mod tests {
         // The window holds at most 12 steps, so at most two of those repeats can
         // be in it at once.
         assert_eq!(g.observe("other", "final", "x", false), Runaway::None);
+    }
+
+    /// A leader briefing three specialists and following each up twice is
+    /// ordinary work — the panel is the product, and stopping it would be worse
+    /// than the loop.
+    #[test]
+    fn a_leader_briefing_several_sub_agents_is_not_a_handoff_loop() {
+        let mut g = guard();
+        for round in 0..3 {
+            for agent in ["scout", "implementer", "reviewer"] {
+                let args = format!("{{\"subchat_id\":\"{agent}\",\"message\":\"round {round}\"}}");
+                assert_eq!(
+                    g.observe("send_subchat_message", &args, &format!("ok {round}"), false),
+                    Runaway::None,
+                );
+            }
+        }
+    }
+
+    /// Different message every time, different answer every time — no triple
+    /// repeats and nothing alternates, so this is invisible to the other three
+    /// rules while the turn burns its whole budget passing one task back and
+    /// forth.
+    #[test]
+    fn re_briefing_one_sub_agent_all_turn_is_stopped() {
+        let mut g = guard();
+        let mut last = Runaway::None;
+        for i in 0..MAX_HANDOFFS_PER_TURN {
+            let args = format!("{{\"subchat_id\":\"impl\",\"message\":\"attempt {i}\"}}");
+            last = g.observe("send_subchat_message", &args, &format!("tried {i}"), false);
+        }
+        match last {
+            Runaway::Handoff { subchat, times } => {
+                assert_eq!(subchat, "impl");
+                assert_eq!(times, MAX_HANDOFFS_PER_TURN);
+            }
+            other => panic!("expected a handoff stop, got {other:?}"),
+        }
+    }
+
+    /// Reading and listing are how a leader *uses* what came back. Counting
+    /// them would punish the behaviour this cap is trying to encourage.
+    #[test]
+    fn reading_a_sub_agent_is_not_delegating_to_it() {
+        assert!(delegation_target("read_subchat", "{\"subchat_id\":\"a\"}").is_none());
+        assert!(delegation_target("collect_subagents", "{}").is_none());
+        assert!(delegation_target("read_file", "{\"path\":\"a\"}").is_none());
+        assert_eq!(
+            delegation_target("send_subchat_message", "{\"subchat_id\":\"a\"}"),
+            Some("a".to_string())
+        );
     }
 
     #[test]

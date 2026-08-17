@@ -987,6 +987,37 @@ function ChatTab() {
       </section>
 
       <section>
+        <h3 className="mb-1 text-sm font-medium">Session token limit</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          A ceiling on what one session — a chat and every sub-agent under it — may spend before
+          the run is stopped and made to report. Counted on the requests themselves, so a
+          ten-step turn that re-sends 50k of context ten times counts as 500k. <strong>0 is
+          off</strong>, which is the default: against a model on your own machine a long session
+          costs nothing but time. Set it when tokens are money and a panel is running unattended.
+        </p>
+        <div className="flex items-center gap-3">
+          <input
+            type="number"
+            min={0}
+            step={100000}
+            value={appSettings.maxSessionTokens}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              if (Number.isFinite(n)) {
+                setAppSettings({ maxSessionTokens: Math.max(0, Math.round(n)) });
+              }
+            }}
+            className="w-32 rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1.5 text-sm"
+          />
+          <span className="text-xs text-[var(--color-text-muted)]">
+            {appSettings.maxSessionTokens > 0
+              ? `tokens per session (${(appSettings.maxSessionTokens / 1_000_000).toFixed(2)}M)`
+              : "no limit"}
+          </span>
+        </div>
+      </section>
+
+      <section>
         <h3 className="mb-1 text-sm font-medium">Tool auto-approval</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
           Dangerous: code execution and shell. Moderate: web search and file access.

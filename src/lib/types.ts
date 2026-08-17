@@ -732,6 +732,16 @@ export interface AppSettings {
    */
   maxToolSteps: number;
   /**
+   * Ceiling on the billed tokens one session — a chat plus every sub-agent
+   * under it — may spend before the run is stopped and made to report (0.14.1).
+   *
+   * `0` (the default) is no limit. Off by default because the usual case here is
+   * a model on the same machine, where a long session costs time rather than
+   * money; the cap is for the case where a panel is spending someone's budget
+   * unattended. Checked at step boundaries, never mid-call.
+   */
+  maxSessionTokens: number;
+  /**
    * How PDF files are processed when attached in the input bar.
    * "images" — render each page to a JPEG and send visually (default)
    * "text"   — extract text content from pages and send as text
@@ -1017,6 +1027,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   apiToken: "",
   autoApproveLevel: "all",
   maxToolSteps: 30,
+  maxSessionTokens: 0,
   pdfMode: "images",
   pdfExportDetail: "steps",
   pdfExportTheme: "app",

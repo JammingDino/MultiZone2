@@ -36,6 +36,29 @@ async fn max_tool_steps(db: &SqlitePool) -> usize {
     continuity::clamp_steps(configured)
 }
 
+/// Session token ceiling from the user's `maxSessionTokens` setting (0.14.1).
+/// `0` — the default — means no ceiling.
+///
+/// Off by default, deliberately. This is a local-first app where the usual case
+/// is a model on the same machine, where a long session costs nothing but time;
+/// a cap that stops legitimate work by default would be the wrong trade for the
+/// people running Ollama. It exists for the case where tokens are money and a
+/// seven-member panel is spending it unattended, and the number belongs to
+/// whoever is paying. Loop detection, which is on for everyone, is what catches
+/// the runaway *shape*.
+async fn max_session_tokens(db: &SqlitePool) -> i64 {
+    let raw: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key = 'app_settings'")
+        .fetch_optional(db)
+        .await
+        .ok()
+        .flatten()
+        .flatten();
+    raw.and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| v.get("maxSessionTokens").and_then(|n| n.as_i64()))
+        .filter(|n| *n > 0)
+        .unwrap_or(0)
+}
+
 /// One-shot overrides for a single send, chosen from the input bar's advanced
 /// menu. They affect only the turn they're passed to — the chat's stored zone
 /// is never modified.
@@ -1496,6 +1519,8 @@ async fn run_participant_turn(
     // tools switched off so the turn always ends in an answer instead of falling
     // silently off the end of a tool result (see `llm::continuity`).
     let max_steps = max_tool_steps(&ctx.db).await;
+    // 0 = no ceiling, which is the default (see `max_session_tokens`).
+    let spend_cap = max_session_tokens(&ctx.db).await;
     // Stall recovery state, tracked across the whole turn.
     let mut used_tools_this_turn = false;
     let mut nudges_used = 0usize;
@@ -1550,6 +1575,47 @@ async fn run_participant_turn(
         // transcript once per participant.
         if persp.is_none() {
             deliver_steers(ctx, sink, chat_id, &mut api_messages).await?;
+        }
+
+        // The session spend ceiling (0.14.1), checked at the step boundary for
+        // the same reason the user's stop request is: a turn is stopped between
+        // steps, never mid-call. Counted over the whole sub-agent session, not
+        // this chat — the panel is what spends, and a leader stopping while its
+        // seven members keep going would be a cap in name only.
+        if spend_cap > 0 && !stop_after_step {
+            match crate::commands::usage::session_spent_tokens(&ctx.db, chat_id).await {
+                Ok(spent) if spent >= spend_cap => {
+                    tracing::info!("session spend cap reached: {spent}/{spend_cap} tokens");
+                    crate::events::record(
+                        &ctx.db,
+                        chat_id,
+                        Some(&turn_id),
+                        persp,
+                        "spend_cap",
+                        format!(
+                            "Stopped: this session has spent {spent} tokens, over the {spend_cap} limit"
+                        ),
+                        Some(serde_json::json!({ "spent": spent, "cap": spend_cap })),
+                    )
+                    .await;
+                    push_system_note(
+                        &mut api_messages,
+                        format!(
+                            "# Out of budget\n\
+                             This session has spent {spent} tokens, which is over the limit of \
+                             {spend_cap} set for it, and your tools are switched off for this \
+                             message. Answer now with what you already have: what you did, what \
+                             you found, and exactly what remains. Do not say you will continue — \
+                             you cannot, until the user raises the limit."
+                        ),
+                    );
+                    stop_after_step = true;
+                }
+                Ok(_) => {}
+                // A cap that cannot be read must not end the turn — a failed
+                // count is our problem, not the user's run.
+                Err(e) => tracing::warn!("spend cap check failed: {e}"),
+            }
         }
 
         // Budget signalling. The wrap-up warning lands one step before the end so

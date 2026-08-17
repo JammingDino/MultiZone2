@@ -853,7 +853,7 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [x] **Runtime-test:** a search step shows the engine strip, and a blocked engine shows as failed
 - [x] **Runtime-test:** a PDF export of a turn that edited a file and ran a command carries the diff and the console
 
-### 0.13.4 — The session log becomes opt-in, and image-only chats get titles
+### 0.13.4 — Image-only chats get titles
 
 **Image-only chats were left unnamed** — a blank row beside a blank icon, or "New Chat" forever. Three separate causes, all of them a path reaching for text that a wordless message does not have:
 
@@ -876,19 +876,32 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 *A comparison pass against ~20 open-source agents and clients ([BORROWABLES.md](BORROWABLES.md)) found the gaps clustered in one place. Orchestration, review, checkpointing and coordination are ahead of most of the field — teamwork locks have no equivalent in anything surveyed. What is behind is the layer underneath: the edit primitive, the retry path, the retrieval, the guardrails on a runaway turn. A panel of seven agents amplifies whatever is under it, including a bad edit primitive.*
 
-### 0.14.0 — An edit that is hard to get wrong
+*0.14.0 clears the ground before that work rather than being part of it: the checks moved onto the machine that writes the code, and the MCP servers a zone was configured with now connect at launch instead of at first use.*
 
-*The first three items landed early, in 0.13.0, because 0.13.0's diff visual is only honest if the edit it draws is the edit that happened. Covered by 15 tests; `cargo test --lib` 192 passed.*
+### An edit that is hard to get wrong — landed early, in 0.13.0
+
+*This was the planned 0.14.0. Its first three items shipped ahead of schedule with 0.13.0, because 0.13.0's diff visual is only honest if the edit it draws is the edit that happened, so it is recorded here as done rather than held open for a version number. Covered by 15 tests; `cargo test --lib` 192 passed. The one item still open moved to 0.14.1.*
 
 - [x] `edit_file` counts occurrences before writing and refuses with the count when it is not 1, or takes them all when `replace_all` is set. `replacen(.., 1)` used to take the first hit silently — a wrong edit that reports success, the worst failure mode a file tool has. An empty `old_text` (which passed `contains` and inserted at offset zero) and an edit that changes nothing are refused too
 - [x] On no exact match, retry line-wise ignoring indentation and trailing whitespace, and re-indent the replacement onto the indentation the file actually uses — otherwise an anchor quoted without its leading spaces silently de-indents the block it edits. Refused again, with the count, if the tolerant match is itself ambiguous
 - [x] Resolution lives in one function ([`resolve_edit`](../src-tauri/src/tools/filesystem.rs)) which `review::proposal` also calls, so the diff a user approves is the diff that lands rather than two implementations of the same rule
 - [x] Syntax check after the write, auto-revert with the reason. Reported only as a *regression* — parsed before, doesn't after — so a checker that misreads a construct misreads it in both versions and cancels its own blind spot out; an already-broken file isn't blamed on this edit and the edit that repairs one is let through. JSON is really parsed; C-like files get a bracket scan that understands strings and comments, and skips single quotes in Rust where a lifetime and a char literal need a real lexer to tell apart
-- [ ] Windowed `read_file` — an offset/limit view with the file's line count reported, so a large file does not have to arrive whole to be edited
 - [x] This is the cheap 80% of the backlog's "file editing as an engine" and did not wait on the code interface
+- → Windowed `read_file` moved to 0.14.1
+
+### 0.14.0 — Checks come home, and servers that start themselves
+
+*Housekeeping the agent floor is built on: the checks now run where the code is written, and the tools a zone was configured with are actually connected when the first message is sent.*
+
+- [x] **The CI job moved onto the development machine.** `npm run build`, `npm test` and `cargo test --lib` ran on every push and PR; the Rust job alone is ~13 minutes of rustc on a hosted Windows runner, against ~40 seconds on a warm local target directory. Now two hooks in [.githooks/](../.githooks/) — `npm run check` (typecheck + script tests, ~15s) on commit, `npm run check:all` (+ build + `cargo test --lib`, ~75s) on push, which in this repo is also the publish. [ci.yml](../.github/workflows/ci.yml) keeps both jobs on `workflow_dispatch` as a clean-checkout second opinion; the automatic triggers are commented out, not deleted. The trade is named in [TEST_STRATEGY.md](TEST_STRATEGY.md) — a hook cannot catch the class of failure that made both CI jobs fail on v0.13.3, where this working tree differed from the runner in exactly the way that mattered
+- [x] **Every enabled MCP server connects at launch.** A server sat at "Disconnected" until someone pressed Connect or a tool call happened to need it — `Manager::call` connects lazily, so the capability was never missing, but the first tool call of a session paid npx startup inside the turn, and a server that had been broken since the last launch announced itself as a failed step mid-run rather than a red row in Settings. `start_enabled` reads the enabled servers and returns; each connection is its own task, so nothing sits in front of the first window paint and one hanging server does not hold up the others. The per-server switch is the opt-out, so there is no new setting
+- [x] Tool reconciliation moved into a shared `sync_tools`, so an autostarted server ends up with exactly the rows a hand-connected one does. 4 tests, the load-bearing one being that a resync keeps the user's danger level — this now runs on every launch, so getting it wrong would silently reset every level on the first restart
+- [x] **Mobile re-scoped as a remote for the desktop**, not a second app — the backlog's one line left the only interesting question, *what runs the message*, unanswered. Same chats and zones on the phone; the desktop runs the turn. Design in [CONNECTIVITY.md](CONNECTIVITY.md#part-3--the-phone-as-a-second-window), sized in the [backlog](#backlog--unscheduled)
+- [ ] **Runtime-test:** launch with two servers configured and one deliberately broken — the good one shows connected before the first message, the broken one shows its error in Settings rather than during a run
 
 ### 0.14.1 — Guardrails on a runaway turn
 
+- [ ] Windowed `read_file` — an offset/limit view with the file's line count reported, so a large file does not have to arrive whole to be edited. Moved from the edit-primitive work above; it is the same problem as the guardrails, one step earlier — a 4,000-line file read whole is a turn that runs out of context rather than one that loops
 - [ ] Loop detection: hash `(tool_name, arguments, result)` per step over a window of the last ~12. Four identical triples stops the turn and surfaces it; three consecutive identical errors fails it with the error. Also catch the alternating pair, which is the shape a stuck agent takes when it fixes one thing by breaking another
 - [ ] Surfaced in the stack tracer, and — for a background sub-agent, which nobody is watching — raised to the parent
 - [ ] Backoff and cooldown in `llm/client.rs`: exponential backoff with jitter on 429 and 5xx, per-provider cooldown after three failures in a window. There is currently no 429 path at all, and a seven-member panel meets rate limits long before one chat does

@@ -5,6 +5,81 @@ alone. Newest first. Detail belongs in the linked docs; this is the thread.
 
 ---
 
+## 2026-08-17 (0.14.0) — Checks come home, servers start themselves
+
+Three unrelated pieces of ground-clearing before 0.14.1's guardrails.
+
+### The CI job moved onto this machine
+
+Yesterday's entry is about fixing two CI jobs. Today they are off — the fix was
+right, the placement was not. The Rust job is ~13 minutes of rustc on a hosted
+Windows runner per commit; the same suite against a warm local target directory
+is ~40 seconds, and this repo only pushes in order to publish.
+
+`.githooks/pre-commit` runs `npm run check` (typecheck + script tests, ~15s).
+`.githooks/pre-push` runs `npm run check:all` (+ build + `cargo test --lib`,
+~75s) — the right place to pay, since a push to main with `releaseBuild: true`
+*is* a release. `npm run hooks:install` points `core.hooksPath` at them.
+
+ci.yml keeps both jobs, `workflow_dispatch`-only, triggers commented out rather
+than deleted.
+
+**What this gives up is exactly what yesterday's entry is about.** Both jobs
+failed on v0.13.3 because this working tree differs from a clean runner —
+Node 22 here, 20 there; a `dist/` that has been sitting here since the first
+build. A hook runs in the same tree that hides those, so it cannot catch that
+class at all. Dispatching ci.yml before a release is the mitigation, and it is
+a judgement each time rather than a gate. Written down in TEST_STRATEGY.md so
+this can be reversed by someone who decides the trade was wrong.
+
+### MCP servers connect at launch
+
+Servers sat at "Disconnected" until Connect was pressed. `Manager::call`
+connects lazily, so no tool was ever *unavailable* — what was wrong was
+everything around that: npx startup landed inside the first turn that needed
+it, and a server broken since the last launch reported itself as a failed step
+mid-run instead of a red row in Settings.
+
+`commands::mcp::start_enabled` runs from `setup()`, reads the enabled servers,
+and returns. Each connection is its own spawned task — three npx spawns and a
+hosted endpoint on a slow link must not queue behind each other, and none of it
+may sit in front of the first window paint. Each emits `mcp-status-changed` as
+it settles; the Settings tab subscribes instead of reading status once on mount.
+
+The per-server `enabled` switch is the opt-out, so no new setting. Tool
+reconciliation came out of `connect_mcp_server` into `sync_tools`, shared by
+both paths.
+
+The test worth having: a resync keeps the user's danger level. That code now
+runs on every launch, so had it been wrong, every level a user had set would
+reset on the first restart after upgrading — a quiet, permanent, one-way loss.
+
+### Mobile, re-scoped
+
+The backlog said "Mobile: Tauri mobile target (iOS/Android)" and left the only
+interesting question unanswered: what runs the message. It is a **remote for the
+desktop** — same chats and zones on the phone, the desktop runs the turn with
+its models, its files, its MCP servers.
+
+Most of it exists. 0.11.0 made the API the whole app, `src/lib/tauri.ts` is a
+single seam a remote transport can implement, and the agentic loop already
+streams over SSE. What does not exist: a LAN bind (opt-in, its own switch — it
+is a different security posture from a loopback socket), pairing by short code
+with per-device tokens and a revocable device registry, answering approvals from
+the phone (which wants 0.14.2 first), and mDNS discovery. LAN-only by design.
+
+Design in CONNECTIVITY.md part 3. Nothing built.
+
+### Verified
+
+| Check | Result |
+| --- | --- |
+| `cargo test --lib` | 201 passed, 0 failed (4 new) |
+| `npm run check` | clean, via the pre-commit hook on each commit |
+| Launch autostart against real servers | **not yet** — needs a run with a good and a deliberately broken server |
+
+---
+
 ## 2026-08-16 (CI) — Both jobs failed on their first real run
 
 The CI workflow I added last session had never executed — it cannot until

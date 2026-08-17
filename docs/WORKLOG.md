@@ -5,6 +5,107 @@ alone. Newest first. Detail belongs in the linked docs; this is the thread.
 
 ---
 
+## 2026-08-17 (0.14.1) — Guardrails on a runaway turn
+
+### What the step budget was not doing
+
+It stopped a long turn, but late and silently. A model calling the same
+failing command twenty times spent the whole budget, paid for twenty requests,
+and ended with a wrap-up that never mentioned it. Seven panel members multiply
+that by seven; a background sub-agent does it unwatched.
+
+`llm/runaway.rs` hashes `(tool, arguments, result)` per call over a window of
+12 and catches four shapes. Three were in the plan — four identical triples,
+three consecutive identical errors, the A/B/A/B oscillation. The fourth turned
+up while writing the tests for the others:
+
+**A leader re-briefing one sub-agent all turn.** Every message differs, every
+answer differs. Nothing repeats, nothing alternates, and the turn runs its
+entire budget passing one task back and forth. None of the three pattern rules
+can see it, because there is no pattern — only a count. Seven delegations to
+the same target now stops it. Reading and collecting are deliberately not
+counted: those are how a leader *uses* what came back, which is the behaviour
+the cap is trying to produce.
+
+### Stopped, not aborted
+
+The turn gets one more step with tools withheld, carrying a note that states
+the evidence rather than the verdict. "You called X four times and got the same
+result each time" leaves reporting as the only move. "You are looping" invites
+a model to argue, or to try once more with a preamble.
+
+A hard abort would be one request cheaper and much worse: the user gets a dead
+run with no sentence, and a sub-agent's parent gets nothing at all — what the
+parent reads is the sub-agent's last message.
+
+Surfaced in three places, because a background sub-agent that went in circles
+still returns a confident-sounding paragraph: an amber card in the thread
+(amber, not red — nothing failed, and neither "open settings" nor "try again"
+applies), a `runaway` session event, and a mark on the node in the stack
+tracer. A sub-agent's runaway is recorded on the parent chat too.
+
+The tests are mostly about what must **not** trip it. A false positive kills a
+working turn mid-task, which is worse than the loop it prevented.
+
+### There was no 429 path at all
+
+A rate limit came back as a provider error and ended the turn. One chat rarely
+meets a limit; seven members hitting one provider in the same second meet it
+constantly, and all seven retrying at once is how a brief limit becomes a
+sustained one.
+
+Retries now: 429, 5xx and transport failures, up to three, **full-jitter**
+exponential backoff, `Retry-After` honoured up to 20s. Full jitter rather than
+exponential-plus-a-bit for the reason above — seven agents that all wait 1s
+arrive together again. Three failures within a minute put the provider on ice
+for 30s. 401s and 404s never count toward that: a zone naming a model that does
+not exist must not take the other zones down.
+
+Retries happen before the first byte streams, which is the only place they are
+safe.
+
+### Fallback zones, and a bug found on the way
+
+A zone can now name another to answer with when its provider will not serve.
+Once per turn, never itself.
+
+Adding the column found four copies of `ZONE_COLS`, and they had drifted — the
+API's had been missing `is_leader` since that field was added, so
+`GET /api/zones` failed to map a row and returned an error. Nothing in the app
+reads that route, so nobody had seen it. `query_as` needs every field, which
+means a stale copy compiles cleanly and fails at runtime, in whichever path
+nobody is watching. One definition now, beside the struct.
+
+### Windowed reads
+
+`read_file` takes `offset`/`limit` and always reports the file's real line
+count. When something was left out it names the exact next call, because
+"truncated" alone produces either a model that answers from a fragment as
+though it were the file, or one that re-reads the same window forever. Long
+lines are clipped by character — a byte cut lands mid-codepoint and returns an
+edit anchor that cannot match.
+
+### The spend cap ships off
+
+`maxSessionTokens` counts the chat and every sub-agent under it, since the
+panel is what spends. Default 0, meaning no limit, and that is a decision
+rather than an oversight: against a model on your own machine a long session
+costs time, not money, and a default that stopped legitimate local runs would
+be the wrong trade for the people this app is for. It exists for a panel
+spending someone's budget unattended. Loop detection, on for everyone, is what
+catches the runaway shape.
+
+### Verified
+
+| Check | Result |
+| --- | --- |
+| `cargo test --lib` | 234 passed, 0 failed (33 new) |
+| `npm run check` | clean |
+| A real runaway, end to end | **not yet** — needs a live model told to repeat itself |
+| Fallback against a dead provider | **not yet** |
+
+---
+
 ## 2026-08-17 (0.14.0) — Checks come home, servers start themselves
 
 Three unrelated pieces of ground-clearing before 0.14.1's guardrails.

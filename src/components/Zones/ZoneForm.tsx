@@ -9,10 +9,48 @@ import { ModelCombobox } from "@/components/common/ModelCombobox";
 import { VisionOverrideSelect } from "@/components/common/VisionOverrideSelect";
 import { IconPicker } from "@/components/common/IconPicker";
 import { ColorPicker } from "@/components/common/ColorPicker";
-import type { Provider, ToolFunctionInfo, ToolUsage, Zone } from "@/lib/types";
+import type { ApprovalCategory, ApprovalPolicy, Provider, ToolFunctionInfo, ToolUsage, Zone } from "@/lib/types";
 import { ALL_TOOLS, TOOL_CATEGORIES, mcpToolEnableId } from "@/lib/types";
 import { useApp } from "@/store/app";
 import { DEFAULT_ZONES } from "@/lib/defaultZones";
+
+const EMPTY_APPROVALS: ApprovalPolicy = { categories: {}, shellAllow: [], shellDeny: [] };
+
+/** Zone override categories, short labels — the long descriptions live in
+ * Settings, where the global policy is set and explained. */
+const ZONE_APPROVAL_CATEGORIES: [ApprovalCategory, string][] = [
+  ["read", "Read"],
+  ["edit", "Edit"],
+  ["shell", "Shell"],
+  ["web", "Web"],
+  ["mcp", "MCP"],
+  ["spawn", "Sub-agents"],
+  ["state", "App state"],
+];
+
+function parseApprovals(raw: string | null | undefined): ApprovalPolicy {
+  if (!raw?.trim()) return EMPTY_APPROVALS;
+  try {
+    const v = JSON.parse(raw) as Partial<ApprovalPolicy>;
+    return {
+      categories: v.categories ?? {},
+      shellAllow: v.shellAllow ?? [],
+      shellDeny: v.shellDeny ?? [],
+    };
+  } catch {
+    return EMPTY_APPROVALS;
+  }
+}
+
+/** `null` when the zone overrides nothing, so "inherit everything" is stored as
+ * the absence of a policy rather than an empty one that looks like a decision. */
+function serializeApprovals(p: ApprovalPolicy): string | null {
+  const empty =
+    Object.keys(p.categories).length === 0 &&
+    p.shellAllow.length === 0 &&
+    p.shellDeny.length === 0;
+  return empty ? null : JSON.stringify(p);
+}
 
 const SAFETY_BADGE: Record<number, { label: string; cls: string }> = {
   0: { label: "Safe",      cls: "border-green-600/40  bg-green-600/10  text-green-500" },
@@ -395,6 +433,8 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
   const [includeThinkingInContext, setIncludeThinkingInContext] = useState(false);
   const [isLeader, setIsLeader] = useState(false);
   const [fallbackZoneId, setFallbackZoneId] = useState<string | null>(null);
+  /** This zone's approval overrides (0.14.2). Empty = inherit everything. */
+  const [approvals, setApprovals] = useState<ApprovalPolicy>(EMPTY_APPROVALS);
   const [icon, setIcon] = useState<string | null>(null);
   const [accentColor, setAccentColor] = useState<string | null>(null);
   const [models, setModels] = useState<string[]>([]);
@@ -483,6 +523,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
       setIncludeThinkingInContext(zone.includeThinkingInContext ?? false);
       setIsLeader(zone.isLeader ?? false);
       setFallbackZoneId(zone.fallbackZoneId ?? null);
+      setApprovals(parseApprovals(zone.approvals));
       setIcon(zone.icon ?? null);
       setAccentColor(zone.accentColor ?? null);
     } else {
@@ -502,6 +543,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
       setIncludeThinkingInContext(false);
       setIsLeader(false);
       setFallbackZoneId(null);
+      setApprovals(EMPTY_APPROVALS);
       setIcon(null);
       setAccentColor(null);
     }
@@ -572,6 +614,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
       includeThinkingInContext,
       isLeader,
       fallbackZoneId,
+      approvals: serializeApprovals(approvals),
       icon,
       accentColor,
     };
@@ -622,7 +665,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
   }, [
     zone?.id, name, providerId, model, systemPrompt, temperature, maxTokens, topP,
     tools, toolConfig, descOverrides, ttsVoice, thinkingEnabled,
-    includeThinkingInContext, isLeader, fallbackZoneId, icon, accentColor,
+    includeThinkingInContext, isLeader, fallbackZoneId, approvals, icon, accentColor,
   ]);
 
   async function handleDelete() {
@@ -1149,6 +1192,80 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
               </div>
             </div>
           </label>
+        </Field>
+
+        <Field label="Approvals">
+          <p className="mb-2 text-[11px] text-[var(--color-text-muted)]">
+            What this zone in particular may do without asking. Everything left on{" "}
+            <strong>Inherit</strong> follows Settings → Chat. This is where a scout that only reads
+            and an implementer that may edit stop being the same policy — and where neither of them
+            gets unreviewed shell.
+          </p>
+          <div className="divide-y divide-[var(--color-border)] rounded border border-[var(--color-border)]">
+            {ZONE_APPROVAL_CATEGORIES.map(([cat, label]) => {
+              const current = approvals.categories[cat];
+              return (
+                <div key={cat} className="flex items-center gap-3 px-2 py-1.5">
+                  <span className="min-w-0 flex-1 text-xs">{label}</span>
+                  <div className="flex shrink-0 overflow-hidden rounded border border-[var(--color-border)] text-[11px]">
+                    {([
+                      [undefined, "Inherit"],
+                      [false, "Ask"],
+                      [true, "Auto"],
+                    ] as [boolean | undefined, string][]).map(([state, text]) => (
+                      <button
+                        key={text}
+                        type="button"
+                        onClick={() =>
+                          setApprovals((p) => {
+                            const categories = { ...p.categories };
+                            if (state === undefined) delete categories[cat];
+                            else categories[cat] = state;
+                            return { ...p, categories };
+                          })
+                        }
+                        className={`px-2 py-0.5 ${
+                          current === state
+                            ? "bg-[var(--color-accent)] text-white"
+                            : "bg-[var(--color-panel)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                        }`}
+                      >
+                        {text}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            {([
+              ["shellAllow", "Run without asking", "npm run test"],
+              ["shellDeny", "Never run", "git push"],
+            ] as ["shellAllow" | "shellDeny", string, string][]).map(([key, label, placeholder]) => (
+              <label key={key} className="block">
+                <span className="mb-1 block text-[11px] font-medium">{label}</span>
+                <textarea
+                  value={approvals[key].join("\n")}
+                  onChange={(e) =>
+                    setApprovals((p) => ({
+                      ...p,
+                      [key]: e.target.value.split("\n").map((s) => s.trim()).filter(Boolean),
+                    }))
+                  }
+                  rows={3}
+                  spellCheck={false}
+                  placeholder={placeholder}
+                  className="w-full rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 font-mono text-[11px] outline-none focus:border-[var(--color-accent)]"
+                />
+              </label>
+            ))}
+          </div>
+          <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+            Command prefixes, one per line — <strong>added to</strong> the global lists rather than
+            replacing them, since a deny list you can drop by configuring something else is not a
+            deny list. Longest match wins.
+          </p>
         </Field>
 
         <Field label="Fallback zone">

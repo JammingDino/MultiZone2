@@ -412,27 +412,6 @@ pub async fn update_message(
     Ok(updated)
 }
 
-/// Read the auto-approve level from persisted app_settings.
-/// Returns "all" if not set (backward-compatible: no approval prompts).
-async fn get_auto_approve_level(db: &SqlitePool) -> String {
-    let raw: Option<Option<String>> = sqlx::query_scalar(
-        "SELECT value FROM settings WHERE key = 'app_settings'",
-    )
-    .fetch_optional(db)
-    .await
-    .ok()
-    .flatten();
-
-    raw.flatten()
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-        .and_then(|v| {
-            v.get("autoApproveLevel")
-                .and_then(|v| v.as_str())
-                .map(String::from)
-        })
-        .unwrap_or_else(|| "all".to_string())
-}
-
 /// Read the OCR language hint from persisted app_settings (0.4.0). Defaults to
 /// "eng". Passed to the OCR engine when falling back for vision-incapable models.
 async fn ocr_language(db: &SqlitePool) -> String {
@@ -505,17 +484,6 @@ pub(crate) async fn vision_override(db: &SqlitePool, model: &str) -> Option<Stri
                 .map(String::from)
         })
         .filter(|s| s == "on" || s == "off")
-}
-
-/// Returns true when the tool needs explicit user approval given the current level.
-fn approval_needed(auto_level: &str, tool_safety: u8) -> bool {
-    match auto_level {
-        "all" => false,
-        "safe_moderate" => tool_safety > 1,
-        "safe" => tool_safety > 0,
-        "none" => true,
-        _ => false,
-    }
 }
 
 /// Run the agentic loop against the chat's existing history without inserting
@@ -896,6 +864,8 @@ fn simple_zone(provider: &Provider) -> AppResult<Zone> {
         // Nothing to fall back to: quick chat *is* the fallback — one provider,
         // its own default model, chosen in settings.
         fallback_zone_id: None,
+        // No overrides: quick chat answers under the global approval policy.
+        approvals: None,
         created_at: 0,
         updated_at: 0,
     })
@@ -1992,8 +1962,12 @@ async fn run_participant_turn(
             .iter()
             .any(|tc| tc.function.name == "exit_plan_mode");
 
-        // Execute tools, persist results, push into history
-        let auto_approve_level = get_auto_approve_level(&ctx.db).await;
+        // Execute tools, persist results, push into history. The policy is read
+        // per step rather than per turn: a user watching a long run and deciding
+        // halfway through to stop being asked about reads should not have to
+        // start a new turn for it (0.14.2).
+        let policy =
+            crate::approvals::Policy::load(&ctx.db, zone.approvals.as_deref()).await;
         let approval_key = approval_key(chat_id, persp);
         // Set when this step's calls tripped loop detection. Handled after the
         // step rather than inside it, so the call that tripped it is still
@@ -2059,7 +2033,68 @@ async fn run_participant_turn(
                 .get(&tc.function.name)
                 .copied()
                 .unwrap_or_else(|| tools::tool_safety_by_name(&tc.function.name));
-            let needs_approval = approval_needed(&auto_approve_level, tool_safety);
+            let decision =
+                policy.decide(&tc.function.name, &tc.function.arguments, tool_safety);
+
+            // A denied shell prefix is refused here, on the same path plan mode
+            // uses: the user already answered this question by writing the rule
+            // down, and turning it into a prompt would ask it again.
+            if let crate::approvals::Decision::Deny(reason) = &decision {
+                crate::events::record(
+                    &ctx.db,
+                    chat_id,
+                    Some(&turn_id),
+                    persp,
+                    "denial",
+                    format!("`{}` was refused by a command rule", tc.function.name),
+                    Some(serde_json::json!({
+                        "tool": tc.function.name,
+                        "arguments": crate::events::summarize_args(&tc.function.arguments),
+                        "rule": "shellDeny",
+                    })),
+                )
+                .await;
+                sink.emit_for(
+                    chat_id,
+                    persp,
+                    StreamPayload::ToolCallResult {
+                        index: 0,
+                        name: tc.function.name.clone(),
+                        result: reason.clone(),
+                    },
+                );
+                let (parts, api_content) = parse_tool_result_content(reason);
+                let msg_id = new_id();
+                sqlx::query(
+                    "INSERT INTO messages (id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, created_at)
+                     VALUES (?1, ?2, 'tool', ?3, NULL, ?4, NULL, ?5, ?6)",
+                )
+                .bind(&msg_id)
+                .bind(chat_id)
+                .bind(serde_json::to_string(&parts)?)
+                .bind(&tc.id)
+                .bind(persp)
+                .bind(now_ts())
+                .execute(&ctx.db)
+                .await?;
+                let saved = sqlx::query_as::<_, Message>(&format!(
+                    "SELECT {MSG_COLS} FROM messages WHERE id = ?1"
+                ))
+                .bind(&msg_id)
+                .fetch_one(&ctx.db)
+                .await?;
+                sink.emit_for(chat_id, persp, StreamPayload::ToolMessageSaved { message: &saved });
+                api_messages.push(ChatMessage {
+                    role: "tool".into(),
+                    content: Some(api_content),
+                    tool_calls: None,
+                    tool_call_id: Some(tc.id.clone()),
+                    name: Some(tc.function.name.clone()),
+                });
+                continue;
+            }
+
+            let needs_approval = decision == crate::approvals::Decision::Ask;
 
             let answer = if needs_approval {
                 let (tx, rx) = oneshot::channel::<ApprovalAnswer>();
@@ -3710,6 +3745,7 @@ mod tests {
             accent_color: None,
             is_leader: false,
             fallback_zone_id: None,
+            approvals: None,
             created_at: 0,
             updated_at: 0,
         }

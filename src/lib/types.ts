@@ -36,6 +36,13 @@ export interface Zone {
    * dedicated indicator in the library/editor; gets the orchestration preamble. */
   isLeader: boolean;
   /**
+   * This zone's approval overrides as a JSON `ApprovalPolicy` (0.14.2), or null
+   * to inherit the global one. Stored as a string because the category set
+   * grows with the tool set, and a column per category would be a migration per
+   * tool group.
+   */
+  approvals: string | null;
+  /**
    * Zone to answer with when this one's provider will not serve the request —
    * rate limited past its cooldown, host down, key rejected (0.14.1). Null for
    * none, which means such a failure ends the turn as it always did.
@@ -536,6 +543,36 @@ export type InputPart =
   | { type: "hidden_text"; text: string }
   | { type: "hidden_image"; data_url: string };
 
+/**
+ * What kind of work a tool does, from the user's point of view — a different
+ * axis from how dangerous it is (0.14.2). `delete_file` and `run_command` are
+ * both dangerous and belong in different categories: letting an agent edit a
+ * repo is not agreeing to let it run anything.
+ */
+export type ApprovalCategory =
+  | "read"
+  | "edit"
+  | "shell"
+  | "web"
+  | "mcp"
+  | "spawn"
+  | "state";
+
+/**
+ * An approval policy, global or per zone. Every field optional-by-omission:
+ * a category that is absent inherits, and a zone's lists are added to the
+ * global ones rather than replacing them — a deny list that can be dropped by
+ * configuring something else is not a deny list.
+ */
+export interface ApprovalPolicy {
+  /** true = auto-approve, false = always ask, absent = inherit. */
+  categories: Partial<Record<ApprovalCategory, boolean>>;
+  /** Command prefixes that run without asking. */
+  shellAllow: string[];
+  /** Command prefixes that are refused outright. */
+  shellDeny: string[];
+}
+
 /** Stream event payloads emitted by the backend over the `stream` event. */
 export type StreamEvent =
   | { type: "user_message_saved"; message: Message }
@@ -730,6 +767,18 @@ export interface AppSettings {
    * lets longer tasks complete in a single turn; lowering it caps how long a
    * runaway model can churn before it has to report back. Clamped to 4–200.
    */
+  /**
+   * Per-category approval policy (0.14.2), which is the axis
+   * `autoApproveLevel` above could never express: "how dangerous is this tool"
+   * and "do I want to be asked about this kind of work" are different
+   * questions. A category left out falls back to the slider, so an install that
+   * never opens this panel behaves exactly as it did.
+   *
+   * `shellAllow` / `shellDeny` are command prefixes, longest match wins — so
+   * "allow `git`, deny `git push`" resolves the way it reads. A deny is a
+   * refusal rather than a prompt: writing the rule down *is* the answer.
+   */
+  approvals: ApprovalPolicy;
   maxToolSteps: number;
   /**
    * Ceiling on the billed tokens one session — a chat plus every sub-agent
@@ -1026,6 +1075,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   apiPort: 8765,
   apiToken: "",
   autoApproveLevel: "all",
+  approvals: { categories: {}, shellAllow: [], shellDeny: [] },
   maxToolSteps: 30,
   maxSessionTokens: 0,
   pdfMode: "images",

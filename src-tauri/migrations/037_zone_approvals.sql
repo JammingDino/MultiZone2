@@ -1,0 +1,17 @@
+-- Per-zone approval overrides (0.14.2).
+--
+-- JSON, and nullable, because "this zone says nothing about approvals" has to
+-- be distinguishable from "this zone auto-approves nothing" — the first
+-- inherits the global policy, the second overrides it to always ask.
+--
+-- Shape (every field optional):
+--   {
+--     "categories": { "read": true, "shell": false, ... },
+--     "shellAllow": ["git", "npm run"],
+--     "shellDeny":  ["git push", "rm"]
+--   }
+--
+-- Stored as text rather than modelled as columns: the category set is expected
+-- to grow with the tool set, and a migration per category would be a migration
+-- per tool group.
+ALTER TABLE zones ADD COLUMN approvals TEXT;

@@ -48,6 +48,11 @@ pub struct Zone {
     /// Used once per turn — a fallback whose own provider is also down is a
     /// dead run either way, and chaining them would hide that.
     pub fallback_zone_id: Option<String>,
+    /// This zone's approval overrides as JSON (0.14.2), or `None` to inherit the
+    /// global policy entirely. See [`crate::approvals`] for the shape — a scout
+    /// that only reads, an implementer that may edit, and neither of them
+    /// holding unreviewed shell.
+    pub approvals: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -63,7 +68,7 @@ pub struct Zone {
 pub const ZONE_COLS: &str = "id, name, provider_id, model, system_prompt,
     temperature_override AS temperature, max_tokens, top_p,
     tools_enabled, tool_config, thinking_enabled, include_thinking_in_context,
-    icon, accent_color, is_leader, fallback_zone_id, created_at, updated_at";
+    icon, accent_color, is_leader, fallback_zone_id, approvals, created_at, updated_at";
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 #[serde(rename_all = "camelCase")]

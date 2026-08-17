@@ -26,7 +26,7 @@ import {
 } from "@/lib/settingsBundle";
 import { pickBundleFile } from "@/lib/importSettings";
 import { type SkillSeed, serializeSkill, parseSkill } from "@/lib/skillFile";
-import type { ApiBindState, CheckpointUsage, ConnectorCatalog, ConnectorEntry, ConnectorField, DbStats, GlobalKbView, IndexSummary, KbDocument, LifetimeUsage, McpDiagnosis, McpServerView, McpTool, Provider, Skill, SkillPack } from "@/lib/types";
+import type { ApiBindState, ApprovalCategory, ApprovalPolicy, CheckpointUsage, ConnectorCatalog, ConnectorEntry, ConnectorField, DbStats, GlobalKbView, IndexSummary, KbDocument, LifetimeUsage, McpDiagnosis, McpServerView, McpTool, Provider, Skill, SkillPack } from "@/lib/types";
 import { formatBytes, formatCount, formatTokens } from "@/lib/format";
 import { PRIMARY_ACTION } from "@/lib/chrome";
 
@@ -1020,7 +1020,8 @@ function ChatTab() {
       <section>
         <h3 className="mb-1 text-sm font-medium">Tool auto-approval</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Dangerous: code execution and shell. Moderate: web search and file access.
+          By danger, for anything the categories below leave undecided. Dangerous: code execution
+          and shell. Moderate: web search and file access.
         </p>
         <OptionCards
           layout="column"
@@ -1033,6 +1034,48 @@ function ChatTab() {
             ["none",         "Nothing",             "Every tool call asks first."],
           ]}
         />
+      </section>
+
+      <section>
+        <h3 className="mb-1 text-sm font-medium">By kind of work</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          The slider above answers "how dangerous is this tool". This answers a different question:
+          what kind of work do you want to be asked about. Reading files all day is not worth twenty
+          prompts; one shell command usually is. Anything left on <strong>Inherit</strong> follows
+          the slider, so changing nothing here changes nothing.
+        </p>
+        <ApprovalCategoryGrid
+          value={appSettings.approvals}
+          onChange={(approvals) => setAppSettings({ approvals })}
+        />
+      </section>
+
+      <section>
+        <h3 className="mb-1 text-sm font-medium">Command rules</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          One command prefix per line, matched on whole words. <strong>Longest match wins</strong>,
+          so allowing <code>git</code> and denying <code>git push</code> resolves the way it reads.
+          A denied command is <em>refused</em>, not prompted — writing the rule down is the answer.
+          These apply to shell, code execution and terminal input only.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <PrefixList
+            label="Run without asking"
+            placeholder={"git status\nnpm run test\nls"}
+            value={appSettings.approvals.shellAllow}
+            onChange={(shellAllow) =>
+              setAppSettings({ approvals: { ...appSettings.approvals, shellAllow } })
+            }
+          />
+          <PrefixList
+            label="Never run"
+            placeholder={"git push\nrm -rf\ncurl"}
+            value={appSettings.approvals.shellDeny}
+            onChange={(shellDeny) =>
+              setAppSettings({ approvals: { ...appSettings.approvals, shellDeny } })
+            }
+          />
+        </div>
       </section>
 
       <section>
@@ -4356,6 +4399,114 @@ function OptionCards<T extends string | number>({
         </button>
       ))}
     </div>
+  );
+}
+
+/**
+ * The seven categories, in the order someone reads them: what an agent looks
+ * at, then what it changes, then what it reaches (0.14.2).
+ */
+const APPROVAL_CATEGORIES: [ApprovalCategory, string, string][] = [
+  ["read", "Read", "Open files, search, list, read memory or another agent's transcript."],
+  ["edit", "Edit", "Write, move, copy or delete files."],
+  ["shell", "Shell", "Run commands, execute code, drive a terminal."],
+  ["web", "Web", "Search, fetch a page, crawl, raw HTTP."],
+  ["mcp", "MCP", "Anything served by a connected MCP server."],
+  ["spawn", "Sub-agents", "Start a sub-agent or hand it work."],
+  ["state", "App state", "Change settings, memories, skills, zones, tags."],
+];
+
+/**
+ * Three states per category, and the third one matters: *inherit* is not the
+ * same as *ask*. An install that never touches this panel has to keep behaving
+ * exactly as it did, which means "undecided" has to be representable.
+ */
+function ApprovalCategoryGrid({
+  value,
+  onChange,
+  compact,
+}: {
+  value: ApprovalPolicy;
+  onChange: (next: ApprovalPolicy) => void;
+  compact?: boolean;
+}) {
+  function set(cat: ApprovalCategory, next: boolean | undefined) {
+    const categories = { ...value.categories };
+    if (next === undefined) delete categories[cat];
+    else categories[cat] = next;
+    onChange({ ...value, categories });
+  }
+
+  return (
+    <div className="divide-y divide-[var(--color-border)] rounded border border-[var(--color-border)]">
+      {APPROVAL_CATEGORIES.map(([cat, label, description]) => {
+        const current = value.categories[cat];
+        return (
+          <div key={cat} className="flex items-center gap-3 px-3 py-2">
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-medium">{label}</div>
+              {!compact && (
+                <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">{description}</div>
+              )}
+            </div>
+            <div className="flex shrink-0 overflow-hidden rounded border border-[var(--color-border)] text-[11px]">
+              {([
+                [undefined, "Inherit"],
+                [false, "Ask"],
+                [true, "Auto"],
+              ] as [boolean | undefined, string][]).map(([state, text]) => (
+                <button
+                  key={text}
+                  onClick={() => set(cat, state)}
+                  className={`px-2 py-1 ${
+                    current === state
+                      ? "bg-[var(--color-accent)] text-white"
+                      : "bg-[var(--color-panel)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                  }`}
+                >
+                  {text}
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** A newline-separated prefix list, edited as text because that is how people
+ * think about a list of commands. Blank lines are dropped on the way out. */
+function PrefixList({
+  label,
+  placeholder,
+  value,
+  onChange,
+}: {
+  label: string;
+  placeholder: string;
+  value: string[];
+  onChange: (next: string[]) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs font-medium">{label}</span>
+      <textarea
+        value={value.join("\n")}
+        onChange={(e) =>
+          onChange(
+            e.target.value
+              .split("\n")
+              .map((s) => s.trim())
+              .filter(Boolean),
+          )
+        }
+        rows={4}
+        spellCheck={false}
+        placeholder={placeholder}
+        className="w-full rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1.5 font-mono text-[11px] outline-none focus:border-[var(--color-accent)]"
+      />
+    </label>
   );
 }
 

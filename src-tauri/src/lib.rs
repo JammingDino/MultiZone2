@@ -1,4 +1,5 @@
 mod api;
+mod approvals;
 mod audio;
 mod checkpoints;
 mod db;

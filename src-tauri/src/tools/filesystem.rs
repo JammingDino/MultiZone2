@@ -10,6 +10,125 @@ const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
 /// so the ceiling is about what that costs rather than what a page image costs.
 const MAX_PDF_BYTES: usize = 50 * 1024 * 1024;
 
+/// Lines returned by `read_file` when the call does not say (0.14.1). Roughly
+/// 15k tokens of source at typical line lengths — big enough that most files
+/// arrive whole and nothing about ordinary use changes, small enough that a
+/// 40,000-line log cannot end a turn by itself.
+const DEFAULT_LINE_LIMIT: usize = 1200;
+/// The most a single call can ask for, however large a `limit` it passes. A
+/// model that wants more can page; a model that asked for a million lines has
+/// made a mistake that should not cost the whole context window.
+const MAX_LINE_LIMIT: usize = 5000;
+/// Longer lines are clipped with a marker. This is for minified bundles and
+/// single-line JSON, where one "line" can be megabytes — the window would be
+/// honoured and the context blown anyway.
+const MAX_LINE_CHARS: usize = 2000;
+
+/// The result of applying an offset/limit window to a file's text.
+#[derive(Debug, PartialEq)]
+struct LineWindow {
+    text: String,
+    /// Lines in the whole file.
+    total: usize,
+    /// 1-based inclusive range actually returned. `from > to` means empty.
+    from: usize,
+    to: usize,
+    /// Whether anything was left out — either side of the window.
+    truncated: bool,
+    /// How many returned lines were clipped at [`MAX_LINE_CHARS`].
+    clipped_lines: usize,
+}
+
+/// Take the `offset`/`limit` window of `text`, 1-based and inclusive.
+///
+/// Split out as a pure function because every interesting case here is an
+/// off-by-one: an offset past the end of the file, a `limit` of zero, a file
+/// with no trailing newline. Reading a large file is also the one place where
+/// getting the arithmetic wrong is invisible — the model receives *some* code,
+/// with no way to tell it is the wrong region.
+fn window_lines(text: &str, offset: Option<usize>, limit: Option<usize>) -> LineWindow {
+    let lines: Vec<&str> = text.lines().collect();
+    let total = lines.len();
+    // `offset` is a line number, so 0 and 1 both mean "from the start" — models
+    // write both, and refusing one of them teaches nothing.
+    let from = offset.unwrap_or(1).max(1);
+    let limit = limit.unwrap_or(DEFAULT_LINE_LIMIT).min(MAX_LINE_LIMIT);
+
+    if from > total || limit == 0 {
+        return LineWindow {
+            text: String::new(),
+            total,
+            from,
+            to: from.saturating_sub(1),
+            truncated: total > 0,
+            clipped_lines: 0,
+        };
+    }
+
+    let start = from - 1;
+    let end = (start + limit).min(total);
+    let mut clipped_lines = 0;
+    let selected: Vec<String> = lines[start..end]
+        .iter()
+        .map(|line| {
+            // Chars, not bytes: clipping mid-codepoint would corrupt the text
+            // the model then quotes back as an edit anchor.
+            if line.chars().count() > MAX_LINE_CHARS {
+                clipped_lines += 1;
+                let head: String = line.chars().take(MAX_LINE_CHARS).collect();
+                format!("{head}… [line clipped]")
+            } else {
+                (*line).to_string()
+            }
+        })
+        .collect();
+
+    LineWindow {
+        text: selected.join("\n"),
+        total,
+        from,
+        to: end,
+        truncated: start > 0 || end < total,
+        clipped_lines,
+    }
+}
+
+/// The sentence the model reads when it did not get the whole file. It has to
+/// say the exact next call to make: "truncated" alone produces either a model
+/// that answers from a fragment as though it were the file, or one that re-reads
+/// the same window and loops.
+fn window_note(w: &LineWindow, path: &str) -> Option<String> {
+    if !w.truncated && w.clipped_lines == 0 {
+        return None;
+    }
+    let mut note = if w.from > w.to {
+        format!(
+            "No lines returned: the window starts at line {} but {path} has {} line(s).",
+            w.from, w.total
+        )
+    } else {
+        format!(
+            "Showing lines {}-{} of {}.",
+            w.from, w.to, w.total
+        )
+    };
+    if w.to < w.total {
+        note.push_str(&format!(
+            " Read the next window with offset {} (and a limit if you want more or fewer than \
+             {DEFAULT_LINE_LIMIT} lines). Do not answer as though you have seen the whole file.",
+            w.to + 1
+        ));
+    }
+    if w.clipped_lines > 0 {
+        note.push_str(&format!(
+            " {} line(s) were longer than {MAX_LINE_CHARS} characters and were clipped — quoting \
+             one as an edit anchor will not match.",
+            w.clipped_lines
+        ));
+    }
+    Some(note)
+}
+
 fn image_mime(path: &Path) -> Option<&'static str> {
     match path
         .extension()
@@ -52,7 +171,10 @@ pub fn definitions(project_dir: Option<&str>, vision_capable: bool) -> Vec<Tool>
                 description: if vision_capable {
                     format!(
                         "Read a file. Use before editing, and whenever the answer depends on what \
-                         a file actually contains. Text is returned as a string; set `as_image` \
+                         a file actually contains. Text is returned as a string, and a long file \
+                         arrives a window at a time: the result always reports the file's total \
+                         line count and the range you got, so continue with `offset` rather than \
+                         answering from a fragment. Set `as_image` \
                          for an image file to put it in your visual context. A `.pdf` is returned \
                          as page images (so you see tables, figures and scans) — page 1 plus the \
                          document's page count unless you ask for more via `pages`.\n\n{hint}"
@@ -60,7 +182,10 @@ pub fn definitions(project_dir: Option<&str>, vision_capable: bool) -> Vec<Tool>
                 } else {
                     format!(
                         "Read a file. Use before editing, and whenever the answer depends on what \
-                         a file actually contains. Text is returned as a string; a `.pdf` is \
+                         a file actually contains. Text is returned as a string, and a long file \
+                         arrives a window at a time: the result always reports the file's total \
+                         line count and the range you got, so continue with `offset` rather than \
+                         answering from a fragment. A `.pdf` is \
                          returned as extracted text — page 1 plus the document's page count \
                          unless you ask for more via `pages`.\n\n{hint}"
                     )
@@ -84,6 +209,15 @@ pub fn definitions(project_dir: Option<&str>, vision_capable: bool) -> Vec<Tool>
                                 "type": "boolean",
                                 "description": "Extract a PDF's text instead of rendering pages. Cheaper for long text-only documents; loses layout, figures and scans.",
                                 "default": false
+                            },
+                            "offset": {
+                                "type": "integer",
+                                "description": "Text files: first line to read, 1-based. Use the `lines.to` of the previous read plus one to continue.",
+                                "default": 1
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": "Text files: how many lines to read (default 1200, maximum 5000)."
                             }
                         },
                         "required": ["path"]
@@ -97,6 +231,15 @@ pub fn definitions(project_dir: Option<&str>, vision_capable: bool) -> Vec<Tool>
                                 "type": "string",
                                 "description": "PDF pages to read: \"3\", \"1-4,9\", or \"all\" (capped at 30 per call).",
                                 "default": "1"
+                            },
+                            "offset": {
+                                "type": "integer",
+                                "description": "Text files: first line to read, 1-based. Use the `lines.to` of the previous read plus one to continue.",
+                                "default": 1
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": "Text files: how many lines to read (default 1200, maximum 5000)."
                             }
                         },
                         "required": ["path"]
@@ -660,16 +803,38 @@ pub async fn read_file(
     match tokio::fs::read(&p).await {
         Ok(bytes) => {
             let path_str = p.to_string_lossy().to_string();
-            Ok(json!({
-                "ref": 1,
-                "path": path_str,
-                "source": path_str,
-                "content": bytes_to_string(bytes),
-                "citation_instructions": READ_FILE_CITATION,
-            })
-            .to_string())
+            let text = bytes_to_string(bytes);
+            Ok(text_read_result(&path_str, &text, args).to_string())
         }
         Err(e) => Ok(json!({ "error": e.to_string() }).to_string()),
+    }
+}
+
+/// The JSON a text read returns, windowed by the call's `offset`/`limit`.
+/// Separate from [`read_file`] so it can be tested without an `AppHandle`.
+fn text_read_result(path: &str, text: &str, args: &Value) -> Value {
+    let window = window_lines(text, usize_arg(args, "offset"), usize_arg(args, "limit"));
+    let mut out = json!({
+        "ref": 1,
+        "path": path,
+        "source": path,
+        "content": window.text,
+        "lines": { "total": window.total, "from": window.from, "to": window.to },
+        "citation_instructions": READ_FILE_CITATION,
+    });
+    if let Some(note) = window_note(&window, path) {
+        out["truncated"] = json!(window.truncated);
+        out["note"] = json!(note);
+    }
+    out
+}
+
+/// Read a whole-number argument, accepting the string form models often send.
+fn usize_arg(args: &Value, key: &str) -> Option<usize> {
+    match args.get(key)? {
+        Value::Number(n) => n.as_u64().map(|v| v as usize),
+        Value::String(s) => s.trim().parse::<usize>().ok(),
+        _ => None,
     }
 }
 
@@ -1879,6 +2044,126 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.root);
         }
+    }
+
+    // ─── Windowed reads (0.14.1) ─────────────────────────────────────────────
+
+    fn numbered(n: usize) -> String {
+        (1..=n).map(|i| format!("line {i}")).collect::<Vec<_>>().join("\n")
+    }
+
+    #[test]
+    fn a_short_file_comes_back_whole_and_untruncated() {
+        let w = window_lines("a\nb\nc\n", None, None);
+        assert_eq!(w.text, "a\nb\nc");
+        assert_eq!((w.total, w.from, w.to), (3, 1, 3));
+        assert!(!w.truncated);
+        assert!(window_note(&w, "f.txt").is_none());
+    }
+
+    /// The point of the default: a long file must not be able to end a turn by
+    /// arriving whole, and the model has to be told that it did not.
+    #[test]
+    fn a_long_file_stops_at_the_default_and_says_where_to_continue() {
+        let w = window_lines(&numbered(3000), None, None);
+        assert_eq!((w.total, w.from, w.to), (3000, 1, DEFAULT_LINE_LIMIT));
+        assert!(w.truncated);
+        let note = window_note(&w, "big.rs").unwrap();
+        assert!(note.contains("1-1200 of 3000"), "{note}");
+        assert!(note.contains("offset 1201"), "the note has to name the next call: {note}");
+    }
+
+    #[test]
+    fn an_offset_reads_from_that_line_and_the_last_window_is_not_truncated() {
+        let w = window_lines(&numbered(10), Some(8), Some(5));
+        assert_eq!(w.text, "line 8\nline 9\nline 10");
+        assert_eq!((w.from, w.to), (8, 10));
+        // Something *was* skipped before the window, so this still reports as a
+        // partial view — the model must not answer as if it read the file.
+        assert!(w.truncated);
+        let note = window_note(&w, "f.rs").unwrap();
+        assert!(note.contains("8-10 of 10"), "{note}");
+        assert!(!note.contains("offset 11"), "there is nothing after the end: {note}");
+    }
+
+    /// Models write `offset: 0` and `offset: 1` interchangeably for "the start".
+    #[test]
+    fn offset_zero_and_one_both_mean_the_beginning() {
+        assert_eq!(window_lines("a\nb\n", Some(0), None), window_lines("a\nb\n", Some(1), None));
+    }
+
+    #[test]
+    fn an_offset_past_the_end_returns_nothing_and_says_how_long_the_file_is() {
+        let w = window_lines(&numbered(10), Some(50), None);
+        assert!(w.text.is_empty());
+        let note = window_note(&w, "f.rs").unwrap();
+        assert!(note.contains("line 50") || note.contains("starts at line 50"), "{note}");
+        assert!(note.contains("10 line"), "{note}");
+    }
+
+    #[test]
+    fn a_limit_beyond_the_maximum_is_clamped() {
+        let w = window_lines(&numbered(9000), Some(1), Some(100_000));
+        assert_eq!(w.to, MAX_LINE_LIMIT);
+    }
+
+    /// A minified bundle is one line of megabytes; honouring the window would
+    /// blow the context anyway.
+    #[test]
+    fn a_very_long_line_is_clipped_and_the_note_warns_it_cannot_be_an_anchor() {
+        let long = "x".repeat(MAX_LINE_CHARS + 500);
+        let w = window_lines(&format!("short\n{long}\n"), None, None);
+        assert_eq!(w.clipped_lines, 1);
+        assert!(w.text.contains("[line clipped]"));
+        let note = window_note(&w, "bundle.js").unwrap();
+        assert!(note.contains("clipped"), "{note}");
+    }
+
+    /// Clipping by chars, not bytes — a byte cut lands mid-codepoint and the
+    /// model quotes back mojibake as an edit anchor.
+    #[test]
+    fn clipping_a_multibyte_line_does_not_split_a_character() {
+        let line = "é".repeat(MAX_LINE_CHARS + 10);
+        let w = window_lines(&line, None, None);
+        assert!(w.text.starts_with(&"é".repeat(10)));
+        assert_eq!(w.text.chars().filter(|c| *c == 'é').count(), MAX_LINE_CHARS);
+    }
+
+    #[test]
+    fn a_read_reports_the_window_it_returned() {
+        let v = text_read_result(
+            "big.txt",
+            &numbered(2000),
+            &json!({ "offset": 500, "limit": 10 }),
+        );
+        assert_eq!(v["lines"]["total"], 2000);
+        assert_eq!(v["lines"]["from"], 500);
+        assert_eq!(v["lines"]["to"], 509);
+        assert_eq!(v["truncated"], true);
+        assert!(v["content"].as_str().unwrap().starts_with("line 500"));
+    }
+
+    /// A whole file keeps the shape it has always had — no `truncated`, no note,
+    /// nothing for a model to react to that was not there before.
+    #[test]
+    fn a_whole_file_gains_no_truncation_fields() {
+        let v = text_read_result("small.txt", "a\nb\n", &json!({}));
+        assert_eq!(v["content"], "a\nb");
+        assert_eq!(v["lines"]["total"], 2);
+        assert!(v.get("truncated").is_none());
+        assert!(v.get("note").is_none());
+    }
+
+    /// Models send `"offset": "500"` as often as the number.
+    #[test]
+    fn a_numeric_argument_sent_as_a_string_is_accepted() {
+        let v = text_read_result(
+            "big.txt",
+            &numbered(2000),
+            &json!({ "offset": "500", "limit": "10" }),
+        );
+        assert_eq!(v["lines"]["from"], 500);
+        assert_eq!(v["lines"]["to"], 509);
     }
 
     // ─── Editing ─────────────────────────────────────────────────────────────

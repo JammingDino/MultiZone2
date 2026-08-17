@@ -63,6 +63,18 @@ export function FileVisual({
   const note = str(result.note);
   const lines = content ? content.split("\n") : [];
   const shown = lines.slice(0, PREVIEW_LINES);
+  // A windowed read (0.14.1) reports where it stopped. Saying "1200 lines" for a
+  // window of a 4,000-line file describes the message rather than the file, and
+  // this card is read as a statement about the file.
+  const win = result.lines as { total?: number; from?: number; to?: number } | undefined;
+  const lineFact =
+    win && typeof win.total === "number"
+      ? win.to && win.total > win.to - (win.from ?? 1) + 1
+        ? `lines ${win.from}–${win.to} of ${win.total}`
+        : `${win.total} line${win.total === 1 ? "" : "s"}`
+      : lines.length
+        ? `${lines.length} line${lines.length === 1 ? "" : "s"}`
+        : null;
 
   return (
     <Card
@@ -75,7 +87,7 @@ export function FileVisual({
         typeof result.page_count === "number"
           ? `${str(result.pages_read) || "pages"} of ${result.page_count}`
           : null,
-        lines.length ? `${lines.length} line${lines.length === 1 ? "" : "s"}` : null,
+        lineFact,
         content ? bytes(content.length) : null,
         language(path),
       ]}

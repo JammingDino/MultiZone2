@@ -4,6 +4,7 @@ mod audio;
 mod checkpoints;
 mod db;
 mod diffs;
+mod instructions;
 mod knowledge;
 mod llm;
 mod mcp;

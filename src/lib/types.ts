@@ -979,6 +979,17 @@ export interface AppSettings {
    * silently against the stale disk.
    */
   reviewQueue: boolean;
+  /**
+   * Read the project's own `AGENTS.md` / `CLAUDE.md` into the system prompt
+   * (0.14.5), from the working directory up to the repository root.
+   *
+   * On by default: a file written to tell an agent how to work in this
+   * repository is the cheapest context there is. Off is for the case the
+   * default cannot cover — a repository whose instruction file is enormous,
+   * wrong, or aimed at a different tool — and it has to be switchable without
+   * moving the file, since the file is not usually ours to move.
+   */
+  projectInstructions: boolean;
   /** Size ceiling for the checkpoint store, in MB. 0 = no ceiling. */
   checkpointMaxMb: number;
   /**
@@ -1142,6 +1153,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   markdownMirrorDir: "",
   checkpointRetentionDays: 30,
   reviewQueue: false,
+  projectInstructions: true,
   checkpointMaxMb: 512,
   visionOverrides: {},
   onboardingSkipped: false,

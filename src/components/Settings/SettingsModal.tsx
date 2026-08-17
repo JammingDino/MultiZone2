@@ -1202,6 +1202,23 @@ function ChatTab() {
       </section>
 
       <section>
+        <h3 className="mb-1 text-sm font-medium">The project's own instructions</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          Most repositories already carry a file written to tell an agent how to work in them —
+          <code> AGENTS.md</code> or <code>CLAUDE.md</code>. Read from the working directory up to
+          the repository root and put in front of every zone that has tools, so seven agents do not
+          rediscover the same conventions one mistake at a time. The context meter lists what it
+          costs under <em>Project instructions</em>.
+        </p>
+        <ToggleRow
+          label="Read AGENTS.md and CLAUDE.md from the project"
+          description="Standing instructions from the repository. They outrank the model's habits, never what you ask for now."
+          checked={appSettings.projectInstructions}
+          onChange={(v) => setAppSettings({ projectInstructions: v })}
+        />
+      </section>
+
+      <section>
         <h3 className="mb-3 text-sm font-medium">Perspective run mode</h3>
         <OptionCards
           value={appSettings.perspectiveMode}

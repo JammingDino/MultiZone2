@@ -36,6 +36,23 @@ async fn max_tool_steps(db: &SqlitePool) -> usize {
     continuity::clamp_steps(configured)
 }
 
+/// Whether a project's own `AGENTS.md` / `CLAUDE.md` is read into the system
+/// prompt (0.14.5). On unless the user says otherwise: a file written to tell
+/// an agent how to work in this repository is the cheapest context there is,
+/// and an install that has never opened the setting should get it.
+async fn project_instructions_enabled(db: &SqlitePool) -> bool {
+    let raw: Option<String> =
+        sqlx::query_scalar("SELECT value FROM settings WHERE key = 'app_settings'")
+            .fetch_optional(db)
+            .await
+            .ok()
+            .flatten()
+            .flatten();
+    raw.and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| v.get("projectInstructions").and_then(Value::as_bool))
+        .unwrap_or(true)
+}
+
 /// The spend ceiling for this chat's session, in billed tokens. `0` means none.
 ///
 /// **This session's own limit first, the global setting as the default**
@@ -2700,6 +2717,8 @@ async fn run_perspective(
 /// most-stable first, most-volatile last. See `build_system_snippets`.
 pub enum SnippetKind {
     ZonePrompt,
+    /// The project's own `AGENTS.md` / `CLAUDE.md` (0.14.5).
+    ProjectInstructions,
     Continuity,
     Skills,
     Knowledge,
@@ -2724,6 +2743,7 @@ impl SnippetKind {
             Self::Skills => "Skills catalog",
             Self::Knowledge => "Knowledge index",
             Self::ZonePrompt => "Zone prompt",
+            Self::ProjectInstructions => "Project instructions",
             Self::Continuity => "Agent-loop preamble",
             Self::Leader => "Sub-agent roster",
             Self::Memory => "Memories",
@@ -2793,11 +2813,33 @@ pub async fn build_system_snippets(
         }
     }
 
+    let zone_tool_ids: Vec<String> = serde_json::from_str(&zone.tools_enabled).unwrap_or_default();
+
+    // The project's own `AGENTS.md` / `CLAUDE.md` (0.14.5) — second only to the
+    // zone prompt, because it is the same kind of thing (standing instructions
+    // that do not move within a session) and belongs in front of everything
+    // that describes machinery.
+    //
+    // Gated on the zone having tools, for the same reason the loop preamble is:
+    // a zone that cannot touch the project is being told how to work in a
+    // repository it will never open. Gated again on the app setting, since this
+    // is a file the app reads on its own initiative and switching that off has
+    // to be possible without moving the file.
+    if !zone_tool_ids.is_empty() && project_instructions_enabled(db).await {
+        if let Ok(Some(dir)) = resolve_working_dir(db, chat_id).await {
+            let dir = dir.trim().to_string();
+            if !dir.is_empty() {
+                if let Some(block) = crate::instructions::block(std::path::Path::new(&dir)) {
+                    snippets.push((SnippetKind::ProjectInstructions, block));
+                }
+            }
+        }
+    }
+
     // How the agentic loop works (0.9.6). A model that doesn't know it will be
     // called again after a tool result has every reason to stop and wait for the
     // user — which is exactly what stalls a long task halfway through. Only
     // zones that actually have tools get this; for the rest it's noise.
-    let zone_tool_ids: Vec<String> = serde_json::from_str(&zone.tools_enabled).unwrap_or_default();
     if !zone_tool_ids.is_empty() {
         snippets.push((
             SnippetKind::Continuity,

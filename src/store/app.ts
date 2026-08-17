@@ -208,6 +208,13 @@ export interface ChatError {
   at: number;
   /** Set when the failure was a perspective zone's rather than the primary's. */
   zoneId?: string;
+  /**
+   * `"runaway"` for a run loop detection stopped (0.14.1). Not a provider
+   * failure: the turn is still alive and about to answer, and none of the
+   * provider advice — check your key, try again — applies. The card reads
+   * differently for it.
+   */
+  kind?: "runaway";
 }
 
 /** A settings bundle staged for import, raised from Settings, onboarding or a file drop. */
@@ -1109,6 +1116,15 @@ export const useApp = create<AppStore>((set, get) => ({
             delete chatTurns[perspectiveZoneId];
             pendingApprovalByChat[chatId] = dropApproval(pendingApprovalByChat[chatId], perspectiveZoneId);
             break;
+          case "runaway":
+            // Named, because in a Multizone run one lane looping while the
+            // others work is exactly the case where "which zone?" is the
+            // question. The lane stays alive to write its wrap-up.
+            errorsByChat[chatId] = [
+              ...(errorsByChat[chatId] ?? []),
+              { message: event.label, at: now, zoneId: perspectiveZoneId, kind: "runaway" },
+            ];
+            break;
           case "done":
           case "cancelled":
             delete chatPersp[perspectiveZoneId];
@@ -1299,6 +1315,17 @@ export const useApp = create<AppStore>((set, get) => ({
           delete turnByChat[chatId];
           routingByChat[chatId] = null;
           pendingApprovalByChat[chatId] = dropApproval(pendingApprovalByChat[chatId], undefined);
+          break;
+
+        case "runaway":
+          // Deliberately does *not* tear the stream down: the backend gives the
+          // model one more tool-free step to explain itself, and that answer is
+          // the useful part. This only puts the reason on screen while the
+          // repeated calls are still visible above it.
+          errorsByChat[chatId] = [
+            ...(errorsByChat[chatId] ?? []),
+            { message: event.label, at: now, kind: "runaway" },
+          ];
           break;
 
         case "done":

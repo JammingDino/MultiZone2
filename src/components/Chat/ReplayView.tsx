@@ -480,6 +480,7 @@ function kindLabel(kind: string): string {
     thinking: "thinking",
     tool_result: "tool output",
     tool_failed: "tool failed",
+    runaway: "loop stopped",
   };
   return map[kind] ?? kind;
 }
@@ -488,7 +489,7 @@ function KindIcon({ kind }: { kind: string }) {
   const cls = "mt-0.5 h-3 w-3 shrink-0";
   if (kind === "tool_error" || kind === "error" || kind === "tool_failed")
     return <AlertTriangle className={`${cls} text-[var(--color-danger)]`} />;
-  if (kind === "denial" || kind === "cancelled")
+  if (kind === "denial" || kind === "cancelled" || kind === "runaway")
     return <Ban className={`${cls} text-amber-400`} />;
   if (kind === "file_change") return <FileText className={`${cls} text-[var(--color-accent)]`} />;
   if (kind.startsWith("plan")) return <ClipboardList className={`${cls} text-[var(--color-accent)]`} />;

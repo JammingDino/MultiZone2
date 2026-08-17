@@ -395,6 +395,8 @@ pub async fn get_subchat_tree(
                 (SELECT COUNT(*) FROM messages m
                    WHERE m.chat_id = c.id AND m.zone_id IS NULL
                      AND m.role IN ('user', 'assistant')) AS message_count,
+                (SELECT COUNT(*) FROM session_events e
+                   WHERE e.chat_id = c.id AND e.kind = 'runaway') AS runaway_count,
                 c.created_at
          FROM chats c
          JOIN descendants d ON c.id = d.id

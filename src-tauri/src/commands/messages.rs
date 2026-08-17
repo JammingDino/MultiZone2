@@ -127,6 +127,10 @@ pub enum StreamPayload<'a> {
     /// turn, or dropped because the turn was cancelled.
     PendingCleared { ids: Vec<String> },
     Cancelled,
+    /// Loop detection stopped the turn (0.14.1). The turn does not end here —
+    /// one tool-free step follows so the model can report — but the reason is
+    /// surfaced now, while the repeated calls are still on screen.
+    Runaway { kind: &'static str, label: String },
     Done,
     Error { message: String },
 }
@@ -1306,6 +1310,22 @@ fn push_system_note(api_messages: &mut Vec<ChatMessage>, text: String) {
     });
 }
 
+/// The chat that spawned this one, when it is a sub-agent's subchat rather than
+/// a branch. Branches share the `parent_chat_id` link and have no owning zone,
+/// which is what `initiated_by_zone_id` distinguishes.
+async fn subchat_parent(db: &SqlitePool, chat_id: &str) -> Option<String> {
+    sqlx::query_scalar::<_, Option<String>>(
+        "SELECT parent_chat_id FROM chats
+          WHERE id = ?1 AND initiated_by_zone_id IS NOT NULL",
+    )
+    .bind(chat_id)
+    .fetch_optional(db)
+    .await
+    .ok()
+    .flatten()
+    .flatten()
+}
+
 /// Hand the model anything the user queued as a *steer* while this turn was
 /// running (see `commands::pending`).
 ///
@@ -1486,6 +1506,9 @@ async fn run_participant_turn(
     // Set when the user asked the run to stop after the step in flight (0.12.1).
     // The next step runs with no tools, so it can only answer.
     let mut stop_after_step = false;
+    // Loop detection (0.14.1), per turn — a call repeated across two turns is
+    // the user asking twice, not an agent stuck.
+    let mut loop_guard = crate::llm::runaway::LoopGuard::new();
     // Citation numbering for this turn. Every citing tool numbers its own
     // results from 1, so without a shared counter a search and a `read_file` in
     // the same turn would both tell the model to write `[1]`. See
@@ -1531,8 +1554,13 @@ async fn run_participant_turn(
         // both warns and withholds the tools, which is what actually guarantees
         // prose comes back.
         let final_step = continuity::is_final_step(step, max_steps) || stop_after_step;
-        if final_step {
+        if final_step && !stop_after_step {
             push_system_note(&mut api_messages, continuity::final_step_nudge(max_steps));
+        } else if final_step {
+            // The turn is ending early — the user asked it to stop (0.12.1), or
+            // loop detection stopped it (0.14.1). Both already pushed a note
+            // saying why; "you have used all N tool steps" on top of that is
+            // simply false, and a model told two different reasons picks one.
         } else if continuity::is_wrapup_step(step, max_steps) {
             push_system_note(
                 &mut api_messages,
@@ -1835,6 +1863,10 @@ async fn run_participant_turn(
         // Execute tools, persist results, push into history
         let auto_approve_level = get_auto_approve_level(&ctx.db).await;
         let approval_key = approval_key(chat_id, persp);
+        // Set when this step's calls tripped loop detection. Handled after the
+        // step rather than inside it, so the call that tripped it is still
+        // persisted and shown — the evidence is the point.
+        let mut runaway = crate::llm::runaway::Runaway::None;
         for tc in &agg.tool_calls {
             if cancel.load(Ordering::Relaxed) {
                 sink.emit_for(chat_id, persp, StreamPayload::Cancelled);
@@ -1994,6 +2026,14 @@ async fn run_participant_turn(
             };
 
             let failed = crate::commands::tool_usage::result_is_error(&result);
+
+            // Loop detection (0.14.1). A denied call is not evidence of a stuck
+            // agent — the user is the one saying no, and three refusals in a row
+            // is a conversation, not a runaway.
+            if approved && runaway == crate::llm::runaway::Runaway::None {
+                runaway = loop_guard.observe(&tc.function.name, &call_arguments, &result, failed);
+            }
+
             crate::events::record(
                 &ctx.db,
                 chat_id,
@@ -2128,6 +2168,71 @@ async fn run_participant_turn(
                 tool_call_id: Some(tc.id.clone()),
                 name: Some(tc.function.name.clone()),
             });
+
+            // Nothing further from a step that has already been judged a loop.
+            // The remaining calls of this step are the same loop continuing.
+            if runaway.is_some() {
+                break;
+            }
+        }
+
+        // A runaway turn (0.14.1) ends the way an out-of-steps turn does: one
+        // more step with the tools withheld, so the model has to say what it was
+        // doing and why it could not finish. A hard abort would be cheaper by one
+        // request and much worse — it leaves the user with a stopped run and no
+        // sentence, and it leaves a background sub-agent's parent with nothing at
+        // all, since what the parent reads is the sub-agent's last message.
+        if runaway.is_some() {
+            tracing::info!("runaway stopped at step {step}/{max_steps}: {}", runaway.label());
+            crate::events::record(
+                &ctx.db,
+                chat_id,
+                Some(&turn_id),
+                persp,
+                "runaway",
+                runaway.label(),
+                Some(serde_json::json!({ "kind": runaway.kind() })),
+            )
+            .await;
+            sink.emit_for(
+                chat_id,
+                persp,
+                StreamPayload::Runaway {
+                    kind: runaway.kind(),
+                    label: runaway.label(),
+                },
+            );
+            // Raised to the parent when this is a sub-agent. A background one is
+            // the case that matters: nobody is watching its stream, its wrap-up
+            // lands in a transcript nobody has open, and the leader would
+            // otherwise collect a plausible-sounding paragraph with no sign that
+            // the run behind it went nowhere.
+            if let Some(parent_id) = subchat_parent(&ctx.db, chat_id).await {
+                crate::events::record(
+                    &ctx.db,
+                    &parent_id,
+                    None,
+                    None,
+                    "runaway",
+                    format!("Sub-agent {} — {}", zone.name, runaway.label().to_lowercase()),
+                    Some(serde_json::json!({
+                        "kind": runaway.kind(),
+                        "subchatId": chat_id,
+                        "zone": zone.name,
+                    })),
+                )
+                .await;
+                sink.emit_for(
+                    &parent_id,
+                    None,
+                    StreamPayload::Runaway {
+                        kind: runaway.kind(),
+                        label: format!("{} — {}", zone.name, runaway.label().to_lowercase()),
+                    },
+                );
+            }
+            push_system_note(&mut api_messages, runaway.note());
+            stop_after_step = true;
         }
 
         if asked_user || filed_plan {

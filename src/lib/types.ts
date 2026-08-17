@@ -241,6 +241,8 @@ export interface SubchatNode {
   initiatedByZoneId: string | null;
   parentChatId: string | null;
   messageCount: number;
+  /** Turns of this subchat that loop detection stopped (0.14.1). */
+  runawayCount: number;
   createdAt: number;
 }
 
@@ -546,6 +548,8 @@ export type StreamEvent =
   | { type: "steer_delivered"; id: string; message: Message }
   | { type: "pending_cleared"; ids: string[] }
   | { type: "cancelled" }
+  /** Loop detection stopped the run (0.14.1); one tool-free step still follows. */
+  | { type: "runaway"; kind: "repeat" | "stuck_error" | "oscillation"; label: string }
   | { type: "done" }
   | { type: "error"; message: string };
 

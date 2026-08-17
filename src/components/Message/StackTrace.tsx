@@ -6,6 +6,7 @@ import {
   Crown,
   Loader2,
   MessageSquare,
+  RefreshCw,
 } from "lucide-react";
 import type { ContentPart, Message, SubchatNode } from "@/lib/types";
 import type { TurnBlock } from "@/lib/grouping";
@@ -207,6 +208,19 @@ function SubchatNodeRow({
           {zone?.name ?? node.title}
         </span>
         {zone?.isLeader && <Crown size={10} className="shrink-0 text-amber-500" />}
+        {/* Loop detection stopped one of this sub-agent's turns (0.14.1). The
+            tree is where a background run is looked at, and a sub-agent that
+            went in circles still returns a confident-sounding paragraph — this
+            is the only place that says otherwise before you read it. */}
+        {node.runawayCount > 0 && (
+          <span
+            title={`Stopped for looping ${node.runawayCount === 1 ? "once" : `${node.runawayCount} times`} — open the transcript`}
+            className="flex shrink-0 items-center gap-0.5 text-amber-400"
+          >
+            <RefreshCw size={10} />
+            {node.runawayCount > 1 && node.runawayCount}
+          </span>
+        )}
         <span className="ml-auto flex shrink-0 items-center gap-1 text-[var(--color-text-muted)]">
           <MessageSquare size={10} />
           {node.messageCount}

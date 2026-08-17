@@ -177,6 +177,11 @@ pub struct SubchatNode {
     pub parent_chat_id: Option<String>,
     /// Count of primary (zone_id IS NULL) user/assistant turns in the subchat.
     pub message_count: i64,
+    /// How many of this subchat's turns loop detection stopped (0.14.1). A
+    /// background sub-agent is the case this exists for: nobody is watching its
+    /// stream, so without a mark on its node in the tree the only trace is a
+    /// wrap-up message inside a transcript nobody opened.
+    pub runaway_count: i64,
     pub created_at: i64,
 }
 

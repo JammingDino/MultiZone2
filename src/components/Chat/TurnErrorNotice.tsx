@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AlertCircle, ChevronDown, ChevronRight, RotateCw, Settings as SettingsIcon, X } from "lucide-react";
+import { AlertCircle, AlertTriangle, ChevronDown, ChevronRight, RotateCw, Settings as SettingsIcon, X } from "lucide-react";
 import { useApp } from "@/store/app";
 import { CHROME_QUIET } from "@/lib/chrome";
 
@@ -27,15 +27,65 @@ export function TurnErrorNotice({ chatId }: { chatId: string }) {
 
   return (
     <div className="flex flex-col gap-2">
-      {errors.map((e, i) => (
-        <ErrorCard
-          key={i}
-          message={e.message}
-          zoneName={e.zoneId ? zones.find((z) => z.id === e.zoneId)?.name ?? "A perspective zone" : null}
-          onDismiss={() => dismiss(chatId)}
-          onOpenSettings={openSettings}
-        />
-      ))}
+      {errors.map((e, i) =>
+        e.kind === "runaway" ? (
+          <RunawayCard
+            key={i}
+            message={e.message}
+            zoneName={e.zoneId ? zones.find((z) => z.id === e.zoneId)?.name ?? "A perspective zone" : null}
+            onDismiss={() => dismiss(chatId)}
+          />
+        ) : (
+          <ErrorCard
+            key={i}
+            message={e.message}
+            zoneName={e.zoneId ? zones.find((z) => z.id === e.zoneId)?.name ?? "A perspective zone" : null}
+            onDismiss={() => dismiss(chatId)}
+            onOpenSettings={openSettings}
+          />
+        ),
+      )}
+    </div>
+  );
+}
+
+/**
+ * A run loop detection stopped (0.14.1).
+ *
+ * Amber rather than red, and no action offered: nothing failed, and the two
+ * things an error card suggests — open settings, send it again — are both wrong
+ * here. The model is still writing its account of what happened, which arrives
+ * as the next message, so this card says what was noticed and gets out of the
+ * way.
+ */
+function RunawayCard({
+  message, zoneName, onDismiss,
+}: {
+  message: string;
+  zoneName: string | null;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="rounded-lg border border-amber-400/40 bg-amber-400/5 p-3">
+      <div className="flex items-start gap-2.5">
+        <AlertTriangle size={16} className="mt-px shrink-0 text-amber-400" />
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium text-amber-400">
+            {zoneName ? `${zoneName} was going in circles` : "This run was going in circles"}
+          </div>
+          <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">{message}.</div>
+          <div className="mt-1 text-xs text-[var(--color-text-muted)]">
+            Tools were withdrawn for the rest of the turn — the reply below is what it made of it.
+          </div>
+        </div>
+        <button
+          onClick={onDismiss}
+          aria-label="Dismiss"
+          className={`shrink-0 rounded p-1 ${CHROME_QUIET}`}
+        >
+          <X size={13} />
+        </button>
+      </div>
     </div>
   );
 }

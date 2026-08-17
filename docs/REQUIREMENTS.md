@@ -127,7 +127,7 @@ Stated explicitly so the app can say no clearly. These are deliberate non-goals 
 - **A fixed vendor integration list.** No first-party "OpenAI plugin" / "Anthropic plugin" special-casing; everything is an OpenAI-compatible provider row.
 - **A general web browser / JS-rendering scraper.** URL extract reads static HTML; JS-only pages return what they ship. A headless-browser depth mode is out of scope for the pure-Rust line.
 - **A code interface / IDE.** A Claude-Code-style coding surface over local models is a post-1.0 backlog item, gated on the RAG foundation — not a 1.0 feature.
-- **Mobile.** Desktop first; a Tauri mobile target is post-desktop-stable backlog.
+- **Mobile as a standalone app.** Desktop first. The backlog item is a Tauri mobile target that is a *remote* for your desktop — same chats and zones, but every message is run by the machine at home, over the LAN, with pairing by code and per-device tokens. A phone that ran its own models and kept its own store would be the cloud sync refused above; a remote client has no second copy to sync. Post-desktop-stable, LAN-only, and never a relay through anyone's server.
 - **Latent-space multi-agent orchestration.** Attractive for Multizone efficiency but not implementable at the app layer (needs inference-engine latent I/O + a training pass) — tracked in the backlog, not scoped.
 
 ---

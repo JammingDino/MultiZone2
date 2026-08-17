@@ -1027,6 +1027,22 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
   Sizing note: the artifacts are cheap because the components exist. Grounding is a mode. Spaced repetition is new state with a scheduler. The interface is shared with the code interface and should be scoped separately. Do not schedule this as one release — the artifacts alone are worth shipping before any of the retention machinery, and they are also the honest test of whether anyone uses it.
 
-- [ ] Mobile: Tauri mobile target (iOS/Android)
+- [ ] **Mobile as a remote for the desktop, not a second app.** A Tauri mobile target (iOS/Android) that is a *window onto the machine at home* rather than a copy of the app running on a phone. It shows the same chats, the same zones, the same projects; you send a message from the phone and the desktop runs it — its providers, its models, its files, its MCP servers, its tools. Nothing infers on the phone and nothing is stored there that the desktop does not already hold.
+
+  This is the right shape for three reasons, and they are worth stating because "just port the app" is the tempting one. A phone cannot run a 30B local model, which is the entire premise of the product. Every tool that matters — `read_file`, shell, the knowledge index, an npx MCP server — is meaningless without the desktop's filesystem. And the alternative, syncing two independent stores, is the cloud-sync feature [REQUIREMENTS.md](REQUIREMENTS.md#out-of-scope) explicitly refuses; a remote client has no second copy to sync.
+
+  **Most of it exists.** 0.11.0 turned the API into the whole app — 105 routes, generated route index, a drift test that fails the build when a new Tauri command has neither a route nor a stated GUI-only reason — and `/api/chats/:id/messages` already streams the agentic loop over SSE. The frontend has one seam: every backend call in the React app goes through [src/lib/tauri.ts](../src/lib/tauri.ts) (`invoke` + `listen`), with a handful of window-chrome exceptions. A transport that implements that module's surface against HTTP + SSE instead of `invoke` is the port. The UI itself should need close to nothing beyond touch targets and layout.
+
+  What does *not* exist, and is the real work:
+
+  - **Reachability.** The server binds `127.0.0.1` on purpose. A LAN bind is opt-in, separate from the existing on/off, and must be honest about what it means — the app is now on the network. Bind to the chosen interface, never `0.0.0.0` silently
+  - **Pairing instead of a pasted token.** The desktop shows a short code (and the same thing as a QR: host, port, code). The phone sends it once and gets back a **per-device token** it keeps; the code is single-use and expires in minutes. A device registry — name, platform, first seen, last seen, token hash — with revoke per device, so a lost phone is one tap rather than a token rotation that logs out everything. Per-device tokens are what makes "it just works next time" and "revoke that one" the same feature
+  - **Approvals on the phone.** A tool prompt currently blocks on a desktop dialog. From a phone that means a run stalls at a dialog nobody is standing in front of. The pending-approval queue needs to be readable and answerable over the API, and 0.14.2's per-category approval is what makes leaving a run unattended reasonable in the first place
+  - **Discovery, so nobody types an IP.** mDNS/Bonjour advertisement of the desktop on the LAN, with manual host entry as the fallback that always works
+  - **The desktop being asleep**, which is the honest failure mode of this design, and belongs in the UI as a stated reason rather than a spinner
+
+  Deliberately *not* in scope: any access from outside the LAN (no relay, no tunnel, no account — that is cloud sync wearing a different hat), and any offline mode on the phone. If the desktop cannot be reached, the phone says so.
+
+  Sized as: LAN bind + pairing + device registry on the desktop first — useful on its own, since it is also how a tablet, a second laptop or a script on the LAN reaches the app — then the transport shim, then the mobile shell. See [CONNECTIVITY.md](CONNECTIVITY.md#part-3--the-phone-as-a-second-window).
 - [ ] Deep research mode: multi-step sourced research using subchats; requires design session before scheduling
 - [ ] Zone snapshot/versioning: save zone config at chat creation time so editing a zone does not alter historical context

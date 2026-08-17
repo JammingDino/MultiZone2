@@ -7,6 +7,7 @@ import {
   ClipboardList,
   Ban,
   BookOpen,
+  CheckCircle2,
   FileText,
   Flag,
   MessageSquare,
@@ -483,6 +484,8 @@ function kindLabel(kind: string): string {
     tool_failed: "tool failed",
     runaway: "loop stopped",
     instructions: "directory rules",
+    checks_passed: "checks passed",
+    checks_failed: "checks failed",
   };
   return map[kind] ?? kind;
 }
@@ -496,6 +499,9 @@ function KindIcon({ kind }: { kind: string }) {
   if (kind === "file_change") return <FileText className={`${cls} text-[var(--color-accent)]`} />;
   if (kind === "instructions")
     return <BookOpen className={`${cls} text-[var(--color-text-muted)]`} />;
+  if (kind === "checks_passed") return <CheckCircle2 className={`${cls} text-green-500`} />;
+  if (kind === "checks_failed")
+    return <AlertTriangle className={`${cls} text-[var(--color-danger)]`} />;
   if (kind.startsWith("plan")) return <ClipboardList className={`${cls} text-[var(--color-accent)]`} />;
   if (kind === "zone_switch") return <Users className={`${cls} text-[var(--color-text-muted)]`} />;
   if (kind === "turn_start" || kind === "turn_end")

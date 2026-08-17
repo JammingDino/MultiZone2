@@ -135,6 +135,11 @@ pub struct Project {
     /// When true, new chats created inside this project start with project
     /// context enabled automatically.
     pub default_context_enabled: bool,
+    /// Commands run against this project's tree once a turn's edits have landed
+    /// (0.14.5), so "the implementer thinks it is done" becomes evidence. None
+    /// or empty means the project has none, and none are inferred.
+    pub lint_command: Option<String>,
+    pub test_command: Option<String>,
     /// Knowledge (RAG) embedding config, bound to the index. The provider+model
     /// define the vector space; `kb_dimensions` is the embedding length captured
     /// at index time. `kb_indexed_at` is the last successful index (None if the

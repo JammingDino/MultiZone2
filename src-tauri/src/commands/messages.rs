@@ -1594,6 +1594,12 @@ async fn run_participant_turn(
     let project_instructions = project_instructions_enabled(&ctx.db).await;
     let mut instructions_seen: std::collections::HashSet<std::path::PathBuf> =
         std::collections::HashSet::new();
+    // Project checks (0.14.5): did this turn actually change any files, and
+    // have the checks already had their one run? Both per turn — a turn that
+    // only read things has nothing to check, and a suite that runs after every
+    // repair attempt spends the whole step budget on the same tests.
+    let mut edits_landed = false;
+    let mut checks_ran = false;
     // Stall recovery state, tracked across the whole turn.
     let mut used_tools_this_turn = false;
     let mut nudges_used = 0usize;
@@ -2042,7 +2048,42 @@ async fn run_participant_turn(
         }
 
         if agg.tool_calls.is_empty() {
-            // Genuinely finished — the turn ends here.
+            // Genuinely finished — but if this turn edited files and the project
+            // carries checks, "finished" is a claim rather than a fact (0.14.5).
+            // Run them and hand the result back as one more step, so the turn
+            // ends on what the checks said instead of on a paragraph that
+            // contradicts the build. Once per turn: a suite re-run after every
+            // repair is how thirty seconds of tests becomes the step budget.
+            if stall == Stall::None && edits_landed && !checks_ran {
+                checks_ran = true;
+                let outcomes =
+                    crate::checks::run(&ctx.db, chat_id, project_dir.as_deref()).await;
+                if let Some(note) = crate::checks::note(&outcomes) {
+                    let passed = outcomes.iter().all(|o| o.passed);
+                    crate::events::record(
+                        &ctx.db,
+                        chat_id,
+                        Some(&turn_id),
+                        persp,
+                        if passed { "checks_passed" } else { "checks_failed" },
+                        crate::checks::summary(&outcomes),
+                        Some(serde_json::json!({
+                            "checks": outcomes
+                                .iter()
+                                .map(|o| serde_json::json!({
+                                    "label": o.label,
+                                    "command": o.command,
+                                    "exitCode": o.exit_code,
+                                    "passed": o.passed,
+                                }))
+                                .collect::<Vec<_>>(),
+                        })),
+                    )
+                    .await;
+                    push_system_note(&mut api_messages, note);
+                    continue;
+                }
+            }
             if stall == Stall::None {
                 break;
             }
@@ -2348,6 +2389,10 @@ async fn run_participant_turn(
             )
             .await;
             if approved && !failed && crate::events::is_file_mutation(&tc.function.name) {
+                // What makes the project's checks worth running at the end of
+                // this turn (0.14.5) — a turn that only read things has nothing
+                // for them to say anything about.
+                edits_landed = true;
                 crate::events::record(
                     &ctx.db,
                     chat_id,

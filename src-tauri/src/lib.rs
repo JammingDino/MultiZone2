@@ -2,6 +2,7 @@ mod api;
 mod approvals;
 mod audio;
 mod checkpoints;
+mod checks;
 mod db;
 mod diffs;
 mod instructions;

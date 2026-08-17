@@ -184,6 +184,16 @@ export interface Project {
   directory: string | null;
   /** When true, new chats in this project start with project context enabled. */
   defaultContextEnabled: boolean;
+  /**
+   * Commands run in the project directory once a turn's edits have landed
+   * (0.14.5), their output handed back to the model before it answers.
+   *
+   * Null or empty means none, and none are inferred: guessing `npm test` in a
+   * repository whose dependencies were never installed produces a confident
+   * failure about the wrong thing.
+   */
+  lintCommand: string | null;
+  testCommand: string | null;
   /** Knowledge (RAG) embedding config, bound to the index. Provider+model define
    * the vector space; changing either forces a re-index. Null until configured. */
   kbProviderId: string | null;

@@ -173,6 +173,8 @@ function ProjectForm({
   const [contextSnippet, setContextSnippet] = useState("");
   const [directory, setDirectory] = useState<string | null>(null);
   const [defaultContextEnabled, setDefaultContextEnabled] = useState(false);
+  const [lintCommand, setLintCommand] = useState("");
+  const [testCommand, setTestCommand] = useState("");
   const [saving, setSaving] = useState(false);
   const refreshProjects = useApp((s) => s.refreshProjects);
 
@@ -185,6 +187,8 @@ function ProjectForm({
       setContextSnippet(project.contextSnippet ?? "");
       setDirectory(project.directory ?? null);
       setDefaultContextEnabled(project.defaultContextEnabled ?? false);
+      setLintCommand(project.lintCommand ?? "");
+      setTestCommand(project.testCommand ?? "");
     } else {
       setName(""); setIcon(null); setAccentColor(null);
       setDefaultZoneId(null); setContextSnippet(""); setDirectory(null);
@@ -210,6 +214,8 @@ function ProjectForm({
       contextSnippet: contextSnippet.trim() || null,
       directory: directory || null,
       defaultContextEnabled,
+      lintCommand: lintCommand.trim() || null,
+      testCommand: testCommand.trim() || null,
     };
   }
 
@@ -236,7 +242,7 @@ function ProjectForm({
     }, 600);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project?.id, name, icon, accentColor, defaultZoneId, contextSnippet, directory, defaultContextEnabled]);
+  }, [project?.id, name, icon, accentColor, defaultZoneId, contextSnippet, directory, defaultContextEnabled, lintCommand, testCommand]);
 
   async function onDelete() {
     if (!project) return;
@@ -339,6 +345,44 @@ function ProjectForm({
           >
             <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all duration-200 ${defaultContextEnabled ? "translate-x-4" : ""}`} />
           </button>
+        </div>
+
+        {/* Checks (0.14.5) — what turns "done" into evidence. */}
+        <div className="mt-3">
+          <div className="mb-1 text-xs text-[var(--color-text-muted)]">
+            Checks after an edit
+            <span className="ml-2 font-normal opacity-60">
+              (run in the project directory once a turn's edits land; the output goes back to the
+              model)
+            </span>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-medium">Lint / typecheck</span>
+              <input
+                value={lintCommand}
+                onChange={(e) => setLintCommand(e.target.value)}
+                spellCheck={false}
+                placeholder="npm run typecheck"
+                className="input font-mono text-xs"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-medium">Tests</span>
+              <input
+                value={testCommand}
+                onChange={(e) => setTestCommand(e.target.value)}
+                spellCheck={false}
+                placeholder="npm test"
+                className="input font-mono text-xs"
+              />
+            </label>
+          </div>
+          <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+            Leave blank for none — nothing is guessed. Lint runs first, since a type error explains
+            a test failure and is cheaper to read. They run once per turn, and a failure is handed
+            back for the model to fix before it answers.
+          </p>
         </div>
 
         {/* Knowledge (RAG) — only for saved projects, since indexing needs a

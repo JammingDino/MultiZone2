@@ -8,7 +8,12 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
+    "typecheck": "tsc -b",
     "test": "node --test \"scripts/**/*.test.mjs\"",
+    "test:rust": "cargo test --lib --manifest-path src-tauri/Cargo.toml",
+    "check": "npm run typecheck && npm test",
+    "check:all": "npm run build && npm test && npm run test:rust",
+    "hooks:install": "git config core.hooksPath .githooks",
     "tauri": "tauri",
     "tauri:build:fast": "tauri build --no-bundle"
   },

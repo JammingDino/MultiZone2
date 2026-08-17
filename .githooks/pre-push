@@ -1,0 +1,21 @@
+#!/bin/sh
+# Full tier: frontend build + script tests + `cargo test --lib` (minutes).
+#
+# This is the job ci.yml used to run on a hosted runner, moved onto the machine
+# that already has a warm target directory. Push is the right place to pay for
+# it here: a push to main with `releaseBuild: true` builds and publishes a
+# release, so anything that reaches the remote is already shipped.
+#
+# The build runs before the Rust tests on purpose — `tauri::generate_context!()`
+# resolves `frontendDist` at compile time, so src-tauri will not build at all
+# unless ../dist exists.
+#
+# Install with `npm run hooks:install` (sets core.hooksPath to .githooks).
+# Skip with `git push --no-verify` if you have just run `npm run check:all`.
+
+set -e
+
+cd "$(git rev-parse --show-toplevel)"
+
+printf 'pre-push: build + script tests + cargo test --lib (this takes a few minutes)\n'
+npm run --silent check:all

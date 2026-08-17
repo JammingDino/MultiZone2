@@ -7,19 +7,34 @@ take to close each one for real.
 ## Where we start from
 
 - **37 Rust files carry `#[cfg(test)]` tests.** `cargo test --lib` is a real
-  suite and it is not run by CI.
+  suite, and as of 0.14.0 a pre-push hook runs it.
 - **No frontend test runner.** No vitest, no jest, no Playwright in
   `package.json` — the Playwright work in 0.12.3 was ad-hoc via `npx`.
-- **CI is release-only.** [release.yml](../.github/workflows/release.yml) builds
-  NSIS on `windows-latest` when `releaseBuild` is true. There is no job that
-  runs on an ordinary push, so nothing is verified between releases.
 - **A build publishes.** The release path is push-to-main, which is why any
   updater test that uses the real pipeline is also a public release.
 
-The cheapest thing on this page, and the prerequisite for the rest: **a CI job
-that runs `npm run build` and `cargo test --lib` on every push.** It costs
-minutes and it catches the class of bug the checklist's own preamble names —
-"most of what has broken here compiled cleanly first."
+The cheapest thing on this page, and the prerequisite for the rest, has landed:
+**`npm run build` and `cargo test --lib` on every change.** It catches the class
+of bug the checklist's own preamble names — "most of what has broken here
+compiled cleanly first."
+
+**Where those checks run changed in 0.14.0.** They were a CI job on every push
+and PR; they are now git hooks on the development machine
+([.githooks/](../.githooks/)) — `npm run check` (typecheck + script tests, ~15s)
+on commit, `npm run check:all` (+ frontend build + `cargo test --lib`, ~75s) on
+push. [ci.yml](../.github/workflows/ci.yml) still holds the same two jobs but
+only runs on `workflow_dispatch`.
+
+The trade, stated plainly so a later reader can reverse it knowingly: a hosted
+Windows runner spends ~13 minutes in rustc per commit against ~40 seconds
+against a warm local target directory, which is what a push actually publishes
+from anyway. What is given up is the clean-checkout property — CI would have
+caught a test that only passes because of something sitting in this working
+tree, which is exactly the failure mode the 2026-08-16 entry in
+[WORKLOG.md](WORKLOG.md) describes (`dist/` had been there since the first
+build, so the Rust job passed locally and failed on the runner). The hooks
+cannot catch that class. Dispatching ci.yml before a release is the mitigation,
+and it is a judgement call each time rather than an automatic gate.
 
 ---
 
@@ -233,7 +248,7 @@ definitive answer rather than a tick.
 
 | # | Work | Why first |
 | --- | --- | --- |
-| 1 | CI job: `npm run build` + `cargo test --lib` on push | Hours of work; starts protecting 37 test files that nothing currently runs |
+| 1 | ~~CI job~~ → git hooks: `npm run build` + `cargo test --lib` on commit/push | **Done (0.14.0).** Protects the 37 test files nothing used to run, without spending a hosted runner's minutes per commit |
 | 2 | Mock streaming provider + drop assertions | Closes item 2, unblocks 1 and 5, needs no provider or network |
 | 3 | Updater secrets, then the local two-build loop | Highest consequence of anything open; the secrets are a settings page |
 | 4 | Fixture test for the manifest rewrite | Pure function, the piece local testing cannot cover |

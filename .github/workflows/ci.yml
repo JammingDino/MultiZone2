@@ -1,18 +1,27 @@
 name: CI
 
-# Runs on every push and pull request. Deliberately separate from release.yml,
-# which only fires when a release was asked for — which meant that between
-# releases nothing was verified at all, while 37 files of Rust tests sat in the
-# tree with nothing running them.
+# Manual only (0.14.0). These same checks now run on the development machine —
+# a pre-commit hook typechecks and runs the script tests, a pre-push hook adds
+# the frontend build and `cargo test --lib` (see .githooks/ and `npm run
+# check:all`). Running them here as well spent GitHub minutes re-proving what
+# was already proven locally, and the Rust job alone is ~13 minutes of rustc on
+# a hosted Windows runner for every commit.
+#
+# The jobs are kept, not deleted: they are the reference definition of what a
+# clean tree means, and `workflow_dispatch` still runs them on demand — for a
+# second opinion from a clean checkout, or when a change is suspected to depend
+# on something only this machine has. Nothing fires automatically.
+#
+# To put the automatic triggers back, uncomment the two lines below.
 #
 # No app bundle is built here: `cargo build --lib` and the frontend build catch
 # the class of breakage this is for (compiles clean, behaves wrong) without
 # paying for a full Tauri bundle on every commit.
 
 on:
-  push:
-    branches: [main]
-  pull_request:
+  # push:
+  #   branches: [main]
+  # pull_request:
   workflow_dispatch:
 
 concurrency:

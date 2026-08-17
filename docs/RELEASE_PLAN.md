@@ -920,7 +920,7 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [x] Shell allow-prefix and deny-prefix lists, longest match wins, so "allow `git`, deny `git push`" resolves correctly. Prefixes match on **whole words** — otherwise allowing `git` quietly allows `gitleaks`. A tie goes to deny, since two equal-length rules disagreeing is a configuration mistake and the safe reading of a mistake is the strict one. A denied command is **refused**, not prompted: writing the rule down was the answer, and asking again would be asking a question the user already answered
 - [x] Per-zone overrides (migration 037, in the zone editor's Advanced section): a scout that only reads, an implementer that may edit, and neither holding unreviewed shell. Merged per key, so a zone that says something about shell does not discard the user's global decision about reads — and a zone's prefix lists are *added to* the global ones rather than replacing them, because a deny list that can be dropped by configuring something else is not a deny list
 - [x] The README's "set auto-approval to *Everything* before a long run" advice is replaced with the thing that is now possible: auto for read/web/sub-agents, ask for shell, and an allow list for the commands you are happy to see run
-- [ ] **Runtime-test:** a zone with shell on *Ask* and `npm run test` allowed runs the tests without prompting and still asks about `rm`
+- [x] **Runtime-test:** a zone with shell on *Ask* and `npm run test` allowed runs the tests without prompting and still asks about `rm`
 - [ ] *Deferred to 0.14.3, with the project-root work:* "edit inside the project root" as a **path** constraint. The category answers whether editing is auto-approved, not where — and a path policy wants the same treatment as the shell lists rather than a boolean bolted onto a category
 
 ### 0.14.3 — A limit that stops, and a prompt worth reading
@@ -935,8 +935,8 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [x] **Notifications when a run is waiting on a person** ([notify.ts](../src/lib/notify.ts), `tauri-plugin-notification`): a tool approval or an `ask_user`, and only those two — both block indefinitely, and the approval times out after five minutes and leaves the agent stalled with no visible cause. Only when the window is in the background, since a toast for what is already on screen is noise. Taskbar attention always; an OS notification when unfocused. A finished turn deliberately never notifies — that is how people learn to dismiss toasts unread, including the two that matter
 - [x] **tok/s means the provider's speed again.** The live figure is now a rolling five-second window, so it follows a provider that changes speed instead of a whole-turn average that drifts. The final figure excludes time spent waiting for an approval as well as tool time: a turn where someone took two minutes to press Approve reported 1.0 tok/s from a provider running at fifty — a number about the person, not the model. The stats card names both waits (`…of which tools ran`, `…of which awaited approval`) so the gap between total and generating time is never a mystery
 - [x] `StreamPayload` was serialising `message_id` and `zone_id` while every reader in the frontend used `messageId` and `zoneName` — `rename_all` renames variants, not fields. Both reads were silently `undefined`: the routing chip named no zone. Fixed with `rename_all_fields`, which is what the TS types already described
-- [ ] **Runtime-test:** a session set below what it has already spent stops on the next message, offers a raise, and continues when one is taken
-- [ ] **Runtime-test:** an approval arriving while the window is in the background raises a notification, and the taskbar entry clears once answered
+- [x] **Runtime-test:** a session set below what it has already spent stops on the next message, offers a raise, and continues when one is taken
+- [x] **Runtime-test:** an approval arriving while the window is in the background raises a notification, and the taskbar entry clears once answered
 
 ### 0.14.4 — Whose limit, and what the clock was measuring
 
@@ -945,8 +945,8 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [x] **The spend limit is per session, not global.** Raising it from the card in one chat raised it for every chat — the opposite of what lifting a ceiling to let *this* piece of work finish is supposed to mean. Chats gain their own `spend_limit` (migration 038), resolved against the **session root** so a chat and its sub-agents share one ceiling: a sub-agent with a limit of its own would be a limit inside a limit, and whichever was smaller would silently win. The Settings value stays, now as the default for chats that have not chosen. `NULL` inherits and `0` means unmetered, which is why the column is nullable rather than zero-defaulted — "no limit" is an answer, not the absence of one. Reachable over the API as well (`POST /api/chats/:id/spend-limit`), which the drift test insisted on
 - [x] **tok/s no longer counts prefill.** After every tool result the model re-encodes a context that has just grown, and on a long agentic turn that is most of the wall clock — counted, until now, as generation time. It is tracked per step and excluded, and the first step's encode is deliberately *not* counted twice: that one is the time-to-first-token, and the turn's clock only starts at the first token
 - [x] The status line names it — **"Reading the conversation…"** rather than "Generating…", because the difference between "the model is slow" and "the context is large" is the whole diagnosis — and the stats card carries `…of which read the context` beside the tool and approval rows
-- [ ] **Runtime-test:** two chats, one with a raised limit, and the other still stops at the default
-- [ ] **Runtime-test:** a ten-step turn against a local model reports a tok/s close to what the provider's own logs show
+- [x] **Runtime-test:** two chats, one with a raised limit, and the other still stops at the default
+- [x] **Runtime-test:** a ten-step turn against a local model reports a tok/s close to what the provider's own logs show
 
 ### 0.14.5 — What the agent knows before it starts
 
@@ -1049,6 +1049,18 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
   | **Source-only grounding** | **Missing** — the mode's whole premise |
   | **Durable study state** | **Missing** — what has been asked, what was wrong, when it is due again |
   | **Retrieval good enough to trust** | **Partly** — see 0.14.4; embedding-only search is weakest on the exact-term lookups a learner makes ("what does it say about *X*") |
+
+  **A second reference, for the teaching half** — Eero Alvar, [*How to optimise learning with AI*](https://www.youtube.com/watch?v=kzcI5F4tGiU). NotebookLM is the benchmark for handling *sources*; this is the benchmark for *instruction*, and they are not the same product. The argument: one teacher to many students is inefficient not because the teacher is bad but because the instruction cannot be aimed, and a learner who assembles their own understanding from four explanations pays the cognitive cost of four teaching styles on top of the material. An AI is one consistent teacher that can absorb the differing perspectives and present them through a single interface, so the learner's attention goes to the subject rather than to finding sources, reconciling them and checking them.
+
+  The part worth taking is the three-phase loop, because it is a shape we can build almost entirely out of pieces that exist:
+
+  | Phase | What it does | What it would be here |
+  | --- | --- | --- |
+  | **Probe** | Graded multiple-choice questions until the *edge* of the learner's knowledge is located — not a score, a boundary | `make_quiz` against the corpus, with the answers written to durable study state instead of discarded |
+  | **Plan** | A curriculum, drawn as a graph. The drawing is the point: it forces the model to reason the teaching order through up front rather than deciding what comes next one message at a time | `render_graph` plus `update_plan`, both already built |
+  | **Teach** | One reasoning step per message, with periodic quizzes before moving on | The mode itself — a chat state that paces the material against what the probe found |
+
+  Two things in it are load-bearing for how this gets scheduled. The probe is worthless unless its result is *stored*, which is the **durable study state** row above — that row is the difference between a teacher and a generator of study material, and it is why the artifacts alone do not add up to this. And his own build is a Python harness with Obsidian as the UI, which is the same conclusion this document keeps reaching from the other direction: the chat panel is the wrong surface, and the shared mode workspace is the missing component.
 
   What the mode itself would add:
 

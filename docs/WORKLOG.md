@@ -5,6 +5,91 @@ alone. Newest first. Detail belongs in the linked docs; this is the thread.
 
 ---
 
+## 2026-08-17 (0.14.5) — What the agent knows before it starts
+
+Five things an agent should have had before its first step, and until now had
+to earn one tool call at a time.
+
+**Where an edit may land.** 0.14.2 shipped approval by kind of work and left
+the deferred half open: the category answers *whether* editing is
+auto-approved, never *where*. Path allow and deny lists, the same shape as the
+shell lists — and one deliberate asymmetry between them. A command matching no
+shell rule falls through to the category, because an allow list there is a
+shortcut. A path allow list is a **boundary**: an edit outside every entry is
+asked about even where the category says auto, since being asked about exactly
+those is the reason to draw one. `{project}` stands for the chat's own
+directory, so the rule almost everyone wants survives changing projects.
+
+The matcher is where the work is. Canonicalize first — symlinks followed, `..`
+resolved, `\\?\` stripped, case folded on Windows and only on Windows — then
+compare a whole segment at a time, so `/srv/app` does not quietly cover
+`/srv/app-backup`. Both ends of a move are checked. A rule that cannot be
+anchored is dropped rather than widened: dropping an allow rule costs a prompt,
+and keeping it, read as a rule about the filesystem root, could cost a
+repository.
+
+**The repository's own instructions.** Most repos an agent meets already carry
+`AGENTS.md` or `CLAUDE.md`, written for exactly this purpose, and we walked
+past them. Read from the working directory up to the repository root — and no
+further. The walk that keeps climbing is how a stray `CLAUDE.md` in a home
+directory ends up in the prompt of every project underneath it, which is very
+hard to notice from inside a chat. The preamble states precedence, because
+these are instructions from a third party: above the model's habits, below what
+the user asks for now.
+
+Directory-specific rules are the same idea with different timing. `src/generated/`
+saying "never edit these by hand" is relevant when someone opens a file there,
+not in every prompt forever, so it arrives on the first read under that folder
+and once per folder per turn.
+
+**The repo map.** Seven agents each spend their first several steps working out
+where things are, in parallel, to reach the same answer. The map is a
+fixed-size answer: definitions ranked by a PageRank over which files refer to
+which. Ranking is the whole point — an alphabetical dump of 4,000 symbols costs
+the budget and buries the ten names that matter, and "referenced by something
+itself referenced" is the only thing separating a map from a word count.
+
+Two decisions worth recording. It is **held for ten minutes past a change**:
+an agent editing files moves the signature almost every turn, and a system
+prompt that moves every turn is a provider prefix cache discarded every turn,
+to reflect one function appearing in one file. And extraction is line patterns,
+not the tree-sitter the plan named — a C grammar per language is tens of
+megabytes on every clean build, in a repo that moved CI onto this machine to
+keep the edit loop short. The failure mode of a missed definition is that it
+ranks lower than it deserves; the map says of itself that it is a map rather
+than an index.
+
+**Checks after an edit.** An agent that has just edited four files reports
+success in prose, which is what it is best at and therefore what tells you
+least. A project carries a lint and a test command; they run when a turn that
+changed files is about to finish, and the output comes back as one more step.
+
+The plan said "fed back as the next turn's input". It is fed back within the
+same turn instead, because a failing test the model learns about next turn is
+one the user has already been told was a success. Lint first, since a type
+error explains a test failure and is cheaper to read than the same failure as
+fifty lines of stack. Once per turn — re-running after every repair is how
+thirty seconds of tests becomes the whole step budget. Truncated from the
+front, because a compiler prints its errors last. A command that never ran has
+not passed. And the model is told it may disown a failure that was already
+there, or this becomes a repair loop over someone else's bug.
+
+### Verified
+
+`cargo test --lib` 296 passed (49 new across the four modules), `npm run
+build`, `npm test`. Migrations 039 and 040. The three runtime tests on the
+release plan are open: all three need a live model against a real repository,
+which is the only place any of this can actually be judged.
+
+### Left alone
+
+Nothing was inferred where it could have been guessed. No default lint command,
+no assumed test runner, no instruction file invented for a project that has
+none — a check nobody wrote down producing a confident failure about the wrong
+thing is worse than no check.
+
+---
+
 ## 2026-08-17 (0.14.4) — Whose limit, and what the clock was measuring
 
 Two corrections, both the same kind of mistake: a number that was accurate

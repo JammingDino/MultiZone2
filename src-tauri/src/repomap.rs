@@ -357,8 +357,12 @@ fn pagerank(edges: &[HashMap<usize, usize>], n: usize) -> Vec<f64> {
 
 // ── Building ────────────────────────────────────────────────────────────────
 
-/// Build the map for a directory. Synchronous and CPU-bound — call it from a
-/// blocking task.
+/// Walk and build in one call, uncached.
+///
+/// The app always goes through `cached`, which splits the two so the walk can
+/// decide whether the build is needed at all. This is the tests' door in, and
+/// the composition of the two halves is exactly what they need to exercise.
+#[cfg(test)]
 pub fn build(root: &Path, token_budget: usize) -> Option<RepoMap> {
     let entries = walk(root);
     if entries.is_empty() {

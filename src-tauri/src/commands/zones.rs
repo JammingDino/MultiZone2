@@ -5,9 +5,7 @@ use crate::state::AppState;
 use serde::Deserialize;
 use tauri::State;
 
-const ZONE_COLS: &str = "id, name, provider_id, model, system_prompt, temperature_override AS temperature, max_tokens, top_p,
-    tools_enabled, tool_config, thinking_enabled, include_thinking_in_context,
-    icon, accent_color, is_leader, created_at, updated_at";
+use crate::db::models::ZONE_COLS;
 
 #[tauri::command]
 pub async fn list_zones(state: State<'_, AppState>) -> AppResult<Vec<Zone>> {
@@ -40,6 +38,8 @@ pub struct ZoneInput {
     pub accent_color: Option<String>,
     /// Response Leader flag — marks the zone as a sub-agent coordinator.
     pub is_leader: Option<bool>,
+    /// Zone to answer with when this one's provider will not serve (0.14.1).
+    pub fallback_zone_id: Option<String>,
 }
 
 #[tauri::command]
@@ -55,8 +55,9 @@ pub async fn upsert_zone(state: State<'_, AppState>, zone: ZoneInput) -> AppResu
     sqlx::query(
         "INSERT INTO zones (id, name, provider_id, model, system_prompt, temperature_override,
                             max_tokens, top_p, tools_enabled, tool_config, thinking_enabled,
-                            include_thinking_in_context, icon, accent_color, is_leader, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?16)
+                            include_thinking_in_context, icon, accent_color, is_leader,
+                            fallback_zone_id, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?17)
          ON CONFLICT(id) DO UPDATE SET
            name = excluded.name,
            provider_id = excluded.provider_id,
@@ -72,6 +73,7 @@ pub async fn upsert_zone(state: State<'_, AppState>, zone: ZoneInput) -> AppResu
            icon = excluded.icon,
            accent_color = excluded.accent_color,
            is_leader = excluded.is_leader,
+           fallback_zone_id = excluded.fallback_zone_id,
            updated_at = excluded.updated_at",
     )
     .bind(&id)
@@ -89,6 +91,10 @@ pub async fn upsert_zone(state: State<'_, AppState>, zone: ZoneInput) -> AppResu
     .bind(&zone.icon)
     .bind(&zone.accent_color)
     .bind(is_leader)
+    // A zone that falls back to itself would retry the dead provider and call
+    // it recovery. Normalised here rather than trusted from the editor, since
+    // the API writes zones too.
+    .bind(zone.fallback_zone_id.filter(|f| f != &id))
     .bind(now)
     .execute(&state.db)
     .await?;

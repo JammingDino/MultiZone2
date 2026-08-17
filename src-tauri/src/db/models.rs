@@ -43,9 +43,27 @@ pub struct Zone {
     /// the engine injects an orchestration preamble (listing the session's
     /// sub-agent roster) and the library/editor show a leader indicator.
     pub is_leader: bool,
+    /// Another zone to answer with when this one's provider will not serve the
+    /// request (0.14.1). Usually the same role pointed at a different provider.
+    /// Used once per turn — a fallback whose own provider is also down is a
+    /// dead run either way, and chaining them would hide that.
+    pub fallback_zone_id: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }
+
+/// The column list every `SELECT … FROM zones` uses.
+///
+/// One definition, next to the struct it has to match, because four copies of
+/// it drifted: the API's had been missing `is_leader` since the field was
+/// added, so `GET /api/zones` failed to map a row and answered with an error —
+/// silently, since nothing in the app reads that route. `sqlx::query_as`
+/// requires every field, so a copy that falls behind does not fail to compile,
+/// it fails at runtime, in whichever path nobody happens to be watching.
+pub const ZONE_COLS: &str = "id, name, provider_id, model, system_prompt,
+    temperature_override AS temperature, max_tokens, top_p,
+    tools_enabled, tool_config, thinking_enabled, include_thinking_in_context,
+    icon, accent_color, is_leader, fallback_zone_id, created_at, updated_at";
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 #[serde(rename_all = "camelCase")]

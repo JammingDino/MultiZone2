@@ -35,6 +35,12 @@ export interface Zone {
   /** Response Leader: a zone configured to coordinate sub-agents. Shown with a
    * dedicated indicator in the library/editor; gets the orchestration preamble. */
   isLeader: boolean;
+  /**
+   * Zone to answer with when this one's provider will not serve the request —
+   * rate limited past its cooldown, host down, key rejected (0.14.1). Null for
+   * none, which means such a failure ends the turn as it always did.
+   */
+  fallbackZoneId: string | null;
   createdAt: number;
   updatedAt: number;
 }

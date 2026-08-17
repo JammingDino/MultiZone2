@@ -68,9 +68,7 @@ impl TurnOverride {
     }
 }
 
-const ZONE_COLS: &str = "id, name, provider_id, model, system_prompt, temperature_override AS temperature, max_tokens, top_p,
-    tools_enabled, tool_config, thinking_enabled, include_thinking_in_context,
-    icon, accent_color, is_leader, created_at, updated_at";
+use crate::db::models::ZONE_COLS;
 // One list, shared with `commands::chats`. It used to be duplicated here, and a
 // column added to `Chat` was only added to the other copy — every `send_message`
 // then failed to decode a Chat row and the send silently did nothing.
@@ -872,6 +870,9 @@ fn simple_zone(provider: &Provider) -> AppResult<Zone> {
         icon: None,
         accent_color: None,
         is_leader: false,
+        // Nothing to fall back to: quick chat *is* the fallback — one provider,
+        // its own default model, chosen in settings.
+        fallback_zone_id: None,
         created_at: 0,
         updated_at: 0,
     })
@@ -1509,6 +1510,8 @@ async fn run_participant_turn(
     // Loop detection (0.14.1), per turn — a call repeated across two turns is
     // the user asking twice, not an agent stuck.
     let mut loop_guard = crate::llm::runaway::LoopGuard::new();
+    // Whether this turn has already spent its one fallback zone (0.14.1).
+    let mut used_fallback = false;
     // Citation numbering for this turn. Every citing tool numbers its own
     // results from 1, so without a shared counter a search and a `read_file` in
     // the same turn would both tell the model to write `[1]`. See
@@ -1616,7 +1619,70 @@ async fn run_participant_turn(
             crate::llm::tokens::measure_request(&req, cpt)
         };
 
-        let response = client.chat_stream(&req).await?;
+        let response = match client.chat_stream(&req).await {
+            Ok(res) => res,
+            Err(e) => {
+                // The zone's provider will not serve this turn — rate limited
+                // past its cooldown, host down, key rejected. If the zone names
+                // a fallback, answer with that instead of losing the run
+                // (0.14.1). Once per turn: a second fallback would be a chain
+                // that hides which provider actually died, and a fallback whose
+                // own provider is also down is a dead turn either way.
+                let fallback_id = (!used_fallback)
+                    .then(|| zone.fallback_zone_id.clone())
+                    .flatten();
+                let Some(fallback_id) = fallback_id else { return Err(e) };
+                let Ok((fz, fp)) = load_zone_and_provider(&ctx.db, &fallback_id).await else {
+                    // The fallback is gone or has no provider. Report the
+                    // original failure, which is the one worth reading.
+                    tracing::warn!("fallback zone {fallback_id} could not be loaded");
+                    return Err(e);
+                };
+                tracing::info!("{} failed ({e}); falling back to {}", zone.name, fz.name);
+                crate::events::record(
+                    &ctx.db,
+                    chat_id,
+                    Some(&turn_id),
+                    persp,
+                    "zone_fallback",
+                    format!("{} could not answer — {} is taking over", zone.name, fz.name),
+                    Some(serde_json::json!({
+                        "from": zone.name,
+                        "to": fz.name,
+                        "error": e.to_string(),
+                    })),
+                )
+                .await;
+                used_fallback = true;
+                current_zone_id = Some(fz.id.clone());
+                zone = fz;
+                provider = fp;
+                tool_ctx.vision_capable = model_vision_capable(&ctx.db, &zone.model).await;
+                tools = build_tools_for_zone(&ctx.db, &zone, &tool_ctx).await;
+                if knowledge_available {
+                    tools.push(crate::tools::knowledge::definition());
+                }
+                if suppress_ask_user {
+                    strip_ask_user(&mut tools);
+                }
+                planning = apply_plan_mode(&ctx.db, chat_id, &mut tools).await;
+                mcp_danger = {
+                    let ids: Vec<String> =
+                        serde_json::from_str(&zone.tools_enabled).unwrap_or_default();
+                    crate::mcp::danger_for_ids(&ctx.db, &ids).await
+                };
+                zone_config = serde_json::from_str(&zone.tool_config)
+                    .unwrap_or(Value::Object(Default::default()));
+                inject_global_tool_config(&mut zone_config, &ctx.db, &zone.model).await;
+                client =
+                    LlmClient::new(&ctx.http, &provider.base_url, provider.api_key.as_deref());
+                sink.emit_event(
+                    "chat-zone-updated",
+                    serde_json::json!({ "chatId": chat_id, "zoneId": zone.id }),
+                );
+                continue;
+            }
+        };
 
         let sink_for_emit = sink.clone();
         let chat_id_for_emit = chat_id.to_string();
@@ -3577,6 +3643,7 @@ mod tests {
             icon: None,
             accent_color: None,
             is_leader: false,
+            fallback_zone_id: None,
             created_at: 0,
             updated_at: 0,
         }

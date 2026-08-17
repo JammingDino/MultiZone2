@@ -385,6 +385,8 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
   const mcpServers = useApp((s) => s.mcpServers);
   const refreshMcpServers = useApp((s) => s.refreshMcpServers);
   const refreshZones = useApp((s) => s.refreshZones);
+  /** Every other zone, for the fallback picker (0.14.1). */
+  const zones = useApp((s) => s.zones);
   const [ceHeadless, setCeHeadless] = useState(false);
   const [ttsVoice, setTtsVoice] = useState("");
   // Thinking is on by default for new zones (0.9.4) — most current models
@@ -392,6 +394,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
   const [thinkingEnabled, setThinkingEnabled] = useState(true);
   const [includeThinkingInContext, setIncludeThinkingInContext] = useState(false);
   const [isLeader, setIsLeader] = useState(false);
+  const [fallbackZoneId, setFallbackZoneId] = useState<string | null>(null);
   const [icon, setIcon] = useState<string | null>(null);
   const [accentColor, setAccentColor] = useState<string | null>(null);
   const [models, setModels] = useState<string[]>([]);
@@ -479,6 +482,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
       setThinkingEnabled(zone.thinkingEnabled ?? true);
       setIncludeThinkingInContext(zone.includeThinkingInContext ?? false);
       setIsLeader(zone.isLeader ?? false);
+      setFallbackZoneId(zone.fallbackZoneId ?? null);
       setIcon(zone.icon ?? null);
       setAccentColor(zone.accentColor ?? null);
     } else {
@@ -497,6 +501,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
       setThinkingEnabled(true);
       setIncludeThinkingInContext(false);
       setIsLeader(false);
+      setFallbackZoneId(null);
       setIcon(null);
       setAccentColor(null);
     }
@@ -566,6 +571,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
       thinkingEnabled,
       includeThinkingInContext,
       isLeader,
+      fallbackZoneId,
       icon,
       accentColor,
     };
@@ -616,7 +622,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
   }, [
     zone?.id, name, providerId, model, systemPrompt, temperature, maxTokens, topP,
     tools, toolConfig, descOverrides, ttsVoice, thinkingEnabled,
-    includeThinkingInContext, isLeader, icon, accentColor,
+    includeThinkingInContext, isLeader, fallbackZoneId, icon, accentColor,
   ]);
 
   async function handleDelete() {
@@ -1143,6 +1149,30 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
               </div>
             </div>
           </label>
+        </Field>
+
+        <Field label="Fallback zone">
+          <select
+            value={fallbackZoneId ?? ""}
+            onChange={(e) => setFallbackZoneId(e.target.value || null)}
+            className="input"
+          >
+            <option value="">None — a provider failure ends the turn</option>
+            {zones
+              .filter((z) => z.id !== zone?.id)
+              .map((z) => (
+                <option key={z.id} value={z.id}>
+                  {z.name}
+                </option>
+              ))}
+          </select>
+          <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+            Answers with instead when this zone's provider won't serve the request — rate limited,
+            host down, key rejected. Used once per turn, so pick a zone on a{" "}
+            <strong>different provider</strong>: falling back to another zone on the same dead host
+            just fails twice. In a panel this is the difference between losing a member mid-run and
+            losing the run.
+          </p>
         </Field>
 
         <Field label="Voice (read aloud)">

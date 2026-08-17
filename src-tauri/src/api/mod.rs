@@ -442,9 +442,7 @@ async fn health(State(st): State<ApiState>, req: axum::extract::Request) -> impl
     }))
 }
 
-const ZONE_COLS: &str = "id, name, provider_id, model, system_prompt, temperature_override AS temperature, max_tokens, top_p,
-    tools_enabled, tool_config, thinking_enabled, include_thinking_in_context,
-    icon, accent_color, created_at, updated_at";
+use crate::db::models::ZONE_COLS;
 
 async fn list_zones(State(st): State<ApiState>) -> ApiResult<Json<Vec<Zone>>> {
     let rows = sqlx::query_as::<_, Zone>(&format!("SELECT {ZONE_COLS} FROM zones ORDER BY name"))

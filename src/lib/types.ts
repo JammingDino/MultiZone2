@@ -990,6 +990,17 @@ export interface AppSettings {
    * moving the file, since the file is not usually ours to move.
    */
   projectInstructions: boolean;
+  /**
+   * Tokens of repository map injected at session start (0.14.5), or 0 for none.
+   *
+   * The map is every source file's definitions, ranked by a PageRank over which
+   * files refer to which — so what fits is what the codebase is organised
+   * around rather than the first N names alphabetically. Its cost is fixed and
+   * paid on every request, which is why it is a number rather than a switch:
+   * the useful question is how much of the context budget a map is worth here,
+   * and the answer differs between a 40-file project and a monorepo.
+   */
+  repoMapTokens: number;
   /** Size ceiling for the checkpoint store, in MB. 0 = no ceiling. */
   checkpointMaxMb: number;
   /**
@@ -1154,6 +1165,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   checkpointRetentionDays: 30,
   reviewQueue: false,
   projectInstructions: true,
+  repoMapTokens: 1000,
   checkpointMaxMb: 512,
   visionOverrides: {},
   onboardingSkipped: false,

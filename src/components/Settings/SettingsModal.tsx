@@ -1219,6 +1219,34 @@ function ChatTab() {
       </section>
 
       <section>
+        <h3 className="mb-1 text-sm font-medium">Repository map</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          What the project defines, ranked by how much the rest of the code refers to it — so an
+          agent starts knowing roughly where things are instead of spending its first several steps
+          finding out. A panel of seven pays that cost seven times, in parallel, to reach the same
+          answer. Rebuilt when the tree changes, at most every ten minutes.
+        </p>
+        <label className="flex items-center gap-2 text-xs">
+          <input
+            type="number"
+            min={0}
+            max={8000}
+            step={250}
+            value={appSettings.repoMapTokens}
+            onChange={(e) =>
+              setAppSettings({
+                repoMapTokens: Math.max(0, Math.min(8000, Number(e.target.value) || 0)),
+              })
+            }
+            className="w-24 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 text-sm outline-none focus:border-[var(--color-accent)]"
+          />
+          <span className="text-[var(--color-text-muted)]">
+            tokens per request — 0 turns the map off. Offered only to zones that have file tools.
+          </span>
+        </label>
+      </section>
+
+      <section>
         <h3 className="mb-3 text-sm font-medium">Perspective run mode</h3>
         <OptionCards
           value={appSettings.perspectiveMode}

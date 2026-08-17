@@ -10,6 +10,7 @@ mod llm;
 mod mcp;
 mod ocr;
 mod plans;
+mod repomap;
 mod review;
 mod pdf_bridge;
 mod skillpacks;

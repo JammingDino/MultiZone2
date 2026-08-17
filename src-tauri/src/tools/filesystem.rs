@@ -1394,7 +1394,7 @@ pub async fn create_folder(
 
 /// Directories never worth walking for either search tool. Keeps a search of a
 /// real project from drowning in dependency and VCS noise.
-const SKIP_DIRS: &[&str] = &[
+pub(crate) const SKIP_DIRS: &[&str] = &[
     ".git", "node_modules", "target", "dist", "build", ".next", ".venv",
     "venv", "__pycache__", ".cache", ".svelte-kit",
 ];

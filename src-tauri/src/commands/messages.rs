@@ -53,6 +53,24 @@ async fn project_instructions_enabled(db: &SqlitePool) -> bool {
         .unwrap_or(true)
 }
 
+/// Tokens of repository map injected at session start (0.14.5). `0` is off.
+async fn repo_map_tokens(db: &SqlitePool) -> usize {
+    let raw: Option<String> =
+        sqlx::query_scalar("SELECT value FROM settings WHERE key = 'app_settings'")
+            .fetch_optional(db)
+            .await
+            .ok()
+            .flatten()
+            .flatten();
+    raw.and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| v.get("repoMapTokens").and_then(Value::as_u64))
+        .map(|n| n as usize)
+        .unwrap_or(crate::repomap::DEFAULT_TOKEN_BUDGET)
+        // A map is a map. Past a few thousand tokens it stops being one and
+        // becomes an inventory competing with the conversation for room.
+        .min(8_000)
+}
+
 /// The spend ceiling for this chat's session, in billed tokens. `0` means none.
 ///
 /// **This session's own limit first, the global setting as the default**
@@ -2762,6 +2780,8 @@ pub enum SnippetKind {
     Continuity,
     Skills,
     Knowledge,
+    /// The ranked map of what this project defines (0.14.5).
+    RepoMap,
     ProjectContext,
     TagContext,
     Leader,
@@ -2782,6 +2802,7 @@ impl SnippetKind {
             Self::TagContext => "Tag context",
             Self::Skills => "Skills catalog",
             Self::Knowledge => "Knowledge index",
+            Self::RepoMap => "Repository map",
             Self::ZonePrompt => "Zone prompt",
             Self::ProjectInstructions => "Project instructions",
             Self::Continuity => "Agent-loop preamble",
@@ -2922,6 +2943,26 @@ pub async fn build_system_snippets(
             if crate::knowledge::has_index(db, &scope).await {
                 if let Some(block) = crate::knowledge::build_knowledge_block(db, &scope).await {
                     snippets.push((SnippetKind::Knowledge, block));
+                }
+            }
+        }
+    }
+
+    // The repository map (0.14.5): what this project defines, ranked by how
+    // much of the rest of it depends on each thing. Offered to zones with tools
+    // for the same reason as the project's instructions — a zone that cannot
+    // open a file has no use for a map of one.
+    if !zone_tool_ids.is_empty() {
+        let budget = repo_map_tokens(db).await;
+        if budget > 0 {
+            if let Ok(Some(dir)) = resolve_working_dir(db, chat_id).await {
+                let dir = dir.trim().to_string();
+                if !dir.is_empty() {
+                    if let Some(map) =
+                        crate::repomap::cached(db, std::path::Path::new(&dir), budget).await
+                    {
+                        snippets.push((SnippetKind::RepoMap, map.text));
+                    }
                 }
             }
         }

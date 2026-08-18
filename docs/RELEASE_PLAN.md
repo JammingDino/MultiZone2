@@ -993,12 +993,6 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [ ] Runtime-test the scrolling fix specifically: a plan of 20+ steps, the wheel over the card and over the task panel, and the composer still reachable throughout
 - [ ] Runtime-test reachability across zones: ask "plan this out first" in a Quick chat, in a read-only zone and in a zone with file tools, and confirm all three enter plan mode without the tool being named. Then check the negative — "what does the release plan say about 0.13?" must not propose a plan
 
-### 0.14.7 — Retrieval and spend
-
-- [ ] Hybrid retrieval: BM25 over FTS5 fused with the existing cosine score at roughly equal weight, then a cross-encoder rerank of the top ~20 down to ~8. Embedding-only search misses exact-token queries — an error string, a config key, a function name — which is most of what a coding agent looks up. Same RRF shape `smart_search` already uses, applied to the local index
-- [ ] A bundled, refreshable model price table; cost in currency per turn and per sub-agent, built on the existing cache-aware token accounting. The header chip currently shows billed tokens behind a dollar sign — this makes the glyph honest
-- [ ] Eval harness: point a zone or team config at SWE-bench Verified instances and report pass rate. The premise of the whole panel is that it beats a single local model, and there is currently no way to know
-
 ---
 
 ## 0.15.x — Smaller lifts
@@ -1069,6 +1063,10 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ## Backlog — unscheduled
 
+- [ ] **Retrieval and spend** — *scheduled as 0.14.7, unscheduled before it started.* Each of the three is a real improvement and none of them is what this app is for: a local-first interface whose corpus is one person's projects, not a cloud index or a benchmark harness.
+  - Hybrid retrieval: BM25 over FTS5 fused with the existing cosine score at roughly equal weight, then a cross-encoder rerank of the top ~20 down to ~8. Embedding-only search misses exact-token queries — an error string, a config key, a function name — which is most of what a coding agent looks up. Same RRF shape `smart_search` already uses, applied to the local index. The honest case for deferring: at one project's scale the embedding-only miss is a second query, not a dead end
+  - A bundled, refreshable model price table; cost in currency per turn and per sub-agent, built on the existing cache-aware token accounting. The header chip currently shows billed tokens behind a dollar sign — this makes the glyph honest. A bundled table also goes stale on someone else's schedule, and local models cost nothing to run
+  - Eval harness: point a zone or team config at SWE-bench Verified instances and report pass rate. The premise of the whole panel is that it beats a single local model, and there is currently no way to know — but SWE-bench measures a coding agent, not a multi-zone chat interface, so a pass rate would answer a question nobody using this is asking
 - [ ] Code interface: chat window for local models working on codebases; uses RAG from 0.4.3; requires design session
 - [ ] **File editing as an engine, not a tool.** Cursor and Antigravity handle multi-file editing categorically better than we do, and the gap is structural rather than a missing feature: they apply *edits* (search/replace or diff hunks, validated against the file as it currently is) where our `write_file` rewrites a whole file from whatever the model remembers of it. A real edit engine means a hunk format, fuzzy anchoring that survives a file having moved on, a syntax check before the write lands, and a failure that reports "the anchor no longer matches" instead of silently clobbering. This is the prerequisite for the code interface above and is scoped with it, not before it. 0.10.x's checkpoints and 0.10.2's diff review are the parts of this problem worth solving early, because they help every existing file tool immediately
 - [ ] **Study mode.** A mode for learning a body of material rather than working on it. The user brings sources into a project — lecture notes, a spec, a textbook chapter, a stack of papers — and the app helps them *know* it. NotebookLM is the reference implementation and the citation-UX benchmark; it is also cloud-only and requires handing Google the sources, which is the whole argument for us having one.

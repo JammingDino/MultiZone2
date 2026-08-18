@@ -20,8 +20,8 @@ compiled cleanly first."
 
 **Where those checks run changed in 0.14.0.** They were a CI job on every push
 and PR; they are now git hooks on the development machine
-([.githooks/](../.githooks/)) — `npm run check` (typecheck + script tests, ~15s)
-on commit, `npm run check:all` (+ frontend build + `cargo test --lib`, ~75s) on
+([.githooks/](../.githooks/)) — `npm run check` (typecheck + script tests, ~1s)
+on commit, `npm run check:push` (+ `cargo test --lib`, ~5s) on
 push. [ci.yml](../.github/workflows/ci.yml) still holds the same two jobs but
 only runs on `workflow_dispatch`.
 

@@ -1,21 +1,31 @@
 #!/bin/sh
-# Full tier: frontend build + script tests + `cargo test --lib` (minutes).
+# Push tier: typecheck + script tests + `cargo test --lib` (~20s warm).
 #
-# This is the job ci.yml used to run on a hosted runner, moved onto the machine
-# that already has a warm target directory. Push is the right place to pay for
-# it here: a push to main with `releaseBuild: true` builds and publishes a
-# release, so anything that reaches the remote is already shipped.
+# This used to run the full `check:all`, which took minutes — and almost all of
+# it was self-inflicted. `check:all` starts with `vite build`, and
+# `tauri::generate_context!()` *embeds* `dist/`, so a fresh bundle invalidates
+# the `multizone` crate and forces a full recompile before the tests can run.
+# Measured on this machine: `cargo test --lib` takes 422s after a rebuilt dist
+# and 3s without one. Seven minutes a push, buying nothing — the Rust tests do
+# not exercise the frontend bundle, they only need a file to embed.
 #
-# The build runs before the Rust tests on purpose — `tauri::generate_context!()`
-# resolves `frontendDist` at compile time, so src-tauri will not build at all
-# unless ../dist exists.
+# So the push tier ensures dist *exists* (scripts/ensure-dist.mjs builds it only
+# when missing) and otherwise leaves it alone. What that gives up is the
+# guarantee that the shipped bundle is current, which is a release concern
+# rather than a per-push one:
+#
+#   npm run check:all   — full build + every test. Run it before a release, and
+#                         after anything that looks environment-sensitive.
+#
+# A push with `releaseBuild: true` on main builds and publishes, so run
+# `check:all` before flipping that flag.
 #
 # Install with `npm run hooks:install` (sets core.hooksPath to .githooks).
-# Skip with `git push --no-verify` if you have just run `npm run check:all`.
+# Skip with `git push --no-verify`.
 
 set -e
 
 cd "$(git rev-parse --show-toplevel)"
 
-printf 'pre-push: build + script tests + cargo test --lib (this takes a few minutes)\n'
-npm run --silent check:all
+printf 'pre-push: typecheck + script tests + cargo test --lib\n'
+npm run --silent check:push

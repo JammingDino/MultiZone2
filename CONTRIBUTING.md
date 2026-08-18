@@ -54,13 +54,31 @@ The release installer is written to `src-tauri/target/release/bundle/`.
 
 ```bash
 npm run hooks:install  # once per clone — points core.hooksPath at .githooks
-npm run check          # typecheck + script tests        (~15s, pre-commit)
-npm run check:all      # + frontend build + cargo tests  (~75s, pre-push)
+npm run check          # typecheck + script tests                 (~1s,  pre-commit)
+npm run check:push     # + cargo test --lib (328 tests)           (~5s,  pre-push)
+npm run check:all      # + a real frontend build                  (minutes, per release)
 ```
 
-The two hooks in [.githooks/](.githooks/) run these for you: `check` on every
-commit, `check:all` on every push. `--no-verify` skips either one when you know
-what you are doing.
+The two hooks in [.githooks/](.githooks/) run the first two for you: `check` on
+every commit, `check:push` on every push. `--no-verify` skips either one when
+you know what you are doing.
+
+Both were far slower until the two causes were measured rather than assumed:
+
+- **`tsc -b` was not incremental.** The root `tsconfig.json` had no
+  `"incremental": true`, so build mode re-checked the whole program every run —
+  30 seconds whether or not anything had changed. With it, an unchanged tree
+  typechecks in 2.
+- **The frontend build was invalidating the Rust one.**
+  `tauri::generate_context!()` *embeds* `dist/`, so `vite build` dirties the
+  `multizone` crate and forces a full recompile before any test can run.
+  Measured here: `cargo test --lib` takes 422 seconds after a rebuilt `dist`,
+  and 3 without one. The push tier now ensures `dist/` *exists*
+  ([scripts/ensure-dist.mjs](scripts/ensure-dist.mjs) builds it only when
+  missing) and otherwise leaves it alone.
+
+What the push tier gives up is the guarantee that the bundle on disk is current
+— a release concern rather than a per-push one, and what `check:all` is for.
 
 [ci.yml](.github/workflows/ci.yml) runs the same checks on GitHub but is
 **manual-only** (`workflow_dispatch`) as of 0.14.0 — a hosted Windows runner
@@ -68,9 +86,10 @@ spends about 13 minutes in rustc per commit to re-prove what the hooks just
 proved locally in one. Dispatch it when you want a clean-checkout second
 opinion; otherwise the local run is the gate.
 
-Run `npm run check:all` yourself before a release, since a release is a push.
-`cargo test --lib` needs `dist/` to exist — `tauri::generate_context!()`
-resolves `frontendDist` at compile time — which is why `check:all` builds first.
+Run `npm run check:all` yourself before a release. A release *is* a push, and
+the push hook deliberately does not rebuild the bundle — so the one push where
+a stale `dist/` would actually ship is the one you have to check by hand. Set
+`"releaseBuild": true` only after it comes back clean.
 
 ## Releasing via GitHub Actions
 

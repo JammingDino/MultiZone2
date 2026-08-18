@@ -1,10 +1,12 @@
 #!/bin/sh
-# Fast tier: typecheck + script tests (~15s). Runs on every commit.
+# Fast tier: typecheck + script tests (~1s). Runs on every commit.
 #
 # GitHub CI is manual-only as of 0.14.0 (.github/workflows/ci.yml), so this
 # hook and its pre-push sibling are what actually keeps the tree honest. The
-# split is by cost: everything under ~20s runs per commit, the minutes-long
-# checks wait for push — which in this repo is also a publish.
+# split is by cost. Both tiers used to be far slower for reasons that turned out
+# to be fixable rather than inherent: `tsc -b` was re-checking the whole program
+# every run for want of `"incremental": true`, and the push tier's `vite build`
+# was invalidating the Rust crate that embeds `dist/`. See CONTRIBUTING.md.
 #
 # `tsc -b` is the one that matters here. Most of what has broken in this project
 # compiled cleanly and behaved wrong, but the cheap half of that class — a

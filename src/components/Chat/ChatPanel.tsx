@@ -508,38 +508,36 @@ export function ChatPanel() {
               chat unless review mode is on. */}
           {/* The approved plan while it runs — the only view of what is *about*
               to happen, and where a step can be struck or the run stopped
-              without cancelling the turn (0.12.1). */}
-          <div className="px-4">
+              without cancelling the turn (0.12.1).
+
+              `shrink-0` is load-bearing (0.14.6). Without it this row is a flex
+              item with `min-height: auto` and visible overflow, so a long task
+              list grew without limit: it pushed the transcript up out of the
+              column, put a second scrollbar on the window, and — because the
+              region was not a scroll container itself and the thread's is in a
+              sibling subtree — swallowed the wheel entirely. The panel bounds
+              and scrolls itself; this keeps the flexbox from re-deciding that. */}
+          <div className="shrink-0 px-4">
             <div className="mx-auto max-w-3xl">
-              <TaskPanel chatId={activeChat.id} streaming={isStreaming} />
+              <TaskPanel
+                chatId={activeChat.id}
+                streaming={isStreaming}
+                compact={!!pendingPlan && pendingApprovals.length === 0}
+              />
             </div>
           </div>
           <ReviewQueue chatId={activeChat.id} />
-          {pendingApprovals.length > 0 ? (
-            <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3">
-              <div className="mx-auto flex max-w-3xl flex-col gap-2">
-                {subchatNotice}
-                {pendingApprovals.map((pa) => (
-                  <ToolApprovalBanner
-                    key={pa.zoneId ?? "__primary__"}
-                    toolName={pa.name}
-                    toolArguments={pa.arguments}
-                    diff={pa.diff}
-                    zoneName={
-                      pa.zoneId
-                        ? zones.find((z) => z.id === pa.zoneId)?.name ?? "Perspective"
-                        : null
-                    }
-                    onApprove={(hunks) => respondApproval(activeChatId!, pa.zoneId, true, hunks)}
-                    onDeny={() => respondApproval(activeChatId!, pa.zoneId, false)}
-                  />
-                ))}
-              </div>
-            </div>
-          ) : pendingPlan ? (
-            <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3">
+          {/* A filed plan sits *above* the composer rather than in place of it
+              (0.14.6). It used to replace it, which meant the only way to
+              disagree with a plan was the "Keep planning" button — a rejection
+              with no reason attached, so the model's next attempt was a guess.
+              The obvious answer, typing what is wrong, was the one the layout
+              forbade. Approvals and `ask_user` still take the row: those are
+              questions with a fixed set of answers, and there is nothing to
+              type. */}
+          {pendingPlan && pendingApprovals.length === 0 && (
+            <div className="shrink-0 border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 pb-2 pt-3">
               <div className="mx-auto max-w-3xl">
-                {subchatNotice}
                 <PlanReview
                   plan={pendingPlan}
                   busy={planBusy}
@@ -566,6 +564,28 @@ export function ChatPanel() {
                     }
                   }}
                 />
+              </div>
+            </div>
+          )}
+          {pendingApprovals.length > 0 ? (
+            <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3">
+              <div className="mx-auto flex max-w-3xl flex-col gap-2">
+                {subchatNotice}
+                {pendingApprovals.map((pa) => (
+                  <ToolApprovalBanner
+                    key={pa.zoneId ?? "__primary__"}
+                    toolName={pa.name}
+                    toolArguments={pa.arguments}
+                    diff={pa.diff}
+                    zoneName={
+                      pa.zoneId
+                        ? zones.find((z) => z.id === pa.zoneId)?.name ?? "Perspective"
+                        : null
+                    }
+                    onApprove={(hunks) => respondApproval(activeChatId!, pa.zoneId, true, hunks)}
+                    onDeny={() => respondApproval(activeChatId!, pa.zoneId, false)}
+                  />
+                ))}
               </div>
             </div>
           ) : pendingAskUser ? (

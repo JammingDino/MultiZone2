@@ -198,9 +198,19 @@ pub fn multi_step_preamble(max_steps: usize, has_plan_tool: bool) -> String {
          outstanding. Tool output on its own is not an answer to the user."
     );
     if has_plan_tool {
+        // Named as progress tracking rather than as planning. The old wording —
+        // "for anything that will take more than about three steps, call
+        // `update_plan` first with the whole plan" — was the closest thing in
+        // the whole prompt to an instruction about planning, and it pointed at
+        // the wrong tool: `update_plan` is a checklist for work already under
+        // way and needs nobody's agreement, while a request for a plan wants
+        // `enter_plan_mode` and the user's approval. A model reading both
+        // reached for the one the prompt actually mentioned (0.14.6).
         s.push_str(
-            "\n- For anything that will take more than about three steps, call `update_plan` \
-             first with the whole plan, then update it as you finish each step.",
+            "\n- Keep the user posted on a long job: for anything taking more than about three \
+             steps, call `update_plan` with the whole checklist and update it as you finish \
+             each step. That is progress reporting on work you are already doing — if the user \
+             wants to agree the work *before* it happens, that is `enter_plan_mode` instead.",
         );
     }
     s
@@ -225,6 +235,39 @@ pub fn final_step_nudge(max_steps: usize) -> String {
          this message. Answer the user now with what you already have: what you did, what you \
          found, and exactly what remains. Do not say you will continue — you cannot, until the \
          user replies."
+    )
+}
+
+/// The budget a planning turn gets (0.14.6).
+///
+/// Planning is the one kind of turn whose entire output is reading: search the
+/// web, follow what it returns, read the files, then write the plan a step at a
+/// time — each of which is a step of the loop. Held to the ordinary budget, a
+/// model planning properly runs out during the research and files whatever it
+/// has, which is exactly the thin plan this release exists to stop. Nothing here
+/// can change anything on disk, so the usual reason to be miserly does not
+/// apply; the ceiling and the cancel button remain the real limits.
+pub fn plan_mode_steps(base: usize) -> usize {
+    base.saturating_mul(2)
+        .clamp(PLAN_MODE_MIN_STEPS, MAX_MAX_STEPS)
+}
+
+/// Floor for a planning turn, so a user who set a small budget for ordinary work
+/// does not get a plan written from three searches.
+const PLAN_MODE_MIN_STEPS: usize = 24;
+
+/// The last-step nudge for a turn that is *planning*, where tools are not fully
+/// withheld: `exit_plan_mode` survives, because a plan mode turn that runs out of
+/// budget and answers in prose has produced the one thing the mode exists to
+/// prevent — a plan the user cannot edit or approve.
+pub fn final_step_plan_nudge(max_steps: usize) -> String {
+    format!(
+        "# Out of steps\n\
+         You have used all {max_steps} tool steps for this turn. Every tool is switched off for \
+         this message except the ones that file your plan. Stop researching and call \
+         `exit_plan_mode` now with what you have — file the plan even if it is less complete \
+         than you wanted, and say what is still open in its context. Do not write the plan out \
+         in prose instead: prose is not something the user can edit or approve."
     )
 }
 

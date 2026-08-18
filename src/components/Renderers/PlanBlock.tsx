@@ -1,5 +1,17 @@
-import { AlertTriangle, Check, Circle, CircleDot, ClipboardList, FileText, Minus } from "lucide-react";
+import { useState } from "react";
+import {
+  AlertTriangle,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Circle,
+  CircleDot,
+  ClipboardList,
+  FileText,
+  Minus,
+} from "lucide-react";
 import type { PlanStep as ArtifactStep } from "@/lib/types";
+import { Markdown } from "./Markdown";
 
 export interface PlanStep {
   step: string;
@@ -96,11 +108,13 @@ export function toPlanData(parsed: any): { steps: PlanStep[]; done: number; tota
 export function PlanProposalBlock({
   title,
   goal,
+  context,
   steps,
   awaiting,
 }: {
   title?: string;
   goal?: string | null;
+  context?: string | null;
   steps: ArtifactStep[];
   awaiting?: boolean;
 }) {
@@ -119,6 +133,7 @@ export function PlanProposalBlock({
         )}
       </div>
       {goal && <div className="text-xs text-[var(--color-text-muted)]">{goal}</div>}
+      {context && <PlanFold label="Context and assumptions" body={context} />}
       <ol className="flex flex-col gap-1">
         {steps.map((s, i) => (
           <li key={s.id ?? i} className="flex items-start gap-2 text-xs">
@@ -142,6 +157,16 @@ export function PlanProposalBlock({
                   ))}
                 </span>
               )}
+              {/* The specification, folded. It is the substance of the plan and
+                  the reason the record is worth keeping — but the transcript is
+                  scrolled past, not read, so it opens on request (0.14.6). */}
+              {s.detail?.trim() && <PlanFold label="Detail" body={s.detail} />}
+              {s.acceptance?.trim() && (
+                <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
+                  <span className="font-medium text-[var(--color-text)]">Done when </span>
+                  {s.acceptance}
+                </div>
+              )}
             </div>
             {s.risk && s.risk !== "low" && (
               <span
@@ -161,16 +186,44 @@ export function PlanProposalBlock({
   );
 }
 
+/** A collapsed block of plan prose — bounded and scrolling once opened, so a
+ *  long specification cannot turn one transcript row into a page of its own. */
+function PlanFold({ label, body }: { label: string; body: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-1">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-[var(--color-text-muted)] transition hover:text-[var(--color-text)]"
+      >
+        {open ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+        {label}
+      </button>
+      {open && (
+        <div className="mt-1 max-h-72 overflow-y-auto rounded border border-[var(--color-border)] bg-[var(--color-bg)]/40 px-2 py-1.5">
+          <Markdown source={body} className="mz-plan-prose" fontSize="0.75rem" />
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Parse an `exit_plan_mode` tool result, or null if it isn't one. */
-export function toPlanProposal(
-  parsed: any,
-): { title?: string; goal?: string | null; steps: ArtifactStep[]; awaiting: boolean } | null {
+export function toPlanProposal(parsed: any): {
+  title?: string;
+  goal?: string | null;
+  context?: string | null;
+  steps: ArtifactStep[];
+  awaiting: boolean;
+} | null {
   if (!parsed || !Array.isArray(parsed.steps) || parsed.rendered !== "plan_proposal") return null;
   const steps = parsed.steps.filter((s: any) => s && typeof s.step === "string");
   if (steps.length === 0) return null;
   return {
     title: typeof parsed.title === "string" ? parsed.title : undefined,
     goal: typeof parsed.goal === "string" ? parsed.goal : null,
+    context: typeof parsed.context === "string" ? parsed.context : null,
     steps,
     awaiting: parsed.status === "waiting_for_user",
   };

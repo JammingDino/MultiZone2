@@ -16,6 +16,7 @@ import { useApp } from "@/store/app";
 import type { Plan, PlanStep, Zone } from "@/lib/types";
 import { parsePlanSteps } from "@/lib/types";
 import { getZoneIcon } from "@/lib/zoneIcons";
+import { Markdown } from "@/components/Renderers/Markdown";
 
 /**
  * The approved plan while it runs (0.12.1).
@@ -35,7 +36,17 @@ import { getZoneIcon } from "@/lib/zoneIcons";
  * In a Multizone run the leader's plan and each sub-agent's render in one tree,
  * because a sub-agent's checklist lived in a subchat nobody was watching.
  */
-export function TaskPanel({ chatId, streaming }: { chatId: string; streaming: boolean }) {
+export function TaskPanel({
+  chatId,
+  streaming,
+  compact,
+}: {
+  chatId: string;
+  streaming: boolean;
+  /** Something else is competing for the space below the transcript — a plan
+   *  waiting on the user. Progress is the less urgent of the two. */
+  compact?: boolean;
+}) {
   const plans = useApp((s) => s.planTreeByChat[chatId]);
   const zones = useApp((s) => s.zones);
   const setPlanSteps = useApp((s) => s.setPlanSteps);
@@ -88,7 +99,20 @@ export function TaskPanel({ chatId, streaming }: { chatId: string; streaming: bo
   }
 
   return (
-    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)]">
+    /* Bounded and scrolling in its own right (0.14.6). A thirty-step plan, or a
+       Multizone run with four sub-agent plans nested under the leader's, used to
+       render at full height between the transcript and the composer — pushing
+       both off the window and leaving the wheel with nothing to scroll anywhere
+       over the panel, because it was not a scroll container and the thread's is
+       in a sibling subtree. A third of the window, then it scrolls.
+
+       Half that again when a plan is waiting on the user: two full-size panels
+       stacked between the thread and the composer leave the transcript about
+       190px, which is not a conversation any more. The card is a decision and
+       this is a progress readout, so this is the one that yields. */
+    <div
+      className={`${compact ? "max-h-[16vh]" : "max-h-[32vh]"} overflow-y-auto overscroll-contain rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)]`}
+    >
       <PlanRows
         plan={root}
         zone={null}
@@ -166,7 +190,10 @@ function PlanRows({
 
   return (
     <div className="flex flex-col gap-2 p-2.5">
-      <div className="flex items-center gap-2 text-xs">
+      {/* Sticky, so the progress figure and "Stop after this step" stay reachable
+          once the list below is long enough to scroll — the control you want
+          most is the one a scrolled-away header would take from you. */}
+      <div className="sticky -top-2.5 z-10 -mx-2.5 -mt-2.5 flex items-center gap-2 bg-[var(--color-panel)] px-2.5 pb-1.5 pt-2.5 text-xs">
         {onToggle && (
           <button
             onClick={onToggle}
@@ -222,38 +249,7 @@ function PlanRows({
         <>
           <ul className="flex flex-col gap-1">
             {steps.map((s) => (
-              <li key={s.id} className="group flex items-start gap-2 text-xs">
-                <StatusIcon status={s.status} />
-                <div className="min-w-0 flex-1">
-                  <span
-                    className={
-                      s.status === "done"
-                        ? "text-[var(--color-text-muted)] line-through"
-                        : s.status === "skipped"
-                          ? "text-[var(--color-text-muted)] line-through opacity-60"
-                          : s.status === "in_progress"
-                            ? "font-medium text-[var(--color-text)]"
-                            : s.status === "failed"
-                              ? "text-[var(--color-danger)]"
-                              : "text-[var(--color-text-muted)]"
-                    }
-                  >
-                    {s.step}
-                  </span>
-                  {(s.error || s.note) && (
-                    <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
-                      {s.error ?? s.note}
-                    </div>
-                  )}
-                </div>
-                <button
-                  onClick={() => onStrike(plan, s)}
-                  title={s.status === "skipped" ? "Put this step back" : "Strike this step"}
-                  className="shrink-0 rounded p-0.5 text-[var(--color-text-muted)] opacity-0 transition hover:text-[var(--color-text)] group-hover:opacity-100"
-                >
-                  {s.status === "skipped" ? <Undo2 size={11} /> : <Minus size={11} />}
-                </button>
-              </li>
+              <StepRow key={s.id} step={s} onStrike={() => onStrike(plan, s)} />
             ))}
           </ul>
 
@@ -288,6 +284,79 @@ function PlanRows({
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * One step of a running plan, with its specification a click away (0.14.6).
+ *
+ * The detail the user approved is the answer to "is it doing the right thing?",
+ * which is the question a run raises and the checklist alone cannot settle —
+ * a line reading "Source selection strategy" tells you nothing about whether
+ * what is happening matches what you agreed to. Collapsed by default: mid-run
+ * this panel is a progress readout, and it only becomes a document when asked.
+ */
+function StepRow({ step, onStrike }: { step: PlanStep; onStrike: () => void }) {
+  const [open, setOpen] = useState(false);
+  const detail = step.detail?.trim() || "";
+  const hasDetail = detail.length > 0 || !!step.acceptance?.trim();
+
+  return (
+    <li className="group flex flex-col gap-1 text-xs">
+      <div className="flex items-start gap-2">
+        <StatusIcon status={step.status} />
+        <div className="min-w-0 flex-1">
+          <span
+            className={
+              step.status === "done"
+                ? "text-[var(--color-text-muted)] line-through"
+                : step.status === "skipped"
+                  ? "text-[var(--color-text-muted)] line-through opacity-60"
+                  : step.status === "in_progress"
+                    ? "font-medium text-[var(--color-text)]"
+                    : step.status === "failed"
+                      ? "text-[var(--color-danger)]"
+                      : "text-[var(--color-text-muted)]"
+            }
+          >
+            {step.step}
+          </span>
+          {(step.error || step.note) && (
+            <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">
+              {step.error ?? step.note}
+            </div>
+          )}
+        </div>
+        {hasDetail && (
+          <button
+            onClick={() => setOpen((v) => !v)}
+            title={open ? "Hide what was agreed for this step" : "What was agreed for this step"}
+            aria-expanded={open}
+            className="shrink-0 rounded p-0.5 text-[var(--color-text-muted)] transition hover:text-[var(--color-text)]"
+          >
+            {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+          </button>
+        )}
+        <button
+          onClick={onStrike}
+          title={step.status === "skipped" ? "Put this step back" : "Strike this step"}
+          className="shrink-0 rounded p-0.5 text-[var(--color-text-muted)] opacity-0 transition hover:text-[var(--color-text)] group-hover:opacity-100"
+        >
+          {step.status === "skipped" ? <Undo2 size={11} /> : <Minus size={11} />}
+        </button>
+      </div>
+      {open && hasDetail && (
+        <div className="ml-5 max-h-56 overflow-y-auto rounded border border-[var(--color-border)] bg-[var(--color-bg)]/40 px-2 py-1.5">
+          {detail && <Markdown source={detail} className="mz-plan-prose" fontSize="0.75rem" />}
+          {step.acceptance?.trim() && (
+            <div className="mt-1.5 text-[11px] text-[var(--color-text-muted)]">
+              <span className="font-medium text-[var(--color-text)]">Done when </span>
+              {step.acceptance}
+            </div>
+          )}
+        </div>
+      )}
+    </li>
   );
 }
 

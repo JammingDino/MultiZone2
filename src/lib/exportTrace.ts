@@ -420,6 +420,8 @@ const LABELS: Record<string, { label: string; icon: ToolIcon }> = {
   ask_user: { label: "Asked a question", icon: "users" },
   enter_plan_mode: { label: "Entered plan mode", icon: "checklist" },
   exit_plan_mode: { label: "Proposed a plan", icon: "checklist" },
+  draft_plan_step: { label: "Drafted a plan step", icon: "checklist" },
+  read_plan: { label: "Read the plan", icon: "checklist" },
   tag_chat: { label: "Tagged the chat", icon: "tool" },
   get_current_datetime: { label: "Checked the time", icon: "clock" },
 };

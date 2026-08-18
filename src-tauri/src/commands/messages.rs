@@ -1388,6 +1388,29 @@ async fn run_agentic_loop(
 /// worse than a slightly odd-looking role. Nothing here is persisted: these live
 /// only in this turn's request body, so the stored conversation is untouched and
 /// the next turn rebuilds cleanly from the database.
+/// The text of the last user message in a built history — what this turn is
+/// actually answering. Attachments and images are skipped; only prose can carry
+/// an instruction like "plan this first".
+fn last_user_text(api_messages: &[ChatMessage]) -> Option<String> {
+    let msg = api_messages.iter().rev().find(|m| m.role == "user")?;
+    match msg.content.as_ref()? {
+        MessageContent::Text(t) => Some(t.clone()),
+        MessageContent::Parts(parts) => {
+            let joined = parts
+                .iter()
+                .filter_map(|p| match p {
+                    ContentPart::Text { text } | ContentPart::HiddenText { text } => {
+                        Some(text.as_str())
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            (!joined.trim().is_empty()).then_some(joined)
+        }
+    }
+}
+
 fn push_system_note(api_messages: &mut Vec<ChatMessage>, text: String) {
     api_messages.push(ChatMessage {
         role: "user".into(),
@@ -1555,7 +1578,7 @@ async fn run_participant_turn(
     }
     // Plan mode (0.12.0). Re-evaluated after every tool batch below, because the
     // model can move the chat in or out of it mid-turn.
-    let mut planning = apply_plan_mode(&ctx.db, chat_id, &mut tools).await;
+    let mut planning = apply_plan_mode(&ctx.db, chat_id, &mut tools, persp.is_some()).await;
     // Per-zone MCP tool danger levels, refreshed on zone switch, consulted by the
     // approval gate alongside built-in `tool_safety_by_name`.
     let mut mcp_danger = {
@@ -1573,7 +1596,27 @@ async fn run_participant_turn(
     let project_dir: Option<String> = tool_ctx.project_dir.clone();
 
     // Build initial messages array (full history)
-    let mut api_messages = build_message_history(&ctx.db, chat_id, &zone).await?;
+    let mut api_messages = build_message_history(&ctx.db, chat_id, &zone, persp.is_some()).await?;
+
+    // "Plan this out first" should reach the tool without the user having to
+    // name it (0.14.6). The standing snippet says planning exists; this says the
+    // message you just received is probably asking for it — which is what the
+    // snippet alone was not enough for, since a general instruction about when
+    // to plan competes with everything else in a long system prompt at exactly
+    // the moment it matters.
+    //
+    // A note appended to the messages rather than another system snippet: it
+    // varies per message, and a volatile snippet at the front of the system
+    // prompt costs the prefix cache for the whole conversation behind it. It
+    // only ever reminds — the mode is still the model's to enter, so a false
+    // positive is one wasted sentence rather than a plan nobody asked for.
+    if !planning && !tools.is_empty() {
+        if let Some(text) = last_user_text(&api_messages) {
+            if crate::plans::reads_as_plan_request(&text) {
+                push_system_note(&mut api_messages, crate::plans::plan_request_nudge());
+            }
+        }
+    }
 
     let mut client =
         LlmClient::new(&ctx.http, &provider.base_url, provider.api_key.as_deref());
@@ -1582,7 +1625,16 @@ async fn run_participant_turn(
     // last two steps are spent finishing: one warned step, then a final step with
     // tools switched off so the turn always ends in an answer instead of falling
     // silently off the end of a tool result (see `llm::continuity`).
-    let max_steps = max_tool_steps(&ctx.db).await;
+    // A planning turn gets a larger budget: its whole output is reading, none of
+    // it can change anything, and a plan filed because the loop ran out mid-
+    // research is the thin plan 0.14.6 exists to stop. Fixed for the turn — the
+    // loop bound is evaluated once — so a chat that enters plan mode *mid*-turn
+    // keeps the ordinary budget and is caught instead by the final-step
+    // exception below, which leaves `exit_plan_mode` reachable.
+    let max_steps = {
+        let base = max_tool_steps(&ctx.db).await;
+        if planning { continuity::plan_mode_steps(base) } else { base }
+    };
     // 0 = no ceiling, which is the default (see `max_session_tokens`).
     let spend_cap = max_session_tokens(&ctx.db, chat_id).await;
     // Path-triggered rules (0.14.5): the directories whose own instructions this
@@ -1710,7 +1762,16 @@ async fn run_participant_turn(
         // both warns and withholds the tools, which is what actually guarantees
         // prose comes back.
         let final_step = continuity::is_final_step(step, max_steps) || stop_after_step;
-        if final_step && !stop_after_step {
+        // A planning turn's last step keeps the tools that *file* the plan. The
+        // whole point of the mode is that the answer arrives as a row the user
+        // can edit; a turn that runs out of budget and writes the plan into the
+        // transcript instead has failed in the specific way the mode exists to
+        // prevent. `stop_after_step` is excluded — that one is the user asking
+        // for the work to end, and it should.
+        let plan_endgame = final_step && planning && !stop_after_step;
+        if plan_endgame {
+            push_system_note(&mut api_messages, continuity::final_step_plan_nudge(max_steps));
+        } else if final_step && !stop_after_step {
             push_system_note(&mut api_messages, continuity::final_step_nudge(max_steps));
         } else if final_step {
             // The turn is ending early — the user asked it to stop (0.12.1), or
@@ -1750,8 +1811,25 @@ async fn run_participant_turn(
             max_tokens: zone.max_tokens,
             top_p: zone.top_p,
             // Tools are withheld on the final step so the model has no option
-            // but to answer. Every other step offers the full set.
-            tools: if tools.is_empty() || final_step { None } else { Some(tools.clone()) },
+            // but to answer. Every other step offers the full set — except a
+            // planning turn's last step, which keeps exactly the tools that end
+            // it properly (see `plan_endgame`).
+            tools: if tools.is_empty() {
+                None
+            } else if plan_endgame {
+                let filing: Vec<Tool> = tools
+                    .iter()
+                    .filter(|t| {
+                        matches!(t.function.name.as_str(), "exit_plan_mode" | "draft_plan_step")
+                    })
+                    .cloned()
+                    .collect();
+                if filing.is_empty() { None } else { Some(filing) }
+            } else if final_step {
+                None
+            } else {
+                Some(tools.clone())
+            },
             tool_choice: None,
             reasoning_effort,
             chat_template_kwargs: None,
@@ -1818,7 +1896,7 @@ async fn run_participant_turn(
                 if suppress_ask_user {
                     strip_ask_user(&mut tools);
                 }
-                planning = apply_plan_mode(&ctx.db, chat_id, &mut tools).await;
+                planning = apply_plan_mode(&ctx.db, chat_id, &mut tools, persp.is_some()).await;
                 mcp_danger = {
                     let ids: Vec<String> =
                         serde_json::from_str(&zone.tools_enabled).unwrap_or_default();
@@ -2634,7 +2712,7 @@ async fn run_participant_turn(
             if suppress_ask_user {
                 strip_ask_user(&mut tools);
             }
-            planning = apply_plan_mode(&ctx.db, chat_id, &mut tools).await;
+            planning = apply_plan_mode(&ctx.db, chat_id, &mut tools, persp.is_some()).await;
         }
 
         // A tool may have switched the chat's primary zone (`change_zone`). If so,
@@ -2669,7 +2747,7 @@ async fn run_participant_turn(
                         if suppress_ask_user {
                             strip_ask_user(&mut tools);
                         }
-                        planning = apply_plan_mode(&ctx.db, chat_id, &mut tools).await;
+                        planning = apply_plan_mode(&ctx.db, chat_id, &mut tools, persp.is_some()).await;
                         mcp_danger = {
                             let ids: Vec<String> =
                                 serde_json::from_str(&zone.tools_enabled).unwrap_or_default();
@@ -2837,6 +2915,9 @@ pub enum SnippetKind {
     PlanMode,
     /// The plan the user approved, as this turn's task list (0.12.0).
     TaskList,
+    /// Planning is available but off: what it is for, and when to reach for it
+    /// (0.14.6).
+    PlanOffer,
 }
 
 impl SnippetKind {
@@ -2857,6 +2938,7 @@ impl SnippetKind {
             Self::CompactHint => "Compaction hint",
             Self::PlanMode => "Plan mode",
             Self::TaskList => "Approved plan",
+            Self::PlanOffer => "Planning available",
         }
     }
 }
@@ -2893,6 +2975,10 @@ pub async fn build_system_snippets(
     chat_id: &str,
     zone: &Zone,
     chat: Option<&Chat>,
+    // `is_perspective`: this participant is one of several answering the same
+    // question. It is not offered `enter_plan_mode` (see `apply_plan_mode`), so
+    // it must not be told about it either.
+    is_perspective: bool,
 ) -> AppResult<Vec<(SnippetKind, String)>> {
     let mut snippets: Vec<(SnippetKind, String)> = Vec::new();
 
@@ -2963,6 +3049,16 @@ pub async fn build_system_snippets(
         snippets.push((SnippetKind::PlanMode, crate::plans::plan_mode_preamble()));
     } else if let Some(plan) = crate::plans::active_plan(db, chat_id, None).await {
         snippets.push((SnippetKind::TaskList, crate::plans::task_list_block(&plan)));
+    } else if !zone_tool_ids.is_empty() && !is_perspective {
+        // Planning is available and off (0.14.6). Saying so is the fix for the
+        // mode's real failure — not misuse but disuse. It lived entirely in one
+        // tool description among twenty, while the loop preamble just above
+        // pointed at `update_plan` for multi-step work, so "plan this for me"
+        // reliably produced a numbered list in prose that nobody could edit or
+        // approve. Matches the condition `apply_plan_mode` offers the tool on
+        // (a zone with tools), so the prompt never advertises a tool that is
+        // not in the request.
+        snippets.push((SnippetKind::PlanOffer, crate::plans::plan_offer_preamble()));
     }
 
     // Skills catalog (Anthropic Agent Skills model): when this zone has the
@@ -3127,7 +3223,7 @@ pub async fn turn_overhead(db: &SqlitePool, chat_id: &str) -> AppResult<TurnOver
     .bind(chat_id)
     .fetch_optional(db)
     .await?;
-    let snippets = build_system_snippets(db, chat_id, &zone, chat.as_ref()).await?;
+    let snippets = build_system_snippets(db, chat_id, &zone, chat.as_ref(), false).await?;
 
     let tool_ctx = load_tool_context(db, Some(chat_id), Some(&zone.model)).await;
     let mut tools = build_tools_for_zone(db, &zone, &tool_ctx).await;
@@ -3154,6 +3250,7 @@ async fn build_message_history(
     db: &SqlitePool,
     chat_id: &str,
     zone: &Zone,
+    is_perspective: bool,
 ) -> AppResult<Vec<ChatMessage>> {
     let chat = sqlx::query_as::<_, crate::db::models::Chat>(&format!(
         "SELECT {CHAT_COLS} FROM chats WHERE id = ?1"
@@ -3162,7 +3259,7 @@ async fn build_message_history(
     .fetch_optional(db)
     .await?;
 
-    let snippets = build_system_snippets(db, chat_id, zone, chat.as_ref()).await?;
+    let snippets = build_system_snippets(db, chat_id, zone, chat.as_ref(), is_perspective).await?;
     let multi_model = is_multi_model(db, chat_id).await;
 
     let mut out: Vec<ChatMessage> = Vec::new();
@@ -3724,31 +3821,69 @@ fn strip_ask_user(tools: &mut Vec<Tool>) {
 ///
 /// In plan mode the mutating tools are *removed from the request*, not merely
 /// discouraged — a model cannot misuse a tool it was never offered — and
-/// `exit_plan_mode` is added as the way out. Out of plan mode, a zone that has
-/// something worth withholding is offered `enter_plan_mode`, so the model can
-/// take itself into planning when a request turns out to be bigger than it
-/// sounded. A read-only zone gets neither: there is nothing to withhold, so
-/// planning mode would change nothing about what it can do.
+/// `exit_plan_mode` is added as the way out. Out of plan mode, `enter_plan_mode`
+/// is offered so the model can take itself into planning when a request turns
+/// out to be bigger than it sounded.
+///
+/// Until 0.14.6 that offer was gated on the zone having a mutating tool, on the
+/// reasoning that a read-only zone has nothing to withhold and so gains nothing
+/// from the mode. That reasoning was about half of what plan mode is. The other
+/// half is the artifact — an ordered, editable, approvable plan the user rewrites
+/// before agreeing to it — and *that* is worth exactly as much to a zone whose
+/// job is a 5 000-word report as to one that edits files. The gate was also the
+/// single biggest reason the mode was never reached in practice: a Quick chat on
+/// a search-and-read base zone was never offered the tool at all, so no amount of
+/// asking for a plan could produce one. Any zone with tools can plan now.
 ///
 /// Returns whether the chat is in plan mode, since the caller gates the
 /// executor's refusal on the same answer.
-async fn apply_plan_mode(db: &SqlitePool, chat_id: &str, tools: &mut Vec<Tool>) -> bool {
+async fn apply_plan_mode(
+    db: &SqlitePool,
+    chat_id: &str,
+    tools: &mut Vec<Tool>,
+    is_perspective: bool,
+) -> bool {
     let planning = crate::plans::in_plan_mode(db, chat_id).await;
-    let has_mutating = tools
-        .iter()
-        .any(|t| !crate::plans::allowed_in_plan_mode(&t.function.name));
+    // A zone with no tools at all is left alone: handing it `enter_plan_mode`
+    // would turn a plain chat model into a tool-calling one for no gain, and
+    // there is nothing for it to investigate with once inside the mode.
+    let has_tools = !tools.is_empty();
 
     if planning {
         tools.retain(|t| crate::plans::allowed_in_plan_mode(&t.function.name));
+        // Drafting the plan a step at a time, filing it, and reading one back:
+        // always offered while planning, whatever the zone has enabled, because
+        // they *are* the mode. A zone with no plan tool ticked can still plan.
+        tools.push(crate::tools::plan_mode::draft_step_definition());
         tools.push(crate::tools::plan_mode::exit_definition());
+        if !tools.iter().any(|t| t.function.name == "read_plan") {
+            tools.push(crate::tools::plan_mode::read_plan_definition());
+        }
         // Planning without the checklist tool leaves the model no way to report
         // progress once the plan is approved, and the plan it just wrote is the
         // obvious thing to keep. Cheap enough to always include.
         if !tools.iter().any(|t| t.function.name == "update_plan") {
             tools.push(crate::tools::plan::definition());
         }
-    } else if has_mutating {
-        tools.push(crate::tools::plan_mode::enter_definition());
+    } else {
+        // Not offered to a perspective zone. Plan mode is a property of the
+        // *chat*, so one of several voices answering the same question would
+        // take the whole conversation — and the other participants' turns —
+        // into planning on everyone's behalf. Same reasoning as `ask_user`:
+        // the shared controls belong to the primary.
+        if has_tools && !is_perspective {
+            tools.push(crate::tools::plan_mode::enter_definition());
+        }
+        // Out of plan mode `read_plan` earns its place only when there is a
+        // plan to read: a turn executing an approved one is exactly where step
+        // 6's specification has scrolled out of context and needs fetching
+        // back. In a chat that has never planned it would be one more tool
+        // definition in every request for nothing.
+        if crate::plans::chat_has_plans(db, chat_id).await
+            && !tools.iter().any(|t| t.function.name == "read_plan")
+        {
+            tools.push(crate::tools::plan_mode::read_plan_definition());
+        }
     }
     planning
 }
@@ -3941,6 +4076,116 @@ mod tests {
         );
     }
 
+    // ── Reaching plan mode at all (0.14.6) ───────────────────────────────────
+
+    fn tool_named(name: &str) -> Tool {
+        Tool {
+            tool_type: "function".into(),
+            function: crate::llm::types::ToolFunction {
+                name: name.into(),
+                description: String::new(),
+                parameters: serde_json::json!({}),
+            },
+        }
+    }
+
+    fn names(tools: &[Tool]) -> Vec<&str> {
+        tools.iter().map(|t| t.function.name.as_str()).collect()
+    }
+
+    /// The bug that made plan mode unreachable for most chats: `enter_plan_mode`
+    /// was offered only to a zone holding a mutating tool, so a Quick chat on a
+    /// search-and-read zone — the exact setup someone asks for a report plan in
+    /// — never saw the tool, and no phrasing could produce a plan.
+    #[tokio::test]
+    async fn a_read_only_zone_can_still_reach_plan_mode() {
+        let pool = pool_with_long_chat().await;
+        let mut tools = vec![tool_named("smart_search"), tool_named("read_file")];
+        let planning = apply_plan_mode(&pool, "c1", &mut tools, false).await;
+        assert!(!planning);
+        assert!(names(&tools).contains(&"enter_plan_mode"));
+    }
+
+    /// A perspective zone is one of several voices answering the same question,
+    /// and plan mode is a property of the whole chat — so it must not be able to
+    /// take the conversation into planning on everyone else's behalf.
+    #[tokio::test]
+    async fn a_perspective_zone_cannot_seize_the_mode() {
+        let pool = pool_with_long_chat().await;
+        let mut tools = vec![tool_named("smart_search"), tool_named("create_file")];
+        apply_plan_mode(&pool, "c1", &mut tools, true).await;
+        assert!(!names(&tools).contains(&"enter_plan_mode"));
+    }
+
+    /// A zone with no tools is left alone: handing it `enter_plan_mode` would
+    /// make a plain chat model a tool-calling one with nothing to investigate.
+    #[tokio::test]
+    async fn a_zone_with_no_tools_is_left_alone() {
+        let pool = pool_with_long_chat().await;
+        let mut tools: Vec<Tool> = Vec::new();
+        apply_plan_mode(&pool, "c1", &mut tools, false).await;
+        assert!(tools.is_empty());
+    }
+
+    /// Inside the mode: the mutating tools are gone from the request itself, and
+    /// the three tools that *are* the mode arrive whatever the zone had ticked.
+    #[tokio::test]
+    async fn planning_swaps_the_toolset() {
+        let pool = pool_with_long_chat().await;
+        crate::plans::set_plan_mode(&pool, "c1", true).await.unwrap();
+        let mut tools = vec![tool_named("smart_search"), tool_named("create_file")];
+        let planning = apply_plan_mode(&pool, "c1", &mut tools, false).await;
+        assert!(planning);
+        let n = names(&tools);
+        assert!(!n.contains(&"create_file"), "mutating tools are withheld, not discouraged");
+        assert!(n.contains(&"smart_search"), "the research half of the mode survives");
+        for t in ["draft_plan_step", "exit_plan_mode", "read_plan", "update_plan"] {
+            assert!(n.contains(&t), "{t} should be offered while planning");
+        }
+        assert!(!n.contains(&"enter_plan_mode"), "already in the mode");
+    }
+
+    /// The prompt has to say planning exists — a tool description among twenty
+    /// was not enough, and the loop preamble beside it pointed at `update_plan`.
+    #[tokio::test]
+    async fn the_prompt_offers_planning_when_it_is_available() {
+        let pool = pool_with_long_chat().await;
+        let prompt = system_prompt_for(&pool, &zone_with_compact_tool()).await;
+        assert!(prompt.contains("enter_plan_mode"));
+
+        // And where the checklist tool is also enabled, the preamble names it
+        // as progress reporting and points the "agree it first" case at plan
+        // mode — so the two stop competing for the same request.
+        let mut planner = zone_with_compact_tool();
+        planner.tools_enabled = r#"["plan","read_file"]"#.into();
+        let prompt = system_prompt_for(&pool, &planner).await;
+        assert!(prompt.contains("update_plan"));
+        assert!(prompt.contains("enter_plan_mode` instead"));
+    }
+
+    /// Inside the mode the offer is replaced by the mode's own preamble, so the
+    /// model is never told to enter a mode it is already in.
+    #[tokio::test]
+    async fn the_offer_gives_way_to_the_mode_itself() {
+        let pool = pool_with_long_chat().await;
+        crate::plans::set_plan_mode(&pool, "c1", true).await.unwrap();
+        let chat = sqlx::query_as::<_, crate::db::models::Chat>(&format!(
+            "SELECT {CHAT_COLS} FROM chats WHERE id = 'c1'"
+        ))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let kinds: Vec<SnippetKind> =
+            build_system_snippets(&pool, "c1", &zone_with_compact_tool(), Some(&chat), false)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|(k, _)| k)
+                .collect();
+        assert!(kinds.contains(&SnippetKind::PlanMode));
+        assert!(!kinds.contains(&SnippetKind::PlanOffer));
+    }
+
     // ── Prefix-cache stability ────────────────────────────────────────────────
 
     async fn pool_with_long_chat() -> SqlitePool {
@@ -3996,7 +4241,7 @@ mod tests {
     }
 
     async fn system_prompt_for(pool: &SqlitePool, zone: &Zone) -> String {
-        build_system_snippets(pool, "c1", zone, None)
+        build_system_snippets(pool, "c1", zone, None, false)
             .await
             .unwrap()
             .iter()
@@ -4048,7 +4293,7 @@ mod tests {
     async fn volatile_snippets_come_last_in_the_system_prompt() {
         let pool = pool_with_long_chat().await;
         grow_history(&pool, 0).await;
-        let snippets = build_system_snippets(&pool, "c1", &zone_with_compact_tool(), None)
+        let snippets = build_system_snippets(&pool, "c1", &zone_with_compact_tool(), None, false)
             .await
             .unwrap();
 

@@ -3301,7 +3301,7 @@ dependencies = [
 
 [[package]]
 name = "multizone"
-version = "0.14.5"
+version = "0.14.6"
 dependencies = [
  "axum",
  "base64 0.22.1",

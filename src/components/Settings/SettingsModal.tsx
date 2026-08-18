@@ -9,6 +9,7 @@ import * as api from "@/lib/tauri";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
 import { VisionOverrideSelect } from "@/components/common/VisionOverrideSelect";
 import { Modal, ModalTitle } from "@/components/common/Modal";
+import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import { HexColorField } from "@/components/common/ColorPicker";
 import { UpdateSection } from "@/components/Settings/UpdateSection";
 import { InstalledZones, useZoneActions } from "@/components/Zones/InstalledZones";
@@ -33,6 +34,14 @@ import { PRIMARY_ACTION } from "@/lib/chrome";
 type Tab = "providers" | "zones" | "appearance" | "chat" | "voice" | "speech" | "skills" | "mcp" | "knowledge" | "memory" | "api" | "data";
 
 const TAB_IDS: Tab[] = ["providers", "zones", "appearance", "chat", "voice", "speech", "skills", "mcp", "knowledge", "memory", "api", "data"];
+
+/** The nav label for each tab, reused when a tab fails to render so the message
+ * names the screen the user actually clicked. */
+const TAB_LABELS: Record<Tab, string> = {
+  providers: "Providers", zones: "Zones", appearance: "Appearance", chat: "Chat",
+  voice: "Dictation", speech: "Speech", skills: "Skills", mcp: "MCP",
+  knowledge: "Knowledge", memory: "Memory", api: "API", data: "Data",
+};
 
 function isTab(v: string | null): v is Tab {
   return !!v && (TAB_IDS as string[]).includes(v);
@@ -71,19 +80,25 @@ export function SettingsModal() {
             <TabButton active={tab === "api"} icon={<Globe size={14} />} label="API" onClick={() => setTab("api")} />
             <TabButton active={tab === "data"} icon={<Database size={14} />} label="Data" onClick={() => setTab("data")} />
           </nav>
-          <div className="flex-1 overflow-y-auto p-4">
-            {tab === "providers" && <ProvidersTab />}
-            {tab === "zones" && <ZonesTab />}
-            {tab === "appearance" && <AppearanceTab />}
-            {tab === "chat" && <ChatTab />}
-            {tab === "voice" && <VoiceTab />}
-            {tab === "speech" && <SpeechTab />}
-            {tab === "skills" && <SkillsTab />}
-            {tab === "mcp" && <McpTab />}
-            {tab === "knowledge" && <KnowledgeTab />}
-            {tab === "memory" && <MemoryTab />}
-            {tab === "api" && <ApiTab />}
-            {tab === "data" && <DataTab />}
+          <div className="flex flex-1 overflow-y-auto p-4">
+            {/* Per tab, and remounted when the tab changes: one screen that
+                throws is one screen, not the window. */}
+            <ErrorBoundary label={`${TAB_LABELS[tab]} settings`} resetKey={tab}>
+              <div className="min-w-0 flex-1">
+                {tab === "providers" && <ProvidersTab />}
+                {tab === "zones" && <ZonesTab />}
+                {tab === "appearance" && <AppearanceTab />}
+                {tab === "chat" && <ChatTab />}
+                {tab === "voice" && <VoiceTab />}
+                {tab === "speech" && <SpeechTab />}
+                {tab === "skills" && <SkillsTab />}
+                {tab === "mcp" && <McpTab />}
+                {tab === "knowledge" && <KnowledgeTab />}
+                {tab === "memory" && <MemoryTab />}
+                {tab === "api" && <ApiTab />}
+                {tab === "data" && <DataTab />}
+              </div>
+            </ErrorBoundary>
           </div>
         </div>
     </Modal>

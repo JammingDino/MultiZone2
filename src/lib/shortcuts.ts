@@ -24,6 +24,7 @@ export type ShortcutAction =
   | "openZoneLibrary"
   | "openProjects"
   | "focusComposer"
+  | "openCommandPalette"
   | "prevChat"
   | "nextChat"
   | "toggleShortcutsHelp";
@@ -47,7 +48,11 @@ export const GLOBAL_SHORTCUTS: GlobalShortcut[] = [
   { action: "toggleSidebar", mod: true, key: "b", display: [MOD, "B"], description: "Show / hide the sidebar" },
   { action: "openZoneLibrary", mod: true, key: "l", display: [MOD, "L"], description: "Configure zones (zone library)" },
   { action: "openProjects", mod: true, shift: true, key: "p", display: [MOD, "Shift", "P"], description: "Manage projects" },
-  { action: "focusComposer", mod: true, key: "k", display: [MOD, "K"], description: "Focus the message input" },
+  // The palette takes ⌘K, which is where every app that has one puts it, and
+  // composer focus moves next door to ⌘J. Worth the relearning: ⌘K reaching a
+  // text field the user is usually already in was the weaker binding.
+  { action: "openCommandPalette", mod: true, key: "k", display: [MOD, "K"], description: "Command palette" },
+  { action: "focusComposer", mod: true, key: "j", display: [MOD, "J"], description: "Focus the message input" },
   { action: "prevChat", alt: true, key: "ArrowUp", display: ["Alt", "↑"], description: "Previous chat" },
   { action: "nextChat", alt: true, key: "ArrowDown", display: ["Alt", "↓"], description: "Next chat" },
   { action: "toggleShortcutsHelp", mod: true, key: "/", display: [MOD, "/"], description: "Open this shortcuts reference" },

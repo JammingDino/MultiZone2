@@ -10,6 +10,7 @@ import { NoProviderBanner } from "./components/Onboarding/NoProviderBanner";
 import { ImportSettingsDialog } from "./components/Settings/ImportSettingsDialog";
 import { UpdatePrompt } from "./components/UpdatePrompt";
 import { ShortcutsHelpModal } from "./components/common/ShortcutsHelpModal";
+import { CommandPalette } from "@/components/CommandPalette";
 import { useApp } from "./store/app";
 import { useGlobalShortcuts } from "./lib/useGlobalShortcuts";
 import { usePdfReadBridge } from "./lib/usePdfReadBridge";
@@ -161,6 +162,9 @@ export default function App() {
           <ChatPanel />
           {showOnboarding && <Onboarding />}
           {shortcutsHelpOpen && <ShortcutsHelpModal onClose={closeShortcutsHelp} />}
+          {/* Above the panels but inside the content area, so the title bar
+              stays draggable while it is up (same reasoning as onboarding). */}
+          <CommandPalette />
         </div>
       </div>
       {/* App-wide so the confirmation can sit above onboarding as well as the

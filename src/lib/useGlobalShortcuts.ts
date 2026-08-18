@@ -49,6 +49,9 @@ export function useGlobalShortcuts() {
         case "focusComposer":
           s.focusComposer();
           break;
+        case "openCommandPalette":
+          s.commandPaletteOpen ? s.closeCommandPalette() : s.openCommandPalette();
+          break;
         case "prevChat":
         case "nextChat": {
           // Navigate the flat, top-level chat list (subchats excluded — they're

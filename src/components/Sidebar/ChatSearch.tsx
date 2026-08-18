@@ -58,6 +58,17 @@ export function ChatSearch({ onActiveChange }: { onActiveChange: (active: boolea
   const inputRef = useRef<HTMLInputElement>(null);
 
   const active = query.trim().length > 0;
+
+  // The palette's "Search messages" lands here. Skips the first render so the
+  // box does not steal focus from the composer at launch.
+  const focusNonce = useApp((s) => s.focusChatSearchNonce);
+  const seenNonce = useRef(focusNonce);
+  useEffect(() => {
+    if (focusNonce === seenNonce.current) return;
+    seenNonce.current = focusNonce;
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, [focusNonce]);
   useEffect(() => onActiveChange(active), [active, onActiveChange]);
 
   // Debounced so a fast typist runs one query per pause rather than one per

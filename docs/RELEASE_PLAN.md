@@ -1011,7 +1011,17 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [ ] Runtime-test against a real history: search a word that appears in a sub-agent's chat, confirm the result names the conversation it lives under, and confirm the jump lands and flashes
 - [ ] Runtime-test the backfill on an existing database — the migration indexes what is already there, and that path never runs in a fresh test DB
 
-- [ ] Command palette over zones, chats, settings and skills — everything reachable is a named thing behind a menu. Note `Ctrl/Cmd+K` is already bound to composer focus and would need rebinding
+### 0.15.1 — One keystroke to anything with a name
+
+*Status: built, `npm run typecheck` clean and `npm run build` green; not yet runtime-tested. [CommandPalette.tsx](../src/components/CommandPalette.tsx).*
+
+- [x] **Command palette over actions, chats, zones and skills.** Everything this app can do is a named thing behind a menu — a zone in the library, a project in a panel, a skill three clicks into a settings tab, a chat in a list that is now long enough to scroll. Subsequence matching, so "nwc" finds New chat, with word-boundary hits scored above mid-word ones so a two-letter query puts the obvious answer first
+- [x] **⌘K is the palette; composer focus moves to ⌘J.** The rebinding the item called for. ⌘K reaching a text field the user is usually already typing in was the weaker claim on the most memorable shortcut in the app, and every application that has a palette puts it there
+- [x] Sub-agents and branches are listed too, labelled by the conversation they hang under — they are precisely the chats that are hard to reach any other way, and two sub-agents both called "Research" are otherwise indistinguishable
+- [x] A zone in the palette means *start work here* (it creates the chat and opens it), because editing one is the zone library and that is its own entry. A skill's row toggles it on or off, which is the thing you actually want to do to a skill
+- [x] Deliberately not message search — that is 0.15.0's box, it hits the database on every keystroke, and mixing "jump to a thing" with "find where something was said" makes both harder to read. The palette offers a row that opens it instead
+- [ ] Runtime-test: ⌘K from a chat, from the home screen and with Settings already open; confirm Escape closes only the palette, and that ⌘J still reaches the composer
+
 - [ ] Fork scope options: visible path / with branches / all, and standalone vs continuation context
 - [ ] MCP `resources/list` as attachable context and `prompts/list` as slash commands — we call `tools/list` and `tools/call` only, so two protocol calls buy a whole surface
 - [ ] Saved parameterised runs: prompt template + zone + parameters in one shareable file. Zone teams already encode who does the work; this encodes the task

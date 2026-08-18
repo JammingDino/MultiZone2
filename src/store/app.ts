@@ -598,6 +598,17 @@ interface AppStore {
   toggleSidebar: () => void;
   /** Signal the active composer to take keyboard focus. */
   focusComposer: () => void;
+  /** Command palette (0.15.1) — one keystroke to anything with a name. */
+  commandPaletteOpen: boolean;
+  /**
+   * Bumped to put the cursor in the sidebar's message-search box. A nonce
+   * rather than a boolean for the same reason `focusComposerNonce` is one:
+   * asking twice in a row has to work.
+   */
+  focusChatSearchNonce: number;
+  focusChatSearch: () => void;
+  openCommandPalette: () => void;
+  closeCommandPalette: () => void;
 
   projectsPanelOpen: boolean;
   projectsPanelInitId: string | null;
@@ -1972,6 +1983,11 @@ export const useApp = create<AppStore>((set, get) => ({
     set({ sidebarOpen: next });
   },
   focusComposer: () => set((s) => ({ focusComposerNonce: s.focusComposerNonce + 1 })),
+  commandPaletteOpen: false,
+  focusChatSearchNonce: 0,
+  focusChatSearch: () => set((st) => ({ sidebarOpen: true, focusChatSearchNonce: st.focusChatSearchNonce + 1 })),
+  openCommandPalette: () => set({ commandPaletteOpen: true }),
+  closeCommandPalette: () => set({ commandPaletteOpen: false }),
   async setDefaultZone(id) {
     set({ defaultZoneId: id });
     try {

@@ -104,6 +104,33 @@ pub struct DiscoveredTool {
     pub input_schema: Option<Value>,
 }
 
+/// A resource as reported by `resources/list` (0.15.3).
+///
+/// Resources are the half of MCP that is *context* rather than capability — a
+/// wiki page, a schema, a dashboard's current state. We call `tools/list` and
+/// `tools/call` and nothing else, so a server offering fifty documents offered
+/// this app none of them.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveredResource {
+    pub uri: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub mime_type: Option<String>,
+}
+
+/// A prompt as reported by `prompts/list` (0.15.3). A server-authored prompt
+/// template, which is what a slash command is.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveredPrompt {
+    pub name: String,
+    pub description: Option<String>,
+    /// `{ name, description?, required? }` per the spec, passed through as-is so
+    /// the UI can build a form without this layer knowing the shape.
+    pub arguments: Vec<Value>,
+}
+
 // ---------------------------------------------------------------------------
 // Transport connections
 // ---------------------------------------------------------------------------
@@ -641,6 +668,98 @@ impl Manager {
         Ok(render_tool_result(&result))
     }
 
+    /// Every resource a server currently offers (0.15.3).
+    ///
+    /// A server that does not implement the method is not an error — it is a
+    /// server without resources, which is most of them. The JSON-RPC error
+    /// comes back as `Err`, and both callers turn that into an empty list
+    /// rather than a failure the user has to read.
+    pub async fn list_resources(&self, server_id: &str) -> AppResult<Vec<DiscoveredResource>> {
+        let server = self.server_by_id(server_id).await?;
+        let conn = self.ensure_connected(&server).await?;
+        let result = conn.request("resources/list", json!({})).await?;
+        Ok(result
+            .get("resources")
+            .and_then(Value::as_array)
+            .map(|rs| {
+                rs.iter()
+                    .filter_map(|r| {
+                        let uri = r.get("uri")?.as_str()?.to_string();
+                        Some(DiscoveredResource {
+                            name: r
+                                .get("name")
+                                .and_then(Value::as_str)
+                                .unwrap_or(&uri)
+                                .to_string(),
+                            uri,
+                            description: r.get("description").and_then(Value::as_str).map(str::to_string),
+                            mime_type: r.get("mimeType").and_then(Value::as_str).map(str::to_string),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    /// Read one resource, flattened to text the model can be handed.
+    pub async fn read_resource(&self, server_id: &str, uri: &str) -> AppResult<String> {
+        let server = self.server_by_id(server_id).await?;
+        let conn = self.ensure_connected(&server).await?;
+        let result = conn.request("resources/read", json!({ "uri": uri })).await?;
+        Ok(render_resource_contents(&result))
+    }
+
+    /// Every prompt a server offers (0.15.3).
+    pub async fn list_prompts(&self, server_id: &str) -> AppResult<Vec<DiscoveredPrompt>> {
+        let server = self.server_by_id(server_id).await?;
+        let conn = self.ensure_connected(&server).await?;
+        let result = conn.request("prompts/list", json!({})).await?;
+        Ok(result
+            .get("prompts")
+            .and_then(Value::as_array)
+            .map(|ps| {
+                ps.iter()
+                    .filter_map(|p| {
+                        Some(DiscoveredPrompt {
+                            name: p.get("name")?.as_str()?.to_string(),
+                            description: p.get("description").and_then(Value::as_str).map(str::to_string),
+                            arguments: p
+                                .get("arguments")
+                                .and_then(Value::as_array)
+                                .cloned()
+                                .unwrap_or_default(),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    /// Expand a prompt template into the text it stands for.
+    pub async fn get_prompt(
+        &self,
+        server_id: &str,
+        name: &str,
+        arguments: Value,
+    ) -> AppResult<String> {
+        let server = self.server_by_id(server_id).await?;
+        let conn = self.ensure_connected(&server).await?;
+        let result = conn
+            .request("prompts/get", json!({ "name": name, "arguments": arguments }))
+            .await?;
+        Ok(render_prompt_messages(&result))
+    }
+
+    async fn server_by_id(&self, id: &str) -> AppResult<McpServer> {
+        sqlx::query_as::<_, McpServer>(&format!(
+            "SELECT {SERVER_COLS} FROM mcp_servers WHERE id = ?1"
+        ))
+        .bind(id)
+        .fetch_optional(&self.db)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("MCP server {id}")))
+    }
+
     /// Return a live connection for a server, opening one if needed.
     async fn ensure_connected(&self, server: &McpServer) -> AppResult<Arc<Connection>> {
         if let Some(conn) = self.conns.lock().await.get(&server.id).cloned() {
@@ -708,6 +827,70 @@ async fn list_tools(conn: &Connection) -> AppResult<Vec<DiscoveredTool>> {
             })
         })
         .collect())
+}
+
+/// Flatten a `resources/read` result into text (0.15.3).
+///
+/// MCP returns `{ contents: [{ uri, mimeType?, text? | blob? }] }`. Binary
+/// (`blob`) parts are named rather than decoded: base64 image bytes pasted into
+/// a prompt are tokens spent on nothing, and the user is better told that the
+/// resource is binary than handed 40KB of it.
+fn render_resource_contents(result: &Value) -> String {
+    let mut out = String::new();
+    let Some(parts) = result.get("contents").and_then(Value::as_array) else {
+        return out;
+    };
+    for part in parts {
+        if !out.is_empty() {
+            out.push_str("
+
+");
+        }
+        if let Some(text) = part.get("text").and_then(Value::as_str) {
+            out.push_str(text);
+        } else if part.get("blob").is_some() {
+            let uri = part.get("uri").and_then(Value::as_str).unwrap_or("resource");
+            let mime = part
+                .get("mimeType")
+                .and_then(Value::as_str)
+                .unwrap_or("application/octet-stream");
+            out.push_str(&format!("[binary resource {uri} ({mime}) — not inlined]"));
+        }
+    }
+    out
+}
+
+/// Flatten a `prompts/get` result into the text it stands for (0.15.3).
+///
+/// The result is a message list with roles. We keep the text and drop the
+/// roles: this becomes the body of a message the *user* is about to send, so
+/// re-labelling half of it "assistant" would be a claim about a turn that never
+/// happened.
+fn render_prompt_messages(result: &Value) -> String {
+    let mut out = String::new();
+    let Some(messages) = result.get("messages").and_then(Value::as_array) else {
+        return out;
+    };
+    for m in messages {
+        let content = m.get("content");
+        // A single content object, or an array of them — the spec allows both.
+        let parts: Vec<&Value> = match content {
+            Some(Value::Array(a)) => a.iter().collect(),
+            Some(v) => vec![v],
+            None => continue,
+        };
+        for part in parts {
+            if let Some(text) = part.get("text").and_then(Value::as_str) {
+                if !out.is_empty() {
+                    out.push_str("
+
+");
+                }
+                out.push_str(text);
+            }
+        }
+    }
+    out
 }
 
 /// Flatten an MCP `tools/call` result into a plain string for the model. MCP
@@ -922,5 +1105,89 @@ mod tests {
     fn shell_split_quotes() {
         let parts = shell_split(r#"npx -y @scope/server --root "C:\Program Files""#);
         assert_eq!(parts, vec!["npx", "-y", "@scope/server", "--root", r"C:\Program Files"]);
+    }
+}
+
+#[cfg(test)]
+mod resource_prompt_tests {
+    use super::*;
+
+    #[test]
+    fn resource_text_parts_are_joined() {
+        let v = json!({ "contents": [
+            { "uri": "file:///a", "text": "first" },
+            { "uri": "file:///b", "text": "second" }
+        ]});
+        assert_eq!(render_resource_contents(&v), "first
+
+second");
+    }
+
+    /// Base64 image bytes pasted into a prompt are tokens spent on nothing. The
+    /// user is better told the resource is binary than handed 40KB of it.
+    #[test]
+    fn a_binary_resource_is_named_rather_than_inlined() {
+        let v = json!({ "contents": [
+            { "uri": "file:///logo.png", "mimeType": "image/png", "blob": "iVBORw0KGgo=" }
+        ]});
+        let out = render_resource_contents(&v);
+        assert!(out.contains("file:///logo.png"), "{out}");
+        assert!(out.contains("image/png"), "{out}");
+        assert!(!out.contains("iVBORw0KGgo"), "the bytes must not be inlined: {out}");
+    }
+
+    /// A server that answers with a shape we did not expect gets an empty
+    /// string, not a panic — this runs against third-party code.
+    #[test]
+    fn a_result_with_no_contents_is_empty_not_a_panic() {
+        assert_eq!(render_resource_contents(&json!({})), "");
+        assert_eq!(render_resource_contents(&json!({ "contents": "nope" })), "");
+        assert_eq!(render_prompt_messages(&json!({})), "");
+        assert_eq!(render_prompt_messages(&json!({ "messages": [{}] })), "");
+    }
+
+    /// The spec allows `content` to be one object or a list of them.
+    #[test]
+    fn prompt_content_is_read_in_both_shapes() {
+        let single = json!({ "messages": [
+            { "role": "user", "content": { "type": "text", "text": "review this" } }
+        ]});
+        assert_eq!(render_prompt_messages(&single), "review this");
+
+        let many = json!({ "messages": [
+            { "role": "user", "content": [
+                { "type": "text", "text": "one" },
+                { "type": "text", "text": "two" }
+            ]}
+        ]});
+        assert_eq!(render_prompt_messages(&many), "one
+
+two");
+    }
+
+    /// Roles are dropped on purpose: the expansion becomes the body of a
+    /// message the *user* is about to send, so labelling half of it "assistant"
+    /// would assert a turn that never happened.
+    #[test]
+    fn roles_are_dropped_and_every_turn_is_kept() {
+        let v = json!({ "messages": [
+            { "role": "user", "content": { "type": "text", "text": "context" } },
+            { "role": "assistant", "content": { "type": "text", "text": "and more" } }
+        ]});
+        let out = render_prompt_messages(&v);
+        assert_eq!(out, "context
+
+and more");
+        assert!(!out.contains("assistant"));
+    }
+
+    /// A resource with no name falls back to its URI, so a picker never shows a
+    /// blank row.
+    #[test]
+    fn a_nameless_resource_is_labelled_by_its_uri() {
+        let r = json!({ "uri": "file:///notes.md" });
+        let name = r.get("name").and_then(Value::as_str)
+            .unwrap_or_else(|| r.get("uri").unwrap().as_str().unwrap());
+        assert_eq!(name, "file:///notes.md");
     }
 }

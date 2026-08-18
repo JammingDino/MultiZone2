@@ -160,6 +160,10 @@ pub const ROUTES: &[RouteDef] = &[
     r("POST", "/api/mcp/servers", "Create or update an MCP server"),
     r("DELETE", "/api/mcp/servers/:id", "Delete an MCP server"),
     r("POST", "/api/mcp/servers/:id/connect", "Connect and re-read the server's tool list"),
+    r("GET", "/api/mcp/servers/:id/resources", "Every resource the server offers"),
+    r("POST", "/api/mcp/servers/:id/resources/read", "Read one resource as text. Body: { \"uri\" }"),
+    r("GET", "/api/mcp/servers/:id/prompts", "Every prompt template the server offers"),
+    r("POST", "/api/mcp/servers/:id/prompts/get", "Expand a prompt. Body: { \"name\", \"arguments\"? }"),
     r("POST", "/api/mcp/servers/:id/disconnect", "Drop the live connection"),
     r("POST", "/api/mcp/tools/:toolId/danger", "Set an MCP tool's danger level"),
     r("GET", "/api/mcp/servers/:id/diagnose", "Why a server isn't working: the first check that fails, and what to do"),
@@ -317,6 +321,10 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("mcp::upsert_mcp_server", Route("POST /api/mcp/servers")),
     ("mcp::delete_mcp_server", Route("DELETE /api/mcp/servers/:id")),
     ("mcp::connect_mcp_server", Route("POST /api/mcp/servers/:id/connect")),
+    ("mcp::list_mcp_resources", Route("GET /api/mcp/servers/:id/resources")),
+    ("mcp::read_mcp_resource", Route("POST /api/mcp/servers/:id/resources/read")),
+    ("mcp::list_mcp_prompts", Route("GET /api/mcp/servers/:id/prompts")),
+    ("mcp::get_mcp_prompt", Route("POST /api/mcp/servers/:id/prompts/get")),
     ("mcp::disconnect_mcp_server", Route("POST /api/mcp/servers/:id/disconnect")),
     ("mcp::set_mcp_tool_danger", Route("POST /api/mcp/tools/:toolId/danger")),
     ("connectors::list_connectors", Route("GET /api/connectors")),
@@ -1116,6 +1124,44 @@ pub async fn connect_mcp_server(
     Path(id): Path<String>,
 ) -> ApiResult<Response> {
     Ok(Json(commands::mcp::connect_mcp_server(app_state(&st), id).await?).into_response())
+}
+
+pub async fn list_mcp_resources(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+) -> ApiResult<Response> {
+    Ok(Json(commands::mcp::list_mcp_resources(app_state(&st), id).await?).into_response())
+}
+
+pub async fn read_mcp_resource(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> ApiResult<Response> {
+    let text = commands::mcp::read_mcp_resource(app_state(&st), id, required(&body, "uri")?).await?;
+    Ok(Json(serde_json::json!({ "text": text })).into_response())
+}
+
+pub async fn list_mcp_prompts(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+) -> ApiResult<Response> {
+    Ok(Json(commands::mcp::list_mcp_prompts(app_state(&st), id).await?).into_response())
+}
+
+pub async fn get_mcp_prompt(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> ApiResult<Response> {
+    let text = commands::mcp::get_mcp_prompt(
+        app_state(&st),
+        id,
+        required(&body, "name")?,
+        body.get("arguments").cloned(),
+    )
+    .await?;
+    Ok(Json(serde_json::json!({ "text": text })).into_response())
 }
 
 pub async fn disconnect_mcp_server(

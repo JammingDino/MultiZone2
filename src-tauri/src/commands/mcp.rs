@@ -397,3 +397,63 @@ mod tests {
         assert!(tool_names(&db).await.is_empty());
     }
 }
+
+
+// ---------------------------------------------------------------------------
+// Resources and prompts (0.15.3)
+// ---------------------------------------------------------------------------
+//
+// We called `tools/list` and `tools/call` and nothing else, so a server
+// offering fifty documents and a dozen prompt templates offered this app none
+// of them. Two more protocol calls each buy a whole surface.
+//
+// Both lists answer with an empty vector when the server does not implement the
+// method. That is not swallowing an error: a server without resources returns
+// exactly the same JSON-RPC "method not found" as a broken one, and most
+// servers have no resources. The alternative is an error banner on every
+// settings panel for every well-behaved server that simply does not offer them.
+
+/// Every resource the server currently offers. Empty when it offers none, or
+/// does not implement `resources/list` at all.
+#[tauri::command]
+pub async fn list_mcp_resources(
+    _state: State<'_, AppState>,
+    id: String,
+) -> AppResult<Vec<mcp::DiscoveredResource>> {
+    Ok(mcp::manager().list_resources(&id).await.unwrap_or_default())
+}
+
+/// Read one resource as text, to be attached to a message.
+///
+/// This one *does* surface its error: the user picked a specific document and
+/// is waiting for it, so silence would look like an empty file.
+#[tauri::command]
+pub async fn read_mcp_resource(
+    _state: State<'_, AppState>,
+    id: String,
+    uri: String,
+) -> AppResult<String> {
+    mcp::manager().read_resource(&id, &uri).await
+}
+
+/// Every prompt template the server offers — the slash commands.
+#[tauri::command]
+pub async fn list_mcp_prompts(
+    _state: State<'_, AppState>,
+    id: String,
+) -> AppResult<Vec<mcp::DiscoveredPrompt>> {
+    Ok(mcp::manager().list_prompts(&id).await.unwrap_or_default())
+}
+
+/// Expand a prompt template into the text it stands for.
+#[tauri::command]
+pub async fn get_mcp_prompt(
+    _state: State<'_, AppState>,
+    id: String,
+    name: String,
+    arguments: Option<serde_json::Value>,
+) -> AppResult<String> {
+    mcp::manager()
+        .get_prompt(&id, &name, arguments.unwrap_or_else(|| serde_json::json!({})))
+        .await
+}

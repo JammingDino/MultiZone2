@@ -8,6 +8,7 @@ import { CHROME_ACTIVE, CHROME_OUTLINED, CHROME_QUIET, PRIMARY_ACTION } from "@/
 import { useDictation, MicButton, DictationMeter } from "@/components/Chat/useDictation";
 import type { InputPart, PendingMode } from "@/lib/types";
 import { attachmentToParts, type PendingAttachment } from "@/lib/attachFiles";
+import { SlashMenu, slashQuery } from "./SlashMenu";
 import {
   appendTranscript,
   AttachError,
@@ -51,6 +52,10 @@ interface InputBarProps {
 
 export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
   const [text, setText] = useState("");
+  // Escape (or a pick) closes the slash menu without clearing what was typed;
+  // it re-arms when the text stops being a slash query.
+  const [slashDismissed, setSlashDismissed] = useState(false);
+  const slash = slashDismissed ? null : slashQuery(text);
   const [sending, setSending] = useState(false);
   const refreshChats = useApp((s) => s.refreshChats);
   const sendKey = useApp((s) => s.appSettings.sendKey);
@@ -429,7 +434,7 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
             </button>
           </div>
         )}
-        <div className="flex items-end gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 focus-within:border-[var(--color-accent)]">
+        <div className="relative flex items-end gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 focus-within:border-[var(--color-accent)]">
           <button
             onClick={() => fileRef.current?.click()}
             className={`rounded p-1.5 ${CHROME_QUIET}`}
@@ -511,9 +516,27 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
               </>
             )}
           </div>
+          {/* MCP prompts and resources (0.15.3). Opens on a `/` in the first
+              column only — a path mid-sentence is not a command. */}
+          {slash !== null && (
+            <SlashMenu
+              query={slash}
+              onPick={(t) => {
+                setText(t);
+                setSlashDismissed(true);
+                taRef.current?.focus();
+              }}
+              onClose={() => setSlashDismissed(true)}
+            />
+          )}
           <textarea
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => {
+              setText(e.target.value);
+              // Re-arm as soon as the composer is back to a bare slash, so
+              // dismissing once does not disable the menu for the session.
+              if (slashQuery(e.target.value) === null) setSlashDismissed(false);
+            }}
             onPaste={onPaste}
             onKeyDown={(e) => {
               const trigger = sendKey === "ctrl_enter"

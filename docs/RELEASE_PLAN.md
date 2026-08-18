@@ -1032,7 +1032,17 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [x] The settings persist rather than being asked each time — the answer is a habit, not a per-message decision, which is why the reference implementation has a "remember" box. Branch still forks immediately with them; the caret beside it is where they change
 - [ ] Runtime-test: fork a chat that has two sub-agent runs and an earlier branch at each scope, and confirm the tree that arrives matches what was asked for
 
-- [ ] MCP `resources/list` as attachable context and `prompts/list` as slash commands — we call `tools/list` and `tools/call` only, so two protocol calls buy a whole surface
+### 0.15.3 — The rest of MCP
+
+*Status: built & tested (`cargo test --lib` 334 passing including 6 new, `npm run build` green); not yet runtime-tested against a server that actually offers either. [mcp/mod.rs](../src-tauri/src/mcp/mod.rs), [SlashMenu.tsx](../src/components/Chat/SlashMenu.tsx).*
+
+- [x] **`prompts/list` and `prompts/get` are slash commands.** A server-authored prompt template already *is* what a slash command is. Typing `/` in the first column lists them; picking one expands it into the composer. Only the first column — this app's conversations are full of paths, and a `/` mid-sentence is not a command
+- [x] **`resources/list` and `resources/read` are attachable context.** Picking a resource reads it and drops the text into the composer *visibly*, rather than as a hidden part. A resource the user is sending but cannot see is the thing this app avoids everywhere else
+- [x] **A server without resources is not a broken server.** It returns the same JSON-RPC "method not found" as one that is, and most servers offer neither — so both list calls answer with an empty list. `read` and `get` do surface their errors, because there the user picked a specific thing and is waiting for it
+- [x] Binary resources are named, not inlined. Base64 image bytes pasted into a prompt are tokens spent on nothing
+- [x] All four on the API as well (`/api/mcp/servers/:id/resources`, `…/resources/read`, `…/prompts`, `…/prompts/get`)
+- [ ] Runtime-test against a server that offers both — the renderers are tested against the shapes the spec allows, but nothing here has met a real server yet
+
 - [ ] Saved parameterised runs: prompt template + zone + parameters in one shareable file. Zone teams already encode who does the work; this encodes the task
 - [ ] Quick assistant — a global-shortcut mini window over the base zone, the fast end of the fast-to-thorough spectrum the roadmap describes
 

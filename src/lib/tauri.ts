@@ -19,6 +19,8 @@ import type {
   RewindStatus,
   SearchHit,
   ForkScope,
+  McpResource,
+  McpPrompt,
   DbStats,
   IndexSummary,
   InputPart,
@@ -66,6 +68,17 @@ export const upsertZone = (zone: Partial<Zone> & { name: string; model: string }
 export const deleteZone = (id: string) => invoke<void>("delete_zone", { id });
 
 // Chats
+// MCP resources and prompts (0.15.3). The list calls answer with an empty array
+// for a server that does not implement the method, which is most of them.
+export const listMcpResources = (id: string) =>
+  invoke<McpResource[]>("list_mcp_resources", { id });
+export const readMcpResource = (id: string, uri: string) =>
+  invoke<string>("read_mcp_resource", { id, uri });
+export const listMcpPrompts = (id: string) =>
+  invoke<McpPrompt[]>("list_mcp_prompts", { id });
+export const getMcpPrompt = (id: string, name: string, args: Record<string, string> = {}) =>
+  invoke<string>("get_mcp_prompt", { id, name, arguments: args });
+
 export const listChats = () => invoke<Chat[]>("list_chats");
 /** Cross-chat message search (0.15.0). Safe to call on every keystroke. */
 export const searchMessages = (query: string) =>

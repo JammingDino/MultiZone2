@@ -1521,3 +1521,19 @@ export interface SearchHit {
  */
 export type ForkScope = "visible" | "branches" | "all";
 export const FORK_SCOPES: readonly ForkScope[] = ["visible", "branches", "all"];
+
+/** A resource offered by an MCP server (0.15.3) — context, not capability. */
+export interface McpResource {
+  uri: string;
+  name: string;
+  description: string | null;
+  mimeType: string | null;
+}
+
+/** A prompt template offered by an MCP server (0.15.3) — a slash command. */
+export interface McpPrompt {
+  name: string;
+  description: string | null;
+  /** `{ name, description?, required? }` per the MCP spec. */
+  arguments: { name: string; description?: string; required?: boolean }[];
+}

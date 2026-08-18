@@ -35,10 +35,13 @@ Semantic versioning. Each release is tagged `vMAJOR.MINOR.PATCH`.
 | **0.10.x** | Reversible work — checkpoints, undo, review before apply | Planned |
 | **0.11.x** | The app sets itself up — API refresh, an API tool, connector catalog | In progress — API refresh and the API tool done; connectors open |
 | **0.12.x** | Planning & task control — plan mode, live task state, replay, chat-window pass | Built — runtime testing open |
+| **0.13.x** | Tool visuals — a look for every tool, raw call one click away | Planned |
+| **0.14.x** | The agent floor — edit reliability, runaway guardrails, retrieval, spend | Planned |
+| **0.15.x** | Smaller lifts — chat search, palette, MCP resources, saved runs | Planned |
 | **1.0.0** | Hardening & Public Release | Planned |
 | **1.1.x** | In-chat rendering — charts from data, richer artifacts | Planned |
 | **1.2.x** | Signed-in connectors — OAuth, keychain, per-scope consent | Planned |
-| **Post-1.0** | Code interface + edit engine, Diffusion LLM, Mobile | Backlog |
+| **Post-1.0** | Code interface + edit engine, study mode, shared mode surface, Diffusion LLM, Mobile | Backlog |
 
 ---
 
@@ -152,6 +155,30 @@ The `plan` tool gives a model a checklist. What it does not give the user is a s
 
 ---
 
+### 0.13.x — Tool visuals
+
+A tool step that isn't a plan, a plot, a diagram or a saved file renders as escaped JSON — 47 of 52 tools, including the ones an agent run is mostly made of. The release gives every tool a look: 14 visual families rather than 52 bespoke cards, a Visual/Input/Output tab strip so the exact arguments and the exact result string stay one click away instead of being the only thing on offer, and a shaped fallback so the unbounded set of MCP tools never drops to raw JSON either. The diff view this needs for file edits already exists — it was built for the approval prompt in 0.10.2 and the step card has simply never called it. The largest single gain is in Multizone mode, where a leader's step list is currently the least legible part of the app: sub-agent spawns become cards you can open the transcript from, and the team board — claims, refusals, notes — becomes visible for the first time. Full spec in [TOOL_VISUALS.md](TOOL_VISUALS.md).
+
+**Done when:** no tool renders as raw JSON by default, every tool step exposes its unmodified input and output in one click, and a Multizone run can be read from the step list without opening the tracer.
+
+---
+
+### 0.14.x — The agent floor
+
+A comparison pass against roughly twenty open-source agents and clients ([BORROWABLES.md](BORROWABLES.md)) put our orchestration, review and checkpointing ahead of most of the field — the teamwork lock layer has no equivalent in anything surveyed — and our *primitives* behind it. `edit_file` requires a byte-exact match and, when the anchor appears twice, silently edits the first one and reports success. There is no 429 path in the LLM client. Nothing stops a background sub-agent repeating a failing call until the task budget is gone, and nobody is watching a background sub-agent. Auto-approval's top notch is *Everything*, which the README tells people to select before a long run. Retrieval is embedding-only, so an exact error string is the query it handles worst.
+
+This release fixes the layer underneath: an edit that refuses ambiguity, tolerates whitespace and syntax-checks itself; loop detection, backoff and explicit caps; per-category approval with shell prefix rules; the project's own `AGENTS.md` and a ranked repo map so seven agents don't rediscover the layout seven times; hybrid retrieval with a rerank; and cost in currency per sub-agent. It closes with an eval harness, because the premise of the whole panel is that it beats a single local model and there is presently no way to know.
+
+**Done when:** an edit either lands correctly or explains itself, a runaway sub-agent stops on its own, a rate limit costs a retry rather than a panel member, and the panel's benchmark score is a number we can produce on demand.
+
+---
+
+### 0.15.x — Smaller lifts
+
+The remainder of the comparison: cross-chat search, a command palette, fork scope options, MCP resources and prompts, saved parameterised runs, and a global-shortcut quick assistant. Independently useful, none load-bearing for 1.0, and grouped so they can be dropped or deferred as a block if 1.0 needs the room.
+
+---
+
 ### 1.0.0 — Hardening & Public Release
 
 Performance audit (startup time, large chat scroll, streaming), installer polish, auto-updater integration, cross-platform smoke tests (Windows, macOS, Linux), and a REQUIREMENTS.md written for onboarding contributors. No new features — this is a quality and release-infrastructure milestone.
@@ -180,9 +207,11 @@ The "Connect Google" button, and the same again per provider: an OAuth client wi
 
 | Feature | Notes |
 | --- | --- |
-| Code interface + edit engine | Claude Code-style chat window for local models working on codebases; uses RAG/embeddings from 0.4.x for repo understanding. Scoped with it: replacing whole-file `write_file` with a real edit engine (diff hunks validated against the file as it currently is, fuzzy anchoring, syntax check before the write lands). Cursor and Antigravity are categorically better here and the gap is structural, not a missing feature — but the parts worth pulling forward are 0.10.x's checkpoints and diff review, which help every existing file tool immediately |
+| Code interface + edit engine | Claude Code-style chat window for local models working on codebases; uses RAG/embeddings from 0.4.x for repo understanding. Scoped with it: replacing whole-file `write_file` with a real edit engine (diff hunks validated against the file as it currently is, fuzzy anchoring, syntax check before the write lands). Cursor and Antigravity are categorically better here and the gap is structural, not a missing feature — but the parts worth pulling forward are 0.10.x's checkpoints and diff review, which help every existing file tool immediately. Wants the shared mode surface below rather than a shell of its own |
+| Study mode | A grounded mode for learning a body of material rather than working on it: answers restricted to the project's own sources, plus a set of study *tools* — mind map, study guide/briefing/FAQ/timeline, flashcards, quiz, data table, slide deck, infographic, audio overview — each one a tool with a renderer, which is the `update_plan` → `PlanBlock` pattern we already use. Most components exist (knowledge base, citations, `render_graph`, TTS, skills, HTML reports); the missing parts are source-only grounding that *refuses* rather than fills gaps, and durable study state. Wants a workspace rather than a chat panel — see "mode surface" below. Sized in [RELEASE_PLAN.md](RELEASE_PLAN.md#backlog--unscheduled) |
+| Mode surface | A workspace shell a mode can furnish — a source/context rail, the conversation, and a collected set of generated artifacts. Wanted by both the code interface and study mode, which is the signal to build it once rather than grow two bespoke shells that duplicate every affordance. Components before modes: whichever mode lands first pays for it, and it is scoped as its own item before either |
 | Diffusion LLM support | Text generation via diffusion-first models (e.g. Mercury Coder); architecturally distinct from autoregressive — isolated pipeline |
-| Mobile app | Tauri mobile target (iOS/Android); post-desktop-stable |
+| Mobile app | Tauri mobile target (iOS/Android) as a **remote for the desktop**, not a second app: same chats, same zones, but the message is run by the machine at home, with its models, files and MCP servers. A phone cannot host a 30B local model or a filesystem tool, and two independent stores would be the cloud sync this project refuses — a remote client has no second copy to sync. The API is already the whole app (105 routes, SSE streaming) and `src/lib/tauri.ts` is a single seam a remote transport can implement; the new work is a LAN bind, pairing by code with per-device tokens, and answering approvals from the phone. LAN-only by design. Post-desktop-stable; sized in [RELEASE_PLAN.md](RELEASE_PLAN.md#backlog--unscheduled) |
 | Multi-user/team | Shared zones, shared projects, access control |
 | Shareable zone marketplace | Community-contributed zones beyond the local library |
 | Latent-space orchestration ([RecursiveMAS](https://recursivemas.github.io/)) | Replace text passing between Multizone agents with latent hidden-state passing — only the final round decodes text. Promises large token/latency savings + accuracy gains for 0.6.x's flagship mode. **Not an app-layer feature:** requires the inference engine to expose hidden states and accept latent inputs (impossible over today's chat-completion APIs — Ollama/OpenAI-compatible/llama.cpp all exchange text/tokens only), plus a training pass to fit the ~13M-param "RecursiveLink" adapters (base weights frozen). The small, frozen-base adapter footprint makes a **local overnight fine-tune** plausible *if* MultiZone gains a training backend — a future bridge between the local-first principle and this technique. Bleeding-edge research as of 2026; gated on engine support landing first. |

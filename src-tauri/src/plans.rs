@@ -35,7 +35,7 @@ use std::sync::OnceLock;
 /// it, and it stops being something a person can read and edit.
 pub const MAX_STEPS: usize = 30;
 
-/// Per-step `detail` ceiling. Generous — the whole point of 0.12.7 is that a
+/// Per-step `detail` ceiling. Generous — the whole point of 0.14.6 is that a
 /// step gets a specification and not a label — but not unbounded: past this the
 /// model is writing the deliverable into the plan instead of planning it, and
 /// every one of these is re-sent to the model on every request of the executing
@@ -51,7 +51,7 @@ pub const MAX_CONTEXT_CHARS: usize = 12_000;
 /// user's question in front of a plan is "what is it going to touch, and which
 /// bit of this could hurt", and a bare list of intentions answers neither.
 ///
-/// `detail` and `acceptance` (0.12.7) are what turn it into something *worth*
+/// `detail` and `acceptance` (0.14.6) are what turn it into something *worth*
 /// reviewing. A step is a heading; the plan is the paragraph under it — the
 /// options that were weighed, the specific choice, the numbers, the thing that
 /// will go wrong. Without somewhere to put that, a model asked to plan writes
@@ -211,7 +211,7 @@ pub struct Plan {
     pub parent_plan_id: Option<String>,
     pub title: String,
     pub goal: Option<String>,
-    /// Everything true of the plan before step 1 (0.12.7): the scope decision,
+    /// Everything true of the plan before step 1 (0.14.6): the scope decision,
     /// the assumptions, what the research turned up, what is still open.
     #[serde(default)]
     pub context: Option<String>,
@@ -441,7 +441,7 @@ pub fn allowed_in_plan_mode(name: &str) -> bool {
             | "update_plan"
             | "enter_plan_mode"
             | "exit_plan_mode"
-            // Drafting the plan a step at a time, and reading one back (0.12.7).
+            // Drafting the plan a step at a time, and reading one back (0.14.6).
             // `draft_plan_step` writes, but only to the plan the user is about
             // to be shown and to that plan's own document — it cannot reach
             // anything the mode exists to protect.
@@ -513,7 +513,7 @@ pub async fn save_draft(
     get(db, &id).await
 }
 
-// ── Drafting a plan a step at a time (0.12.7) ────────────────────────────────
+// ── Drafting a plan a step at a time (0.14.6) ────────────────────────────────
 
 /// The plan this participant is currently writing, if any.
 ///
@@ -979,7 +979,7 @@ pub fn plan_mode_preamble() -> String {
 
 /// The system snippet a chat gets when planning is available and *not* on.
 ///
-/// Nothing said so before 0.12.7. Plan mode existed entirely in one tool
+/// Nothing said so before 0.14.6. Plan mode existed entirely in one tool
 /// description among twenty, and the one thing the prompt did say about planning
 /// pointed at `update_plan` — a different tool, for progress on work already
 /// under way. So a user asking in plain words for a plan reliably got a numbered
@@ -1140,7 +1140,7 @@ mod tests {
     }
 
     /// The research half of the mode. Planning is *made of* reading, and a plan
-    /// written without searching is the failure 0.12.7 exists to fix — so the
+    /// written without searching is the failure 0.14.6 exists to fix — so the
     /// tools that do the reading are asserted present, not merely not-denied.
     #[test]
     fn reads_and_the_mode_itself_survive() {
@@ -1227,7 +1227,7 @@ mod tests {
         assert!(block.contains("The user edited this plan"));
     }
 
-    /// The whole point of 0.12.7: the executing turn is handed the *detail* it
+    /// The whole point of 0.14.6: the executing turn is handed the *detail* it
     /// was approved on, not just the headings. A plan whose specifications stop
     /// at the approval card is a plan the model re-invents while running it.
     #[test]
@@ -1314,7 +1314,7 @@ mod tests {
     }
 
     /// The sentences users actually type when they want a plan. Every one of
-    /// these produced prose before 0.12.7 unless the user typed the function
+    /// these produced prose before 0.14.6 unless the user typed the function
     /// name themselves.
     #[test]
     fn plain_requests_for_a_plan_are_recognised() {
@@ -1383,7 +1383,7 @@ mod tests {
     }
 
     /// The drafting loop end to end: a header, three steps written one call at a
-    /// time, one of them rewritten, then filed. This is the shape 0.12.7 adds —
+    /// time, one of them rewritten, then filed. This is the shape 0.14.6 adds —
     /// a plan built over several turns of thought rather than squeezed into one
     /// argument blob — so it is asserted as a sequence, not per function.
     #[tokio::test]

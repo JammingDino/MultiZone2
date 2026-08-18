@@ -36,6 +36,108 @@ async fn max_tool_steps(db: &SqlitePool) -> usize {
     continuity::clamp_steps(configured)
 }
 
+/// Whether a project's own `AGENTS.md` / `CLAUDE.md` is read into the system
+/// prompt (0.14.5). On unless the user says otherwise: a file written to tell
+/// an agent how to work in this repository is the cheapest context there is,
+/// and an install that has never opened the setting should get it.
+async fn project_instructions_enabled(db: &SqlitePool) -> bool {
+    let raw: Option<String> =
+        sqlx::query_scalar("SELECT value FROM settings WHERE key = 'app_settings'")
+            .fetch_optional(db)
+            .await
+            .ok()
+            .flatten()
+            .flatten();
+    raw.and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| v.get("projectInstructions").and_then(Value::as_bool))
+        .unwrap_or(true)
+}
+
+/// Tokens of repository map injected at session start (0.14.5). `0` is off.
+async fn repo_map_tokens(db: &SqlitePool) -> usize {
+    let raw: Option<String> =
+        sqlx::query_scalar("SELECT value FROM settings WHERE key = 'app_settings'")
+            .fetch_optional(db)
+            .await
+            .ok()
+            .flatten()
+            .flatten();
+    raw.and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| v.get("repoMapTokens").and_then(Value::as_u64))
+        .map(|n| n as usize)
+        .unwrap_or(crate::repomap::DEFAULT_TOKEN_BUDGET)
+        // A map is a map. Past a few thousand tokens it stops being one and
+        // becomes an inventory competing with the conversation for room.
+        .min(8_000)
+}
+
+/// The spend ceiling for this chat's session, in billed tokens. `0` means none.
+///
+/// **This session's own limit first, the global setting as the default**
+/// (0.14.4). Raising the ceiling from the card in one chat used to raise it
+/// everywhere, which is the opposite of what lifting a limit to let *this*
+/// piece of work finish is supposed to mean.
+///
+/// Resolved against the session root, since spend is counted across a chat and
+/// every sub-agent under it — a sub-agent with a ceiling of its own would be a
+/// limit inside a limit, and whichever was smaller would silently win.
+///
+/// Off by default, deliberately. This is a local-first app where the usual case
+/// is a model on the same machine, where a long session costs nothing but time;
+/// a cap that stops legitimate work by default would be the wrong trade for the
+/// people running Ollama. It exists for the case where tokens are money and a
+/// seven-member panel is spending it unattended, and the number belongs to
+/// whoever is paying. Loop detection, which is on for everyone, is what catches
+/// the runaway *shape*.
+async fn max_session_tokens(db: &SqlitePool, chat_id: &str) -> i64 {
+    // `Some(0)` is a real answer — "this session runs unmetered" — so it has to
+    // beat the global default rather than read as unset.
+    if let Ok(root) = crate::tools::teamwork::session_root(db, chat_id).await {
+        let own: Option<Option<i64>> =
+            sqlx::query_scalar("SELECT spend_limit FROM chats WHERE id = ?1")
+                .bind(&root)
+                .fetch_optional(db)
+                .await
+                .ok()
+                .flatten();
+        if let Some(limit) = own.flatten() {
+            return limit.max(0);
+        }
+    }
+
+    let raw: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key = 'app_settings'")
+        .fetch_optional(db)
+        .await
+        .ok()
+        .flatten()
+        .flatten();
+    raw.and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| v.get("maxSessionTokens").and_then(|n| n.as_i64()))
+        .filter(|n| *n > 0)
+        .unwrap_or(0)
+}
+
+/// Set (or clear, with `None`) a session's own spend limit (0.14.4).
+///
+/// Always written to the session root: raising the limit from inside a
+/// sub-agent's chat is still a statement about the whole session, which is the
+/// thing being measured.
+#[tauri::command]
+pub async fn set_chat_spend_limit(
+    state: State<'_, AppState>,
+    chat_id: String,
+    limit: Option<i64>,
+) -> AppResult<()> {
+    let root = crate::tools::teamwork::session_root(&state.db, &chat_id).await?;
+    sqlx::query("UPDATE chats SET spend_limit = ?1, updated_at = ?2 WHERE id = ?3")
+        .bind(limit.map(|n| n.max(0)))
+        .bind(now_ts())
+        .bind(&root)
+        .execute(&state.db)
+        .await?;
+    Ok(())
+}
+
 /// One-shot overrides for a single send, chosen from the input bar's advanced
 /// menu. They affect only the turn they're passed to — the chat's stored zone
 /// is never modified.
@@ -68,9 +170,7 @@ impl TurnOverride {
     }
 }
 
-const ZONE_COLS: &str = "id, name, provider_id, model, system_prompt, temperature_override AS temperature, max_tokens, top_p,
-    tools_enabled, tool_config, thinking_enabled, include_thinking_in_context,
-    icon, accent_color, is_leader, created_at, updated_at";
+use crate::db::models::ZONE_COLS;
 // One list, shared with `commands::chats`. It used to be duplicated here, and a
 // column added to `Chat` was only added to the other copy — every `send_message`
 // then failed to decode a Chat row and the send silently did nothing.
@@ -89,8 +189,17 @@ pub enum InputPart {
     HiddenImage { data_url: String },
 }
 
+/// One event of a streamed turn, as the frontend receives it.
+///
+/// `rename_all_fields` was missing until 0.14.3, and the container-level
+/// `rename_all` only renames *variants* — so `message_id` and `zone_id` went
+/// out as snake_case while [types.ts](../../../src/lib/types.ts) declared, and
+/// every reader used, `messageId` and `zoneName`. Those reads were quietly
+/// `undefined`: the routing chip named no zone, and the streaming state carried
+/// no message id. Nothing threw, which is why it survived — a wrong field name
+/// across this boundary is not a type error on either side of it.
 #[derive(Debug, Clone, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")]
 pub enum StreamPayload<'a> {
     UserMessageSaved { message: &'a Message },
     AssistantStart { message_id: String },
@@ -127,6 +236,16 @@ pub enum StreamPayload<'a> {
     /// turn, or dropped because the turn was cancelled.
     PendingCleared { ids: Vec<String> },
     Cancelled,
+    /// Loop detection stopped the turn (0.14.1). The turn does not end here —
+    /// one tool-free step follows so the model can report — but the reason is
+    /// surfaced now, while the repeated calls are still on screen.
+    Runaway { kind: &'static str, label: String },
+    /// The session spend limit stopped the run (0.14.3). Unlike every other
+    /// ending this one is a *decision waiting on the user*: nothing more will
+    /// run, in this chat or any other in the session, until the limit is raised
+    /// or turned off. The numbers travel with it so the prompt can offer a
+    /// specific new limit rather than a text box.
+    SpendLimit { spent: i64, cap: i64, mid_turn: bool },
     Done,
     Error { message: String },
 }
@@ -387,27 +506,6 @@ pub async fn update_message(
     Ok(updated)
 }
 
-/// Read the auto-approve level from persisted app_settings.
-/// Returns "all" if not set (backward-compatible: no approval prompts).
-async fn get_auto_approve_level(db: &SqlitePool) -> String {
-    let raw: Option<Option<String>> = sqlx::query_scalar(
-        "SELECT value FROM settings WHERE key = 'app_settings'",
-    )
-    .fetch_optional(db)
-    .await
-    .ok()
-    .flatten();
-
-    raw.flatten()
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-        .and_then(|v| {
-            v.get("autoApproveLevel")
-                .and_then(|v| v.as_str())
-                .map(String::from)
-        })
-        .unwrap_or_else(|| "all".to_string())
-}
-
 /// Read the OCR language hint from persisted app_settings (0.4.0). Defaults to
 /// "eng". Passed to the OCR engine when falling back for vision-incapable models.
 async fn ocr_language(db: &SqlitePool) -> String {
@@ -480,17 +578,6 @@ pub(crate) async fn vision_override(db: &SqlitePool, model: &str) -> Option<Stri
                 .map(String::from)
         })
         .filter(|s| s == "on" || s == "off")
-}
-
-/// Returns true when the tool needs explicit user approval given the current level.
-fn approval_needed(auto_level: &str, tool_safety: u8) -> bool {
-    match auto_level {
-        "all" => false,
-        "safe_moderate" => tool_safety > 1,
-        "safe" => tool_safety > 0,
-        "none" => true,
-        _ => false,
-    }
 }
 
 /// Run the agentic loop against the chat's existing history without inserting
@@ -868,6 +955,11 @@ fn simple_zone(provider: &Provider) -> AppResult<Zone> {
         icon: None,
         accent_color: None,
         is_leader: false,
+        // Nothing to fall back to: quick chat *is* the fallback — one provider,
+        // its own default model, chosen in settings.
+        fallback_zone_id: None,
+        // No overrides: quick chat answers under the global approval policy.
+        approvals: None,
         created_at: 0,
         updated_at: 0,
     })
@@ -1329,6 +1421,22 @@ fn push_system_note(api_messages: &mut Vec<ChatMessage>, text: String) {
     });
 }
 
+/// The chat that spawned this one, when it is a sub-agent's subchat rather than
+/// a branch. Branches share the `parent_chat_id` link and have no owning zone,
+/// which is what `initiated_by_zone_id` distinguishes.
+async fn subchat_parent(db: &SqlitePool, chat_id: &str) -> Option<String> {
+    sqlx::query_scalar::<_, Option<String>>(
+        "SELECT parent_chat_id FROM chats
+          WHERE id = ?1 AND initiated_by_zone_id IS NOT NULL",
+    )
+    .bind(chat_id)
+    .fetch_optional(db)
+    .await
+    .ok()
+    .flatten()
+    .flatten()
+}
+
 /// Hand the model anything the user queued as a *steer* while this turn was
 /// running (see `commands::pending`).
 ///
@@ -1491,7 +1599,7 @@ async fn run_participant_turn(
     let mut api_messages = build_message_history(&ctx.db, chat_id, &zone, persp.is_some()).await?;
 
     // "Plan this out first" should reach the tool without the user having to
-    // name it (0.12.7). The standing snippet says planning exists; this says the
+    // name it (0.14.6). The standing snippet says planning exists; this says the
     // message you just received is probably asking for it — which is what the
     // snippet alone was not enough for, since a general instruction about when
     // to plan competes with everything else in a long system prompt at exactly
@@ -1519,7 +1627,7 @@ async fn run_participant_turn(
     // silently off the end of a tool result (see `llm::continuity`).
     // A planning turn gets a larger budget: its whole output is reading, none of
     // it can change anything, and a plan filed because the loop ran out mid-
-    // research is the thin plan 0.12.7 exists to stop. Fixed for the turn — the
+    // research is the thin plan 0.14.6 exists to stop. Fixed for the turn — the
     // loop bound is evaluated once — so a chat that enters plan mode *mid*-turn
     // keeps the ordinary budget and is caught instead by the final-step
     // exception below, which leaves `exit_plan_mode` reachable.
@@ -1527,6 +1635,23 @@ async fn run_participant_turn(
         let base = max_tool_steps(&ctx.db).await;
         if planning { continuity::plan_mode_steps(base) } else { base }
     };
+    // 0 = no ceiling, which is the default (see `max_session_tokens`).
+    let spend_cap = max_session_tokens(&ctx.db, chat_id).await;
+    // Path-triggered rules (0.14.5): the directories whose own instructions this
+    // turn has already answered for, carrying the ones that turned out to hold
+    // nothing as well — a model working through twenty files in one folder pays
+    // for the lookup once. Per turn, because the note lives only in this turn's
+    // request body; the next turn rebuilds from the database, where it was
+    // deliberately never stored.
+    let project_instructions = project_instructions_enabled(&ctx.db).await;
+    let mut instructions_seen: std::collections::HashSet<std::path::PathBuf> =
+        std::collections::HashSet::new();
+    // Project checks (0.14.5): did this turn actually change any files, and
+    // have the checks already had their one run? Both per turn — a turn that
+    // only read things has nothing to check, and a suite that runs after every
+    // repair attempt spends the whole step budget on the same tests.
+    let mut edits_landed = false;
+    let mut checks_ran = false;
     // Stall recovery state, tracked across the whole turn.
     let mut used_tools_this_turn = false;
     let mut nudges_used = 0usize;
@@ -1538,6 +1663,11 @@ async fn run_participant_turn(
     // Set when the user asked the run to stop after the step in flight (0.12.1).
     // The next step runs with no tools, so it can only answer.
     let mut stop_after_step = false;
+    // Loop detection (0.14.1), per turn — a call repeated across two turns is
+    // the user asking twice, not an agent stuck.
+    let mut loop_guard = crate::llm::runaway::LoopGuard::new();
+    // Whether this turn has already spent its one fallback zone (0.14.1).
+    let mut used_fallback = false;
     // Citation numbering for this turn. Every citing tool numbers its own
     // results from 1, so without a shared counter a search and a `read_file` in
     // the same turn would both tell the model to write `[1]`. See
@@ -1578,6 +1708,55 @@ async fn run_participant_turn(
             deliver_steers(ctx, sink, chat_id, &mut api_messages).await?;
         }
 
+        // The session spend ceiling (0.14.1, made a real stop in 0.14.3).
+        //
+        // Checked at the step boundary, and what happens there is a **hard
+        // stop**: the loop ends here, with no further request to the provider.
+        //
+        // 0.14.1 gave the model one more tool-free step to explain itself, the
+        // same wrap-up the step budget uses. That was wrong, and the reason is
+        // the whole point of this setting: another step is *another paid
+        // request*, and the largest kind — a wrap-up re-sends the entire
+        // context. A limit that spends past itself to apologise for spending is
+        // not a limit. The user is told instead, by the app, for free.
+        if spend_cap > 0 {
+            match crate::commands::usage::session_spent_tokens(&ctx.db, chat_id).await {
+                Ok(spent) if spent >= spend_cap => {
+                    tracing::info!("session spend limit reached: {spent}/{spend_cap} tokens");
+                    crate::events::record(
+                        &ctx.db,
+                        chat_id,
+                        Some(&turn_id),
+                        persp,
+                        "spend_limit",
+                        format!(
+                            "Stopped: this session has spent {spent} tokens of its {spend_cap} limit"
+                        ),
+                        Some(serde_json::json!({ "spent": spent, "cap": spend_cap })),
+                    )
+                    .await;
+                    sink.emit_for(
+                        chat_id,
+                        persp,
+                        StreamPayload::SpendLimit {
+                            spent,
+                            cap: spend_cap,
+                            // Mid-turn: work was done and is in the transcript
+                            // above, which changes what the user is deciding
+                            // about.
+                            mid_turn: step > 0,
+                        },
+                    );
+                    sink.emit_for(chat_id, persp, StreamPayload::Done);
+                    return Ok(());
+                }
+                Ok(_) => {}
+                // A limit that cannot be read must not end the turn — a failed
+                // count is our problem, not the user's run.
+                Err(e) => tracing::warn!("spend limit check failed: {e}"),
+            }
+        }
+
         // Budget signalling. The wrap-up warning lands one step before the end so
         // the model can choose what to spend its last call on; the final step
         // both warns and withholds the tools, which is what actually guarantees
@@ -1592,8 +1771,13 @@ async fn run_participant_turn(
         let plan_endgame = final_step && planning && !stop_after_step;
         if plan_endgame {
             push_system_note(&mut api_messages, continuity::final_step_plan_nudge(max_steps));
-        } else if final_step {
+        } else if final_step && !stop_after_step {
             push_system_note(&mut api_messages, continuity::final_step_nudge(max_steps));
+        } else if final_step {
+            // The turn is ending early — the user asked it to stop (0.12.1), or
+            // loop detection stopped it (0.14.1). Both already pushed a note
+            // saying why; "you have used all N tool steps" on top of that is
+            // simply false, and a model told two different reasons picks one.
         } else if continuity::is_wrapup_step(step, max_steps) {
             push_system_note(
                 &mut api_messages,
@@ -1666,7 +1850,70 @@ async fn run_participant_turn(
             crate::llm::tokens::measure_request(&req, cpt)
         };
 
-        let response = client.chat_stream(&req).await?;
+        let response = match client.chat_stream(&req).await {
+            Ok(res) => res,
+            Err(e) => {
+                // The zone's provider will not serve this turn — rate limited
+                // past its cooldown, host down, key rejected. If the zone names
+                // a fallback, answer with that instead of losing the run
+                // (0.14.1). Once per turn: a second fallback would be a chain
+                // that hides which provider actually died, and a fallback whose
+                // own provider is also down is a dead turn either way.
+                let fallback_id = (!used_fallback)
+                    .then(|| zone.fallback_zone_id.clone())
+                    .flatten();
+                let Some(fallback_id) = fallback_id else { return Err(e) };
+                let Ok((fz, fp)) = load_zone_and_provider(&ctx.db, &fallback_id).await else {
+                    // The fallback is gone or has no provider. Report the
+                    // original failure, which is the one worth reading.
+                    tracing::warn!("fallback zone {fallback_id} could not be loaded");
+                    return Err(e);
+                };
+                tracing::info!("{} failed ({e}); falling back to {}", zone.name, fz.name);
+                crate::events::record(
+                    &ctx.db,
+                    chat_id,
+                    Some(&turn_id),
+                    persp,
+                    "zone_fallback",
+                    format!("{} could not answer — {} is taking over", zone.name, fz.name),
+                    Some(serde_json::json!({
+                        "from": zone.name,
+                        "to": fz.name,
+                        "error": e.to_string(),
+                    })),
+                )
+                .await;
+                used_fallback = true;
+                current_zone_id = Some(fz.id.clone());
+                zone = fz;
+                provider = fp;
+                tool_ctx.vision_capable = model_vision_capable(&ctx.db, &zone.model).await;
+                tools = build_tools_for_zone(&ctx.db, &zone, &tool_ctx).await;
+                if knowledge_available {
+                    tools.push(crate::tools::knowledge::definition());
+                }
+                if suppress_ask_user {
+                    strip_ask_user(&mut tools);
+                }
+                planning = apply_plan_mode(&ctx.db, chat_id, &mut tools, persp.is_some()).await;
+                mcp_danger = {
+                    let ids: Vec<String> =
+                        serde_json::from_str(&zone.tools_enabled).unwrap_or_default();
+                    crate::mcp::danger_for_ids(&ctx.db, &ids).await
+                };
+                zone_config = serde_json::from_str(&zone.tool_config)
+                    .unwrap_or(Value::Object(Default::default()));
+                inject_global_tool_config(&mut zone_config, &ctx.db, &zone.model).await;
+                client =
+                    LlmClient::new(&ctx.http, &provider.base_url, provider.api_key.as_deref());
+                sink.emit_event(
+                    "chat-zone-updated",
+                    serde_json::json!({ "chatId": chat_id, "zoneId": zone.id }),
+                );
+                continue;
+            }
+        };
 
         let sink_for_emit = sink.clone();
         let chat_id_for_emit = chat_id.to_string();
@@ -1879,7 +2126,42 @@ async fn run_participant_turn(
         }
 
         if agg.tool_calls.is_empty() {
-            // Genuinely finished — the turn ends here.
+            // Genuinely finished — but if this turn edited files and the project
+            // carries checks, "finished" is a claim rather than a fact (0.14.5).
+            // Run them and hand the result back as one more step, so the turn
+            // ends on what the checks said instead of on a paragraph that
+            // contradicts the build. Once per turn: a suite re-run after every
+            // repair is how thirty seconds of tests becomes the step budget.
+            if stall == Stall::None && edits_landed && !checks_ran {
+                checks_ran = true;
+                let outcomes =
+                    crate::checks::run(&ctx.db, chat_id, project_dir.as_deref()).await;
+                if let Some(note) = crate::checks::note(&outcomes) {
+                    let passed = outcomes.iter().all(|o| o.passed);
+                    crate::events::record(
+                        &ctx.db,
+                        chat_id,
+                        Some(&turn_id),
+                        persp,
+                        if passed { "checks_passed" } else { "checks_failed" },
+                        crate::checks::summary(&outcomes),
+                        Some(serde_json::json!({
+                            "checks": outcomes
+                                .iter()
+                                .map(|o| serde_json::json!({
+                                    "label": o.label,
+                                    "command": o.command,
+                                    "exitCode": o.exit_code,
+                                    "passed": o.passed,
+                                }))
+                                .collect::<Vec<_>>(),
+                        })),
+                    )
+                    .await;
+                    push_system_note(&mut api_messages, note);
+                    continue;
+                }
+            }
             if stall == Stall::None {
                 break;
             }
@@ -1910,9 +2192,17 @@ async fn run_participant_turn(
             .iter()
             .any(|tc| tc.function.name == "exit_plan_mode");
 
-        // Execute tools, persist results, push into history
-        let auto_approve_level = get_auto_approve_level(&ctx.db).await;
+        // Execute tools, persist results, push into history. The policy is read
+        // per step rather than per turn: a user watching a long run and deciding
+        // halfway through to stop being asked about reads should not have to
+        // start a new turn for it (0.14.2).
+        let policy =
+            crate::approvals::Policy::load(&ctx.db, zone.approvals.as_deref()).await;
         let approval_key = approval_key(chat_id, persp);
+        // Set when this step's calls tripped loop detection. Handled after the
+        // step rather than inside it, so the call that tripped it is still
+        // persisted and shown — the evidence is the point.
+        let mut runaway = crate::llm::runaway::Runaway::None;
         for tc in &agg.tool_calls {
             if cancel.load(Ordering::Relaxed) {
                 sink.emit_for(chat_id, persp, StreamPayload::Cancelled);
@@ -1973,7 +2263,77 @@ async fn run_participant_turn(
                 .get(&tc.function.name)
                 .copied()
                 .unwrap_or_else(|| tools::tool_safety_by_name(&tc.function.name));
-            let needs_approval = approval_needed(&auto_approve_level, tool_safety);
+            let decision = policy.decide(
+                &tc.function.name,
+                &tc.function.arguments,
+                tool_safety,
+                project_dir.as_deref(),
+            );
+
+            // A denied shell prefix or edit path is refused here, on the same
+            // path plan mode uses: the user already answered this question by
+            // writing the rule down, and turning it into a prompt would ask it
+            // again.
+            if let crate::approvals::Decision::Deny { reason, rule } = &decision {
+                crate::events::record(
+                    &ctx.db,
+                    chat_id,
+                    Some(&turn_id),
+                    persp,
+                    "denial",
+                    format!(
+                        "`{}` was refused by {}",
+                        tc.function.name,
+                        if *rule == "editDeny" { "a path rule" } else { "a command rule" }
+                    ),
+                    Some(serde_json::json!({
+                        "tool": tc.function.name,
+                        "arguments": crate::events::summarize_args(&tc.function.arguments),
+                        "rule": rule,
+                    })),
+                )
+                .await;
+                sink.emit_for(
+                    chat_id,
+                    persp,
+                    StreamPayload::ToolCallResult {
+                        index: 0,
+                        name: tc.function.name.clone(),
+                        result: reason.clone(),
+                    },
+                );
+                let (parts, api_content) = parse_tool_result_content(reason);
+                let msg_id = new_id();
+                sqlx::query(
+                    "INSERT INTO messages (id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, created_at)
+                     VALUES (?1, ?2, 'tool', ?3, NULL, ?4, NULL, ?5, ?6)",
+                )
+                .bind(&msg_id)
+                .bind(chat_id)
+                .bind(serde_json::to_string(&parts)?)
+                .bind(&tc.id)
+                .bind(persp)
+                .bind(now_ts())
+                .execute(&ctx.db)
+                .await?;
+                let saved = sqlx::query_as::<_, Message>(&format!(
+                    "SELECT {MSG_COLS} FROM messages WHERE id = ?1"
+                ))
+                .bind(&msg_id)
+                .fetch_one(&ctx.db)
+                .await?;
+                sink.emit_for(chat_id, persp, StreamPayload::ToolMessageSaved { message: &saved });
+                api_messages.push(ChatMessage {
+                    role: "tool".into(),
+                    content: Some(api_content),
+                    tool_calls: None,
+                    tool_call_id: Some(tc.id.clone()),
+                    name: Some(tc.function.name.clone()),
+                });
+                continue;
+            }
+
+            let needs_approval = decision == crate::approvals::Decision::Ask;
 
             let answer = if needs_approval {
                 let (tx, rx) = oneshot::channel::<ApprovalAnswer>();
@@ -2072,6 +2432,14 @@ async fn run_participant_turn(
             };
 
             let failed = crate::commands::tool_usage::result_is_error(&result);
+
+            // Loop detection (0.14.1). A denied call is not evidence of a stuck
+            // agent — the user is the one saying no, and three refusals in a row
+            // is a conversation, not a runaway.
+            if approved && runaway == crate::llm::runaway::Runaway::None {
+                runaway = loop_guard.observe(&tc.function.name, &call_arguments, &result, failed);
+            }
+
             crate::events::record(
                 &ctx.db,
                 chat_id,
@@ -2099,6 +2467,10 @@ async fn run_participant_turn(
             )
             .await;
             if approved && !failed && crate::events::is_file_mutation(&tc.function.name) {
+                // What makes the project's checks worth running at the end of
+                // this turn (0.14.5) — a turn that only read things has nothing
+                // for them to say anything about.
+                edits_landed = true;
                 crate::events::record(
                     &ctx.db,
                     chat_id,
@@ -2206,6 +2578,102 @@ async fn run_participant_turn(
                 tool_call_id: Some(tc.id.clone()),
                 name: Some(tc.function.name.clone()),
             });
+
+            // Path-triggered rules (0.14.5). A directory deeper in the tree can
+            // carry its own `AGENTS.md` — `src/generated/` saying "never edit
+            // these by hand" is the common one — and those rules become relevant
+            // exactly when a file under them is opened. Delivered here rather
+            // than in the base prompt, because a repository's every
+            // directory-specific rule up front is context spent on folders the
+            // turn never visits.
+            if approved && !failed && project_instructions {
+                if let Some(note) = crate::instructions::triggered(
+                    &tc.function.name,
+                    &call_arguments,
+                    project_dir.as_deref(),
+                    &mut instructions_seen,
+                ) {
+                    crate::events::record(
+                        &ctx.db,
+                        chat_id,
+                        Some(&turn_id),
+                        persp,
+                        "instructions",
+                        "Read this directory's own instructions".to_string(),
+                        Some(serde_json::json!({
+                            "tool": tc.function.name,
+                            "arguments": crate::events::summarize_args(&call_arguments),
+                        })),
+                    )
+                    .await;
+                    push_system_note(&mut api_messages, note);
+                }
+            }
+
+            // Nothing further from a step that has already been judged a loop.
+            // The remaining calls of this step are the same loop continuing.
+            if runaway.is_some() {
+                break;
+            }
+        }
+
+        // A runaway turn (0.14.1) ends the way an out-of-steps turn does: one
+        // more step with the tools withheld, so the model has to say what it was
+        // doing and why it could not finish. A hard abort would be cheaper by one
+        // request and much worse — it leaves the user with a stopped run and no
+        // sentence, and it leaves a background sub-agent's parent with nothing at
+        // all, since what the parent reads is the sub-agent's last message.
+        if runaway.is_some() {
+            tracing::info!("runaway stopped at step {step}/{max_steps}: {}", runaway.label());
+            crate::events::record(
+                &ctx.db,
+                chat_id,
+                Some(&turn_id),
+                persp,
+                "runaway",
+                runaway.label(),
+                Some(serde_json::json!({ "kind": runaway.kind() })),
+            )
+            .await;
+            sink.emit_for(
+                chat_id,
+                persp,
+                StreamPayload::Runaway {
+                    kind: runaway.kind(),
+                    label: runaway.label(),
+                },
+            );
+            // Raised to the parent when this is a sub-agent. A background one is
+            // the case that matters: nobody is watching its stream, its wrap-up
+            // lands in a transcript nobody has open, and the leader would
+            // otherwise collect a plausible-sounding paragraph with no sign that
+            // the run behind it went nowhere.
+            if let Some(parent_id) = subchat_parent(&ctx.db, chat_id).await {
+                crate::events::record(
+                    &ctx.db,
+                    &parent_id,
+                    None,
+                    None,
+                    "runaway",
+                    format!("Sub-agent {} — {}", zone.name, runaway.label().to_lowercase()),
+                    Some(serde_json::json!({
+                        "kind": runaway.kind(),
+                        "subchatId": chat_id,
+                        "zone": zone.name,
+                    })),
+                )
+                .await;
+                sink.emit_for(
+                    &parent_id,
+                    None,
+                    StreamPayload::Runaway {
+                        kind: runaway.kind(),
+                        label: format!("{} — {}", zone.name, runaway.label().to_lowercase()),
+                    },
+                );
+            }
+            push_system_note(&mut api_messages, runaway.note());
+            stop_after_step = true;
         }
 
         if asked_user || filed_plan {
@@ -2430,9 +2898,13 @@ async fn run_perspective(
 /// most-stable first, most-volatile last. See `build_system_snippets`.
 pub enum SnippetKind {
     ZonePrompt,
+    /// The project's own `AGENTS.md` / `CLAUDE.md` (0.14.5).
+    ProjectInstructions,
     Continuity,
     Skills,
     Knowledge,
+    /// The ranked map of what this project defines (0.14.5).
+    RepoMap,
     ProjectContext,
     TagContext,
     Leader,
@@ -2444,7 +2916,7 @@ pub enum SnippetKind {
     /// The plan the user approved, as this turn's task list (0.12.0).
     TaskList,
     /// Planning is available but off: what it is for, and when to reach for it
-    /// (0.12.7).
+    /// (0.14.6).
     PlanOffer,
 }
 
@@ -2456,7 +2928,9 @@ impl SnippetKind {
             Self::TagContext => "Tag context",
             Self::Skills => "Skills catalog",
             Self::Knowledge => "Knowledge index",
+            Self::RepoMap => "Repository map",
             Self::ZonePrompt => "Zone prompt",
+            Self::ProjectInstructions => "Project instructions",
             Self::Continuity => "Agent-loop preamble",
             Self::Leader => "Sub-agent roster",
             Self::Memory => "Memories",
@@ -2531,11 +3005,33 @@ pub async fn build_system_snippets(
         }
     }
 
+    let zone_tool_ids: Vec<String> = serde_json::from_str(&zone.tools_enabled).unwrap_or_default();
+
+    // The project's own `AGENTS.md` / `CLAUDE.md` (0.14.5) — second only to the
+    // zone prompt, because it is the same kind of thing (standing instructions
+    // that do not move within a session) and belongs in front of everything
+    // that describes machinery.
+    //
+    // Gated on the zone having tools, for the same reason the loop preamble is:
+    // a zone that cannot touch the project is being told how to work in a
+    // repository it will never open. Gated again on the app setting, since this
+    // is a file the app reads on its own initiative and switching that off has
+    // to be possible without moving the file.
+    if !zone_tool_ids.is_empty() && project_instructions_enabled(db).await {
+        if let Ok(Some(dir)) = resolve_working_dir(db, chat_id).await {
+            let dir = dir.trim().to_string();
+            if !dir.is_empty() {
+                if let Some(block) = crate::instructions::block(std::path::Path::new(&dir)) {
+                    snippets.push((SnippetKind::ProjectInstructions, block));
+                }
+            }
+        }
+    }
+
     // How the agentic loop works (0.9.6). A model that doesn't know it will be
     // called again after a tool result has every reason to stop and wait for the
     // user — which is exactly what stalls a long task halfway through. Only
     // zones that actually have tools get this; for the rest it's noise.
-    let zone_tool_ids: Vec<String> = serde_json::from_str(&zone.tools_enabled).unwrap_or_default();
     if !zone_tool_ids.is_empty() {
         snippets.push((
             SnippetKind::Continuity,
@@ -2554,7 +3050,7 @@ pub async fn build_system_snippets(
     } else if let Some(plan) = crate::plans::active_plan(db, chat_id, None).await {
         snippets.push((SnippetKind::TaskList, crate::plans::task_list_block(&plan)));
     } else if !zone_tool_ids.is_empty() && !is_perspective {
-        // Planning is available and off (0.12.7). Saying so is the fix for the
+        // Planning is available and off (0.14.6). Saying so is the fix for the
         // mode's real failure — not misuse but disuse. It lived entirely in one
         // tool description among twenty, while the loop preamble just above
         // pointed at `update_plan` for multi-step work, so "plan this for me"
@@ -2588,6 +3084,26 @@ pub async fn build_system_snippets(
             if crate::knowledge::has_index(db, &scope).await {
                 if let Some(block) = crate::knowledge::build_knowledge_block(db, &scope).await {
                     snippets.push((SnippetKind::Knowledge, block));
+                }
+            }
+        }
+    }
+
+    // The repository map (0.14.5): what this project defines, ranked by how
+    // much of the rest of it depends on each thing. Offered to zones with tools
+    // for the same reason as the project's instructions — a zone that cannot
+    // open a file has no use for a map of one.
+    if !zone_tool_ids.is_empty() {
+        let budget = repo_map_tokens(db).await;
+        if budget > 0 {
+            if let Ok(Some(dir)) = resolve_working_dir(db, chat_id).await {
+                let dir = dir.trim().to_string();
+                if !dir.is_empty() {
+                    if let Some(map) =
+                        crate::repomap::cached(db, std::path::Path::new(&dir), budget).await
+                    {
+                        snippets.push((SnippetKind::RepoMap, map.text));
+                    }
                 }
             }
         }
@@ -3309,7 +3825,7 @@ fn strip_ask_user(tools: &mut Vec<Tool>) {
 /// is offered so the model can take itself into planning when a request turns
 /// out to be bigger than it sounded.
 ///
-/// Until 0.12.7 that offer was gated on the zone having a mutating tool, on the
+/// Until 0.14.6 that offer was gated on the zone having a mutating tool, on the
 /// reasoning that a read-only zone has nothing to withhold and so gains nothing
 /// from the mode. That reasoning was about half of what plan mode is. The other
 /// half is the artifact — an ordered, editable, approvable plan the user rewrites
@@ -3560,7 +4076,7 @@ mod tests {
         );
     }
 
-    // ── Reaching plan mode at all (0.12.7) ───────────────────────────────────
+    // ── Reaching plan mode at all (0.14.6) ───────────────────────────────────
 
     fn tool_named(name: &str) -> Tool {
         Tool {
@@ -3717,6 +4233,8 @@ mod tests {
             icon: None,
             accent_color: None,
             is_leader: false,
+            fallback_zone_id: None,
+            approvals: None,
             created_at: 0,
             updated_at: 0,
         }

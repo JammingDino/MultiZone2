@@ -9,10 +9,58 @@ import { ModelCombobox } from "@/components/common/ModelCombobox";
 import { VisionOverrideSelect } from "@/components/common/VisionOverrideSelect";
 import { IconPicker } from "@/components/common/IconPicker";
 import { ColorPicker } from "@/components/common/ColorPicker";
-import type { Provider, ToolFunctionInfo, ToolUsage, Zone } from "@/lib/types";
+import type { ApprovalCategory, ApprovalPolicy, Provider, ToolFunctionInfo, ToolUsage, Zone } from "@/lib/types";
 import { ALL_TOOLS, TOOL_CATEGORIES, mcpToolEnableId } from "@/lib/types";
 import { useApp } from "@/store/app";
 import { DEFAULT_ZONES } from "@/lib/defaultZones";
+
+const EMPTY_APPROVALS: ApprovalPolicy = {
+  categories: {},
+  shellAllow: [],
+  shellDeny: [],
+  editAllow: [],
+  editDeny: [],
+};
+
+/** Zone override categories, short labels — the long descriptions live in
+ * Settings, where the global policy is set and explained. */
+const ZONE_APPROVAL_CATEGORIES: [ApprovalCategory, string][] = [
+  ["read", "Read"],
+  ["edit", "Edit"],
+  ["shell", "Shell"],
+  ["web", "Web"],
+  ["mcp", "MCP"],
+  ["spawn", "Sub-agents"],
+  ["state", "App state"],
+];
+
+function parseApprovals(raw: string | null | undefined): ApprovalPolicy {
+  if (!raw?.trim()) return EMPTY_APPROVALS;
+  try {
+    const v = JSON.parse(raw) as Partial<ApprovalPolicy>;
+    return {
+      categories: v.categories ?? {},
+      shellAllow: v.shellAllow ?? [],
+      shellDeny: v.shellDeny ?? [],
+      editAllow: v.editAllow ?? [],
+      editDeny: v.editDeny ?? [],
+    };
+  } catch {
+    return EMPTY_APPROVALS;
+  }
+}
+
+/** `null` when the zone overrides nothing, so "inherit everything" is stored as
+ * the absence of a policy rather than an empty one that looks like a decision. */
+function serializeApprovals(p: ApprovalPolicy): string | null {
+  const empty =
+    Object.keys(p.categories).length === 0 &&
+    p.shellAllow.length === 0 &&
+    p.shellDeny.length === 0 &&
+    p.editAllow.length === 0 &&
+    p.editDeny.length === 0;
+  return empty ? null : JSON.stringify(p);
+}
 
 const SAFETY_BADGE: Record<number, { label: string; cls: string }> = {
   0: { label: "Safe",      cls: "border-green-600/40  bg-green-600/10  text-green-500" },
@@ -384,6 +432,9 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
   }, [zone?.id]);
   const mcpServers = useApp((s) => s.mcpServers);
   const refreshMcpServers = useApp((s) => s.refreshMcpServers);
+  const refreshZones = useApp((s) => s.refreshZones);
+  /** Every other zone, for the fallback picker (0.14.1). */
+  const zones = useApp((s) => s.zones);
   const [ceHeadless, setCeHeadless] = useState(false);
   const [ttsVoice, setTtsVoice] = useState("");
   // Thinking is on by default for new zones (0.9.4) — most current models
@@ -391,6 +442,9 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
   const [thinkingEnabled, setThinkingEnabled] = useState(true);
   const [includeThinkingInContext, setIncludeThinkingInContext] = useState(false);
   const [isLeader, setIsLeader] = useState(false);
+  const [fallbackZoneId, setFallbackZoneId] = useState<string | null>(null);
+  /** This zone's approval overrides (0.14.2). Empty = inherit everything. */
+  const [approvals, setApprovals] = useState<ApprovalPolicy>(EMPTY_APPROVALS);
   const [icon, setIcon] = useState<string | null>(null);
   const [accentColor, setAccentColor] = useState<string | null>(null);
   const [models, setModels] = useState<string[]>([]);
@@ -478,6 +532,8 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
       setThinkingEnabled(zone.thinkingEnabled ?? true);
       setIncludeThinkingInContext(zone.includeThinkingInContext ?? false);
       setIsLeader(zone.isLeader ?? false);
+      setFallbackZoneId(zone.fallbackZoneId ?? null);
+      setApprovals(parseApprovals(zone.approvals));
       setIcon(zone.icon ?? null);
       setAccentColor(zone.accentColor ?? null);
     } else {
@@ -496,6 +552,8 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
       setThinkingEnabled(true);
       setIncludeThinkingInContext(false);
       setIsLeader(false);
+      setFallbackZoneId(null);
+      setApprovals(EMPTY_APPROVALS);
       setIcon(null);
       setAccentColor(null);
     }
@@ -532,9 +590,8 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
     setToolConfig((tc) => buildToolConfig(tc, v));
   }
 
-  async function onSave() {
-    if (!name.trim() || !model.trim()) return;
-    setSaving(true);
+  /** Everything the editor holds, in the shape `upsert_zone` takes. */
+  function buildPayload() {
     // Fold the per-zone TTS voice (0.8.1) into the tool_config JSON so it rides
     // along with the rest of the zone config rather than needing its own column.
     let finalToolConfig = toolConfig;
@@ -552,29 +609,74 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
       else delete obj.tool_descriptions;
       finalToolConfig = JSON.stringify(obj, null, 2);
     } catch { /* keep raw toolConfig if it isn't valid JSON */ }
+    return {
+      id: zone?.id,
+      name: name.trim(),
+      providerId,
+      model: model.trim(),
+      systemPrompt: systemPrompt.trim() || null,
+      temperature,
+      maxTokens: maxTokens ? parseInt(maxTokens, 10) : null,
+      topP: topP ? parseFloat(topP) : null,
+      toolsEnabled: JSON.stringify(tools),
+      toolConfig: finalToolConfig,
+      thinkingEnabled,
+      includeThinkingInContext,
+      isLeader,
+      fallbackZoneId,
+      approvals: serializeApprovals(approvals),
+      icon,
+      accentColor,
+    };
+  }
+
+  /** Create a new zone. Editing an existing one saves itself — see below. */
+  async function onCreate() {
+    if (!name.trim() || !model.trim()) return;
+    setSaving(true);
     try {
-      const saved = await api.upsertZone({
-        id: zone?.id,
-        name: name.trim(),
-        providerId,
-        model: model.trim(),
-        systemPrompt: systemPrompt.trim() || null,
-        temperature,
-        maxTokens: maxTokens ? parseInt(maxTokens, 10) : null,
-        topP: topP ? parseFloat(topP) : null,
-        toolsEnabled: JSON.stringify(tools),
-        toolConfig: finalToolConfig,
-        thinkingEnabled,
-        includeThinkingInContext,
-        isLeader,
-        icon,
-        accentColor,
-      });
-      onSaved(saved);
+      onSaved(await api.upsertZone(buildPayload()));
     } finally {
       setSaving(false);
     }
   }
+
+  /**
+   * Autosave (1.1).
+   *
+   * The zone editor is five sections of settings behind a scroll and a nav
+   * rail, and it ended in a Save button you had to remember on the way out —
+   * so the common way to use it was to change a tool, close it, and find out
+   * later that nothing had been saved. An existing zone now writes itself a
+   * beat after you stop, and the button is gone. Creating one still takes the
+   * explicit action, because a half-typed zone should not become a real one.
+   *
+   * The debounce is also what makes switching zones safe: for one render after
+   * `zone` changes the fields still hold the *previous* zone's values, and a
+   * write then would copy them onto the new zone. The reset effect refills them
+   * in the same commit cycle, which cancels that timer long before it fires.
+   */
+  useEffect(() => {
+    if (!zone?.id) return;
+    if (!name.trim() || !model.trim()) return;
+    const timer = setTimeout(async () => {
+      setSaving(true);
+      try {
+        await api.upsertZone(buildPayload());
+        await refreshZones();
+      } catch (e) {
+        console.error("zone autosave failed", e);
+      } finally {
+        setSaving(false);
+      }
+    }, 600);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    zone?.id, name, providerId, model, systemPrompt, temperature, maxTokens, topP,
+    tools, toolConfig, descOverrides, ttsVoice, thinkingEnabled,
+    includeThinkingInContext, isLeader, fallbackZoneId, approvals, icon, accentColor,
+  ]);
 
   async function handleDelete() {
     if (!zone) return;
@@ -1102,6 +1204,109 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
           </label>
         </Field>
 
+        <Field label="Approvals">
+          <p className="mb-2 text-[11px] text-[var(--color-text-muted)]">
+            What this zone in particular may do without asking. Everything left on{" "}
+            <strong>Inherit</strong> follows Settings → Chat. This is where a scout that only reads
+            and an implementer that may edit stop being the same policy — and where neither of them
+            gets unreviewed shell.
+          </p>
+          <div className="divide-y divide-[var(--color-border)] rounded border border-[var(--color-border)]">
+            {ZONE_APPROVAL_CATEGORIES.map(([cat, label]) => {
+              const current = approvals.categories[cat];
+              return (
+                <div key={cat} className="flex items-center gap-3 px-2 py-1.5">
+                  <span className="min-w-0 flex-1 text-xs">{label}</span>
+                  <div className="flex shrink-0 overflow-hidden rounded border border-[var(--color-border)] text-[11px]">
+                    {([
+                      [undefined, "Inherit"],
+                      [false, "Ask"],
+                      [true, "Auto"],
+                    ] as [boolean | undefined, string][]).map(([state, text]) => (
+                      <button
+                        key={text}
+                        type="button"
+                        onClick={() =>
+                          setApprovals((p) => {
+                            const categories = { ...p.categories };
+                            if (state === undefined) delete categories[cat];
+                            else categories[cat] = state;
+                            return { ...p, categories };
+                          })
+                        }
+                        className={`px-2 py-0.5 ${
+                          current === state
+                            ? "bg-[var(--color-accent)] text-white"
+                            : "bg-[var(--color-panel)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                        }`}
+                      >
+                        {text}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            {([
+              ["shellAllow", "Run without asking", "npm run test"],
+              ["shellDeny", "Never run", "git push"],
+              ["editAllow", "Edit without asking", "{project}"],
+              ["editDeny", "Never edit", "{project}/.git"],
+            ] as ["shellAllow" | "shellDeny" | "editAllow" | "editDeny", string, string][]).map(([key, label, placeholder]) => (
+              <label key={key} className="block">
+                <span className="mb-1 block text-[11px] font-medium">{label}</span>
+                <textarea
+                  value={approvals[key].join("\n")}
+                  onChange={(e) =>
+                    setApprovals((p) => ({
+                      ...p,
+                      [key]: e.target.value.split("\n").map((s) => s.trim()).filter(Boolean),
+                    }))
+                  }
+                  rows={3}
+                  spellCheck={false}
+                  placeholder={placeholder}
+                  className="w-full rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 font-mono text-[11px] outline-none focus:border-[var(--color-accent)]"
+                />
+              </label>
+            ))}
+          </div>
+          <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+            Command prefixes and paths, one per line — <strong>added to</strong> the global lists
+            rather than replacing them, since a deny list you can drop by configuring something
+            else is not a deny list. Longest match wins. In the path lists{" "}
+            <code>{"{project}"}</code> is the chat's own project directory, and anything under{" "}
+            <em>Edit without asking</em> makes those paths a boundary: an edit outside them is
+            prompted even where the Edit category says auto.
+          </p>
+        </Field>
+
+        <Field label="Fallback zone">
+          <select
+            value={fallbackZoneId ?? ""}
+            onChange={(e) => setFallbackZoneId(e.target.value || null)}
+            className="input"
+          >
+            <option value="">None — a provider failure ends the turn</option>
+            {zones
+              .filter((z) => z.id !== zone?.id)
+              .map((z) => (
+                <option key={z.id} value={z.id}>
+                  {z.name}
+                </option>
+              ))}
+          </select>
+          <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+            Answers with instead when this zone's provider won't serve the request — rate limited,
+            host down, key rejected. Used once per turn, so pick a zone on a{" "}
+            <strong>different provider</strong>: falling back to another zone on the same dead host
+            just fails twice. In a panel this is the difference between losing a member mid-run and
+            losing the run.
+          </p>
+        </Field>
+
         <Field label="Voice (read aloud)">
           <input
             type="text"
@@ -1197,7 +1402,12 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
         </nav>
       </div>
 
-      <div className="flex justify-end gap-2 border-t border-[var(--color-border)] px-4 py-3">
+      <div className="flex items-center justify-end gap-2 border-t border-[var(--color-border)] px-4 py-3">
+        {zone && (
+          <span className="mr-auto text-[11px] text-[var(--color-text-muted)]">
+            {saving ? "Saving…" : "Changes save as you make them"}
+          </span>
+        )}
         {zone && (
           <button
             onClick={handleDelete}
@@ -1206,14 +1416,16 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
             <Trash2 size={12} /> Delete
           </button>
         )}
-        <button
-          onClick={onSave}
-          disabled={saving || !name.trim() || !model.trim()}
-          className="rounded px-3 py-1.5 text-xs text-white disabled:opacity-50"
-          style={{ background: activeColor }}
-        >
-          {zone ? "Save" : "Create zone"}
-        </button>
+        {!zone && (
+          <button
+            onClick={onCreate}
+            disabled={saving || !name.trim() || !model.trim()}
+            className="rounded px-3 py-1.5 text-xs text-white disabled:opacity-50"
+            style={{ background: activeColor }}
+          >
+            Create zone
+          </button>
+        )}
       </div>
 
       <style>{`.input { width: 100%; border: 1px solid var(--color-border); border-radius: 4px; padding: 6px 8px; background: var(--color-panel); font-size: 13px; } .input:focus { border-color: var(--color-accent); outline: none; }`}</style>

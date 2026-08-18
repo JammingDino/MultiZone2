@@ -22,6 +22,7 @@ export function ExportMenu({ chatId }: { chatId: string }) {
   const fontFamily = useApp((s) => s.appSettings.fontFamily);
   const pdfExportDetail = useApp((s) => s.appSettings.pdfExportDetail);
   const pdfExportTheme = useApp((s) => s.appSettings.pdfExportTheme);
+  const pdfExportSessionLog = useApp((s) => s.appSettings.pdfExportSessionLog);
   const exportSubchats = useApp((s) => s.appSettings.exportSubchats);
 
   const [open, setOpen] = useState(false);
@@ -102,7 +103,7 @@ export function ExportMenu({ chatId }: { chatId: string }) {
             accent: theme.accent,
             fontFamily,
           },
-          { detail: pdfExportDetail },
+          { detail: pdfExportDetail, sessionLog: pdfExportSessionLog },
         );
     } catch (e) {
       console.error("chat export failed", e);

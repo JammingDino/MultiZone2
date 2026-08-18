@@ -1,4 +1,4 @@
--- Plans with a document behind them (0.12.7).
+-- Plans with a document behind them (0.14.6).
 --
 -- 0.12.0 shipped a plan as an ordered list of one-line steps, and that is what
 -- it produced: eight labels a person could read in four seconds and learn

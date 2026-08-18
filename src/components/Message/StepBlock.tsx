@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 
 import {
   ChevronRight,
   ChevronDown,
-  Wrench,
   Brain,
   CheckCircle2,
   AlertCircle,
@@ -20,6 +19,8 @@ import { MermaidBlock, type MermaidAutoFix } from "@/components/Renderers/Mermai
 import { HtmlReportBlock } from "@/components/Renderers/HtmlReportBlock";
 import { SavedFileChip } from "@/components/Renderers/SavedFileChip";
 import { PlanBlock, PlanProposalBlock, toPlanData, toPlanProposal } from "@/components/Renderers/PlanBlock";
+import { ToolVisual, hasToolVisual } from "./visuals/ToolVisual";
+import { familyIcon } from "./visuals/familyIcon";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { useDictation, MicButton, DictationMeter } from "@/components/Chat/useDictation";
@@ -176,6 +177,9 @@ function ToolStepView({
       : null;
 
   const status = baseStatus === "done" && mermaidFailed ? "error" : baseStatus;
+  // A run of twenty steps was a column of identical wrenches; the family glyph
+  // is the one thing that makes a collapsed rail scannable.
+  const StepIcon = familyIcon(name);
 
   const statusIcon =
     status === "running" || status === "pending" ? (
@@ -195,7 +199,7 @@ function ToolStepView({
         className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-[var(--color-panel-hover)]"
       >
         {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        <Wrench
+        <StepIcon
           size={12}
           className={`text-[var(--color-accent)]${pending ? " animate-pulse" : ""}`}
         />
@@ -254,32 +258,125 @@ function ToolStepView({
       )}
 
       {open && (
-        <div className="space-y-2 border-t border-[var(--color-border)] p-2 text-xs">
-          <Section label="Arguments">
-            <pre className="max-h-[280px] overflow-auto whitespace-pre-wrap text-[var(--color-text-muted)]">
-              {toolCall.function.arguments
-                ? prettyJson(toolCall.function.arguments)
-                : "(none)"}
-            </pre>
-          </Section>
-          {resultText !== null && (
-            <Section
-              label={isError ? (isSetupIssue ? "Details" : "Error") : "Output"}
-            >
-              <pre
-                className={`max-h-[280px] overflow-auto whitespace-pre-wrap ${
-                  isError && !isSetupIssue
-                    ? "text-[var(--color-danger)]"
-                    : "text-[var(--color-text-muted)]"
-                }`}
-              >
-                {prettyJson(resultText)}
-              </pre>
-            </Section>
-          )}
-        </div>
+        <ToolTabs
+          name={name}
+          args={args}
+          argumentsText={toolCall.function.arguments}
+          resultText={resultText}
+          parsedResult={parsedResult}
+          isError={isError}
+          isSetupIssue={isSetupIssue}
+          /* Only a visual rendered *by this card* counts as already on screen.
+             `hideVisual` must not be included: the activity rail sets it on
+             every step, and the lifting it refers to only ever applies to the
+             `existing` family (plans, diagrams, plots, saved files) — which
+             `ToolVisual` returns nothing for anyway. Including it suppressed
+             every family card in the rail, which is the whole chat. */
+          hasOwnVisual={!!renderedView}
+        />
       )}
     </div>
+  );
+}
+
+/**
+ * Visual · Input · Output (0.13.0).
+ *
+ * The expanded card used to be two `<pre>` blocks of escaped JSON, which is the
+ * right thing to have available and the wrong thing to land on. The visual
+ * leads; the exact arguments and the exact result string stay one click away,
+ * because when something has gone wrong they are what you need — and on an
+ * error the Input tab is where the answer usually is, so that is where the card
+ * opens.
+ */
+function ToolTabs({
+  name,
+  args,
+  argumentsText,
+  resultText,
+  parsedResult,
+  isError,
+  isSetupIssue,
+  hasOwnVisual,
+}: {
+  name: string;
+  args: any;
+  argumentsText: string;
+  resultText: string | null;
+  parsedResult: any;
+  isError: boolean;
+  isSetupIssue: boolean;
+  hasOwnVisual: boolean;
+}) {
+  const showVisual = !hasOwnVisual && hasToolVisual(name, parsedResult, isError);
+  const visual = showVisual ? (
+    <ToolVisual name={name} args={args} parsed={parsedResult} isError={isError} />
+  ) : null;
+  // Visual is the landing tab whenever there is one — expanding a step is a
+  // request to see what the tool did, not to read its arguments back.
+  const [tab, setTab] = useState<"visual" | "input" | "output">(visual ? "visual" : "input");
+  const active = tab === "visual" && !visual ? "input" : tab;
+
+  return (
+    <div className="border-t border-[var(--color-border)] text-xs">
+      <div className="flex items-center gap-1 px-2 pt-2">
+        {visual && <Tab id="visual" active={active} onPick={setTab} label="Visual" />}
+        <Tab id="input" active={active} onPick={setTab} label="Input" />
+        {resultText !== null && (
+          <Tab
+            id="output"
+            active={active}
+            onPick={setTab}
+            label={isError ? (isSetupIssue ? "Details" : "Error") : "Output"}
+          />
+        )}
+      </div>
+      <div className="p-2">
+        {active === "visual" && visual}
+        {active === "input" && (
+          <pre className="max-h-[320px] overflow-auto whitespace-pre-wrap text-[var(--color-text-muted)]">
+            {argumentsText ? prettyJson(argumentsText) : "(none)"}
+          </pre>
+        )}
+        {active === "output" && resultText !== null && (
+          <pre
+            className={`max-h-[320px] overflow-auto whitespace-pre-wrap ${
+              isError && !isSetupIssue
+                ? "text-[var(--color-danger)]"
+                : "text-[var(--color-text-muted)]"
+            }`}
+          >
+            {prettyJson(resultText)}
+          </pre>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Tab({
+  id,
+  active,
+  onPick,
+  label,
+}: {
+  id: "visual" | "input" | "output";
+  active: string;
+  onPick: (t: "visual" | "input" | "output") => void;
+  label: string;
+}) {
+  const on = active === id;
+  return (
+    <button
+      onClick={() => onPick(id)}
+      className={`rounded px-2 py-1 text-[11px] transition-colors ${
+        on
+          ? "bg-[var(--color-panel-hover)] text-[var(--color-text)]"
+          : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+      }`}
+    >
+      {label}
+    </button>
   );
 }
 

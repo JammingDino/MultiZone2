@@ -46,7 +46,10 @@ function outcomeSummary(report: RestoreReport): string {
 export function TurnChanges({ chatId, messageIds }: { chatId: string; messageIds: string[] }) {
   const checkpoint = useApp((s) =>
     (s.checkpointsByChat[chatId] ?? []).find(
-      (c) => c.messageId !== null && messageIds.includes(c.messageId),
+      // A rewind mark is anchored to the message it was taken at so the way
+      // forward can be offered there — it is not a turn, and must not read as
+      // one turn's worth of file changes here.
+      (c) => c.label !== "rewind" && c.messageId !== null && messageIds.includes(c.messageId),
     ),
   );
   const revert = useApp((s) => s.revertCheckpoint);

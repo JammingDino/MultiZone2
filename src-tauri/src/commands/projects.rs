@@ -7,15 +7,14 @@ use tauri::State;
 
 // ─── Projects ────────────────────────────────────────────────────────────────
 
-pub const PROJECT_COLS: &str = "id, name, icon, accent_color, default_zone_id, context_snippet, directory, default_context_enabled, kb_provider_id, kb_embedding_model, kb_dimensions, kb_indexed_at, kb_default_enabled, created_at, updated_at";
+pub const PROJECT_COLS: &str = "id, name, icon, accent_color, default_zone_id, context_snippet, directory, default_context_enabled, lint_command, test_command, kb_provider_id, kb_embedding_model, kb_dimensions, kb_indexed_at, kb_default_enabled, created_at, updated_at";
 
 #[tauri::command]
 pub async fn list_projects(state: State<'_, AppState>) -> AppResult<Vec<Project>> {
     // The reserved global-KB project is hidden — it backs the default-directory
     // knowledge base, not a user-facing project.
     let rows = sqlx::query_as::<_, Project>(
-        "SELECT id, name, icon, accent_color, default_zone_id, context_snippet, directory, default_context_enabled, kb_provider_id, kb_embedding_model, kb_dimensions, kb_indexed_at, kb_default_enabled, created_at, updated_at
-         FROM projects WHERE id != ?1 ORDER BY name",
+        &format!("SELECT {PROJECT_COLS} FROM projects WHERE id != ?1 ORDER BY name"),
     )
     .bind(crate::knowledge::GLOBAL_KB_ID)
     .fetch_all(&state.db)
@@ -34,6 +33,10 @@ pub struct ProjectInput {
     pub context_snippet: Option<String>,
     pub directory: Option<String>,
     pub default_context_enabled: Option<bool>,
+    /// Commands run against this project's own tree once a turn's edits have
+    /// landed (0.14.5). Empty clears the stored one.
+    pub lint_command: Option<String>,
+    pub test_command: Option<String>,
 }
 
 #[tauri::command]
@@ -43,8 +46,8 @@ pub async fn upsert_project(state: State<'_, AppState>, project: ProjectInput) -
     let now = now_ts();
     let default_context = project.default_context_enabled.unwrap_or(false);
     sqlx::query(
-        "INSERT INTO projects (id, name, icon, accent_color, default_zone_id, context_snippet, directory, default_context_enabled, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)
+        "INSERT INTO projects (id, name, icon, accent_color, default_zone_id, context_snippet, directory, default_context_enabled, lint_command, test_command, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)
          ON CONFLICT(id) DO UPDATE SET
            name = excluded.name,
            icon = excluded.icon,
@@ -53,6 +56,8 @@ pub async fn upsert_project(state: State<'_, AppState>, project: ProjectInput) -
            context_snippet = excluded.context_snippet,
            directory = excluded.directory,
            default_context_enabled = excluded.default_context_enabled,
+           lint_command = excluded.lint_command,
+           test_command = excluded.test_command,
            updated_at = excluded.updated_at",
     )
     .bind(&id)
@@ -63,6 +68,8 @@ pub async fn upsert_project(state: State<'_, AppState>, project: ProjectInput) -
     .bind(&project.context_snippet)
     .bind(&project.directory)
     .bind(default_context)
+    .bind(project.lint_command.as_deref().map(str::trim).filter(|s| !s.is_empty()))
+    .bind(project.test_command.as_deref().map(str::trim).filter(|s| !s.is_empty()))
     .bind(now)
     .execute(&state.db)
     .await?;
@@ -84,8 +91,7 @@ pub async fn upsert_project(state: State<'_, AppState>, project: ProjectInput) -
     }
 
     let row = sqlx::query_as::<_, Project>(
-        "SELECT id, name, icon, accent_color, default_zone_id, context_snippet, directory, default_context_enabled, kb_provider_id, kb_embedding_model, kb_dimensions, kb_indexed_at, kb_default_enabled, created_at, updated_at
-         FROM projects WHERE id = ?1",
+        &format!("SELECT {PROJECT_COLS} FROM projects WHERE id = ?1"),
     )
     .bind(&id)
     .fetch_one(&state.db)

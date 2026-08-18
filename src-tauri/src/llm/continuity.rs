@@ -205,7 +205,7 @@ pub fn multi_step_preamble(max_steps: usize, has_plan_tool: bool) -> String {
         // the wrong tool: `update_plan` is a checklist for work already under
         // way and needs nobody's agreement, while a request for a plan wants
         // `enter_plan_mode` and the user's approval. A model reading both
-        // reached for the one the prompt actually mentioned (0.12.7).
+        // reached for the one the prompt actually mentioned (0.14.6).
         s.push_str(
             "\n- Keep the user posted on a long job: for anything taking more than about three \
              steps, call `update_plan` with the whole checklist and update it as you finish \
@@ -238,7 +238,7 @@ pub fn final_step_nudge(max_steps: usize) -> String {
     )
 }
 
-/// The budget a planning turn gets (0.12.7).
+/// The budget a planning turn gets (0.14.6).
 ///
 /// Planning is the one kind of turn whose entire output is reading: search the
 /// web, follow what it returns, read the files, then write the plan a step at a

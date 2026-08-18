@@ -50,6 +50,28 @@ npm run tauri build    # full release build (frontend + Rust + installer)
 
 The release installer is written to `src-tauri/target/release/bundle/`.
 
+## Checks (they run on your machine, not on GitHub)
+
+```bash
+npm run hooks:install  # once per clone — points core.hooksPath at .githooks
+npm run check          # typecheck + script tests        (~15s, pre-commit)
+npm run check:all      # + frontend build + cargo tests  (~75s, pre-push)
+```
+
+The two hooks in [.githooks/](.githooks/) run these for you: `check` on every
+commit, `check:all` on every push. `--no-verify` skips either one when you know
+what you are doing.
+
+[ci.yml](.github/workflows/ci.yml) runs the same checks on GitHub but is
+**manual-only** (`workflow_dispatch`) as of 0.14.0 — a hosted Windows runner
+spends about 13 minutes in rustc per commit to re-prove what the hooks just
+proved locally in one. Dispatch it when you want a clean-checkout second
+opinion; otherwise the local run is the gate.
+
+Run `npm run check:all` yourself before a release, since a release is a push.
+`cargo test --lib` needs `dist/` to exist — `tauri::generate_context!()`
+resolves `frontendDist` at compile time — which is why `check:all` builds first.
+
 ## Releasing via GitHub Actions
 
 Builds are not triggered on every push. To publish a release:

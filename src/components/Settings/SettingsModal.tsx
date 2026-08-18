@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { X, Plus, Trash2, RefreshCw, Server, Palette, MessageSquare, Database, AlertTriangle, Loader2, Folder, FolderOpen, Globe, Copy, Check, Brain, Sparkles, FileUp, FileDown, Plug, Wifi, WifiOff, Library, Layers, ChevronDown, ChevronRight, Mic, Volume2, AudioLines, Stethoscope, ExternalLink, Download } from "lucide-react";
+import { X, Plus, Trash2, RefreshCw, Server, Palette, MessageSquare, Database, AlertTriangle, Loader2, Folder, FolderOpen, Globe, Copy, Check, Brain, Sparkles, FileUp, FileDown, Plug, Wifi, WifiOff, Library, Layers, ChevronDown, ChevronRight, Mic, Volume2, AudioLines, Stethoscope, ExternalLink, Download, Search } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useApp } from "@/store/app";
 import type { BackgroundEffect, GlassStyle, ThemeColorKey } from "@/store/app";
@@ -26,7 +26,7 @@ import {
 } from "@/lib/settingsBundle";
 import { pickBundleFile } from "@/lib/importSettings";
 import { type SkillSeed, serializeSkill, parseSkill } from "@/lib/skillFile";
-import type { ApiBindState, CheckpointUsage, ConnectorCatalog, ConnectorEntry, ConnectorField, DbStats, GlobalKbView, IndexSummary, KbDocument, LifetimeUsage, McpDiagnosis, McpServerView, McpTool, Provider, Skill, SkillPack } from "@/lib/types";
+import type { ApiBindState, ApprovalCategory, ApprovalPolicy, CheckpointUsage, ConnectorCatalog, ConnectorEntry, ConnectorField, DbStats, GlobalKbView, IndexSummary, KbDocument, LifetimeUsage, McpDiagnosis, McpServerView, McpTool, Provider, Skill, SkillPack } from "@/lib/types";
 import { formatBytes, formatCount, formatTokens } from "@/lib/format";
 import { PRIMARY_ACTION } from "@/lib/chrome";
 
@@ -157,9 +157,7 @@ function ZonesTab() {
       </div>
 
       <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-        A zone is an assistant with its own model, prompt and tools. Configure Zones
-        opens the full panel — the installed zones on the left, the library of
-        presets to add on the right.
+        A zone is an assistant with its own model, prompt and tools.
       </p>
 
       {zones.length === 0 ? (
@@ -194,63 +192,116 @@ function ProvidersTab() {
   );
   const zones = useApp((s) => s.zones);
   const baseZoneId = useApp((s) => s.appSettings.baseZoneId);
-  const [editing, setEditing] = useState<Partial<Provider> | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [filter, setFilter] = useState("");
 
   // There is no separate "default provider" setting (0.9.9) — the base zone in
   // Settings → Chat names one, and that is the provider everything falls back
   // to. Shown here so the Providers list still says which one that is.
   const baseProvider = resolveBaseProvider(providers, zones, baseZoneId);
 
+  // A list of a dozen endpoints is a list you scroll rather than read, and the
+  // editor used to open above it — so clicking the ninth provider scrolled the
+  // one you wanted off the top. Rows are one line each and open in place, and a
+  // filter appears once there are enough of them to be worth filtering.
+  const q = filter.trim().toLowerCase();
+  const shown = q
+    ? providers.filter(
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          p.baseUrl.toLowerCase().includes(q) ||
+          (p.defaultModel ?? "").toLowerCase().includes(q),
+      )
+    : providers;
+
   return (
     <>
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-3 flex items-center justify-between gap-2">
         <h3 className="text-sm font-medium">Providers</h3>
         <button
-          onClick={() => setEditing({ name: "", baseUrl: "", apiKey: "" })}
+          onClick={() => { setOpenId(null); setAdding(true); }}
           className="flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
         >
           <Plus size={12} /> Add provider
         </button>
       </div>
 
-      {/* The form sits above the list: when you add a provider on an install
-          that already has several, a form appended below the list opens
-          off-screen and looks like nothing happened. */}
-      {editing && (
+      {providers.length > 5 && (
+        <div className="relative mb-2">
+          <Search
+            size={12}
+            className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
+          />
+          <input
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="Filter providers"
+            className="input !pl-7 text-xs"
+          />
+        </div>
+      )}
+
+      {adding && (
         <ProviderForm
-          value={editing}
-          onClose={() => setEditing(null)}
-          onSaved={async () => { await refreshProviders(); setEditing(null); }}
+          value={{ name: "", baseUrl: "", apiKey: "" }}
+          onClose={() => setAdding(false)}
+          onDeleted={async () => { await refreshProviders(); setAdding(false); }}
         />
       )}
 
-      <div className="flex flex-col gap-2">
-        {providers.map((p) => (
-          <div
-            key={p.id}
-            onClick={() => setEditing(p)}
-            className="cursor-pointer rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3 text-sm hover:border-[var(--color-accent)]"
-          >
-            <div className="font-medium">{p.name}</div>
-            <div className="text-xs text-[var(--color-text-muted)]">{p.baseUrl}</div>
-            <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">
-              Default model: {p.defaultModel ? <span className="font-mono">{p.defaultModel}</span> : <span className="italic">none set</span>}
+      <div className="flex flex-col gap-1">
+        {shown.map((p) => {
+          const open = openId === p.id;
+          return (
+            <div
+              key={p.id}
+              className={`rounded border bg-[var(--color-bg)] ${
+                open ? "border-[var(--color-accent)]" : "border-[var(--color-border)]"
+              }`}
+            >
+              <button
+                onClick={() => setOpenId(open ? null : p.id)}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:text-[var(--color-accent)]"
+              >
+                <ChevronRight
+                  size={12}
+                  className={`shrink-0 text-[var(--color-text-muted)] transition-transform ${open ? "rotate-90" : ""}`}
+                />
+                <span className="shrink-0 font-medium">{p.name}</span>
+                <span className="truncate text-xs text-[var(--color-text-muted)]">{p.baseUrl}</span>
+                <span className="ml-auto shrink-0 font-mono text-[11px] text-[var(--color-text-muted)]">
+                  {p.defaultModel || ""}
+                </span>
+              </button>
+              {open && (
+                <div className="border-t border-[var(--color-border)] p-3">
+                  <ProviderForm
+                    value={p}
+                    onClose={() => setOpenId(null)}
+                    onDeleted={async () => { await refreshProviders(); setOpenId(null); }}
+                  />
+                </div>
+              )}
             </div>
-          </div>
-        ))}
-        {providers.length === 0 && (
+          );
+        })}
+        {providers.length === 0 && !adding && (
           <div className="rounded border border-dashed border-[var(--color-border)] p-6 text-center text-xs text-[var(--color-text-muted)]">
             No providers yet. Add one to get started.
+          </div>
+        )}
+        {providers.length > 0 && shown.length === 0 && (
+          <div className="p-4 text-center text-xs text-[var(--color-text-muted)]">
+            Nothing matches “{filter}”.
           </div>
         )}
       </div>
 
       {baseProvider && (
         <p className="mt-4 text-xs text-[var(--color-text-muted)]">
-          <span className="font-medium text-[var(--color-text)]">{baseProvider.name}</span> is what
-          MultiZone falls back to — it's the provider behind your base zone (Settings → Chat), or
-          the first provider here when no base zone is set. Change it by pointing your base zone at
-          a different provider.
+          Everything falls back to <span className="font-medium text-[var(--color-text)]">{baseProvider.name}</span>,
+          the provider behind your base zone (Settings → Chat).
         </p>
       )}
     </>
@@ -717,17 +768,22 @@ function AppearanceTab() {
           ]}
         />
         <p className="mt-3 text-xs text-[var(--color-text-muted)]">
-          Export opens your print dialog: choose “Save as PDF”, set Margins to
-          “None” for a single continuous page, and enable “Background graphics”
-          so the theme’s colours are drawn.
+          Export opens your print dialog. Set Margins to “None” for one continuous page, and
+          enable “Background graphics” so the theme’s colours are drawn.
         </p>
 
-        <div className="mt-4">
+        <div className="mt-4 flex flex-col gap-3">
           <ToggleRow
             label="Include sub-agent conversations"
-            description="Fold the sub-agents a run delegated to into the export, nested under the turns that spawned them and marked throughout as zone-to-zone rather than something you said. Applies to Markdown and PDF."
+            description="Nested under the turns that spawned them, and marked as zone-to-zone. Markdown and PDF."
             checked={appSettings.exportSubchats}
             onChange={(exportSubchats) => setAppSettings({ exportSubchats })}
+          />
+          <ToggleRow
+            label="Append the session log"
+            description="Closes the PDF with the run as recorded — every turn and tool, timed from the first. Evidence rather than reading, so it is off unless you want it. PDF only."
+            checked={appSettings.pdfExportSessionLog}
+            onChange={(pdfExportSessionLog) => setAppSettings({ pdfExportSessionLog })}
           />
         </div>
       </section>
@@ -791,7 +847,7 @@ function CustomCssSection() {
         <div className="flex flex-col gap-2">
           <ToggleRow
             label="Apply custom CSS"
-            description="Your own stylesheet, loaded after the app's own so it wins. Switch it off to get the stock look back without deleting what you wrote."
+            description="Loaded after the app's own, so it wins. Off restores the stock look without deleting it."
             checked={enabled}
             onChange={(customCssEnabled) => setTheme({ customCssEnabled })}
           />
@@ -931,9 +987,46 @@ function ChatTab() {
       </section>
 
       <section>
+        <h3 className="mb-1 text-sm font-medium">Session token limit</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          A ceiling on what one session — a chat and every sub-agent under it — may spend before the
+          run is <strong>stopped</strong>. Counted on the requests themselves, so a ten-step turn
+          that re-sends 50k of context ten times counts as 500k. <strong>0 is off</strong>, which is
+          the default: against a model on your own machine a long session costs nothing but time.
+          Set it when tokens are money and a panel is running unattended.
+        </p>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          This is the <strong>default for chats that have not set their own</strong>. Raising the
+          limit from the card in a chat that has hit it applies to that chat alone, which is what
+          lifting a ceiling to let one piece of work finish is supposed to mean.
+        </p>
+        <div className="flex items-center gap-3">
+          <input
+            type="number"
+            min={0}
+            step={100000}
+            value={appSettings.maxSessionTokens}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              if (Number.isFinite(n)) {
+                setAppSettings({ maxSessionTokens: Math.max(0, Math.round(n)) });
+              }
+            }}
+            className="w-32 rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1.5 text-sm"
+          />
+          <span className="text-xs text-[var(--color-text-muted)]">
+            {appSettings.maxSessionTokens > 0
+              ? `tokens per session (${(appSettings.maxSessionTokens / 1_000_000).toFixed(2)}M)`
+              : "no limit"}
+          </span>
+        </div>
+      </section>
+
+      <section>
         <h3 className="mb-1 text-sm font-medium">Tool auto-approval</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Dangerous: code execution and shell. Moderate: web search and file access.
+          By danger, for anything the categories below leave undecided. Dangerous: code execution
+          and shell. Moderate: web search and file access.
         </p>
         <OptionCards
           layout="column"
@@ -949,16 +1042,105 @@ function ChatTab() {
       </section>
 
       <section>
+        <h3 className="mb-1 text-sm font-medium">By kind of work</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          The slider above answers "how dangerous is this tool". This answers a different question:
+          what kind of work do you want to be asked about. Reading files all day is not worth twenty
+          prompts; one shell command usually is. Anything left on <strong>Inherit</strong> follows
+          the slider, so changing nothing here changes nothing.
+        </p>
+        <ApprovalCategoryGrid
+          value={appSettings.approvals}
+          onChange={(approvals) => setAppSettings({ approvals })}
+        />
+      </section>
+
+      <section>
+        <h3 className="mb-1 text-sm font-medium">Notifications</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          A run that needs you stops until you answer — an approval times out after five minutes and
+          the agent behind it stalls with no visible cause. Since the reason to start a long run is
+          not to sit watching it, the app says so.
+        </p>
+        <ToggleRow
+          label="Tell me when a run is waiting on me"
+          description="Approvals and questions only, and only when the window is in the background. Finished turns never notify."
+          checked={appSettings.notifyWhenWaiting}
+          onChange={(v) => setAppSettings({ notifyWhenWaiting: v })}
+        />
+      </section>
+
+      <section>
+        <h3 className="mb-1 text-sm font-medium">Command rules</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          One command prefix per line, matched on whole words. <strong>Longest match wins</strong>,
+          so allowing <code>git</code> and denying <code>git push</code> resolves the way it reads.
+          A denied command is <em>refused</em>, not prompted — writing the rule down is the answer.
+          These apply to shell, code execution and terminal input only.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <PrefixList
+            label="Run without asking"
+            placeholder={"git status\nnpm run test\nls"}
+            value={appSettings.approvals.shellAllow}
+            onChange={(shellAllow) =>
+              setAppSettings({ approvals: { ...appSettings.approvals, shellAllow } })
+            }
+          />
+          <PrefixList
+            label="Never run"
+            placeholder={"git push\nrm -rf\ncurl"}
+            value={appSettings.approvals.shellDeny}
+            onChange={(shellDeny) =>
+              setAppSettings({ approvals: { ...appSettings.approvals, shellDeny } })
+            }
+          />
+        </div>
+      </section>
+
+      <section>
+        <h3 className="mb-1 text-sm font-medium">Where edits may land</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          One path per line, matched a whole folder at a time — <code>{"{project}"}</code> stands
+          for whichever project the chat is in. Longest match wins, so allowing{" "}
+          <code>{"{project}"}</code> and denying <code>{"{project}/.git"}</code> reads the way it
+          looks. The category above decides <em>whether</em> edits are approved; this decides{" "}
+          <strong>where</strong>.
+        </p>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          Listing anything under <em>Edit without asking</em> makes it a boundary: an edit outside
+          every line is prompted even when the Edit category is set to auto — being asked about
+          exactly those is the reason to draw one.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <PrefixList
+            label="Edit without asking"
+            placeholder={"{project}\nC:\\Users\\me\\scratch"}
+            value={appSettings.approvals.editAllow}
+            onChange={(editAllow) =>
+              setAppSettings({ approvals: { ...appSettings.approvals, editAllow } })
+            }
+          />
+          <PrefixList
+            label="Never edit"
+            placeholder={"{project}/.git\n{project}/node_modules"}
+            value={appSettings.approvals.editDeny}
+            onChange={(editDeny) =>
+              setAppSettings({ approvals: { ...appSettings.approvals, editDeny } })
+            }
+          />
+        </div>
+      </section>
+
+      <section>
         <h3 className="mb-1 text-sm font-medium">Review file edits before they land</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Queue every file a zone writes instead of writing it, and read the batch as a diff before
-          applying it — whole, file by file, or hunk by hunk. The model carries on as if the change
-          had landed (reading the file gives it back its own queued version), so a long task still
-          works; nothing reaches disk until you say so.
+          A zone's writes queue up as a diff you apply whole, by file, or by hunk. The model
+          carries on as if they had landed, so a long task still works.
         </p>
         <ToggleRow
           label="Stage file edits for review"
-          description="Applies to create and edit calls in every chat. Approval prompts and checkpoints keep working as they do now."
+          description="Create and edit calls, in every chat."
           checked={appSettings.reviewQueue}
           onChange={(v) => setAppSettings({ reviewQueue: v })}
         />
@@ -979,7 +1161,7 @@ function ChatTab() {
       <section>
         <h3 className="mb-1 text-sm font-medium">OCR fallback</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Language hint used when images are OCR'd for a model that can't see them
+          Used when an image is OCR'd for a model that can't see it
           (<span className="font-mono">eng</span>, <span className="font-mono">deu</span>,{" "}
           <span className="font-mono">fra</span>…).
         </p>
@@ -1020,6 +1202,51 @@ function ChatTab() {
       </section>
 
       <section>
+        <h3 className="mb-1 text-sm font-medium">The project's own instructions</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          Most repositories already carry a file written to tell an agent how to work in them —
+          <code> AGENTS.md</code> or <code>CLAUDE.md</code>. Read from the working directory up to
+          the repository root and put in front of every zone that has tools, so seven agents do not
+          rediscover the same conventions one mistake at a time. The context meter lists what it
+          costs under <em>Project instructions</em>.
+        </p>
+        <ToggleRow
+          label="Read AGENTS.md and CLAUDE.md from the project"
+          description="Standing instructions from the repository. They outrank the model's habits, never what you ask for now."
+          checked={appSettings.projectInstructions}
+          onChange={(v) => setAppSettings({ projectInstructions: v })}
+        />
+      </section>
+
+      <section>
+        <h3 className="mb-1 text-sm font-medium">Repository map</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          What the project defines, ranked by how much the rest of the code refers to it — so an
+          agent starts knowing roughly where things are instead of spending its first several steps
+          finding out. A panel of seven pays that cost seven times, in parallel, to reach the same
+          answer. Rebuilt when the tree changes, at most every ten minutes.
+        </p>
+        <label className="flex items-center gap-2 text-xs">
+          <input
+            type="number"
+            min={0}
+            max={8000}
+            step={250}
+            value={appSettings.repoMapTokens}
+            onChange={(e) =>
+              setAppSettings({
+                repoMapTokens: Math.max(0, Math.min(8000, Number(e.target.value) || 0)),
+              })
+            }
+            className="w-24 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 text-sm outline-none focus:border-[var(--color-accent)]"
+          />
+          <span className="text-[var(--color-text-muted)]">
+            tokens per request — 0 turns the map off. Offered only to zones that have file tools.
+          </span>
+        </label>
+      </section>
+
+      <section>
         <h3 className="mb-3 text-sm font-medium">Perspective run mode</h3>
         <OptionCards
           value={appSettings.perspectiveMode}
@@ -1042,7 +1269,7 @@ function ChatTab() {
         <div className="mt-3">
           <ToggleRow
             label="Show the team's total context"
-            description="The context meter also reports every subagent's context, not just this chat's. Only appears when a chat has subagents."
+            description="Adds every subagent's context to the meter. Only shown when a chat has subagents."
             checked={appSettings.teamContextMeter !== false}
             onChange={(v) => setAppSettings({ teamContextMeter: v })}
           />
@@ -1081,9 +1308,8 @@ function VoiceTab() {
       <section>
         <h3 className="mb-1 text-sm font-medium">Dictation provider</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          The mic button's recordings are transcribed by one of your configured providers. Any provider
-          exposing an OpenAI-compatible <span className="font-mono">/audio/transcriptions</span> endpoint
-          works — OpenAI itself, or a local server like LM Studio serving a whisper model (fully on-device).
+          Any provider with an OpenAI-compatible <span className="font-mono">/audio/transcriptions</span>{" "}
+          endpoint — including a local whisper server, which keeps recordings on this machine.
         </p>
         {providers.length === 0 ? (
           <p className="text-xs text-amber-600 dark:text-amber-400">
@@ -1116,9 +1342,8 @@ function VoiceTab() {
       <section>
         <h3 className="mb-1 text-sm font-medium">Audio uploads</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Drop an audio file into any composer — MP3, WAV, M4A, MP4, FLAC, OGG, WebM — and it is
-          transcribed by the provider above, then sent as text. That is what lets a{" "}
-          <em>text-only</em> model take spoken input: it never sees audio, only the transcript.
+          Drop an audio file into any composer — MP3, WAV, M4A, MP4, FLAC, OGG, WebM — and the
+          transcript is sent as text, so a text-only model can take spoken input.
         </p>
         {(!appSettings.sttProviderId || !appSettings.sttModel) && (
           <p className="mb-3 text-xs text-amber-600 dark:text-amber-400">
@@ -1146,15 +1371,14 @@ function VoiceTab() {
           ]}
         />
         <p className="mt-2 text-xs text-[var(--color-text-muted)]">
-          “As an attachment” is the one that works for long recordings: the whole transcript goes to
-          the model while you type the actual instruction — “summarise this meeting”, “what did I
-          promise to do?”.
+          Long recordings want “as an attachment”, so you can type the instruction —
+          “summarise this meeting” — alongside the transcript.
         </p>
 
         <div className="mt-4">
           <ToggleRow
             label="Include timestamps and language"
-            description="Asks the endpoint for per-segment timings, the detected language and a note on passages it was unsure of. Not every OpenAI-compatible server implements this."
+            description="Per-segment timings and the detected language. Not every server implements it."
             checked={appSettings.sttUploadMetadata}
             onChange={(sttUploadMetadata) => setAppSettings({ sttUploadMetadata })}
           />
@@ -1185,18 +1409,16 @@ function VoiceTab() {
           />
         </div>
         <p className="mt-2 text-xs text-[var(--color-text-muted)]">
-          OpenAI's hosted endpoint rejects anything over 25 MB itself; raise this only for a local
-          or self-hosted server with its own ceiling. Duration is measured before upload, and a
-          format this machine can't decode is uploaded anyway rather than refused on a guess.
+          OpenAI's hosted endpoint refuses anything over 25 MB itself — raise this only for a
+          server with its own ceiling.
         </p>
       </section>
 
       <section>
         <h3 className="mb-1 text-sm font-medium">Language</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          BCP-47-ish language code (e.g. <span className="font-mono">en</span>). Leave empty to auto-detect
-          — which is the better default for both dictation and uploads, since the model identifies the
-          language itself and forcing the wrong one is worse than letting it decide.
+          BCP-47-ish code (e.g. <span className="font-mono">en</span>). Empty auto-detects, which is
+          usually better than forcing one.
         </p>
         <input
           type="text"
@@ -1251,9 +1473,8 @@ function VoiceTab() {
       <section>
         <h3 className="mb-1 text-sm font-medium">Live transcription</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Show words as you speak by re-transcribing the recording on an interval.
-          Each pass is a full request to the provider — free against a local server,
-          billed per call against a hosted one.
+          Re-transcribes the recording on an interval. Each pass is a full request — free against
+          a local server, billed per call against a hosted one.
         </p>
         <ToggleRow
           label="Show words while speaking"
@@ -1359,9 +1580,8 @@ function SpeechSynthesisSettings() {
       <section>
         <h3 className="mb-1 text-sm font-medium">Speech (read aloud)</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Responses can be spoken by one of your configured providers. Any provider exposing an
-          OpenAI-compatible <span className="font-mono">/audio/speech</span> endpoint works — OpenAI itself,
-          or a local server (fully on-device).
+          Any provider with an OpenAI-compatible <span className="font-mono">/audio/speech</span>{" "}
+          endpoint, including a local one.
         </p>
         {providers.length === 0 ? (
           <p className="text-xs text-amber-600 dark:text-amber-400">
@@ -1476,8 +1696,8 @@ function SpeechSynthesisSettings() {
       <section>
         <h3 className="mb-1 text-sm font-medium">Prefetch</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          How many upcoming sentences are synthesized in parallel while the current one plays. Higher
-          removes the gap between sentences but sends more concurrent requests to the provider.
+          Sentences synthesized in parallel while the current one plays. Higher removes the gap
+          between them, at more concurrent requests.
         </p>
         <SliderRow
           label="Sentences ahead"
@@ -1559,10 +1779,9 @@ function VoiceCloningSettings() {
         <h3 className="text-sm font-medium">Voice cloning</h3>
       </div>
       <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-        Some speech models can clone a voice from a short sample (e.g. a local F5-TTS server); most
-        hosted providers (like OpenAI) cannot — they only offer fixed built-in voices. Cloning is
-        handled entirely in-app: your reference clip and its transcript are sent with each request, so
-        no server-side setup is needed. Enable this only if your speech model supports cloning.
+        Some local models (F5-TTS, say) clone a voice from a short sample; hosted ones like OpenAI
+        only offer fixed voices. Your clip and its transcript ride along with each request, so there
+        is nothing to set up server-side.
       </p>
       <ToggleRow
         label="My speech model supports voice cloning"
@@ -1687,9 +1906,8 @@ function ConversationModeSettings() {
     <section>
       <h3 className="mb-1 text-sm font-medium">Conversation mode (hands-free)</h3>
       <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-        Chain dictation and speech into a continuous loop: after a spoken response finishes, the mic
-        starts listening again so you can reply by voice. Speaking interrupts playback (barge-in).
-        Requires both a dictation provider and a speech provider above.
+        The mic reopens when a spoken response finishes, and speaking interrupts playback. Needs
+        both a dictation and a speech provider above.
       </p>
       <ToggleRow
         label="Enable conversation mode"
@@ -1756,9 +1974,9 @@ function SkillsTab() {
       <section>
         <h3 className="mb-1 text-sm font-medium">Skills</h3>
         <p className="text-xs text-[var(--color-text-muted)]">
-          Global, on-demand instruction sets. Any zone with the <span className="font-mono">Skills</span> tool
-          sees the name + description of every enabled skill and can load its full instructions itself when a
-          request matches — like any other tool call. Write the description as the use case that should trigger it.
+          On-demand instruction sets. A zone with the <span className="font-mono">Skills</span> tool sees
+          every enabled skill's description and loads the full text itself when one matches — so write
+          the description as the use case that should trigger it.
         </p>
       </section>
 
@@ -1937,10 +2155,9 @@ function SkillPacksSection() {
         </div>
       </div>
       <p className="text-xs text-[var(--color-text-muted)]">
-        Skills published as a folder — <span className="font-mono">SKILL.md</span> plus reference pages and
-        scripts — installed by their own CLI. They appear in every agent's catalog alongside the skills above,
-        and an agent reads the extra files through <span className="font-mono">load_skill</span>, so no
-        filesystem access is needed. Edit them where they were installed, not here.
+        Skills published as a folder — <span className="font-mono">SKILL.md</span> plus reference pages
+        and scripts — installed by their own CLI. They join the catalog above; edit them where they
+        were installed, not here.
       </p>
 
       {showHelp && (
@@ -2097,8 +2314,9 @@ function SkillEditor({
   const [content, setContent] = useState(skill?.content ?? seed?.content ?? "");
   const [enabled, setEnabled] = useState(skill?.enabled ?? true);
   const [saving, setSaving] = useState(false);
+  const refreshSkills = useApp((s) => s.refreshSkills);
 
-  async function onSave() {
+  async function onCreate() {
     if (!name.trim()) return;
     setSaving(true);
     try {
@@ -2106,6 +2324,22 @@ function SkillEditor({
       onDone();
     } finally { setSaving(false); }
   }
+
+  // An existing skill saves itself: this is a page of prose you scroll, and a
+  // Save button at the bottom of one is a Save button you leave without pressing.
+  useEffect(() => {
+    if (!skill?.id || !name.trim()) return;
+    const timer = setTimeout(async () => {
+      setSaving(true);
+      try {
+        await api.upsertSkill({ id: skill.id, name: name.trim(), description: description.trim() || null, content, enabled });
+        await refreshSkills();
+      } catch (e) {
+        console.error("skill autosave failed", e);
+      } finally { setSaving(false); }
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [skill?.id, name, description, content, enabled]);
 
   async function onExport() {
     const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "skill";
@@ -2157,10 +2391,21 @@ function SkillEditor({
             <FileDown size={12} /> Export
           </button>
         )}
-        <button onClick={onCancel} className="rounded px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)]">Cancel</button>
-        <button onClick={onSave} disabled={saving || !name.trim()} className={`rounded px-3 py-1.5 text-xs ${PRIMARY_ACTION}`}>
-          {skill ? "Save" : "Create skill"}
-        </button>
+        {skill ? (
+          <>
+            <span className="text-[11px] text-[var(--color-text-muted)]">
+              {saving ? "Saving…" : "Changes save as you make them"}
+            </span>
+            <button onClick={onDone} className="rounded px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)]">Done</button>
+          </>
+        ) : (
+          <>
+            <button onClick={onCancel} className="rounded px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)]">Cancel</button>
+            <button onClick={onCreate} disabled={saving || !name.trim()} className={`rounded px-3 py-1.5 text-xs ${PRIMARY_ACTION}`}>
+              Create skill
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
@@ -2200,6 +2445,14 @@ function McpTab() {
   const [diagById, setDiagById] = useState<Record<string, McpDiagnosis>>({});
 
   useEffect(() => { refreshMcpServers().catch(console.error); }, [refreshMcpServers]);
+
+  // The launch autostart connects servers in parallel and reports each one as it
+  // settles. Opening this tab while that is still in flight would otherwise show
+  // stale "Disconnected" pills that never update.
+  useEffect(() => {
+    const un = api.onMcpStatusChanged(() => { refreshMcpServers().catch(console.error); });
+    return () => { un.then((f) => f()).catch(() => {}); };
+  }, [refreshMcpServers]);
 
   async function connect(s: McpServerView) {
     setBusyId(s.id);
@@ -2271,14 +2524,18 @@ function McpTab() {
       <section>
         <h3 className="mb-1 text-sm font-medium">MCP servers</h3>
         <p className="text-xs text-[var(--color-text-muted)]">
-          Connect external <span className="font-mono">Model Context Protocol</span> servers — local
-          commands (stdio) or remote endpoints (SSE/HTTP). On connect, MultiZone fetches the server's
-          tools; set a danger level per tool, then enable specific tools per zone in the zone editor.
-          MCP tool calls go through the same approval pipeline as built-in tools.
+          Local commands (stdio) or remote endpoints (SSE/HTTP). Connecting fetches the server's
+          tools; give each a danger level here, then enable the ones you want per zone in the zone
+          editor. They go through the same approval pipeline as built-in tools.
         </p>
         <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-          Start from the <strong>catalog</strong> if you can: an entry knows the command, the
-          variables and where each credential comes from, so all it asks you for is the credential.
+          Every enabled server connects on launch, so its tools and their descriptions are current
+          before the first message. Turn a server off with its own switch to stop it starting;
+          <strong> Connect</strong> here is for reconnecting after a change or a failure.
+        </p>
+        <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+          Prefer the <strong>catalog</strong>: an entry already knows the command and the variables,
+          so all it asks you for is the credential.
         </p>
       </section>
 
@@ -2362,20 +2619,75 @@ function McpTab() {
               )}
 
               {s.tools.length > 0 && (
-                <div className="mt-3 flex flex-col gap-1.5 border-t border-[var(--color-border)] pt-2">
-                  <div className="text-[11px] font-medium text-[var(--color-text-muted)]">
-                    Tools ({s.tools.length})
-                  </div>
-                  {s.tools.map((t) => (
-                    <McpToolRow key={t.id} tool={t} onSetDanger={(lvl) => setDanger(t.id, lvl)} />
-                  ))}
-                </div>
+                <McpToolList tools={s.tools} onSetDanger={setDanger} />
               )}
               {s.tools.length === 0 && s.status.state === "connected" && (
                 <div className="mt-2 text-[11px] text-[var(--color-text-muted)]">This server advertised no tools.</div>
               )}
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A server's tools, folded away by default.
+ *
+ * A connected GitHub server advertises 47 of them, each with a description and
+ * a danger dropdown — expanded, one server filled several screens and finding
+ * the next one meant scrolling past all of it. The count is on the summary line,
+ * which is what you want to know most of the time; the filter appears once the
+ * list is long enough that scanning it is the slow part.
+ */
+function McpToolList({
+  tools,
+  onSetDanger,
+}: {
+  tools: McpTool[];
+  onSetDanger: (toolId: string, level: number) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState("");
+
+  const q = filter.trim().toLowerCase();
+  const shown = q
+    ? tools.filter(
+        (t) =>
+          t.name.toLowerCase().includes(q) ||
+          (t.description ?? "").toLowerCase().includes(q),
+      )
+    : tools;
+
+  return (
+    <div className="mt-3 border-t border-[var(--color-border)] pt-2">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-1 text-[11px] font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+      >
+        <ChevronRight size={11} className={`transition-transform ${open ? "rotate-90" : ""}`} />
+        Tools ({tools.length})
+      </button>
+
+      {open && (
+        <div className="mt-2 flex flex-col gap-1.5">
+          {tools.length > 8 && (
+            <input
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Filter tools"
+              className="input text-xs"
+            />
+          )}
+          {shown.map((t) => (
+            <McpToolRow key={t.id} tool={t} onSetDanger={(lvl) => onSetDanger(t.id, lvl)} />
+          ))}
+          {shown.length === 0 && (
+            <div className="py-2 text-center text-[11px] text-[var(--color-text-muted)]">
+              Nothing matches “{filter}”.
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -2554,8 +2866,8 @@ function ConnectorCatalogPanel({ onDone, onCancel }: { onDone: () => void; onCan
         <div className="mb-1 flex items-center gap-1.5 text-xs font-medium"><Download size={12} /> Import entries from a URL</div>
         <p className="mb-2 text-[11px] text-[var(--color-text-muted)]">
           A JSON file holding one entry, a list of them, or an object with an
-          <span className="font-mono"> entries </span> array. Imported entries are files in the
-          connectors folder; one sharing an id with a shipped entry replaces it.
+          <span className="font-mono"> entries </span> array. One sharing an id with a shipped entry
+          replaces it.
         </p>
         <div className="flex items-center gap-2">
           <input
@@ -2780,30 +3092,42 @@ function McpServerEditor({
   const [enabled, setEnabled] = useState(server?.enabled ?? true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const refreshMcpServers = useApp((s) => s.refreshMcpServers);
 
-  async function onSave() {
-    if (!name.trim()) return;
-    if (transport === "stdio" && !command.trim()) { setError("A stdio server needs a command."); return; }
-    if (transport === "sse" && !url.trim()) { setError("An SSE/HTTP server needs a URL."); return; }
+  /** What's wrong with the form as it stands, or null when it can be written. */
+  function invalid(): string | null {
+    if (!name.trim()) return "A server needs a name.";
+    if (transport === "stdio" && !command.trim()) return "A stdio server needs a command.";
+    if (transport === "sse" && !url.trim()) return "An SSE/HTTP server needs a URL.";
     if (env.trim()) {
-      try { JSON.parse(env); } catch { setError("Env must be valid JSON (e.g. {\"API_KEY\":\"…\"})."); return; }
+      try { JSON.parse(env); } catch { return "Env must be valid JSON (e.g. {\"API_KEY\":\"…\"})."; }
     }
     if (headers.trim()) {
-      try { JSON.parse(headers); } catch { setError("Headers must be valid JSON (e.g. {\"Authorization\":\"Bearer …\"})."); return; }
+      try { JSON.parse(headers); } catch { return "Headers must be valid JSON (e.g. {\"Authorization\":\"Bearer …\"})."; }
     }
+    return null;
+  }
+
+  function payload() {
+    return {
+      id: server?.id,
+      name: name.trim(),
+      transport,
+      command: transport === "stdio" ? command.trim() : null,
+      url: transport === "sse" ? url.trim() : null,
+      env: transport === "stdio" ? env.trim() || null : null,
+      headers: transport === "sse" ? headers.trim() || null : null,
+      enabled,
+    };
+  }
+
+  async function onCreate() {
+    const problem = invalid();
+    if (problem) { setError(problem); return; }
     setSaving(true);
     setError("");
     try {
-      await api.upsertMcpServer({
-        id: server?.id,
-        name: name.trim(),
-        transport,
-        command: transport === "stdio" ? command.trim() : null,
-        url: transport === "sse" ? url.trim() : null,
-        env: transport === "stdio" ? env.trim() || null : null,
-        headers: transport === "sse" ? headers.trim() || null : null,
-        enabled,
-      });
+      await api.upsertMcpServer(payload());
       onDone();
     } catch (e) {
       setError(String(e));
@@ -2811,6 +3135,25 @@ function McpServerEditor({
       setSaving(false);
     }
   }
+
+  // An existing server saves itself. A half-typed JSON blob is simply not
+  // written — the reason says so and the last good version stays on disk.
+  useEffect(() => {
+    if (!server?.id) return;
+    const problem = invalid();
+    setError(problem ?? "");
+    if (problem) return;
+    const timer = setTimeout(async () => {
+      setSaving(true);
+      try {
+        await api.upsertMcpServer(payload());
+        await refreshMcpServers();
+      } catch (e) {
+        setError(String(e));
+      } finally { setSaving(false); }
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [server?.id, name, transport, command, url, env, headers, enabled]);
 
   return (
     <div className="flex flex-col gap-3">
@@ -2876,13 +3219,24 @@ function McpServerEditor({
       )}
 
       <div className="flex items-center justify-end gap-2 border-t border-[var(--color-border)] pt-3">
-        <button onClick={onCancel} className="rounded px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)]">Cancel</button>
-        <button onClick={onSave} disabled={saving || !name.trim()} className={`rounded px-3 py-1.5 text-xs ${PRIMARY_ACTION}`}>
-          {server ? "Save" : "Add server"}
-        </button>
+        {server ? (
+          <>
+            <span className="mr-auto text-[11px] text-[var(--color-text-muted)]">
+              {saving ? "Saving…" : "Changes save as you make them"}
+            </span>
+            <button onClick={onDone} className="rounded px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)]">Done</button>
+          </>
+        ) : (
+          <>
+            <button onClick={onCancel} className="rounded px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)]">Cancel</button>
+            <button onClick={onCreate} disabled={saving || !name.trim()} className={`rounded px-3 py-1.5 text-xs ${PRIMARY_ACTION}`}>
+              Add server
+            </button>
+          </>
+        )}
       </div>
       <p className="text-[11px] text-[var(--color-text-muted)]">
-        After saving, click <span className="font-medium">Connect</span> to fetch this server's tools.
+        Click <span className="font-medium">Connect</span> to fetch this server's tools.
       </p>
     </div>
   );
@@ -2985,11 +3339,10 @@ function KnowledgeTab() {
       <section>
         <h3 className="mb-1 text-sm font-medium">Knowledge</h3>
         <p className="text-xs text-[var(--color-text-muted)]">
-          Set a <span className="font-medium">default embedding model</span> — new projects inherit it
-          automatically — and index your <span className="font-medium">default directory</span> into a
-          global knowledge base that chats without a project can search via the{" "}
-          <code className="rounded bg-[var(--color-bg)] px-1">search_local_files</code> tool. For a local
-          model, add Ollama as a provider and pick something like{" "}
+          New projects inherit the default embedding model, and the default directory is indexed
+          into a knowledge base that project-less chats search with{" "}
+          <code className="rounded bg-[var(--color-bg)] px-1">search_local_files</code>. To keep it
+          local, add Ollama as a provider and pick something like{" "}
           <code className="rounded bg-[var(--color-bg)] px-1">nomic-embed-text</code>.
         </p>
       </section>
@@ -3019,9 +3372,12 @@ function KnowledgeTab() {
         </div>
         {dirty && (
           <div className="mt-2 flex items-center justify-between gap-2 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 text-[11px] text-[var(--color-text-muted)]">
-            <span>Changing the embedding model rebuilds the global index from scratch.</span>
-            <button onClick={saveConfig} disabled={savingCfg} className={`rounded px-2 py-1 ${PRIMARY_ACTION}`}>
-              {savingCfg ? "Saving…" : "Save"}
+            {/* Not a save button: applying this *discards* the existing index,
+                because the vectors belong to the old model's space. It stays an
+                explicit press for the same reason a delete does. */}
+            <span>Applying this discards the global index — it has to be rebuilt.</span>
+            <button onClick={saveConfig} disabled={savingCfg} className={`shrink-0 rounded px-2 py-1 ${PRIMARY_ACTION}`}>
+              {savingCfg ? "Applying…" : "Apply & rebuild"}
             </button>
           </div>
         )}
@@ -3050,8 +3406,8 @@ function KnowledgeTab() {
             disabled={indexing || !configured || !dir || dirty}
             title={
               !dir ? "Choose a default directory first."
-                : !configured ? "Set and save an embedding provider + model first."
-                : dirty ? "Save the embedding settings first."
+                : !configured ? "Set an embedding provider and model first."
+                : dirty ? "Apply the embedding change first."
                 : "Walk the default directory and (re)index it."
             }
             className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-xs ${PRIMARY_ACTION}`}
@@ -3322,9 +3678,8 @@ function ApiTab() {
       <section>
         <h3 className="mb-1 text-sm font-medium">Local HTTP API</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Exposes a local REST + SSE API (bound to 127.0.0.1) so external tools or scripts can
-          list and create chats, pick zones/projects, and send messages — the same capabilities as
-          the app. Requests must include your bearer token.
+          A local REST + SSE API on 127.0.0.1 with the same capabilities as the app — chats,
+          zones, projects, messages. Every request needs your bearer token.
         </p>
         <div
           onClick={() => !busy && apply({ apiEnabled: !appSettings.apiEnabled })}
@@ -3573,10 +3928,10 @@ function DataTab() {
       <section>
         <h3 className="mb-1 text-sm font-medium">Plaintext markdown storage</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Keep every chat as a real <span className="font-mono">.md</span> file you can read, edit, and version
-          outside the app. The database stays the source of truth, but the files sync both ways: chats are written
-          out as you go, and edits you make to a file on disk (message text, title) are pulled back in. Zone configs
-          are written as JSON in a <span className="font-mono">zones/</span> subfolder alongside.
+          Every chat as a real <span className="font-mono">.md</span> file you can read, edit and
+          version. The database stays the source of truth, but the sync runs both ways — edits you
+          make on disk are pulled back in. Zone configs go alongside as JSON in{" "}
+          <span className="font-mono">zones/</span>.
         </p>
 
         <ToggleRow
@@ -3641,7 +3996,7 @@ function DataTab() {
       <section>
         <h3 className="mb-1 text-sm font-medium">Reset</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Permanently deletes the database, all chats, zones, projects, tags, and attachments. The app will exit — on next launch everything starts fresh.
+          Deletes the database and everything in it. The app exits, and next launch starts fresh.
         </p>
 
         {resetStage === "idle" && (
@@ -3742,9 +4097,9 @@ function CheckpointStorageSection() {
     <section>
       <h3 className="mb-1 text-sm font-medium">File checkpoints</h3>
       <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-        Before a turn changes a file, its previous contents are kept so the turn can be reverted from the
-        transcript. Content shared between turns is stored once. The newest checkpoint is never removed, whatever
-        the limits below say — the turn that just ran stays revertible.
+        A turn's files are kept as they were before it ran, so it can be reverted from the
+        transcript. The newest checkpoint survives the limits below, whatever they say — the turn
+        that just ran stays revertible.
       </p>
 
       {usage && (
@@ -3898,11 +4253,10 @@ function SettingsTransferSection() {
     <section>
       <h3 className="mb-1 text-sm font-medium">Settings backup & transfer</h3>
       <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-        Save your setup — providers, zones, skills, MCP servers, global memories, preferences and
-        theme — as a single JSON file, and import it into another install. Chats aren't included (use
-        the markdown storage above for those), and neither are machine-specific paths or the local
-        API token, so the other install keeps its own. You can also just drop a settings file onto
-        the window at any time.
+        Providers, zones, skills, MCP servers, global memories, preferences and theme as one JSON
+        file. Chats are not included — the markdown storage above covers those — and neither are
+        machine-specific paths or the local API token. Dropping a settings file on the window
+        imports it too.
       </p>
 
       <ToggleRow
@@ -4147,6 +4501,114 @@ function OptionCards<T extends string | number>({
   );
 }
 
+/**
+ * The seven categories, in the order someone reads them: what an agent looks
+ * at, then what it changes, then what it reaches (0.14.2).
+ */
+const APPROVAL_CATEGORIES: [ApprovalCategory, string, string][] = [
+  ["read", "Read", "Open files, search, list, read memory or another agent's transcript."],
+  ["edit", "Edit", "Write, move, copy or delete files."],
+  ["shell", "Shell", "Run commands, execute code, drive a terminal."],
+  ["web", "Web", "Search, fetch a page, crawl, raw HTTP."],
+  ["mcp", "MCP", "Anything served by a connected MCP server."],
+  ["spawn", "Sub-agents", "Start a sub-agent or hand it work."],
+  ["state", "App state", "Change settings, memories, skills, zones, tags."],
+];
+
+/**
+ * Three states per category, and the third one matters: *inherit* is not the
+ * same as *ask*. An install that never touches this panel has to keep behaving
+ * exactly as it did, which means "undecided" has to be representable.
+ */
+function ApprovalCategoryGrid({
+  value,
+  onChange,
+  compact,
+}: {
+  value: ApprovalPolicy;
+  onChange: (next: ApprovalPolicy) => void;
+  compact?: boolean;
+}) {
+  function set(cat: ApprovalCategory, next: boolean | undefined) {
+    const categories = { ...value.categories };
+    if (next === undefined) delete categories[cat];
+    else categories[cat] = next;
+    onChange({ ...value, categories });
+  }
+
+  return (
+    <div className="divide-y divide-[var(--color-border)] rounded border border-[var(--color-border)]">
+      {APPROVAL_CATEGORIES.map(([cat, label, description]) => {
+        const current = value.categories[cat];
+        return (
+          <div key={cat} className="flex items-center gap-3 px-3 py-2">
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-medium">{label}</div>
+              {!compact && (
+                <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">{description}</div>
+              )}
+            </div>
+            <div className="flex shrink-0 overflow-hidden rounded border border-[var(--color-border)] text-[11px]">
+              {([
+                [undefined, "Inherit"],
+                [false, "Ask"],
+                [true, "Auto"],
+              ] as [boolean | undefined, string][]).map(([state, text]) => (
+                <button
+                  key={text}
+                  onClick={() => set(cat, state)}
+                  className={`px-2 py-1 ${
+                    current === state
+                      ? "bg-[var(--color-accent)] text-white"
+                      : "bg-[var(--color-panel)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                  }`}
+                >
+                  {text}
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** A newline-separated prefix list, edited as text because that is how people
+ * think about a list of commands. Blank lines are dropped on the way out. */
+function PrefixList({
+  label,
+  placeholder,
+  value,
+  onChange,
+}: {
+  label: string;
+  placeholder: string;
+  value: string[];
+  onChange: (next: string[]) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs font-medium">{label}</span>
+      <textarea
+        value={value.join("\n")}
+        onChange={(e) =>
+          onChange(
+            e.target.value
+              .split("\n")
+              .map((s) => s.trim())
+              .filter(Boolean),
+          )
+        }
+        rows={4}
+        spellCheck={false}
+        placeholder={placeholder}
+        className="w-full rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1.5 font-mono text-[11px] outline-none focus:border-[var(--color-accent)]"
+      />
+    </label>
+  );
+}
+
 function ToggleRow({
   label, description, checked, onChange,
 }: {
@@ -4223,8 +4685,19 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
   );
 }
 
-function ProviderForm({ value, onClose, onSaved }: { value: Partial<Provider>; onClose: () => void; onSaved: () => void }) {
+/**
+ * The provider editor, which saves itself.
+ *
+ * It used to autosave only once a provider existed, and existing meant having
+ * pressed "Add provider" — so a new provider could not be tested until it had
+ * been saved, and the one thing you want to do with an endpoint and a key you
+ * just typed is find out whether they work. A name and a base URL is enough to
+ * be a provider, so as soon as both are filled the row is written and the form
+ * carries on editing it. There is no save button in either direction.
+ */
+function ProviderForm({ value, onClose, onDeleted }: { value: Partial<Provider>; onClose: () => void; onDeleted: () => void }) {
   const refreshProviders = useApp((s) => s.refreshProviders);
+  const [id, setId] = useState<string | null>(value.id ?? null);
   const [name, setName] = useState(value.name ?? "");
   const [baseUrl, setBaseUrl] = useState(value.baseUrl ?? "");
   const [apiKey, setApiKey] = useState(value.apiKey ?? "");
@@ -4232,7 +4705,6 @@ function ProviderForm({ value, onClose, onSaved }: { value: Partial<Provider>; o
   const [models, setModels] = useState<string[]>([]);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
   const [presetId, setPresetId] = useState<string | null>(null);
 
   // Auto-load the model list when editing an existing provider.
@@ -4252,54 +4724,39 @@ function ProviderForm({ value, onClose, onSaved }: { value: Partial<Provider>; o
     return () => { cancelled = true; };
   }, [value.id]);
 
-  // Autosave for existing providers: debounce 500 ms after any field change.
+  // Autosave, debounced past a burst of typing. The first write is what creates
+  // a new provider, so `id` is adopted from what comes back.
   useEffect(() => {
-    if (!value.id) return;
     if (!name.trim() || !baseUrl.trim()) return;
     const timer = setTimeout(async () => {
       try {
-        await api.upsertProvider({
-          id: value.id,
+        const saved = await api.upsertProvider({
+          id: id ?? undefined,
           name: name.trim(),
           baseUrl: baseUrl.trim(),
           apiKey: apiKey.trim() || null,
           defaultModel: defaultModel.trim() || null,
         });
+        if (!id) setId(saved.id);
         await refreshProviders();
       } catch (e) {
         console.error("provider autosave failed", e);
       }
     }, 500);
     return () => clearTimeout(timer);
-  }, [name, baseUrl, apiKey, defaultModel, value.id]);
-
-  async function onCreate() {
-    if (!name.trim() || !baseUrl.trim()) return;
-    setSaving(true);
-    try {
-      await api.upsertProvider({
-        id: value.id,
-        name: name.trim(),
-        baseUrl: baseUrl.trim(),
-        apiKey: apiKey.trim() || null,
-        defaultModel: defaultModel.trim() || null,
-      });
-      onSaved();
-    } finally { setSaving(false); }
-  }
+  }, [name, baseUrl, apiKey, defaultModel, id]);
 
   async function onDelete() {
-    if (!value.id) return;
-    await api.deleteProvider(value.id);
-    onSaved();
+    if (id) await api.deleteProvider(id);
+    onDeleted();
   }
 
   async function onTest() {
-    if (!value.id) { setTestResult("Save the provider first to test models."); return; }
+    if (!id) { setTestResult("Fill in a name and base URL first."); return; }
     setTesting(true);
     setTestResult(null);
     try {
-      const list = await api.fetchModels(value.id);
+      const list = await api.fetchModels(id);
       setModels(list);
       setTestResult(`Found ${list.length} model${list.length === 1 ? "" : "s"}.`);
     } catch (e: any) {
@@ -4318,7 +4775,7 @@ function ProviderForm({ value, onClose, onSaved }: { value: Partial<Provider>; o
   const preset = PROVIDER_PRESETS.find((p) => p.id === presetId) ?? presetForBaseUrl(baseUrl);
 
   return (
-    <div className="mb-4 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+    <div className={value.id ? "" : "mb-4 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3"}>
       {!value.id && (
         <div className="mb-3">
           <div className="mb-1.5 text-xs text-[var(--color-text-muted)]">
@@ -4388,22 +4845,15 @@ function ProviderForm({ value, onClose, onSaved }: { value: Partial<Provider>; o
         <div className="my-2 rounded bg-[var(--color-panel)] p-2 text-xs text-[var(--color-text-muted)]">{testResult}</div>
       )}
       <div className="mt-3 flex justify-end gap-2">
-        {value.id && (
-          <button onClick={onDelete} className="flex items-center gap-1 rounded border border-[var(--color-danger)] px-2 py-1 text-xs text-[var(--color-danger)] hover:bg-[var(--color-danger)] hover:text-white">
-            <Trash2 size={12} /> Delete
-          </button>
-        )}
+        <button onClick={onDelete} className="flex items-center gap-1 rounded border border-[var(--color-danger)] px-2 py-1 text-xs text-[var(--color-danger)] hover:bg-[var(--color-danger)] hover:text-white">
+          <Trash2 size={12} /> {id ? "Delete" : "Discard"}
+        </button>
         <button onClick={onTest} disabled={testing} className="flex items-center gap-1 rounded border border-[var(--color-border)] px-2 py-1 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-50">
           <RefreshCw size={12} className={testing ? "animate-spin" : ""} /> Test
         </button>
         <button onClick={onClose} className="rounded border border-[var(--color-border)] px-2 py-1 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]">
-          {value.id ? "Done" : "Cancel"}
+          Done
         </button>
-        {!value.id && (
-          <button onClick={onCreate} disabled={saving || !name.trim() || !baseUrl.trim()} className={`rounded px-3 py-1 text-xs ${PRIMARY_ACTION}`}>
-            Add provider
-          </button>
-        )}
       </div>
     </div>
   );

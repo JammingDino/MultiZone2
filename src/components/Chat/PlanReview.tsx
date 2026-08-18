@@ -26,7 +26,7 @@ import { CHROME_QUIET, PRIMARY_ACTION } from "@/lib/chrome";
 import { usePersistentBool } from "@/lib/uiState";
 
 /**
- * The plan the model filed, waiting on the user (0.12.0, rebuilt in 0.12.7).
+ * The plan the model filed, waiting on the user (0.12.0, rebuilt in 0.14.6).
  *
  * Every planning harness worth copying ends with prose and a yes/no. This one
  * ends with the plan as a list the user can actually rewrite — reorder a step,
@@ -36,7 +36,7 @@ import { usePersistentBool } from "@/lib/uiState";
  * to the executing turn from there, so an edit here is binding rather than a
  * comment the model may or may not honour.
  *
- * Two things changed in 0.12.7, both because a plan is now a document rather
+ * Two things changed in 0.14.6, both because a plan is now a document rather
  * than a list of headings.
  *
  * **It is paged.** A step carries a specification — several paragraphs, often a

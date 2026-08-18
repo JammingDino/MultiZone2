@@ -11,7 +11,7 @@ use tauri::{AppHandle, Emitter, State};
 /// `commands::messages` — `query_as::<Chat>` fails to decode if the list and the
 /// struct drift, so there must only ever be one of these.
 pub const CHAT_COLS: &str =
-    "id, title, zone_id, project_id, project_context_enabled, knowledge_enabled, perspective_mode, smart_routing, parent_chat_id, branched_from_message_id, initiated_by_zone_id, context_summary, context_summary_through, plan_mode, created_at, updated_at";
+    "id, title, zone_id, project_id, project_context_enabled, knowledge_enabled, perspective_mode, smart_routing, parent_chat_id, branched_from_message_id, initiated_by_zone_id, context_summary, context_summary_through, plan_mode, spend_limit, created_at, updated_at";
 
 /// The global default for whether new chats start with knowledge enabled, read
 /// from the `knowledgeDefaultEnabled` field of the `app_settings` JSON blob.
@@ -395,6 +395,8 @@ pub async fn get_subchat_tree(
                 (SELECT COUNT(*) FROM messages m
                    WHERE m.chat_id = c.id AND m.zone_id IS NULL
                      AND m.role IN ('user', 'assistant')) AS message_count,
+                (SELECT COUNT(*) FROM session_events e
+                   WHERE e.chat_id = c.id AND e.kind = 'runaway') AS runaway_count,
                 c.created_at
          FROM chats c
          JOIN descendants d ON c.id = d.id
@@ -775,8 +777,17 @@ pub async fn generate_title(
         return Err(AppError::Invalid("no user message yet".into()));
     }
 
+    // A message that is only an image gets a different instruction. Asked to
+    // name "the topic" of a wordless turn, models reach for the medium and
+    // reply "Image Attachment" or "Uploaded Screenshot" — technically a noun
+    // phrase, useless as a row in a list where every such chat gets the same
+    // one. Naming what is *in* the picture is the whole value.
+    let wordless_image = !whole_conversation && is_image_only(&convo);
     let subject = if whole_conversation {
         "the conversation above. Weigh what the conversation actually turned out to be about, not only how it opened"
+    } else if wordless_image {
+        "the image above. Name what the image shows — its subject, not the fact that it is an image, \
+         and never the words \"image\", \"photo\", \"screenshot\" or \"attachment\" unless the subject really is one"
     } else {
         "the message above"
     };
@@ -987,12 +998,14 @@ async fn fallback_title(db: &sqlx::SqlitePool, chat_id: &str) -> String {
     .ok()
     .flatten();
 
-    let text = first
-        .map(|(c,)| extract_text_from_content_json(&c))
-        .unwrap_or_default();
+    let content = first.map(|(c,)| c).unwrap_or_default();
+    let text = extract_text_from_content_json(&content);
     let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
     if text.is_empty() {
-        return "New Chat".to_string();
+        // A wordless opening message is almost always an image, and naming it
+        // beats leaving the row reading "New Chat" forever.
+        return image_only_title(count_images_in_content_json(&content))
+            .unwrap_or_else(|| "New Chat".to_string());
     }
     let short = truncate_chars(&text, TITLE_MAX_CHARS - 1);
     short.trim().to_string()
@@ -1137,6 +1150,69 @@ fn truncate_chars(s: &str, max: usize) -> String {
 }
 
 /// Best-effort plain text out of a stored message's JSON content parts.
+/// How many images a stored message carries, counting the hidden ones.
+///
+/// A chat opened with nothing but a screenshot has no text to fall back on, and
+/// every path that reached for that text produced either an empty title or
+/// "New Chat" — a blank row in the sidebar next to a blank icon.
+fn count_images_in_content_json(content_json: &str) -> usize {
+    let Ok(parts) = serde_json::from_str::<Vec<serde_json::Value>>(content_json) else {
+        return 0;
+    };
+    parts
+        .iter()
+        .filter(|p| {
+            matches!(
+                p.get("type").and_then(|v| v.as_str()),
+                Some("image_url") | Some("hidden_image")
+            )
+        })
+        .count()
+}
+
+/// Whether the title context is a picture and nothing else — no words for the
+/// model to work from, so it has to be told to describe what it sees.
+fn is_image_only(convo: &[ChatMessage]) -> bool {
+    let mut saw_image = false;
+    for m in convo {
+        match &m.content {
+            Some(MessageContent::Parts(parts)) => {
+                for p in parts {
+                    match p {
+                        crate::llm::types::ContentPart::ImageUrl { .. }
+                        | crate::llm::types::ContentPart::HiddenImage { .. } => saw_image = true,
+                        crate::llm::types::ContentPart::Text { text }
+                        | crate::llm::types::ContentPart::HiddenText { text } => {
+                            if !text.trim().is_empty() {
+                                return false;
+                            }
+                        }
+                    }
+                }
+            }
+            // Any real text at all — including the "[image attachment]" stand-in
+            // used for a model that cannot see — means there is something to
+            // read, and the ordinary instruction applies.
+            Some(MessageContent::Text(t)) if !t.trim().is_empty() => return false,
+            _ => {}
+        }
+    }
+    saw_image
+}
+
+/// The title a wordless message gets when nothing better is available.
+///
+/// Deliberately plain. It is a placeholder for a model-written title, and a
+/// guess dressed up as a description ("Screenshot of a Terminal") would be
+/// worse than admitting the app only knows an image arrived.
+fn image_only_title(count: usize) -> Option<String> {
+    match count {
+        0 => None,
+        1 => Some("Image".to_string()),
+        n => Some(format!("{n} Images")),
+    }
+}
+
 fn extract_text_from_content_json(content_json: &str) -> String {
     if let Ok(parts) = serde_json::from_str::<Vec<serde_json::Value>>(content_json) {
         let mut buf = String::new();
@@ -1218,5 +1294,83 @@ mod title_tests {
         assert_eq!(clean_title_candidate("   \n  \n"), None);
         assert_eq!(clean_title_candidate("---"), None);
         assert_eq!(clean_title_candidate("```"), None);
+    }
+
+    // ─── Image-only chats ────────────────────────────────────────────────────
+
+    /// The reported bug: a chat opened with only a screenshot kept "New Chat"
+    /// or went blank, because every fallback reached for text that was not
+    /// there.
+    #[test]
+    fn a_wordless_message_is_named_after_its_images() {
+        let one = r#"[{"type":"image_url","image_url":{"url":"data:image/png;base64,AAA"}}]"#;
+        assert_eq!(count_images_in_content_json(one), 1);
+        assert_eq!(image_only_title(1).as_deref(), Some("Image"));
+
+        let three = r#"[
+            {"type":"image_url","image_url":{"url":"a"}},
+            {"type":"hidden_image","image_url":{"url":"b"}},
+            {"type":"image_url","image_url":{"url":"c"}}
+        ]"#;
+        assert_eq!(count_images_in_content_json(three), 3);
+        assert_eq!(image_only_title(3).as_deref(), Some("3 Images"));
+    }
+
+    #[test]
+    fn a_message_with_no_images_has_no_image_title() {
+        assert_eq!(count_images_in_content_json(r#"[{"type":"text","text":"hi"}]"#), 0);
+        assert_eq!(image_only_title(0), None);
+        // Malformed content must not panic — it is read back from the database.
+        assert_eq!(count_images_in_content_json("not json"), 0);
+    }
+
+    fn parts_message(parts: Vec<crate::llm::types::ContentPart>) -> ChatMessage {
+        ChatMessage {
+            role: "user".into(),
+            content: Some(MessageContent::Parts(parts)),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        }
+    }
+
+    fn image_part() -> crate::llm::types::ContentPart {
+        crate::llm::types::ContentPart::ImageUrl {
+            image_url: crate::llm::types::ImageUrl {
+                url: "data:image/png;base64,AAA".into(),
+                detail: None,
+            },
+        }
+    }
+
+    /// Which instruction the model gets turns on this, and asking for "the
+    /// topic" of a wordless turn is what produces "Image Attachment".
+    #[test]
+    fn an_image_with_no_words_asks_the_model_to_describe_it() {
+        assert!(is_image_only(&[parts_message(vec![image_part()])]));
+    }
+
+    #[test]
+    fn any_real_text_uses_the_ordinary_instruction() {
+        assert!(!is_image_only(&[parts_message(vec![
+            image_part(),
+            crate::llm::types::ContentPart::Text { text: "what is this?".into() },
+        ])]));
+
+        // The stand-in a non-vision model gets is text too: there is something
+        // to read, so the ordinary instruction applies.
+        assert!(!is_image_only(&[ChatMessage {
+            role: "user".into(),
+            content: Some(MessageContent::Text("[image attachment]".into())),
+            tool_calls: None,
+            tool_call_id: None,
+            name: None,
+        }]));
+    }
+
+    #[test]
+    fn an_empty_context_is_not_an_image() {
+        assert!(!is_image_only(&[]));
+        assert!(!is_image_only(&[parts_message(vec![])]));
     }
 }

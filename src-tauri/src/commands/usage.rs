@@ -347,6 +347,36 @@ pub async fn session_context_usage(
     session_usage(&state.db, &chat_id).await
 }
 
+/// Billed tokens across this chat's whole sub-agent session (0.14.1).
+///
+/// A cheap sum rather than [`session_usage`], which builds a per-agent
+/// breakdown with an overhead measurement per member — this runs at the top of
+/// every step, and the caller only needs one number.
+///
+/// Billed, not context: `chat_usage` accumulates what each request actually
+/// cost, so a ten-step turn that re-sent 50k of context ten times counts as
+/// 500k. That is the number a spend cap is about.
+pub async fn session_spent_tokens(db: &SqlitePool, chat_id: &str) -> AppResult<i64> {
+    let root = crate::tools::teamwork::session_root(db, chat_id).await?;
+    let total: i64 = sqlx::query_scalar(
+        "WITH RECURSIVE descendants(id) AS (
+            SELECT id FROM chats
+              WHERE parent_chat_id = ?1 AND initiated_by_zone_id IS NOT NULL
+            UNION ALL
+            SELECT c.id FROM chats c
+              JOIN descendants d ON c.parent_chat_id = d.id
+              WHERE c.initiated_by_zone_id IS NOT NULL
+         )
+         SELECT COALESCE(SUM(u.input_tokens + u.output_tokens), 0)
+           FROM chat_usage u
+          WHERE u.chat_id = ?1 OR u.chat_id IN (SELECT id FROM descendants)",
+    )
+    .bind(&root)
+    .fetch_one(db)
+    .await?;
+    Ok(total)
+}
+
 /// The command's body, over a plain pool so it can be exercised without an
 /// `AppState`.
 pub async fn session_usage(db: &SqlitePool, chat_id: &str) -> AppResult<SessionUsage> {
@@ -677,6 +707,36 @@ mod tests {
             usage.spent.reported_requests, 0,
             "a provider that reports nothing leaves these estimated, and says so",
         );
+    }
+
+    /// The spend cap's cheap sum and the meter's full breakdown are two
+    /// implementations of one number, and the cap is enforced against a session
+    /// the user reads in the meter. If they disagree, one of them is lying to
+    /// somebody.
+    #[tokio::test]
+    async fn the_spend_cap_sum_agrees_with_the_meter_and_sees_sub_agents() {
+        let db = fixture().await;
+        sqlx::query(
+            "INSERT INTO chats (id, title, zone_id, parent_chat_id, initiated_by_zone_id,
+                                created_at, updated_at)
+             VALUES ('c2', 'sub', 'z1', 'c1', 'z1', 2, 2)",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+
+        let measure = crate::llm::tokens::RequestMeasure { input_tokens: 1_000, ..Default::default() };
+        crate::llm::tokens::record_request(&db, "c1", "test-model", &measure, None).await;
+        crate::llm::tokens::record_request(&db, "c2", "test-model", &measure, None).await;
+
+        let meter = session_usage(&db, "c1").await.unwrap();
+        let cap_sum = session_spent_tokens(&db, "c1").await.unwrap();
+        assert_eq!(cap_sum, meter.spent.input_tokens + meter.spent.output_tokens);
+        assert_eq!(cap_sum, 2_000, "the leader's request and the sub-agent's");
+
+        // Asked from inside the sub-agent, the answer is the session's, not the
+        // subchat's — otherwise a member could never be the one to hit the cap.
+        assert_eq!(session_spent_tokens(&db, "c2").await.unwrap(), cap_sum);
     }
 
     /// The lifetime total counts chats no one session has heard of — that is the

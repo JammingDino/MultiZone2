@@ -120,7 +120,7 @@ Needs two builds: install version N, then publish N+1.
 - [ ] With a newer release published, the update is detected and its notes shown
 - [ ] Download shows progress and completes
 - [ ] Restart lands on the new version
-- [ ] 🔁 The published release actually contains `latest.json` (missing signing secrets produce installers but no manifest — the failure is silent and only visible to already-installed users)
+- [x] 🔁 The published release actually contains a **signed** `latest.json` — missing signing secrets produce installers but no manifest, and the failure is silent and only visible to already-installed users. *Verified from the tree rather than by eye: `updater/latest.json` carries a real signature per platform for v0.13.0. Re-check by running `node -e "const m=require('./updater/latest.json'); console.log(Object.entries(m.platforms).map(([k,v])=>k+' '+v.signature.length))"` — a zero-length or absent signature means the secrets stopped being read.*
 - [ ] Settings, chats, zones, and skills all survive the update
 
 ## 10. Uninstall 🖥️
@@ -176,6 +176,75 @@ Needs two builds: install version N, then publish N+1.
 - [ ] The boot splash draws the accent-coloured mark and is gone inside a second; a click, tap or keypress skips it immediately
 - [ ] The splash does not reappear when the window is reloaded mid-session, and never appears twice
 - [ ] ⚙️ Clearing the webview's localStorage (or a fresh install) launches on the defaults with no stale palette or size
+
+## 11d. Tool visuals & editing (0.13.0)
+
+Everything here typechecks and builds; none of it has been seen in the Tauri
+shell. The edit-resolution rules underneath are covered by `cargo test --lib`,
+so what needs eyes is the rendering and the approval path.
+
+- [ ] Expanding any tool step shows a **Visual · Input · Output** tab strip. Input still holds the exact arguments and Output the exact result string — both unedited
+- [x] A tool with no family (**any MCP tool**) renders shaped — a table for a list of like objects, a folding key/value list otherwise — and never as escaped JSON ⚙️ *(verified 0.13.1)*
+- [ ] A tool result carrying JSON *inside a string field* is shaped too, not shown escaped
+- [ ] `create_file` shows the new file as an addition; `edit_file` shows a real diff with unchanged surrounding lines as context
+- [ ] `run_command` shows the command, its output, and a green/red **exit** pill. stderr is tinted differently from stdout
+- [x] A command printing thousands of lines keeps the last 200, says so, and scrolls inside its own box without pushing the turn off screen *(verified 0.13.1)*
+- [ ] An **errored** tool opens on Input, and shows no visual card duplicating the error
+- [ ] Plans, diagrams, plots and saved files render exactly as before, above the tabs, with no second copy inside them
+- [ ] In compact mode the lifted visual still appears once, not twice
+
+**Replay (0.13.1)**
+
+- [ ] Opening a tool row in **Replay** shows the same visual the transcript does — a diff for an edit, a console for a command, a tree for a listing
+- [ ] The raw output is still there below it, under an "Output" label
+- [ ] A tool whose result is prose rather than JSON still shows its output, with no empty visual above it
+- [ ] Replay on a subchat renders visuals too (its messages were never opened in the transcript)
+
+**Image-only chat titles (0.13.4)**
+
+- [ ] 🔁 Send **an image with no text** as the first message. The chat gets a title naming what is in the picture — not a blank row, not "New Chat", not "Image Attachment" ⚙️ *(needs a vision-capable model)*
+- [ ] The same with **auto-title off** (Settings → Chat): the chat reads "Image", or "3 Images" for several — never an empty row
+- [ ] The same against a **non-vision** model: a title still appears rather than a blank
+- [ ] A message with both an image and text still titles from the text
+
+**Session log in the PDF (0.13.4)**
+
+- [ ] Settings → Appearance → Chat export carries **Append the session log**, and it is **off** on a fresh install and on an existing one that has never seen it
+- [ ] With it off, a PDF export ends at the conversation — no "Session log" table
+- [ ] With it on, the log is appended, timed from the first event
+- [ ] The Markdown export still carries its own log section either way — the setting is PDF-only
+
+**The rest of the families, and export (0.13.3)**
+
+- [ ] 🔁 **Visuals appear in the chat itself, not only in Replay.** Expand a tool step in a normal conversation — the Visual tab is there and is the one it lands on. (The activity rail's `hideVisual` flag used to suppress every family card, and the rail is the whole chat)
+- [ ] A `smart_search` step shows the engine strip; an engine that was blocked or rate-limited shows as failed rather than being silently absent ⚙️
+- [ ] `smart_fetch` shows the page title, domain and word count; `smart_crawl` shows one row per page and reports pages read vs errored
+- [ ] `http_request` shows a status pill — green 2xx, red 4xx/5xx — with headers folded and the body shaped, not escaped
+- [ ] Memory shows its scope; a skill shows its files; `change_zone` and `tag_chat` read as one line
+- [ ] `get_current_datetime` renders as a plain line with no card around it
+- [ ] Step icons differ by family — a collapsed run is not a column of identical wrenches
+- [ ] **PDF export** of a turn that edited a file and ran a command carries the `+/−` diff and the console with its exit code
+- [ ] Markdown export of the same turn is unchanged in structure (no stray HTML)
+
+**Multizone legibility (0.13.2)**
+
+- [ ] A `spawn_subagent` step shows the zone, the task, a status pill and the reply — not a JSON object with the answer as one escaped string
+- [ ] **Transcript** expands inside that step and shows the same leader↔sub-agent exchange the stack tracer does
+- [ ] A `background: true` spawn reads as still running and names `collect_subagents` as the way to pick it up; `collect_subagents` then shows one card per agent
+- [ ] `team_status` renders as a board — agents, claims, notes — and the same agent is the same colour in the claims list and the notes feed
+- [ ] `claim_files` shows the claimed paths and the stated intent; a conflict names who holds the file and for how long
+- [ ] 🔁 **A write refused by another agent's claim** renders as a board card naming the holder and their intent, not as a red error string. (Needs two agents in one session: have one claim a file, then have the other write it)
+- [ ] An ordinary single-zone chat shows none of the teamwork UI
+
+**Editing (0.14.0 rules, landed early)**
+
+- [ ] 🔁 An `edit_file` whose `old_text` appears **twice** is refused with the count — it must not silently edit the first one
+- [ ] The same call with `replace_all: true` changes every occurrence
+- [ ] An anchor with a stray trailing space, or quoted without its leading indentation, still applies — and the replacement lands at the file's own indentation, not the model's
+- [ ] An edit that breaks a `.json` or `.rs` file's syntax is **reverted on disk** and reported as reverted
+- [ ] An edit that *repairs* an already-broken file is allowed through
+- [ ] 🔁 The approval prompt's diff matches what actually lands, including for a whitespace-tolerant match (preview and execution now share `resolve_edit` — if these ever disagree, that sharing has been broken)
+- [ ] Review mode: staging, narrowing to some hunks, and applying still work against the shared resolver
 
 ## 12. Performance
 

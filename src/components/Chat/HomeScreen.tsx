@@ -442,7 +442,7 @@ export function HomeScreen() {
   }
 
   return (
-    /* Balance (0.12.7). Two things were off. The block was centred *geometrically*
+    /* Balance (0.14.6). Two things were off. The block was centred *geometrically*
        in a tall window, which reads as low — the eye puts the centre of a page
        above its middle, which is why every poster and title slide sits its
        subject high. The asymmetric padding here is the correction: content

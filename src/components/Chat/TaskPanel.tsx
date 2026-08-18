@@ -99,7 +99,7 @@ export function TaskPanel({
   }
 
   return (
-    /* Bounded and scrolling in its own right (0.12.7). A thirty-step plan, or a
+    /* Bounded and scrolling in its own right (0.14.6). A thirty-step plan, or a
        Multizone run with four sub-agent plans nested under the leader's, used to
        render at full height between the transcript and the composer — pushing
        both off the window and leaving the wheel with nothing to scroll anywhere
@@ -288,7 +288,7 @@ function PlanRows({
 }
 
 /**
- * One step of a running plan, with its specification a click away (0.12.7).
+ * One step of a running plan, with its specification a click away (0.14.6).
  *
  * The detail the user approved is the answer to "is it doing the right thing?",
  * which is the question a run raises and the checklist alone cannot settle —

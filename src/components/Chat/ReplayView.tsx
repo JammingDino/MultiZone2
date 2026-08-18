@@ -6,6 +6,8 @@ import {
   ChevronRight,
   ClipboardList,
   Ban,
+  BookOpen,
+  CheckCircle2,
   FileText,
   Flag,
   MessageSquare,
@@ -20,6 +22,7 @@ import * as api from "@/lib/tauri";
 import { buildTrace } from "@/lib/exportTrace";
 import { CHROME_ACTIVE, CHROME_OUTLINED } from "@/lib/chrome";
 import type { Message, SessionEvent } from "@/lib/types";
+import { ToolVisual, hasToolVisual } from "@/components/Message/visuals/ToolVisual";
 
 /**
  * Replay (0.12.2) — stepping through a past session at your own pace.
@@ -213,10 +216,28 @@ export function ReplayView({ chatId, onClose }: { chatId: string; onClose: () =>
                   {current.meta ? ` · ${current.meta}` : ""}
                   {current.turnId ? ` · turn ${current.turnId.slice(0, 8)}` : ""}
                 </div>
+                {current.tool &&
+                  hasToolVisual(current.tool.name, current.tool.parsed, current.tool.isError) && (
+                    <div className="mb-3">
+                      <ToolVisual
+                        name={current.tool.name}
+                        args={current.tool.args}
+                        parsed={current.tool.parsed}
+                        isError={current.tool.isError}
+                      />
+                    </div>
+                  )}
                 {current.body && (
-                  <div className="mb-3 whitespace-pre-wrap break-words rounded border border-[var(--color-border)] bg-[var(--color-bg)]/50 p-2 text-[12px] leading-relaxed text-[var(--color-text)]">
-                    {clamp(current.body)}
-                  </div>
+                  <>
+                    {current.tool && (
+                      <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+                        Output
+                      </div>
+                    )}
+                    <div className="mb-3 whitespace-pre-wrap break-words rounded border border-[var(--color-border)] bg-[var(--color-bg)]/50 p-2 text-[12px] leading-relaxed text-[var(--color-text)]">
+                      {clamp(current.body)}
+                    </div>
+                  </>
                 )}
                 {current.detail && (
                   <>
@@ -268,6 +289,12 @@ interface ReplayEntry {
   /** Extra facts for the header line, e.g. "1.4s · error". */
   meta?: string | null;
   turnId?: string | null;
+  /**
+   * A tool call, so the replay can draw the same visual the transcript does
+   * (0.13.1). Replay is read precisely when something went wrong, so showing a
+   * worse view of the call here than in the chat would be the wrong way round.
+   */
+  tool?: { name: string; args: unknown; parsed: unknown; isError: boolean };
 }
 
 /** How much of a long body/detail is rendered. Past this, a replay pane becomes a
@@ -366,6 +393,12 @@ function transcriptEntries(messages: Message[]): ReplayEntry[] {
           body: item.resultText,
           detail: item.args ? JSON.stringify(item.args, null, 2) : null,
           detailLabel: "Arguments",
+          tool: {
+            name,
+            args: item.args,
+            parsed: parseResult(item.resultText),
+            isError: item.status === "error",
+          },
           meta: [outcome, item.durationMs != null ? secs(item.durationMs) : null]
             .filter(Boolean)
             .join(" · "),
@@ -391,6 +424,20 @@ function pretty(detail: string): string {
     return JSON.stringify(JSON.parse(detail), null, 2);
   } catch {
     return detail;
+  }
+}
+
+/**
+ * A tool result as a value, for the visual. Tools return JSON as a string; one
+ * that returns prose (or nothing) has no visual and falls back to the body,
+ * which is what was shown before this existed.
+ */
+function parseResult(text: string | null | undefined): unknown {
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
   }
 }
 
@@ -435,6 +482,10 @@ function kindLabel(kind: string): string {
     thinking: "thinking",
     tool_result: "tool output",
     tool_failed: "tool failed",
+    runaway: "loop stopped",
+    instructions: "directory rules",
+    checks_passed: "checks passed",
+    checks_failed: "checks failed",
   };
   return map[kind] ?? kind;
 }
@@ -443,9 +494,14 @@ function KindIcon({ kind }: { kind: string }) {
   const cls = "mt-0.5 h-3 w-3 shrink-0";
   if (kind === "tool_error" || kind === "error" || kind === "tool_failed")
     return <AlertTriangle className={`${cls} text-[var(--color-danger)]`} />;
-  if (kind === "denial" || kind === "cancelled")
+  if (kind === "denial" || kind === "cancelled" || kind === "runaway")
     return <Ban className={`${cls} text-amber-400`} />;
   if (kind === "file_change") return <FileText className={`${cls} text-[var(--color-accent)]`} />;
+  if (kind === "instructions")
+    return <BookOpen className={`${cls} text-[var(--color-text-muted)]`} />;
+  if (kind === "checks_passed") return <CheckCircle2 className={`${cls} text-green-500`} />;
+  if (kind === "checks_failed")
+    return <AlertTriangle className={`${cls} text-[var(--color-danger)]`} />;
   if (kind.startsWith("plan")) return <ClipboardList className={`${cls} text-[var(--color-accent)]`} />;
   if (kind === "zone_switch") return <Users className={`${cls} text-[var(--color-text-muted)]`} />;
   if (kind === "turn_start" || kind === "turn_end")

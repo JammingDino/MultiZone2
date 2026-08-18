@@ -35,6 +35,19 @@ export interface Zone {
   /** Response Leader: a zone configured to coordinate sub-agents. Shown with a
    * dedicated indicator in the library/editor; gets the orchestration preamble. */
   isLeader: boolean;
+  /**
+   * This zone's approval overrides as a JSON `ApprovalPolicy` (0.14.2), or null
+   * to inherit the global one. Stored as a string because the category set
+   * grows with the tool set, and a column per category would be a migration per
+   * tool group.
+   */
+  approvals: string | null;
+  /**
+   * Zone to answer with when this one's provider will not serve the request —
+   * rate limited past its cooldown, host down, key rejected (0.14.1). Null for
+   * none, which means such a failure ends the turn as it always did.
+   */
+  fallbackZoneId: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -76,6 +89,16 @@ export interface Chat {
    * plan (or the user) turns it off.
    */
   planMode: boolean;
+  /**
+   * This session's own spend ceiling in billed tokens (0.14.4), or null to use
+   * the global default from Settings.
+   *
+   * `0` is a real value meaning *no limit* — which is why null, not zero, means
+   * "not set". Raising the limit from the card in one chat writes it here, so
+   * it applies to this session and no other; it is stored on the session root,
+   * since spend is counted across a chat and every sub-agent under it.
+   */
+  spendLimit: number | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -89,7 +112,7 @@ export interface PlanStep {
   /** Why — the sentence that makes the step reviewable rather than a label. */
   intent?: string | null;
   /**
-   * The specification, as Markdown (0.12.7). The approach and the rejected
+   * The specification, as Markdown (0.14.6). The approach and the rejected
    * alternatives, the concrete parameters, what goes wrong here. `step` is the
    * heading; this is the plan.
    */
@@ -118,7 +141,7 @@ export interface Plan {
   title: string;
   goal: string | null;
   /**
-   * Everything true of the plan before step 1 (0.12.7), as Markdown: the scope
+   * Everything true of the plan before step 1 (0.14.6), as Markdown: the scope
    * decision made and the ones rejected, the assumptions, what the research
    * turned up, what is still open.
    */
@@ -189,6 +212,16 @@ export interface Project {
   directory: string | null;
   /** When true, new chats in this project start with project context enabled. */
   defaultContextEnabled: boolean;
+  /**
+   * Commands run in the project directory once a turn's edits have landed
+   * (0.14.5), their output handed back to the model before it answers.
+   *
+   * Null or empty means none, and none are inferred: guessing `npm test` in a
+   * repository whose dependencies were never installed produces a confident
+   * failure about the wrong thing.
+   */
+  lintCommand: string | null;
+  testCommand: string | null;
   /** Knowledge (RAG) embedding config, bound to the index. Provider+model define
    * the vector space; changing either forces a re-index. Null until configured. */
   kbProviderId: string | null;
@@ -269,6 +302,8 @@ export interface SubchatNode {
   initiatedByZoneId: string | null;
   parentChatId: string | null;
   messageCount: number;
+  /** Turns of this subchat that loop detection stopped (0.14.1). */
+  runawayCount: number;
   createdAt: number;
 }
 
@@ -556,6 +591,47 @@ export type InputPart =
   | { type: "hidden_text"; text: string }
   | { type: "hidden_image"; data_url: string };
 
+/**
+ * What kind of work a tool does, from the user's point of view — a different
+ * axis from how dangerous it is (0.14.2). `delete_file` and `run_command` are
+ * both dangerous and belong in different categories: letting an agent edit a
+ * repo is not agreeing to let it run anything.
+ */
+export type ApprovalCategory =
+  | "read"
+  | "edit"
+  | "shell"
+  | "web"
+  | "mcp"
+  | "spawn"
+  | "state";
+
+/**
+ * An approval policy, global or per zone. Every field optional-by-omission:
+ * a category that is absent inherits, and a zone's lists are added to the
+ * global ones rather than replacing them — a deny list that can be dropped by
+ * configuring something else is not a deny list.
+ */
+export interface ApprovalPolicy {
+  /** true = auto-approve, false = always ask, absent = inherit. */
+  categories: Partial<Record<ApprovalCategory, boolean>>;
+  /** Command prefixes that run without asking. */
+  shellAllow: string[];
+  /** Command prefixes that are refused outright. */
+  shellDeny: string[];
+  /**
+   * Paths an edit may touch without being asked about (0.14.5). `{project}`
+   * stands for the chat's own working directory.
+   *
+   * Unlike `shellAllow`, a non-empty list here is a *boundary*: an edit outside
+   * every entry is asked about even when the edit category is auto-approved,
+   * because being asked about exactly those is the reason to draw one.
+   */
+  editAllow: string[];
+  /** Paths an edit is refused outright, longest match winning over `editAllow`. */
+  editDeny: string[];
+}
+
 /** Stream event payloads emitted by the backend over the `stream` event. */
 export type StreamEvent =
   | { type: "user_message_saved"; message: Message }
@@ -574,6 +650,14 @@ export type StreamEvent =
   | { type: "steer_delivered"; id: string; message: Message }
   | { type: "pending_cleared"; ids: string[] }
   | { type: "cancelled" }
+  /** Loop detection stopped the run (0.14.1); one tool-free step still follows. */
+  | { type: "runaway"; kind: "repeat" | "stuck_error" | "oscillation" | "handoff"; label: string }
+  /**
+   * The session spend limit stopped the run (0.14.3). A hard stop: no further
+   * request is made, in this chat or any other in the session, until the limit
+   * is raised or removed.
+   */
+  | { type: "spend_limit"; spent: number; cap: number; midTurn: boolean }
   | { type: "done" }
   | { type: "error"; message: string };
 
@@ -748,7 +832,43 @@ export interface AppSettings {
    * lets longer tasks complete in a single turn; lowering it caps how long a
    * runaway model can churn before it has to report back. Clamped to 4–200.
    */
+  /**
+   * Per-category approval policy (0.14.2), which is the axis
+   * `autoApproveLevel` above could never express: "how dangerous is this tool"
+   * and "do I want to be asked about this kind of work" are different
+   * questions. A category left out falls back to the slider, so an install that
+   * never opens this panel behaves exactly as it did.
+   *
+   * `shellAllow` / `shellDeny` are command prefixes, longest match wins — so
+   * "allow `git`, deny `git push`" resolves the way it reads. A deny is a
+   * refusal rather than a prompt: writing the rule down *is* the answer.
+   *
+   * `editAllow` / `editDeny` are the same shape over paths (0.14.5), and answer
+   * *where* an edit may land rather than whether edits are approved at all.
+   */
+  approvals: ApprovalPolicy;
+  /**
+   * Notify when a run stops and waits for you — a tool approval or an
+   * `ask_user` (0.14.3). The window's taskbar entry is highlighted, and an OS
+   * notification is posted if the window is in the background.
+   *
+   * Only those two events, and only when you are looking elsewhere. A finished
+   * turn does not notify: completion is the expected outcome, and a toast for
+   * every one of them teaches people to dismiss toasts unread — including the
+   * two that mean a run is blocked on them.
+   */
+  notifyWhenWaiting: boolean;
   maxToolSteps: number;
+  /**
+   * Ceiling on the billed tokens one session — a chat plus every sub-agent
+   * under it — may spend before the run is stopped and made to report (0.14.1).
+   *
+   * `0` (the default) is no limit. Off by default because the usual case here is
+   * a model on the same machine, where a long session costs time rather than
+   * money; the cap is for the case where a panel is spending someone's budget
+   * unattended. Checked at step boundaries, never mid-call.
+   */
+  maxSessionTokens: number;
   /**
    * How PDF files are processed when attached in the input bar.
    * "images" — render each page to a JPEG and send visually (default)
@@ -769,6 +889,20 @@ export interface AppSettings {
    * light (or the reverse).
    */
   pdfExportTheme: "app" | "dark" | "light";
+  /**
+   * Whether a chat's PDF export closes with the session log — the run as it was
+   * *recorded*: every turn started and finished, every tool run, the approvals
+   * declined, the failures the prose never mentions.
+   *
+   * Off by default (0.13.4). It is evidence rather than reading, and on a long
+   * run it is a table of hundreds of rows appended to a document usually being
+   * exported for someone who wants the conversation. Turn it on when the export
+   * is a record — a bug report, an audit, showing what an agent actually did.
+   *
+   * PDF only: the Markdown export keeps its own log section, since a markdown
+   * file is far more often the machine-readable copy.
+   */
+  pdfExportSessionLog: boolean;
   /**
    * Whether a chat export folds in the sub-agent conversations the run spawned
    * (0.9.11), nested under the turns that started them and labelled as
@@ -883,6 +1017,28 @@ export interface AppSettings {
    * silently against the stale disk.
    */
   reviewQueue: boolean;
+  /**
+   * Read the project's own `AGENTS.md` / `CLAUDE.md` into the system prompt
+   * (0.14.5), from the working directory up to the repository root.
+   *
+   * On by default: a file written to tell an agent how to work in this
+   * repository is the cheapest context there is. Off is for the case the
+   * default cannot cover — a repository whose instruction file is enormous,
+   * wrong, or aimed at a different tool — and it has to be switchable without
+   * moving the file, since the file is not usually ours to move.
+   */
+  projectInstructions: boolean;
+  /**
+   * Tokens of repository map injected at session start (0.14.5), or 0 for none.
+   *
+   * The map is every source file's definitions, ranked by a PageRank over which
+   * files refer to which — so what fits is what the codebase is organised
+   * around rather than the first N names alphabetically. Its cost is fixed and
+   * paid on every request, which is why it is a number rather than a switch:
+   * the useful question is how much of the context budget a map is worth here,
+   * and the answer differs between a 40-file project and a monorepo.
+   */
+  repoMapTokens: number;
   /** Size ceiling for the checkpoint store, in MB. 0 = no ceiling. */
   checkpointMaxMb: number;
   /**
@@ -1020,10 +1176,14 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   apiPort: 8765,
   apiToken: "",
   autoApproveLevel: "all",
+  approvals: { categories: {}, shellAllow: [], shellDeny: [], editAllow: [], editDeny: [] },
+  notifyWhenWaiting: true,
   maxToolSteps: 30,
+  maxSessionTokens: 0,
   pdfMode: "images",
   pdfExportDetail: "steps",
   pdfExportTheme: "app",
+  pdfExportSessionLog: false,
   exportSubchats: true,
   perspectiveMode: "parallel",
   perspectiveLayout: "stacked",
@@ -1042,6 +1202,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   markdownMirrorDir: "",
   checkpointRetentionDays: 30,
   reviewQueue: false,
+  projectInstructions: true,
+  repoMapTokens: 1000,
   checkpointMaxMb: 512,
   visionOverrides: {},
   onboardingSkipped: false,
@@ -1247,6 +1409,25 @@ export interface RestoreReport {
   files: RestoredFile[];
   /** The checkpoint taken of the restore itself, so undo is undoable. */
   undoCheckpointId: string | null;
+}
+
+/** The outcome of a rewind: what moved, and the mark it can be undone from. */
+export interface RewindReport {
+  /** Null when the rewind found nothing to undo, and so left no trace. */
+  markId: string | null;
+  reports: RestoreReport[];
+}
+
+/** Whether a chat has a rewind that can be walked forward again. */
+export interface RewindStatus {
+  canForward: boolean;
+  /** Paths the forward step would put back. */
+  forwardFiles: number;
+  /** When the rewind that left this mark was taken. */
+  forwardAt: number | null;
+  /** The message it was taken at — the way forward is offered in the same place
+   *  the user asked to go back. */
+  forwardMessageId: string | null;
 }
 
 /** Groups the zone editor's tool list is sorted into, in display order (0.9.0). */

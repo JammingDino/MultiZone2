@@ -1,6 +1,6 @@
-import { useState } from "react";
-import { Copy, Check, RotateCcw, BarChart3, Pencil, GitBranch, Volume2, Pause, Play, Square, TriangleAlert } from "lucide-react";
-import type { Checkpoint } from "@/lib/types";
+import { useMemo, useState } from "react";
+import { Copy, Check, RotateCcw, BarChart3, Pencil, GitBranch, History, Redo2, Volume2, Pause, Play, Square, TriangleAlert } from "lucide-react";
+import type { Checkpoint, RestoreReport } from "@/lib/types";
 import { useApp } from "@/store/app";
 import { useTts, zoneVoice } from "@/store/tts";
 import * as api from "@/lib/tauri";
@@ -205,6 +205,10 @@ export function MessageActions({
       )}
 
       {branchFromMessageId && (
+        <RewindControls chatId={chatId} messageId={branchFromMessageId} disabled={isBusy} />
+      )}
+
+      {branchFromMessageId && (
         <div className="relative">
           <ActionButton
             onClick={onBranch}
@@ -252,9 +256,45 @@ export function MessageActions({
                 />
               )}
               <StatRow
-                label="Generation time"
+                label="Total time"
                 value={formatDuration(stats.durationMs)}
               />
+              {/* The two reasons total time and generation time differ, each
+                  named (0.14.3). Without them a turn reads as a slow model when
+                  it was a slow tool, or — the case this was built for — a
+                  provider running at fifty tok/s while a prompt waited two
+                  minutes for someone to walk back to their desk. */}
+              {(stats.toolMs ?? 0) > 0 && (
+                <StatRow label="…of which tools ran" value={formatDuration(stats.toolMs ?? 0)} />
+              )}
+              {(stats.approvalMs ?? 0) > 0 && (
+                <StatRow
+                  label="…of which awaited approval"
+                  value={formatDuration(stats.approvalMs ?? 0)}
+                />
+              )}
+              {(stats.prefillMs ?? 0) > 0 && (
+                <StatRow
+                  label="…of which read the context"
+                  value={formatDuration(stats.prefillMs ?? 0)}
+                />
+              )}
+              {((stats.toolMs ?? 0) > 0 ||
+                (stats.approvalMs ?? 0) > 0 ||
+                (stats.prefillMs ?? 0) > 0) && (
+                <StatRow
+                  label="Generating"
+                  value={formatDuration(
+                    Math.max(
+                      0,
+                      stats.durationMs -
+                        (stats.toolMs ?? 0) -
+                        (stats.approvalMs ?? 0) -
+                        (stats.prefillMs ?? 0),
+                    ),
+                  )}
+                />
+              )}
               <StatRow
                 label="Output tokens (est.)"
                 value={formatTokens(estimateTokens(stats.contentChars))}
@@ -295,6 +335,179 @@ export function MessageActions({
       )}
     </div>
   );
+}
+
+/**
+ * Rewind, in both directions (1.1).
+ *
+ * Putting the working tree back to a moment in the conversation used to be
+ * reachable only as a side-offer of "branch from here" — you could not rewind
+ * without forking the chat, and you could not change your mind afterwards. It
+ * is its own action now, on every turn either side of the conversation, and it
+ * is reversible: the rewind records where the tree stood before it moved, so
+ * the same spot in the transcript offers the way back out.
+ *
+ * Both buttons are hidden when they would do nothing, so an ordinary chat that
+ * never touched a file never grows a control for undoing file changes.
+ */
+function RewindControls({
+  chatId,
+  messageId,
+  disabled,
+}: {
+  chatId: string;
+  messageId: string;
+  disabled?: boolean;
+}) {
+  const checkpoints = useApp((s) => s.checkpointsByChat[chatId]);
+  const messages = useApp((s) => s.messagesByChat[chatId]);
+  const status = useApp((s) => s.rewindByChat[chatId]);
+  const rewindToMessage = useApp((s) => s.rewindToMessage);
+  const rewindForward = useApp((s) => s.rewindForward);
+
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+
+  // The turns after this message that changed files — what a rewind would undo.
+  // Read off the loaded transcript rather than asked of the backend, because
+  // this decides whether to *render* a button, on every turn in the chat.
+  const later = useMemo(() => {
+    const order = new Map((messages ?? []).map((m, i) => [m.id, i] as const));
+    const pivot = order.get(messageId);
+    if (pivot === undefined) return [];
+    return (checkpoints ?? []).filter((c) => {
+      // Marks and per-restore undos are bookkeeping, not turns the user took.
+      if (c.label === "rewind" || !c.messageId) return false;
+      const at = order.get(c.messageId);
+      return at !== undefined && at > pivot;
+    });
+  }, [checkpoints, messages, messageId]);
+
+  const canForward = Boolean(status?.canForward) && status?.forwardMessageId === messageId;
+  if (later.length === 0 && !canForward) return null;
+
+  const paths = new Set(later.flatMap((c) => c.files.map((f) => f.path)));
+  const diverged = later.flatMap((c) => c.files).filter((f) => f.diverged).length;
+
+  async function run(fn: () => Promise<string>) {
+    setConfirming(false);
+    setBusy(true);
+    try {
+      setNote(await fn());
+    } catch (e) {
+      setNote(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const rewind = (force: boolean) =>
+    run(async () => {
+      const report = await rewindToMessage(chatId, messageId, force);
+      return restoreSummary(report.reports);
+    });
+
+  const forward = () =>
+    run(async () => {
+      const report = await rewindForward(chatId);
+      return report ? restoreSummary([report]) : "Nothing left to walk forward.";
+    });
+
+  return (
+    <div className="relative flex items-center gap-1">
+      {later.length > 0 && (
+        <ActionButton
+          onClick={() => setConfirming((v) => !v)}
+          label={
+            busy
+              ? "Rewinding…"
+              : `Rewind files to here — undo what ${later.length} later turn${
+                  later.length === 1 ? "" : "s"
+                } wrote`
+          }
+          disabled={disabled || busy}
+        >
+          <History size={ACTION_ICON} />
+        </ActionButton>
+      )}
+
+      {canForward && (
+        <ActionButton
+          onClick={() => void forward()}
+          label={`Rewind forward — put back the ${status?.forwardFiles ?? 0} file${
+            status?.forwardFiles === 1 ? "" : "s"
+          } this rewind undid`}
+          disabled={disabled || busy}
+        >
+          <Redo2 size={ACTION_ICON} />
+        </ActionButton>
+      )}
+
+      {note && (
+        <span
+          className="max-w-[420px] truncate text-[11px] text-[var(--color-text-muted)]"
+          title={note}
+          onClick={() => setNote(null)}
+          role="button"
+        >
+          {note}
+        </span>
+      )}
+
+      {confirming && (
+        <div className="absolute bottom-full left-0 z-40 mb-1 w-[300px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] p-2.5 text-xs shadow-lg">
+          <p className="text-[var(--color-text)]">
+            {later.length} later turn{later.length === 1 ? "" : "s"} changed {paths.size} file
+            {paths.size === 1 ? "" : "s"}.
+          </p>
+          <p className="mt-1 text-[var(--color-text-muted)]">
+            Put them back to how they stood here. The conversation is left alone, and you can
+            walk it forward again from this same spot.
+          </p>
+          {diverged > 0 && (
+            <p className="mt-1 flex items-start gap-1 text-amber-500">
+              <TriangleAlert size={12} className="mt-0.5 shrink-0" />
+              {diverged} {diverged === 1 ? "has" : "have"} been edited outside the app and will be
+              left as found.
+            </p>
+          )}
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <button
+              onClick={() => void rewind(false)}
+              className={`rounded px-2 py-1 ${CHROME_OUTLINED}`}
+            >
+              Rewind
+            </button>
+            {diverged > 0 && (
+              <button
+                onClick={() => void rewind(true)}
+                className={`rounded px-2 py-1 ${CHROME_OUTLINED}`}
+              >
+                Rewind, discarding those edits
+              </button>
+            )}
+            <button
+              onClick={() => setConfirming(false)}
+              className="rounded px-2 py-1 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** "3 restored, 1 conflict" — what actually happened, counted by outcome. */
+function restoreSummary(reports: RestoreReport[]): string {
+  const counts = new Map<string, number>();
+  for (const f of reports.flatMap((r) => r.files)) {
+    counts.set(f.outcome, (counts.get(f.outcome) ?? 0) + 1);
+  }
+  if (counts.size === 0) return "Nothing to change.";
+  return [...counts].map(([outcome, n]) => `${n} ${outcome}`).join(", ");
 }
 
 /**
@@ -492,11 +705,18 @@ function formatSpeed(stats: {
   reasoningChars: number;
   toolCallChars?: number;
   toolMs?: number;
+  approvalMs?: number;
+  prefillMs?: number;
 }) {
-  // tok/s reflects generation throughput, so discount time spent executing
-  // tools (the model isn't producing tokens then). Overall duration is shown
-  // separately, in full.
-  const genMs = stats.durationMs - (stats.toolMs ?? 0);
+  // tok/s reflects generation throughput, so discount every stretch where the
+  // model was not generating: tools executing, an approval prompt sitting
+  // unanswered (0.14.3), and the encode at the start of each step after the
+  // first (0.14.4). A turn where someone took two minutes to press Approve
+  // reported 1.0 tok/s from a provider running at fifty — a number about the
+  // person, not the model. Total duration is shown separately, in full, and
+  // each wait gets its own row.
+  const genMs =
+    stats.durationMs - (stats.toolMs ?? 0) - (stats.approvalMs ?? 0) - (stats.prefillMs ?? 0);
   if (genMs <= 0) return "—";
   // Speed includes thinking and tool-call tokens — both are tokens the model
   // produced, so both affect throughput.

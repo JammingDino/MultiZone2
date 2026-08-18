@@ -53,7 +53,7 @@ The shipped **Code Team** is a general codebase collaboration: talk to **Code Te
 
 Seven zones on one model at seven temperatures: the value comes from independent attempts and adversarial review, not from a bigger model.
 
-Every member is equipped like an agent you'd actually want on the job — web search and full page reads (an unfamiliar library's real API beats a half-remembered one), skills, the code runner, and shared memory at project scope, which is the durable counterpart to the board: how this repo's tests are run, or a trap someone hit, is injected into every agent on the project, including the ones spawned next week. Before a long run, set **Settings → Chat → Tool auto-approval** to *Everything* (a sub-agent cannot show you an approval prompt) and raise **Task length** to 60 or more.
+Every member is equipped like an agent you'd actually want on the job — web search and full page reads (an unfamiliar library's real API beats a half-remembered one), skills, the code runner, and shared memory at project scope, which is the durable counterpart to the board: how this repo's tests are run, or a trap someone hit, is injected into every agent on the project, including the ones spawned next week. Before a long run, raise **Task length** to 60 or more and deal with approvals — a sub-agent cannot show you a prompt, so anything it must ask about will simply stall. Since 0.14.0 that no longer means turning the safety off wholesale: under **Settings → Chat → By kind of work**, set *read*, *web* and *sub-agents* to **Auto** and leave *shell* on **Ask**, and add the commands you are happy to see run (`npm run test`, `git status`) to the allow list beside it. The zone editor has the same controls per zone, which is how a scout that only reads and an implementer that may edit stop being the same policy. **Where edits may land** is the same idea over paths (0.14.5): put `{project}` in the allow list and edits inside whichever project the chat is in stop prompting, while anything outside it still asks — a list here is a boundary rather than a shortcut, because being asked about exactly those is the reason to draw one.
 
 ## Web tools
 
@@ -180,6 +180,13 @@ Protocol server except the part only you have: the command or URL, the environme
 headers it needs, what has to be installed first, and a link to the page each credential comes
 from. Installing one writes the server and stops — nothing is launched or contacted until you
 press **Connect**, and then you set a danger level per tool and enable the ones you want per zone.
+
+**From the next launch on, enabled servers start themselves** (0.14.0). Every server whose own
+switch is on connects in the background as the app opens, so its tool list is current before the
+first message rather than after the first tool call, and a server that has broken since you last
+used it shows as a red row in Settings instead of surfacing as a failed step mid-turn. Turning a
+server off is how you stop it starting; **Connect** is now for reconnecting after a change or a
+failure.
 
 The shipped set covers Gmail, GitHub, Context7, Tavily search, the reference filesystem server and
 Playwright. It is a JSON file, not code: **Import entries from a URL** adds more (one entry, a list,

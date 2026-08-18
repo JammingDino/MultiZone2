@@ -116,16 +116,27 @@ pub async fn proposal(
                 Current::Absent => return Some(Err("the file does not exist yet".into())),
                 Current::Binary => return Some(Err("binary".into())),
             };
-            if !current.contains(old_text) {
-                // The tool will refuse this call for the same reason; saying so
-                // here means the user isn't asked to approve something that
-                // cannot work.
-                return Some(Err(
-                    "the text this edit replaces is not in the file as it stands".into(),
-                ));
+            let replace_all =
+                args.get("replace_all").and_then(|v| v.as_bool()).unwrap_or(false);
+            // Resolved by the tool's own function rather than a second copy of
+            // the rule: the diff shown here is the one that will land, down to
+            // the tolerant match and the re-indentation. A refusal is surfaced
+            // in the tool's own words, so the user isn't asked to approve
+            // something that cannot work.
+            match crate::tools::filesystem::resolve_edit(
+                &current,
+                old_text,
+                new_text,
+                replace_all,
+            ) {
+                Ok(r) => Some(Ok(Proposal {
+                    path,
+                    display,
+                    before: Some(current),
+                    after: r.updated,
+                })),
+                Err(why) => Some(Err(why)),
             }
-            let after = current.replacen(old_text, new_text, 1);
-            Some(Ok(Proposal { path, display, before: Some(current), after }))
         }
         _ => None,
     }

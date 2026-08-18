@@ -547,7 +547,14 @@ input[type="color"]:hover { border-color: var(--color-accent); }
 }
 .markdown .katex-display {
   margin: 0.5em 0;
+  /* A wide equation scrolls sideways. `overflow-x` on its own computes
+   * `overflow-y` to `auto` too, and KaTeX's struts overrun the line box by a
+   * fraction of a pixel — enough to hang a vertical scrollbar off every single
+   * display equation. Clip that axis instead, with a little room so tall
+   * glyphs (integrals, stacked fractions) aren't shaved. */
   overflow-x: auto;
+  overflow-y: hidden;
+  padding-block: 3px;
 }
 
 /* ===== function-plot (MathPlotBlock) theme awareness ===== */
@@ -839,7 +846,7 @@ html.shadows [class*="shadow-xl"] {
 }
 
 /* ===== Plan prose =====
-   A step's specification (0.12.7) is Markdown rendered inside a bounded panel,
+   A step's specification (0.14.6) is Markdown rendered inside a bounded panel,
    not inside the conversation. The transcript's rhythm — generous headings, a
    blank line's worth of air between paragraphs — is right for reading an answer
    and wrong for reviewing eight of these in a card that has to leave room for

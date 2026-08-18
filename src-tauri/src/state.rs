@@ -56,7 +56,7 @@ impl AppState {
         // so an edit the user dislikes can be put back (0.10.0).
         crate::checkpoints::set_store_root(app_data_dir.join("checkpoints"));
 
-        // Where a plan is written as a Markdown document (0.12.7), so a plan
+        // Where a plan is written as a Markdown document (0.14.6), so a plan
         // outlives the context that produced it and can be opened as a file.
         // Deliberately here rather than in the user's project: a plan is the
         // app's own record, and writing one should never touch a working tree.

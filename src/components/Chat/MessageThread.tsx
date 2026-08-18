@@ -5,6 +5,7 @@ import { useTts, zoneVoice } from "@/store/tts";
 import type { Message } from "@/lib/types";
 import { UserMessage, BotTurnView } from "@/components/Message/Message";
 import { TurnErrorNotice } from "./TurnErrorNotice";
+import { SpendLimitNotice } from "./SpendLimitNotice";
 import { groupMessages } from "@/lib/grouping";
 
 const PIN_THRESHOLD_PX = 60;
@@ -272,6 +273,10 @@ export function MessageThread({ chatId }: { chatId: string }) {
           {/* A failed turn saves no message, so its explanation lives outside
               the unit list — otherwise the turn renders as nothing at all. */}
           <TurnErrorNotice chatId={chatId} />
+          {/* A run stopped by the spend limit (0.14.3) — a question with
+              actions rather than a report, so it sits below the transcript it
+              stopped and stays until it is answered. */}
+          <SpendLimitNotice chatId={chatId} />
           <div ref={endRef} />
         </div>
       </div>

@@ -2,6 +2,8 @@
 
 Notes behind the 0.11.x and 1.2.x entries in [RELEASE_PLAN.md](RELEASE_PLAN.md). Two questions that turned out to be the same question: *can the app set itself up, so that connecting it to things is not a job for someone who reads code?*
 
+**Part 3 was added in 0.14.0** and asks the question from the other side: what does it take for something that is *not* on this machine — a phone, a tablet, a second laptop — to reach the app? It turns out to be mostly the same answer, because Part 1 already made the API the whole app.
+
 Written August 2026, against 0.10.1. **Part 1 was built as 0.11.0** — the route index, the honest health check, the persisted bind outcome and the drift test all landed, and the ten routes became 105.
 
 **The API tool landed too**, as `app_read` / `app_control`. It went one step further than the design below asked for: rather than attaching the token in Rust, it serves the request through the same `axum` router in-process, so there is no socket, no port, and no token *anywhere* in the path — and the tool works whether or not the user has switched the HTTP server on, which is the common case for someone who has never wanted remote access. The write side of the API also learned to tell an open window what it changed, so a preference or a zone changed by a model or a script is visible in the app immediately instead of at the next restart. **Connectors were built as 0.11.2**, and the catalog turned out to matter more than the header
@@ -98,6 +100,61 @@ Routes 1 and 2 together get a non-technical user most of the way: a catalog entr
 The reason to build the API self-check tool and the connector catalog in the same release is that they are the same feature from the user's side. A zone that can read the connector catalog, check whether a server is reachable, and report *why* it is not — "the command `npx` ran but the server exited: `GOOGLE_CREDENTIALS_PATH` is not set" — is a setup wizard that happens to be a conversation. That is the thing non-technical users are missing, not another settings panel.
 
 The line to hold, per the roadmap's principles: the model may *propose* configuration and *diagnose* it, and the user approves the write. Letting a model silently add an MCP server that launches a process is exactly the capability an injected prompt would want.
+
+---
+
+## Part 3 — the phone as a second window
+
+*Added August 2026, against 0.14.0, when the backlog's one-line "Mobile: Tauri mobile target" was re-scoped. Nothing here is built; this is the design the backlog entry points at.*
+
+### The premise
+
+The mobile app is **a remote for the desktop, not a second app**. Same chats, same zones, same projects — but you send from the phone and the machine at home runs it, with its providers, its models, its files, its MCP servers. Nothing infers on the phone; nothing is stored there the desktop does not already hold.
+
+Three reasons, since "port the app to a phone" is the obvious alternative:
+
+1. **A phone cannot run a 30B local model**, which is the premise of the product. Whatever ran on the phone would be a different, worse app wearing the same icon.
+2. **Every tool that matters needs the desktop.** `read_file`, shell, the knowledge index, an `npx` MCP server — none of them mean anything against a phone's sandbox.
+3. **Two stores would have to sync**, and cloud sync is a stated non-goal. A remote client has no second copy, so there is nothing to reconcile — the hard problem is deleted rather than solved.
+
+### What Part 1 already bought
+
+This design is cheap now and would not have been before 0.11.0:
+
+- **The API is the whole app.** 105 routes, a generated `/api/routes` index, and a drift test that fails the build when a Tauri command gains no route and no stated GUI-only reason. A remote client is not limited to the ten routes of the 0.5.x API.
+- **Streaming already works over HTTP.** `POST /api/chats/:id/messages` runs the same agentic loop as the GUI and streams it as SSE. That is the hard half of a chat client.
+- **The frontend has one seam.** Every backend call goes through [src/lib/tauri.ts](../src/lib/tauri.ts) — `invoke` for commands, `listen` for events — with a short list of window-chrome exceptions (`getVersion`, window controls, `downloadDir`, `saveFile`). Implement that module's surface against HTTP + SSE and the existing React app *is* the mobile client. The port is a transport, not a rewrite.
+
+### The four things that do not exist
+
+**1. A LAN bind, opt-in and honest.** The server binds `127.0.0.1` today, which is why nothing on the network can reach it. A remote client needs the app reachable from the LAN, and that is a genuinely different security posture from "a socket only this machine can open" — so it is its own switch, not a side effect of turning the API on. Bind to the selected interface rather than `0.0.0.0`, show the address the phone should use, and say plainly in the UI that the app is now on the network.
+
+**2. Pairing, replacing the pasted token.** Today's auth is one static bearer token, generated in Settings and copy-pasted. That does not survive contact with a phone: it is long, it is typed by hand, it is the same secret for every device, and revoking it logs out everything at once.
+
+Instead:
+
+- The desktop shows a **short code** — six digits, single-use, expiring in a few minutes — and the same payload as a QR (host, port, code) so nothing is typed at all.
+- The phone posts the code once and gets back a **per-device token** it stores in the platform keystore.
+- The desktop keeps a **device registry**: name, platform, first seen, last seen, and a *hash* of the token, never the token.
+- Each device can be revoked on its own. A lost phone is one tap, and no other device notices.
+
+Per-device tokens are what make "it works again next time" and "revoke just that one" the same feature. Pairing endpoints are the only unauthenticated writes on the surface, so they need the treatment that implies: rate-limited, code valid once, attempts logged to the registry, and pairing only possible while the user has the dialog open on the desktop.
+
+**3. Approvals that can be answered from the phone.** A tool approval currently blocks on a desktop dialog. Sending from a phone means a run can stall at a prompt nobody is standing in front of — the same failure the README's "select Everything before a long run" advice is really about. The pending queue needs to be readable and answerable over the API, with the phone able to approve, deny, or leave it. **0.14.2's per-category auto-approval is the prerequisite**: it is what makes an unattended run reasonable rather than a choice between babysitting and *Everything*.
+
+**4. Discovery, so nobody types an IP.** mDNS/Bonjour advertisement on the LAN, with manual host entry as the fallback that always works. Phones move between networks and DHCP moves addresses; a client that only knows an IP is one router reboot from useless.
+
+### Deliberately out of scope
+
+- **Anything from outside the LAN.** No relay, no tunnel, no account. That is cloud sync with a different name, and it is refused for the same reasons.
+- **Offline mode on the phone.** If the desktop cannot be reached, the phone says so. A local cache that answers when the desktop is asleep is a second store, which is the thing this design exists to avoid.
+- **A different feature set.** If it is worth doing on the phone it is a route, and the drift test already insists routes exist.
+
+The honest failure mode is **the desktop being asleep**, and it belongs in the UI as a stated reason rather than a spinner. A wake-on-LAN affordance is the obvious follow-on and should not be in the first version.
+
+### Sizing
+
+The desktop half is worth building first and stands on its own — a LAN bind, pairing, and a device registry are equally what a tablet, a second laptop, or a script on the network needs, and none of it requires a mobile toolchain. Then the transport shim behind `src/lib/tauri.ts`, which is testable in a desktop browser against a real desktop instance. Then the Tauri mobile shell, which by that point is layout, touch targets, and a pairing screen.
 
 ---
 

@@ -1,0 +1,95 @@
+name: CI
+
+# Manual only (0.14.0). These same checks now run on the development machine —
+# a pre-commit hook typechecks and runs the script tests, a pre-push hook adds
+# the frontend build and `cargo test --lib` (see .githooks/ and `npm run
+# check:all`). Running them here as well spent GitHub minutes re-proving what
+# was already proven locally, and the Rust job alone is ~13 minutes of rustc on
+# a hosted Windows runner for every commit.
+#
+# The jobs are kept, not deleted: they are the reference definition of what a
+# clean tree means, and `workflow_dispatch` still runs them on demand — for a
+# second opinion from a clean checkout, or when a change is suspected to depend
+# on something only this machine has. Nothing fires automatically.
+#
+# To put the automatic triggers back, uncomment the two lines below.
+#
+# No app bundle is built here: `cargo build --lib` and the frontend build catch
+# the class of breakage this is for (compiles clean, behaves wrong) without
+# paying for a full Tauri bundle on every commit.
+
+on:
+  # push:
+  #   branches: [main]
+  # pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Typecheck, build, script tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 22, not 20: `node --test` only learned to expand glob patterns in 22,
+      # so on 20 `npm test` passes "scripts/**/*.test.mjs" through as a literal
+      # path and fails with "Could not find". 20 is also past end-of-life, and
+      # development happens on 22 — CI running a different major than the one
+      # everything is written against is how a green local run fails here.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # `npm run build` runs `tsc -b` first, so a type error fails here.
+      - name: Build
+        run: npm run build
+
+      - name: Script tests
+        run: npm test
+
+  rust:
+    name: Rust tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      # `tauri::generate_context!()` resolves `frontendDist` at *compile* time,
+      # so the lib will not build unless ../dist exists — even though no test
+      # here touches a frontend asset. A placeholder is enough and keeps this
+      # job independent of the Node one: building the real frontend would add a
+      # duplicate npm install to a job that already spends 13 minutes in rustc,
+      # to embed files nothing under test reads.
+      - name: Placeholder frontend build output
+        shell: bash
+        run: |
+          mkdir -p dist
+          [ -f dist/index.html ] || echo '<!doctype html><title>ci</title>' > dist/index.html
+
+      # The library alone — no Tauri bundling, no WebView2. wreq links
+      # BoringSSL, so cmake/perl/NASM come from the runner image rather than
+      # being installed here.
+      - name: cargo test
+        working-directory: src-tauri
+        run: cargo test --lib
+
+      # Advisory: the tree is not currently rustfmt-clean, and reformatting it
+      # wholesale would bury real changes in noise for a long time afterwards.
+      # Reported so the drift is visible; not enforced until someone decides to
+      # do the one-off pass.
+      - name: cargo fmt (advisory)
+        working-directory: src-tauri
+        run: cargo fmt --check
+        continue-on-error: true

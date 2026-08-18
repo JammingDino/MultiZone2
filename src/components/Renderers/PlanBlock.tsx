@@ -159,7 +159,7 @@ export function PlanProposalBlock({
               )}
               {/* The specification, folded. It is the substance of the plan and
                   the reason the record is worth keeping — but the transcript is
-                  scrolled past, not read, so it opens on request (0.12.7). */}
+                  scrolled past, not read, so it opens on request (0.14.6). */}
               {s.detail?.trim() && <PlanFold label="Detail" body={s.detail} />}
               {s.acceptance?.trim() && (
                 <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">

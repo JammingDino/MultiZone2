@@ -1,0 +1,25 @@
+#!/bin/sh
+# Fast tier: typecheck + script tests (~15s). Runs on every commit.
+#
+# GitHub CI is manual-only as of 0.14.0 (.github/workflows/ci.yml), so this
+# hook and its pre-push sibling are what actually keeps the tree honest. The
+# split is by cost: everything under ~20s runs per commit, the minutes-long
+# checks wait for push — which in this repo is also a publish.
+#
+# `tsc -b` is the one that matters here. Most of what has broken in this project
+# compiled cleanly and behaved wrong, but the cheap half of that class — a
+# renamed field, a changed prop type, a store selector that no longer exists —
+# is exactly what the typechecker catches in seconds.
+#
+# Install with `npm run hooks:install` (sets core.hooksPath to .githooks).
+# Skip a single commit with `git commit --no-verify` — for a WIP commit you
+# already know does not build.
+
+set -e
+
+# Hooks run from the repository root, but not necessarily with it as $PWD when
+# invoked from a worktree or a subdirectory-aware client.
+cd "$(git rev-parse --show-toplevel)"
+
+printf 'pre-commit: typecheck + script tests\n'
+npm run --silent check

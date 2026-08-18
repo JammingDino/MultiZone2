@@ -1,8 +1,9 @@
 use crate::error::{AppError, AppResult};
 use crate::llm::types::*;
 use reqwest::Client;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 /// Base URLs that rejected `stream_options`. Asking for token counts is not
 /// worth a failed turn, but neither is paying a wasted round trip on every
@@ -10,6 +11,126 @@ use std::sync::{Mutex, OnceLock};
 fn no_stream_options() -> &'static Mutex<HashSet<String>> {
     static SET: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
     SET.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+// ---------------------------------------------------------------------------
+// Backoff and per-provider cooldown (0.14.1)
+// ---------------------------------------------------------------------------
+//
+// Until now there was no 429 path at all: a rate limit came back as a provider
+// error and ended the turn. One chat rarely meets a rate limit; a seven-member
+// panel meets it constantly, and every member hitting the same provider in the
+// same second is exactly the pattern that triggers one. Retrying immediately —
+// all seven at once — is how a brief limit becomes a sustained one.
+//
+// So: retry the transient failures with exponential backoff and jitter, and if
+// a provider fails repeatedly, stop asking it for a while. A cooldown is not
+// pessimism, it is what turns "seven agents hammering a dead endpoint" into one
+// fast, clear failure per agent.
+
+/// Attempts after the first, for one request.
+const MAX_RETRIES: u32 = 3;
+/// First backoff. Doubles each attempt, before jitter.
+const BASE_BACKOFF_MS: u64 = 500;
+/// Ceiling for a single wait. A turn is interactive; a 30-second sleep inside
+/// one is indistinguishable from a hang.
+const MAX_BACKOFF_MS: u64 = 8_000;
+/// The provider's own `Retry-After` is honoured up to here. Beyond it, waiting
+/// is worse than failing with a message the user can act on.
+const MAX_RETRY_AFTER: Duration = Duration::from_secs(20);
+/// Failures within this window count toward the cooldown.
+const FAILURE_WINDOW: Duration = Duration::from_secs(60);
+/// Failures in that window before the provider is put on ice.
+const FAILURES_BEFORE_COOLDOWN: usize = 3;
+/// How long a provider stays on ice.
+const COOLDOWN: Duration = Duration::from_secs(30);
+
+/// Wait before attempt `attempt` (1-based), given a jitter factor in `[0, 1)`.
+///
+/// Full jitter, not "exponential ± a bit": the point is to *spread* a panel's
+/// retries, and seven agents that all wait 1s ± 10% arrive together again. The
+/// jitter is a parameter so the arithmetic can be tested without a clock or a
+/// random source.
+fn backoff_delay(attempt: u32, jitter: f64) -> Duration {
+    let exp = BASE_BACKOFF_MS.saturating_mul(1u64 << attempt.min(16).saturating_sub(1));
+    let capped = exp.min(MAX_BACKOFF_MS);
+    // Never zero — a "retry" that waits no time at all is just a second
+    // simultaneous request.
+    let ms = (capped as f64 * (0.25 + 0.75 * jitter.clamp(0.0, 1.0))) as u64;
+    Duration::from_millis(ms.max(50))
+}
+
+/// A cheap jitter source. No `rand` in the tree, and spreading retries needs
+/// unpredictability of milliseconds, not cryptographic quality.
+fn jitter() -> f64 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    (nanos % 1_000) as f64 / 1_000.0
+}
+
+/// Is this worth trying again? A 429 or a 5xx is the provider saying "not now";
+/// a transport failure (`None`) is a socket that never got an answer. Everything
+/// else — a bad key, an unknown model, a malformed request — will fail
+/// identically the second time and retrying only delays the message that says so.
+fn is_transient(status: Option<reqwest::StatusCode>) -> bool {
+    match status {
+        None => true,
+        Some(s) => s.as_u16() == 429 || s.is_server_error(),
+    }
+}
+
+/// `Retry-After`, in seconds, clamped. Providers that answer a 429 with one are
+/// telling us the actual answer; guessing when we have been told is rude and
+/// usually wrong in the expensive direction.
+fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
+    let raw = headers.get(reqwest::header::RETRY_AFTER)?.to_str().ok()?;
+    let secs: u64 = raw.trim().parse().ok()?;
+    Some(Duration::from_secs(secs).min(MAX_RETRY_AFTER))
+}
+
+#[derive(Default)]
+struct ProviderHealth {
+    /// Recent transient failures, oldest first.
+    failures: VecDeque<Instant>,
+    cooling_until: Option<Instant>,
+}
+
+fn health() -> &'static Mutex<HashMap<String, ProviderHealth>> {
+    static MAP: OnceLock<Mutex<HashMap<String, ProviderHealth>>> = OnceLock::new();
+    MAP.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// How long this provider is still on ice, if it is.
+fn cooling_for(base_url: &str, now: Instant) -> Option<Duration> {
+    let map = health().lock().ok()?;
+    let until = map.get(base_url)?.cooling_until?;
+    (until > now).then(|| until - now)
+}
+
+/// Record a transient failure; returns true if it started a cooldown.
+fn note_failure(base_url: &str, now: Instant) -> bool {
+    let Ok(mut map) = health().lock() else { return false };
+    let entry = map.entry(base_url.to_string()).or_default();
+    while entry.failures.front().is_some_and(|t| now.duration_since(*t) > FAILURE_WINDOW) {
+        entry.failures.pop_front();
+    }
+    entry.failures.push_back(now);
+    if entry.failures.len() >= FAILURES_BEFORE_COOLDOWN {
+        entry.cooling_until = Some(now + COOLDOWN);
+        entry.failures.clear();
+        return true;
+    }
+    false
+}
+
+/// A provider that answered is a working provider — forget its history rather
+/// than carrying two old failures into an unrelated one an hour later.
+fn note_success(base_url: &str) {
+    if let Ok(mut map) = health().lock() {
+        map.remove(base_url);
+    }
 }
 
 pub struct LlmClient<'a> {
@@ -111,7 +232,60 @@ impl<'a> LlmClient<'a> {
     /// estimate — so it is worth one wasted round trip to find out, once, which
     /// kind of provider this is. After that the answer is remembered and the
     /// field is simply omitted.
+    /// Send it, and try again if the provider was merely busy (0.14.1).
+    ///
+    /// Retries happen here, before a single byte has been streamed, which is the
+    /// only place they are safe: once tokens have reached the transcript a retry
+    /// would duplicate them.
     pub async fn chat_stream(&self, req: &ChatRequest) -> AppResult<reqwest::Response> {
+        if let Some(left) = cooling_for(&self.base_url, Instant::now()) {
+            return Err(AppError::Provider(format!(
+                "{} is cooling down for another {}s after {FAILURES_BEFORE_COOLDOWN} failures in a \
+                 minute. This is the app backing off, not the provider refusing — try again after \
+                 that, or point this zone at another provider.",
+                self.base_url,
+                left.as_secs() + 1
+            )));
+        }
+
+        let mut attempt = 0;
+        loop {
+            match self.chat_stream_once(req).await {
+                Ok(res) => {
+                    note_success(&self.base_url);
+                    return Ok(res);
+                }
+                Err((status, wait, e)) => {
+                    if !is_transient(status) {
+                        // Not the provider's health — a bad key or a bad
+                        // request. Never counted toward a cooldown: putting a
+                        // provider on ice because a zone names a model that does
+                        // not exist would take the other zones down with it.
+                        return Err(e);
+                    }
+                    let cooling = note_failure(&self.base_url, Instant::now());
+                    attempt += 1;
+                    if cooling || attempt > MAX_RETRIES {
+                        return Err(e);
+                    }
+                    let delay = wait.unwrap_or_else(|| backoff_delay(attempt, jitter()));
+                    tracing::debug!(
+                        "{} returned {:?}; retry {attempt}/{MAX_RETRIES} in {}ms",
+                        self.base_url,
+                        status.map(|s| s.as_u16()),
+                        delay.as_millis(),
+                    );
+                    tokio::time::sleep(delay).await;
+                }
+            }
+        }
+    }
+
+    /// One attempt, including the `stream_options` probe and its fallback.
+    async fn chat_stream_once(
+        &self,
+        req: &ChatRequest,
+    ) -> Result<reqwest::Response, (Option<reqwest::StatusCode>, Option<Duration>, AppError)> {
         let refused = no_stream_options()
             .lock()
             .map(|s| s.contains(&self.base_url))
@@ -124,11 +298,12 @@ impl<'a> LlmClient<'a> {
                 // about the field. A bad key, a rate limit or a provider outage
                 // says nothing about `stream_options`, and retrying those would
                 // double every failure and then blame the wrong thing.
-                Err((status, e)) if !rejects_the_request(status) => return Err(e),
-                Err((_, e)) => {
+                Err(e) if !rejects_the_request(e.0) => return Err(e),
+                Err(e) => {
                     tracing::debug!(
-                        "{} refused stream_options ({e}); retrying without usage reporting",
+                        "{} refused stream_options ({}); retrying without usage reporting",
                         self.base_url,
+                        e.2,
                     );
                     if let Ok(mut set) = no_stream_options().lock() {
                         set.insert(self.base_url.clone());
@@ -138,22 +313,28 @@ impl<'a> LlmClient<'a> {
         }
 
         let plain = ChatRequest { stream_options: None, ..req.clone() };
-        self.post_stream(&plain).await.map_err(|(_, e)| e)
+        self.post_stream(&plain).await
     }
 
-    /// The response status, alongside the error, so the caller can tell an
-    /// unusable request apart from an unusable provider.
+    /// The response status and any `Retry-After`, alongside the error, so the
+    /// caller can tell an unusable request apart from a busy provider.
     async fn post_stream(
         &self,
         req: &ChatRequest,
-    ) -> Result<reqwest::Response, (Option<reqwest::StatusCode>, AppError)> {
+    ) -> Result<reqwest::Response, (Option<reqwest::StatusCode>, Option<Duration>, AppError)> {
         let http_req = self.http.post(self.url("/chat/completions")).json(req);
-        let res = self.auth(http_req).send().await.map_err(|e| (None, AppError::from(e)))?;
+        let res = self
+            .auth(http_req)
+            .send()
+            .await
+            .map_err(|e| (None, None, AppError::from(e)))?;
         if !res.status().is_success() {
             let status = res.status();
+            let wait = retry_after(res.headers());
             let body = res.text().await.unwrap_or_default();
             return Err((
                 Some(status),
+                wait,
                 AppError::Provider(format!("chat/completions {status}: {body}")),
             ));
         }
@@ -170,4 +351,104 @@ fn rejects_the_request(status: Option<reqwest::StatusCode>) -> bool {
         status.map(|s| s.as_u16()),
         Some(400) | Some(404) | Some(422)
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reqwest::StatusCode;
+
+    fn code(n: u16) -> Option<StatusCode> {
+        Some(StatusCode::from_u16(n).unwrap())
+    }
+
+    #[test]
+    fn a_busy_provider_is_retried_and_a_broken_request_is_not() {
+        assert!(is_transient(code(429)), "rate limit");
+        assert!(is_transient(code(500)));
+        assert!(is_transient(code(503)));
+        assert!(is_transient(None), "a socket that never answered");
+
+        // These fail identically the second time; retrying only delays the
+        // message that explains them.
+        assert!(!is_transient(code(401)), "a bad key");
+        assert!(!is_transient(code(404)), "a model that does not exist");
+        assert!(!is_transient(code(400)));
+    }
+
+    #[test]
+    fn backoff_doubles_and_is_capped() {
+        // Same jitter throughout, so this measures the curve rather than luck.
+        let at = |n| backoff_delay(n, 1.0).as_millis();
+        assert_eq!(at(1), BASE_BACKOFF_MS as u128);
+        assert_eq!(at(2), (BASE_BACKOFF_MS * 2) as u128);
+        assert_eq!(at(3), (BASE_BACKOFF_MS * 4) as u128);
+        assert_eq!(at(20), MAX_BACKOFF_MS as u128, "capped, and no overflow");
+    }
+
+    /// The reason jitter is here at all: seven panel members that all wait the
+    /// same 1s arrive together and trigger the same limit again.
+    #[test]
+    fn jitter_spreads_retries_without_ever_waiting_nothing() {
+        let low = backoff_delay(3, 0.0);
+        let high = backoff_delay(3, 0.999);
+        assert!(low < high, "{low:?} !< {high:?}");
+        assert!(low.as_millis() >= 50, "a retry that waits no time is a second request");
+    }
+
+    #[test]
+    fn retry_after_is_read_and_clamped() {
+        let mut h = reqwest::header::HeaderMap::new();
+        h.insert(reqwest::header::RETRY_AFTER, "7".parse().unwrap());
+        assert_eq!(retry_after(&h), Some(Duration::from_secs(7)));
+
+        // A provider asking for ten minutes is telling us to fail instead.
+        h.insert(reqwest::header::RETRY_AFTER, "600".parse().unwrap());
+        assert_eq!(retry_after(&h), Some(MAX_RETRY_AFTER));
+
+        // An HTTP-date form is valid per the RFC and not understood here; the
+        // fallback is the ordinary backoff, not a panic.
+        h.insert(reqwest::header::RETRY_AFTER, "Wed, 21 Oct 2026 07:28:00 GMT".parse().unwrap());
+        assert_eq!(retry_after(&h), None);
+    }
+
+    #[test]
+    fn three_failures_in_the_window_start_a_cooldown() {
+        let url = "http://cooldown-test.invalid/v1";
+        let now = Instant::now();
+        assert!(!note_failure(url, now));
+        assert!(!note_failure(url, now));
+        assert!(note_failure(url, now), "the third one");
+
+        assert!(cooling_for(url, now).is_some());
+        assert!(
+            cooling_for(url, now + COOLDOWN + Duration::from_secs(1)).is_none(),
+            "and it expires"
+        );
+        note_success(url);
+    }
+
+    /// Two failures an hour apart are two unrelated blips, not a broken
+    /// provider.
+    #[test]
+    fn failures_outside_the_window_do_not_accumulate() {
+        let url = "http://window-test.invalid/v1";
+        let start = Instant::now();
+        assert!(!note_failure(url, start));
+        assert!(!note_failure(url, start + FAILURE_WINDOW * 2));
+        assert!(!note_failure(url, start + FAILURE_WINDOW * 4));
+        assert!(cooling_for(url, start + FAILURE_WINDOW * 4).is_none());
+        note_success(url);
+    }
+
+    #[test]
+    fn a_success_clears_the_history() {
+        let url = "http://recovery-test.invalid/v1";
+        let now = Instant::now();
+        note_failure(url, now);
+        note_failure(url, now);
+        note_success(url);
+        assert!(!note_failure(url, now), "back to counting from zero");
+        note_success(url);
+    }
 }

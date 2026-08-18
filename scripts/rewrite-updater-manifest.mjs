@@ -27,6 +27,7 @@
 
 import { writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
+import { rewritePlatforms } from "./rewrite-manifest-core.mjs";
 
 const repo = process.env.GITHUB_REPOSITORY;
 const tag = process.env.RELEASE_TAG;
@@ -71,17 +72,11 @@ const manifest = await (
 
 // Match each platform back to its asset by the filename the bundler put in the
 // URL. Going through the name (rather than assuming one asset per platform)
-// keeps this correct if more targets are added later.
-const byName = new Map(release.assets.map((a) => [a.name, a]));
-
-for (const [platform, entry] of Object.entries(manifest.platforms ?? {})) {
-  const filename = decodeURIComponent(new URL(entry.url).pathname.split("/").pop());
-  const asset = byName.get(filename);
-  if (!asset) {
-    throw new Error(`no asset named ${filename} in release ${tag} (platform ${platform})`);
-  }
-  entry.url = api(`/releases/assets/${asset.id}`);
-  console.log(`${platform}: ${filename} -> asset ${asset.id}`);
+// keeps this correct if more targets are added later. The mapping itself lives
+// in `rewrite-manifest-core.mjs` so it can be tested without a release.
+const { mapped } = rewritePlatforms(manifest, release.assets, repo);
+for (const { platform, filename, id } of mapped) {
+  console.log(`${platform}: ${filename} -> asset ${id}`);
 }
 
 await mkdir(dirname(outPath), { recursive: true });

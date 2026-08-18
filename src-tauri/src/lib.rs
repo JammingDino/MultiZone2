@@ -1,13 +1,17 @@
 mod api;
+mod approvals;
 mod audio;
 mod checkpoints;
+mod checks;
 mod db;
 mod diffs;
+mod instructions;
 mod knowledge;
 mod llm;
 mod mcp;
 mod ocr;
 mod plans;
+mod repomap;
 mod review;
 mod pdf_bridge;
 mod skillpacks;
@@ -121,6 +125,13 @@ pub fn run() {
         // one of the two requests.
         .plugin(build_updater_plugin())
         .plugin(tauri_plugin_process::init())
+        // OS notifications (0.14.3), for the two moments a run stops and waits
+        // for a person: a tool approval and an `ask_user`. Both block the turn
+        // indefinitely — the approval until its five-minute timeout auto-denies
+        // and the sub-agent stalls with no visible cause — and both are most
+        // likely to happen while the user is in another window, since the whole
+        // point of a long agentic run is not watching it.
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let handle = app.handle().clone();
             tauri::async_runtime::block_on(async move {
@@ -150,6 +161,11 @@ pub fn run() {
                 handle.manage(state);
                 // Launch the HTTP API server if the user has enabled it.
                 commands::api::start_if_enabled(&handle).await;
+                // Bring every enabled MCP server up (0.14.0). Returns as soon as
+                // the servers are read from the database — each connection runs
+                // in its own task, so npx starting three stdio servers is not in
+                // front of the first window paint.
+                commands::mcp::start_enabled(&handle).await;
                 // Start the knowledge directory watcher (live auto re-index).
                 {
                     let st = handle.state::<AppState>();
@@ -192,6 +208,7 @@ pub fn run() {
             commands::chats::rename_chat,
             commands::chats::set_chat_zone,
             commands::chats::set_chat_smart,
+            commands::messages::set_chat_spend_limit,
             commands::plans::set_chat_plan_mode,
             commands::plans::list_plans,
             commands::plans::pending_plan,
@@ -274,6 +291,9 @@ pub fn run() {
             commands::checkpoints::restore_checkpoint,
             commands::checkpoints::checkpoints_since_message,
             commands::checkpoints::restore_to_message,
+            commands::checkpoints::rewind_to_message,
+            commands::checkpoints::rewind_forward,
+            commands::checkpoints::rewind_status,
             commands::review::list_staged_edits,
             commands::review::apply_staged_edit,
             commands::review::discard_staged_edit,

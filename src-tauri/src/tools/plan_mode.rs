@@ -28,7 +28,7 @@ use serde_json::{json, Value};
 use sqlx::SqlitePool;
 
 /// Offered whenever the chat is *not* in plan mode and the zone has any tools
-/// (0.12.7 — it used to require a mutating one; see `apply_plan_mode`).
+/// (0.14.6 — it used to require a mutating one; see `apply_plan_mode`).
 ///
 /// The description is written in the imperative and leads with the triggers,
 /// because the failure this tool actually had was not misuse: it was never being

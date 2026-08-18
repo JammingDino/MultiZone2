@@ -15,6 +15,8 @@ import type {
   StagedEdit,
   PruneOutcome,
   RestoreReport,
+  RewindReport,
+  RewindStatus,
   DbStats,
   IndexSummary,
   InputPart,
@@ -71,6 +73,13 @@ export const setChatZone = (id: string, zoneId: string | null) =>
   invoke<void>("set_chat_zone", { id, zoneId });
 export const setChatSmart = (id: string, smart: boolean) =>
   invoke<void>("set_chat_smart", { id, smart });
+/**
+ * This session's own spend ceiling (0.14.4). `null` hands it back to the global
+ * default; `0` means unmetered. Written to the session root, so setting it from
+ * a sub-agent's chat still describes the whole session.
+ */
+export const setChatSpendLimit = (chatId: string, limit: number | null) =>
+  invoke<void>("set_chat_spend_limit", { chatId, limit });
 // Plan mode & plans (0.12.0)
 export const setChatPlanMode = (chatId: string, on: boolean) =>
   invoke<void>("set_chat_plan_mode", { chatId, on });
@@ -238,6 +247,22 @@ export const restoreToMessage = (chatId: string, messageId: string, force?: bool
   invoke<RestoreReport[]>("restore_to_message", { chatId, messageId, force: force ?? false });
 
 /**
+ * Rewind the tree to how it stood at `messageId`, reversibly (1.1). Unlike
+ * `restoreToMessage` it leaves a mark, so `rewindForward` can put the tree back
+ * the way it was.
+ */
+export const rewindToMessage = (chatId: string, messageId: string, force?: boolean) =>
+  invoke<RewindReport>("rewind_to_message", { chatId, messageId, force: force ?? false });
+
+/** Walk the most recent rewind forward again. Null when there is none. */
+export const rewindForward = (chatId: string, force?: boolean) =>
+  invoke<RestoreReport | null>("rewind_forward", { chatId, force: force ?? false });
+
+/** Whether this chat has a rewind that can be walked forward. */
+export const rewindStatus = (chatId: string) =>
+  invoke<RewindStatus>("rewind_status", { chatId });
+
+/**
  * The last bind outcome — the same row `/api/health` reports, so the panel and
  * the API cannot tell different stories about whether the server is up.
  */
@@ -302,6 +327,18 @@ export const disconnectMcpServer = (id: string) =>
   invoke<void>("disconnect_mcp_server", { id });
 export const setMcpToolDanger = (toolId: string, dangerLevel: number) =>
   invoke<void>("set_mcp_tool_danger", { toolId, dangerLevel });
+/**
+ * Emitted as each enabled server settles during the launch autostart (0.14.0).
+ * Servers connect in parallel and a stdio one can take several seconds of npx,
+ * so Settings → MCP subscribes rather than reading status once on mount — which
+ * would otherwise show every row as "Disconnected" for as long as the window
+ * happened to open before the servers came up.
+ */
+export function onMcpStatusChanged(
+  handler: (e: { serverId: string }) => void,
+): Promise<UnlistenFn> {
+  return listen<{ serverId: string }>("mcp-status-changed", (e) => handler(e.payload));
+}
 
 // Connectors (0.11.2) — the catalog an MCP server is installed from, and the
 // diagnosis for one that will not connect.

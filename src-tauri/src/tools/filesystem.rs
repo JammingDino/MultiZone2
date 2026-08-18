@@ -10,6 +10,125 @@ const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
 /// so the ceiling is about what that costs rather than what a page image costs.
 const MAX_PDF_BYTES: usize = 50 * 1024 * 1024;
 
+/// Lines returned by `read_file` when the call does not say (0.14.1). Roughly
+/// 15k tokens of source at typical line lengths — big enough that most files
+/// arrive whole and nothing about ordinary use changes, small enough that a
+/// 40,000-line log cannot end a turn by itself.
+const DEFAULT_LINE_LIMIT: usize = 1200;
+/// The most a single call can ask for, however large a `limit` it passes. A
+/// model that wants more can page; a model that asked for a million lines has
+/// made a mistake that should not cost the whole context window.
+const MAX_LINE_LIMIT: usize = 5000;
+/// Longer lines are clipped with a marker. This is for minified bundles and
+/// single-line JSON, where one "line" can be megabytes — the window would be
+/// honoured and the context blown anyway.
+const MAX_LINE_CHARS: usize = 2000;
+
+/// The result of applying an offset/limit window to a file's text.
+#[derive(Debug, PartialEq)]
+struct LineWindow {
+    text: String,
+    /// Lines in the whole file.
+    total: usize,
+    /// 1-based inclusive range actually returned. `from > to` means empty.
+    from: usize,
+    to: usize,
+    /// Whether anything was left out — either side of the window.
+    truncated: bool,
+    /// How many returned lines were clipped at [`MAX_LINE_CHARS`].
+    clipped_lines: usize,
+}
+
+/// Take the `offset`/`limit` window of `text`, 1-based and inclusive.
+///
+/// Split out as a pure function because every interesting case here is an
+/// off-by-one: an offset past the end of the file, a `limit` of zero, a file
+/// with no trailing newline. Reading a large file is also the one place where
+/// getting the arithmetic wrong is invisible — the model receives *some* code,
+/// with no way to tell it is the wrong region.
+fn window_lines(text: &str, offset: Option<usize>, limit: Option<usize>) -> LineWindow {
+    let lines: Vec<&str> = text.lines().collect();
+    let total = lines.len();
+    // `offset` is a line number, so 0 and 1 both mean "from the start" — models
+    // write both, and refusing one of them teaches nothing.
+    let from = offset.unwrap_or(1).max(1);
+    let limit = limit.unwrap_or(DEFAULT_LINE_LIMIT).min(MAX_LINE_LIMIT);
+
+    if from > total || limit == 0 {
+        return LineWindow {
+            text: String::new(),
+            total,
+            from,
+            to: from.saturating_sub(1),
+            truncated: total > 0,
+            clipped_lines: 0,
+        };
+    }
+
+    let start = from - 1;
+    let end = (start + limit).min(total);
+    let mut clipped_lines = 0;
+    let selected: Vec<String> = lines[start..end]
+        .iter()
+        .map(|line| {
+            // Chars, not bytes: clipping mid-codepoint would corrupt the text
+            // the model then quotes back as an edit anchor.
+            if line.chars().count() > MAX_LINE_CHARS {
+                clipped_lines += 1;
+                let head: String = line.chars().take(MAX_LINE_CHARS).collect();
+                format!("{head}… [line clipped]")
+            } else {
+                (*line).to_string()
+            }
+        })
+        .collect();
+
+    LineWindow {
+        text: selected.join("\n"),
+        total,
+        from,
+        to: end,
+        truncated: start > 0 || end < total,
+        clipped_lines,
+    }
+}
+
+/// The sentence the model reads when it did not get the whole file. It has to
+/// say the exact next call to make: "truncated" alone produces either a model
+/// that answers from a fragment as though it were the file, or one that re-reads
+/// the same window and loops.
+fn window_note(w: &LineWindow, path: &str) -> Option<String> {
+    if !w.truncated && w.clipped_lines == 0 {
+        return None;
+    }
+    let mut note = if w.from > w.to {
+        format!(
+            "No lines returned: the window starts at line {} but {path} has {} line(s).",
+            w.from, w.total
+        )
+    } else {
+        format!(
+            "Showing lines {}-{} of {}.",
+            w.from, w.to, w.total
+        )
+    };
+    if w.to < w.total {
+        note.push_str(&format!(
+            " Read the next window with offset {} (and a limit if you want more or fewer than \
+             {DEFAULT_LINE_LIMIT} lines). Do not answer as though you have seen the whole file.",
+            w.to + 1
+        ));
+    }
+    if w.clipped_lines > 0 {
+        note.push_str(&format!(
+            " {} line(s) were longer than {MAX_LINE_CHARS} characters and were clipped — quoting \
+             one as an edit anchor will not match.",
+            w.clipped_lines
+        ));
+    }
+    Some(note)
+}
+
 fn image_mime(path: &Path) -> Option<&'static str> {
     match path
         .extension()
@@ -52,7 +171,10 @@ pub fn definitions(project_dir: Option<&str>, vision_capable: bool) -> Vec<Tool>
                 description: if vision_capable {
                     format!(
                         "Read a file. Use before editing, and whenever the answer depends on what \
-                         a file actually contains. Text is returned as a string; set `as_image` \
+                         a file actually contains. Text is returned as a string, and a long file \
+                         arrives a window at a time: the result always reports the file's total \
+                         line count and the range you got, so continue with `offset` rather than \
+                         answering from a fragment. Set `as_image` \
                          for an image file to put it in your visual context. A `.pdf` is returned \
                          as page images (so you see tables, figures and scans) — page 1 plus the \
                          document's page count unless you ask for more via `pages`.\n\n{hint}"
@@ -60,7 +182,10 @@ pub fn definitions(project_dir: Option<&str>, vision_capable: bool) -> Vec<Tool>
                 } else {
                     format!(
                         "Read a file. Use before editing, and whenever the answer depends on what \
-                         a file actually contains. Text is returned as a string; a `.pdf` is \
+                         a file actually contains. Text is returned as a string, and a long file \
+                         arrives a window at a time: the result always reports the file's total \
+                         line count and the range you got, so continue with `offset` rather than \
+                         answering from a fragment. A `.pdf` is \
                          returned as extracted text — page 1 plus the document's page count \
                          unless you ask for more via `pages`.\n\n{hint}"
                     )
@@ -84,6 +209,15 @@ pub fn definitions(project_dir: Option<&str>, vision_capable: bool) -> Vec<Tool>
                                 "type": "boolean",
                                 "description": "Extract a PDF's text instead of rendering pages. Cheaper for long text-only documents; loses layout, figures and scans.",
                                 "default": false
+                            },
+                            "offset": {
+                                "type": "integer",
+                                "description": "Text files: first line to read, 1-based. Use the `lines.to` of the previous read plus one to continue.",
+                                "default": 1
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": "Text files: how many lines to read (default 1200, maximum 5000)."
                             }
                         },
                         "required": ["path"]
@@ -97,6 +231,15 @@ pub fn definitions(project_dir: Option<&str>, vision_capable: bool) -> Vec<Tool>
                                 "type": "string",
                                 "description": "PDF pages to read: \"3\", \"1-4,9\", or \"all\" (capped at 30 per call).",
                                 "default": "1"
+                            },
+                            "offset": {
+                                "type": "integer",
+                                "description": "Text files: first line to read, 1-based. Use the `lines.to` of the previous read plus one to continue.",
+                                "default": 1
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": "Text files: how many lines to read (default 1200, maximum 5000)."
                             }
                         },
                         "required": ["path"]
@@ -151,16 +294,23 @@ pub fn definitions(project_dir: Option<&str>, vision_capable: bool) -> Vec<Tool>
             function: ToolFunction {
                 name: "edit_file".into(),
                 description: format!(
-                    "Change part of an existing file by replacing an exact block of text. Read the \
-                     file first — `old_text` must match byte for byte, whitespace included, and \
-                     only its first occurrence is replaced.\n\n{hint}"
+                    "Change part of an existing file by replacing a block of text. Read the file \
+                     first. `old_text` must identify exactly one place in the file: if it appears \
+                     more than once the edit is refused with the count, so include enough \
+                     surrounding lines to make it unique (or set `replace_all` when you really do \
+                     mean every occurrence). Indentation and trailing whitespace are matched \
+                     leniently when an exact match fails.\n\n{hint}"
                 ),
                 parameters: json!({
                     "type": "object",
                     "properties": {
                         "path": { "type": "string" },
-                        "old_text": { "type": "string", "description": "Exact text to replace." },
-                        "new_text": { "type": "string", "description": "Text to replace it with." }
+                        "old_text": { "type": "string", "description": "Text to replace. Must be unique in the file unless replace_all is set." },
+                        "new_text": { "type": "string", "description": "Text to replace it with." },
+                        "replace_all": {
+                            "type": "boolean",
+                            "description": "Replace every occurrence instead of refusing an ambiguous match. Default false."
+                        }
                     },
                     "required": ["path", "old_text", "new_text"]
                 }),
@@ -653,16 +803,38 @@ pub async fn read_file(
     match tokio::fs::read(&p).await {
         Ok(bytes) => {
             let path_str = p.to_string_lossy().to_string();
-            Ok(json!({
-                "ref": 1,
-                "path": path_str,
-                "source": path_str,
-                "content": bytes_to_string(bytes),
-                "citation_instructions": READ_FILE_CITATION,
-            })
-            .to_string())
+            let text = bytes_to_string(bytes);
+            Ok(text_read_result(&path_str, &text, args).to_string())
         }
         Err(e) => Ok(json!({ "error": e.to_string() }).to_string()),
+    }
+}
+
+/// The JSON a text read returns, windowed by the call's `offset`/`limit`.
+/// Separate from [`read_file`] so it can be tested without an `AppHandle`.
+fn text_read_result(path: &str, text: &str, args: &Value) -> Value {
+    let window = window_lines(text, usize_arg(args, "offset"), usize_arg(args, "limit"));
+    let mut out = json!({
+        "ref": 1,
+        "path": path,
+        "source": path,
+        "content": window.text,
+        "lines": { "total": window.total, "from": window.from, "to": window.to },
+        "citation_instructions": READ_FILE_CITATION,
+    });
+    if let Some(note) = window_note(&window, path) {
+        out["truncated"] = json!(window.truncated);
+        out["note"] = json!(note);
+    }
+    out
+}
+
+/// Read a whole-number argument, accepting the string form models often send.
+fn usize_arg(args: &Value, key: &str) -> Option<usize> {
+    match args.get(key)? {
+        Value::Number(n) => n.as_u64().map(|v| v as usize),
+        Value::String(s) => s.trim().parse::<usize>().ok(),
+        _ => None,
     }
 }
 
@@ -1222,7 +1394,7 @@ pub async fn create_folder(
 
 /// Directories never worth walking for either search tool. Keeps a search of a
 /// real project from drowning in dependency and VCS noise.
-const SKIP_DIRS: &[&str] = &[
+pub(crate) const SKIP_DIRS: &[&str] = &[
     ".git", "node_modules", "target", "dist", "build", ".next", ".venv",
     "venv", "__pycache__", ".cache", ".svelte-kit",
 ];
@@ -1481,6 +1653,303 @@ pub async fn search_file_text(
     .to_string())
 }
 
+// ─── Editing (0.14.0) ────────────────────────────────────────────────────────
+//
+// An edit used to be `current.replacen(old_text, new_text, 1)` guarded by a
+// `contains` check, which fails in two directions. A `old_text` that appears
+// twice edited the *first* one and reported success — a wrong edit that claims
+// to have worked, which is the worst thing a file tool can do. And an anchor
+// that differed by a trailing space or a level of indentation was refused
+// outright, costing a turn to a difference that changes nothing.
+//
+// Resolution now lives in one place because the approval prompt previews the
+// same edit (`review::proposal`) and the diff a user agrees to has to be the
+// diff that lands.
+
+/// How an edit's anchor was found in the file.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum EditMatch {
+    /// `old_text` was present byte for byte.
+    Exact,
+    /// Matched line-wise ignoring indentation and trailing whitespace.
+    Tolerant,
+}
+
+impl EditMatch {
+    fn as_str(self) -> &'static str {
+        match self {
+            EditMatch::Exact => "exact",
+            EditMatch::Tolerant => "whitespace-tolerant",
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ResolvedEdit {
+    pub updated: String,
+    pub matched: EditMatch,
+    /// How many places the anchor identified. Always 1 unless `replace_all`.
+    pub occurrences: usize,
+}
+
+/// Work out what an edit would leave in the file, or why it cannot be applied.
+///
+/// The refusals are written for the model that has to act on them: they say
+/// what was wrong *and* what to do differently, because "not found" on its own
+/// reliably produces the same call again.
+pub fn resolve_edit(
+    current: &str,
+    old_text: &str,
+    new_text: &str,
+    replace_all: bool,
+) -> Result<ResolvedEdit, String> {
+    if old_text.is_empty() {
+        return Err("old_text is empty — it must be the text to replace. To create or overwrite \
+                    a file use create_file; to append, read the file and edit against its end."
+            .into());
+    }
+    if old_text == new_text {
+        return Err("old_text and new_text are identical — this edit would change nothing".into());
+    }
+
+    let exact = current.matches(old_text).count();
+    match exact {
+        1 => {
+            return Ok(ResolvedEdit {
+                updated: current.replacen(old_text, new_text, 1),
+                matched: EditMatch::Exact,
+                occurrences: 1,
+            })
+        }
+        n if n > 1 => {
+            if replace_all {
+                return Ok(ResolvedEdit {
+                    updated: current.replace(old_text, new_text),
+                    matched: EditMatch::Exact,
+                    occurrences: n,
+                });
+            }
+            return Err(format!(
+                "old_text appears {n} times in this file, so which one to change is ambiguous. \
+                 Include more surrounding lines to make it unique, or set replace_all: true if \
+                 every occurrence should change."
+            ));
+        }
+        _ => {}
+    }
+
+    // No exact match. Try again line-wise, ignoring indentation and trailing
+    // whitespace — the two things a model reproduces least reliably and which
+    // most often mean nothing.
+    let spans = tolerant_spans(current, old_text);
+    match spans.len() {
+        0 => Err("old_text was not found in the file, even ignoring indentation and trailing \
+                  whitespace. Read the file again — it may have changed since you last saw it."
+            .into()),
+        1 => {
+            let (start, end) = spans[0];
+            let indented = reindent(current, old_text, new_text, start);
+            let mut updated = String::with_capacity(current.len() + indented.len());
+            updated.push_str(&current[..start]);
+            updated.push_str(&indented);
+            updated.push_str(&current[end..]);
+            Ok(ResolvedEdit { updated, matched: EditMatch::Tolerant, occurrences: 1 })
+        }
+        n => Err(format!(
+            "old_text has no exact match, and ignoring whitespace it matches {n} places — which \
+             one to change is ambiguous. Include more surrounding lines to make it unique."
+        )),
+    }
+}
+
+/// Byte spans in `current` whose lines equal `old_text`'s lines once trimmed.
+///
+/// Deliberately line-based: an anchor that differs mid-line is a different
+/// anchor, and guessing there is how a "helpful" edit tool corrupts a file.
+fn tolerant_spans(current: &str, old_text: &str) -> Vec<(usize, usize)> {
+    let needle: Vec<&str> = old_text.lines().collect();
+    if needle.is_empty() {
+        return Vec::new();
+    }
+    // (byte offset, line) for every line in the file.
+    let mut lines: Vec<(usize, &str)> = Vec::new();
+    let mut offset = 0usize;
+    for line in current.split_inclusive('\n') {
+        lines.push((offset, line.trim_end_matches(['\n', '\r'])));
+        offset += line.len();
+    }
+    if lines.len() < needle.len() {
+        return Vec::new();
+    }
+
+    let trimmed: Vec<&str> = needle.iter().map(|l| l.trim()).collect();
+    let mut out = Vec::new();
+    for start in 0..=(lines.len() - needle.len()) {
+        let hit = (0..needle.len()).all(|i| lines[start + i].1.trim() == trimmed[i]);
+        if !hit {
+            continue;
+        }
+        let begin = lines[start].0;
+        let last = start + needle.len() - 1;
+        // End at the last matched line's end, keeping its newline out of the
+        // span so the replacement doesn't have to reproduce it.
+        let end = lines[last].0 + lines[last].1.len();
+        out.push((begin, end));
+    }
+    out
+}
+
+/// Shift `new_text` onto the indentation the file actually uses at `start`.
+///
+/// A model that dropped four spaces from its anchor dropped them from the
+/// replacement too, and writing that back verbatim would silently de-indent the
+/// block it just edited.
+fn reindent(current: &str, old_text: &str, new_text: &str, start: usize) -> String {
+    let file_indent = leading_ws(current[start..].lines().next().unwrap_or(""));
+    let old_indent = leading_ws(old_text.lines().next().unwrap_or(""));
+    if file_indent == old_indent {
+        return new_text.to_string();
+    }
+    if let Some(extra) = file_indent.strip_prefix(old_indent) {
+        if !extra.is_empty() {
+            return new_text
+                .lines()
+                .map(|l| if l.trim().is_empty() { l.to_string() } else { format!("{extra}{l}") })
+                .collect::<Vec<_>>()
+                .join("\n");
+        }
+    }
+    if let Some(surplus) = old_indent.strip_prefix(file_indent) {
+        if !surplus.is_empty() {
+            return new_text
+                .lines()
+                .map(|l| l.strip_prefix(surplus).unwrap_or(l).to_string())
+                .collect::<Vec<_>>()
+                .join("\n");
+        }
+    }
+    new_text.to_string()
+}
+
+fn leading_ws(line: &str) -> &str {
+    &line[..line.len() - line.trim_start().len()]
+}
+
+/// Whether an edit broke the file's syntax, reported only when the file parsed
+/// *before* the edit and does not after.
+///
+/// The regression framing is what keeps this honest. A guardrail is only worth
+/// having if it fires when something is definitely wrong, and a checker that
+/// misreads a construct misreads it in both versions — so comparing the two
+/// cancels the checker's own blind spots out. A file that was already
+/// unbalanced is left alone rather than being blamed on this edit.
+fn syntax_regression(path: &Path, before: &str, after: &str) -> Option<String> {
+    // Very large files aren't worth scanning twice on every edit.
+    if after.len() > 512 * 1024 {
+        return None;
+    }
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    if ext == "json" {
+        let was_valid = serde_json::from_str::<serde_json::Value>(before).is_ok();
+        if !was_valid {
+            return None;
+        }
+        if let Err(e) = serde_json::from_str::<serde_json::Value>(after) {
+            return Some(format!("the file is no longer valid JSON ({e})"));
+        }
+        return None;
+    }
+    const BRACKETED: &[&str] = &[
+        "rs", "ts", "tsx", "js", "jsx", "mjs", "cjs", "c", "h", "cc", "cpp", "hpp", "java", "cs",
+        "go", "css", "scss",
+    ];
+    if !BRACKETED.contains(&ext.as_str()) {
+        return None;
+    }
+    // Rust char literals ('(' and friends) and lifetimes both live behind a
+    // single quote, and telling them apart needs a real lexer — so quotes of
+    // that kind are simply not treated as string delimiters there.
+    let single_quotes_are_strings = ext != "rs";
+    if !balanced(before, single_quotes_are_strings) {
+        return None;
+    }
+    if balanced(after, single_quotes_are_strings) {
+        return None;
+    }
+    Some("the edit leaves brackets unbalanced (it was balanced before)".into())
+}
+
+/// Whether `()`, `[]` and `{}` pair up outside strings and comments.
+fn balanced(src: &str, single_quotes_are_strings: bool) -> bool {
+    #[derive(PartialEq)]
+    enum Mode {
+        Code,
+        LineComment,
+        BlockComment,
+        Str(char),
+    }
+    let mut mode = Mode::Code;
+    let mut stack: Vec<char> = Vec::new();
+    let mut escaped = false;
+    let bytes: Vec<char> = src.chars().collect();
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i];
+        let next = bytes.get(i + 1).copied();
+        match mode {
+            Mode::LineComment => {
+                if c == '\n' {
+                    mode = Mode::Code;
+                }
+            }
+            Mode::BlockComment => {
+                if c == '*' && next == Some('/') {
+                    mode = Mode::Code;
+                    i += 1;
+                }
+            }
+            Mode::Str(q) => {
+                if escaped {
+                    escaped = false;
+                } else if c == '\\' {
+                    escaped = true;
+                } else if c == q {
+                    mode = Mode::Code;
+                }
+            }
+            Mode::Code => match c {
+                '/' if next == Some('/') => {
+                    mode = Mode::LineComment;
+                    i += 1;
+                }
+                '/' if next == Some('*') => {
+                    mode = Mode::BlockComment;
+                    i += 1;
+                }
+                '"' | '`' => mode = Mode::Str(c),
+                '\'' if single_quotes_are_strings => mode = Mode::Str(c),
+                '(' | '[' | '{' => stack.push(c),
+                ')' | ']' | '}' => {
+                    let want = match c {
+                        ')' => '(',
+                        ']' => '[',
+                        _ => '{',
+                    };
+                    match stack.pop() {
+                        Some(open) if open == want => {}
+                        _ => return false,
+                    }
+                }
+                _ => {}
+            },
+        }
+        i += 1;
+    }
+    // A file may legitimately end inside a line comment; ending inside a string
+    // or a block comment means something is genuinely unclosed.
+    stack.is_empty() && matches!(mode, Mode::Code | Mode::LineComment)
+}
+
 pub async fn edit_file(
     args: &Value,
     zone_config: &Value,
@@ -1489,6 +1958,7 @@ pub async fn edit_file(
     let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
     let old_text = args.get("old_text").and_then(|v| v.as_str()).unwrap_or("");
     let new_text = args.get("new_text").and_then(|v| v.as_str()).unwrap_or("");
+    let replace_all = args.get("replace_all").and_then(|v| v.as_bool()).unwrap_or(false);
     let p = match checked_path(path, zone_config, project_dir) {
         Ok(p) => p,
         Err(e) => return Ok(e),
@@ -1498,21 +1968,36 @@ pub async fn edit_file(
         Err(e) => return Ok(json!({ "error": format!("failed to read file: {e}") }).to_string()),
     };
     let current = bytes_to_string(bytes);
-    if !current.contains(old_text) {
+
+    let resolved = match resolve_edit(&current, old_text, new_text, replace_all) {
+        Ok(r) => r,
+        Err(why) => return Ok(json!({ "error": why }).to_string()),
+    };
+
+    if let Err(e) = tokio::fs::write(&p, resolved.updated.as_bytes()).await {
+        return Ok(json!({ "error": e.to_string() }).to_string());
+    }
+
+    // Written, then checked: a revert restores bytes we already hold, and
+    // checking first would leave the window where the file on disk is neither
+    // version.
+    if let Some(why) = syntax_regression(&p, &current, &resolved.updated) {
+        let restored = tokio::fs::write(&p, current.as_bytes()).await.is_ok();
         return Ok(json!({
-            "error": "old_text not found in file — use read_file to get the current content before editing"
+            "error": format!("edit reverted — {why}"),
+            "reverted": restored,
+            "path": p.to_string_lossy(),
         })
         .to_string());
     }
-    let updated = current.replacen(old_text, new_text, 1);
-    match tokio::fs::write(&p, updated.as_bytes()).await {
-        Ok(_) => Ok(json!({
-            "path": p.to_string_lossy(),
-            "ok": true
-        })
-        .to_string()),
-        Err(e) => Ok(json!({ "error": e.to_string() }).to_string()),
-    }
+
+    Ok(json!({
+        "path": p.to_string_lossy(),
+        "ok": true,
+        "matched": resolved.matched.as_str(),
+        "replacements": resolved.occurrences,
+    })
+    .to_string())
 }
 
 #[cfg(test)]
@@ -1559,6 +2044,303 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.root);
         }
+    }
+
+    // ─── Windowed reads (0.14.1) ─────────────────────────────────────────────
+
+    fn numbered(n: usize) -> String {
+        (1..=n).map(|i| format!("line {i}")).collect::<Vec<_>>().join("\n")
+    }
+
+    #[test]
+    fn a_short_file_comes_back_whole_and_untruncated() {
+        let w = window_lines("a\nb\nc\n", None, None);
+        assert_eq!(w.text, "a\nb\nc");
+        assert_eq!((w.total, w.from, w.to), (3, 1, 3));
+        assert!(!w.truncated);
+        assert!(window_note(&w, "f.txt").is_none());
+    }
+
+    /// The point of the default: a long file must not be able to end a turn by
+    /// arriving whole, and the model has to be told that it did not.
+    #[test]
+    fn a_long_file_stops_at_the_default_and_says_where_to_continue() {
+        let w = window_lines(&numbered(3000), None, None);
+        assert_eq!((w.total, w.from, w.to), (3000, 1, DEFAULT_LINE_LIMIT));
+        assert!(w.truncated);
+        let note = window_note(&w, "big.rs").unwrap();
+        assert!(note.contains("1-1200 of 3000"), "{note}");
+        assert!(note.contains("offset 1201"), "the note has to name the next call: {note}");
+    }
+
+    #[test]
+    fn an_offset_reads_from_that_line_and_the_last_window_is_not_truncated() {
+        let w = window_lines(&numbered(10), Some(8), Some(5));
+        assert_eq!(w.text, "line 8\nline 9\nline 10");
+        assert_eq!((w.from, w.to), (8, 10));
+        // Something *was* skipped before the window, so this still reports as a
+        // partial view — the model must not answer as if it read the file.
+        assert!(w.truncated);
+        let note = window_note(&w, "f.rs").unwrap();
+        assert!(note.contains("8-10 of 10"), "{note}");
+        assert!(!note.contains("offset 11"), "there is nothing after the end: {note}");
+    }
+
+    /// Models write `offset: 0` and `offset: 1` interchangeably for "the start".
+    #[test]
+    fn offset_zero_and_one_both_mean_the_beginning() {
+        assert_eq!(window_lines("a\nb\n", Some(0), None), window_lines("a\nb\n", Some(1), None));
+    }
+
+    #[test]
+    fn an_offset_past_the_end_returns_nothing_and_says_how_long_the_file_is() {
+        let w = window_lines(&numbered(10), Some(50), None);
+        assert!(w.text.is_empty());
+        let note = window_note(&w, "f.rs").unwrap();
+        assert!(note.contains("line 50") || note.contains("starts at line 50"), "{note}");
+        assert!(note.contains("10 line"), "{note}");
+    }
+
+    #[test]
+    fn a_limit_beyond_the_maximum_is_clamped() {
+        let w = window_lines(&numbered(9000), Some(1), Some(100_000));
+        assert_eq!(w.to, MAX_LINE_LIMIT);
+    }
+
+    /// A minified bundle is one line of megabytes; honouring the window would
+    /// blow the context anyway.
+    #[test]
+    fn a_very_long_line_is_clipped_and_the_note_warns_it_cannot_be_an_anchor() {
+        let long = "x".repeat(MAX_LINE_CHARS + 500);
+        let w = window_lines(&format!("short\n{long}\n"), None, None);
+        assert_eq!(w.clipped_lines, 1);
+        assert!(w.text.contains("[line clipped]"));
+        let note = window_note(&w, "bundle.js").unwrap();
+        assert!(note.contains("clipped"), "{note}");
+    }
+
+    /// Clipping by chars, not bytes — a byte cut lands mid-codepoint and the
+    /// model quotes back mojibake as an edit anchor.
+    #[test]
+    fn clipping_a_multibyte_line_does_not_split_a_character() {
+        let line = "é".repeat(MAX_LINE_CHARS + 10);
+        let w = window_lines(&line, None, None);
+        assert!(w.text.starts_with(&"é".repeat(10)));
+        assert_eq!(w.text.chars().filter(|c| *c == 'é').count(), MAX_LINE_CHARS);
+    }
+
+    #[test]
+    fn a_read_reports_the_window_it_returned() {
+        let v = text_read_result(
+            "big.txt",
+            &numbered(2000),
+            &json!({ "offset": 500, "limit": 10 }),
+        );
+        assert_eq!(v["lines"]["total"], 2000);
+        assert_eq!(v["lines"]["from"], 500);
+        assert_eq!(v["lines"]["to"], 509);
+        assert_eq!(v["truncated"], true);
+        assert!(v["content"].as_str().unwrap().starts_with("line 500"));
+    }
+
+    /// A whole file keeps the shape it has always had — no `truncated`, no note,
+    /// nothing for a model to react to that was not there before.
+    #[test]
+    fn a_whole_file_gains_no_truncation_fields() {
+        let v = text_read_result("small.txt", "a\nb\n", &json!({}));
+        assert_eq!(v["content"], "a\nb");
+        assert_eq!(v["lines"]["total"], 2);
+        assert!(v.get("truncated").is_none());
+        assert!(v.get("note").is_none());
+    }
+
+    /// Models send `"offset": "500"` as often as the number.
+    #[test]
+    fn a_numeric_argument_sent_as_a_string_is_accepted() {
+        let v = text_read_result(
+            "big.txt",
+            &numbered(2000),
+            &json!({ "offset": "500", "limit": "10" }),
+        );
+        assert_eq!(v["lines"]["from"], 500);
+        assert_eq!(v["lines"]["to"], 509);
+    }
+
+    // ─── Editing ─────────────────────────────────────────────────────────────
+
+    /// The regression this whole change exists for: two occurrences used to
+    /// mean the first one was edited and the call reported success.
+    #[test]
+    fn an_ambiguous_anchor_is_refused_rather_than_guessed() {
+        let src = "a = 1;\nb = 2;\na = 1;\n";
+        let err = resolve_edit(src, "a = 1;", "a = 9;", false).unwrap_err();
+        assert!(err.contains("2 times"), "{err}");
+        assert!(err.contains("replace_all"), "the refusal has to say what to do instead: {err}");
+    }
+
+    #[test]
+    fn replace_all_takes_every_occurrence_when_asked() {
+        let src = "a = 1;\nb = 2;\na = 1;\n";
+        let r = resolve_edit(src, "a = 1;", "a = 9;", true).unwrap();
+        assert_eq!(r.updated, "a = 9;\nb = 2;\na = 9;\n");
+        assert_eq!(r.occurrences, 2);
+    }
+
+    #[test]
+    fn a_unique_anchor_edits_exactly_once() {
+        let src = "one\ntwo\nthree\n";
+        let r = resolve_edit(src, "two", "TWO", false).unwrap();
+        assert_eq!(r.updated, "one\nTWO\nthree\n");
+        assert_eq!(r.matched, EditMatch::Exact);
+    }
+
+    /// An empty anchor used to pass `contains` and insert at offset zero.
+    #[test]
+    fn an_empty_anchor_is_refused() {
+        let err = resolve_edit("anything", "", "x", false).unwrap_err();
+        assert!(err.contains("empty"), "{err}");
+    }
+
+    #[test]
+    fn an_edit_that_changes_nothing_is_refused() {
+        let err = resolve_edit("hello", "hello", "hello", false).unwrap_err();
+        assert!(err.contains("identical"), "{err}");
+    }
+
+    /// Trailing whitespace and a dropped indent level are the two differences a
+    /// model reproduces least reliably and which mean nothing.
+    #[test]
+    fn trailing_whitespace_does_not_cost_a_turn() {
+        let src = "fn main() {\n    let x = 1;\n}\n";
+        // The model reproduced the line with a trailing space it never had.
+        let r = resolve_edit(src, "    let x = 1; ", "    let x = 2;", false).unwrap();
+        assert_eq!(r.matched, EditMatch::Tolerant);
+        assert_eq!(r.updated, "fn main() {\n    let x = 2;\n}\n");
+    }
+
+    #[test]
+    fn a_dropped_indent_is_matched_and_the_replacement_re_indented() {
+        let src = "def go():\n    a = 1\n    b = 2\n";
+        // Quoted without the leading indentation, which the newline between the
+        // two lines carries — so it is not a substring at all.
+        let r = resolve_edit(src, "a = 1\nb = 2", "a = 1\nb = 3", false).unwrap();
+        assert_eq!(r.matched, EditMatch::Tolerant);
+        assert_eq!(r.updated, "def go():\n    a = 1\n    b = 3\n");
+    }
+
+    #[test]
+    fn a_tolerant_match_spanning_lines_keeps_the_surrounding_text() {
+        let src = "head\n  alpha  \n  beta\ntail\n";
+        let r = resolve_edit(src, "alpha\nbeta", "gamma", false).unwrap();
+        assert_eq!(r.updated, "head\n  gamma\ntail\n");
+    }
+
+    #[test]
+    fn an_anchor_that_is_tolerantly_ambiguous_is_still_refused() {
+        let src = "  x = 1\n  y = 2\nmiddle\n    x = 1\n    y = 2\n";
+        // Not an exact substring either way — the indentation sits between the
+        // lines — and tolerantly it fits in two places.
+        let err = resolve_edit(src, "x = 1\ny = 2", "x = 9\ny = 9", false).unwrap_err();
+        assert!(err.contains("2 places"), "{err}");
+    }
+
+    #[test]
+    fn a_missing_anchor_says_the_file_may_have_moved_on() {
+        let err = resolve_edit("one\ntwo\n", "seventeen", "x", false).unwrap_err();
+        assert!(err.contains("Read the file again"), "{err}");
+    }
+
+    // ─── The syntax guard ────────────────────────────────────────────────────
+
+    #[test]
+    fn breaking_json_is_caught() {
+        let before = r#"{ "a": 1 }"#;
+        let after = r#"{ "a": 1 "#;
+        let why = syntax_regression(Path::new("f.json"), before, after).unwrap();
+        assert!(why.contains("JSON"), "{why}");
+    }
+
+    #[test]
+    fn a_dropped_brace_is_caught() {
+        let before = "fn a() {\n    b();\n}\n";
+        let after = "fn a() {\n    b();\n";
+        assert!(syntax_regression(Path::new("f.rs"), before, after).is_some());
+    }
+
+    /// The guard only fires on a *regression*. A file that was already broken
+    /// is not this edit's fault, and blaming it would revert a repair.
+    #[test]
+    fn an_already_broken_file_is_not_blamed_on_the_edit() {
+        let before = "fn a() {\n    b();\n";
+        let after = "fn a() {\n    c();\n";
+        assert!(syntax_regression(Path::new("f.rs"), before, after).is_none());
+        // ...and the edit that repairs it is allowed through.
+        let repaired = "fn a() {\n    b();\n}\n";
+        assert!(syntax_regression(Path::new("f.rs"), before, repaired).is_none());
+    }
+
+    /// Brackets inside strings and comments are text, not structure — counting
+    /// them is the classic way a checker like this produces false positives.
+    #[test]
+    fn brackets_in_strings_and_comments_are_not_structure() {
+        assert!(balanced(r#"let s = "a { b (";  // and } here"#, true));
+        assert!(balanced("/* } } } */ fn a() {}", true));
+        assert!(balanced(r#"let s = "\" { ";"#, true));
+        assert!(!balanced("fn a() { let s = \"ok\";", true));
+    }
+
+    /// Rust lifetimes and char literals both sit behind a single quote, so a
+    /// quote is not a string delimiter there.
+    #[test]
+    fn rust_lifetimes_do_not_open_a_string() {
+        assert!(balanced("fn a<'x>(v: &'x [u8]) -> Option<&'x u8> { v.first() }", false));
+    }
+
+    #[test]
+    fn an_unknown_extension_is_left_alone() {
+        assert!(syntax_regression(Path::new("notes.txt"), "{{{", "{").is_none());
+    }
+
+    #[tokio::test]
+    async fn a_syntax_breaking_edit_is_reverted_on_disk() {
+        let sb = Sandbox::new("revert");
+        sb.write("m.rs", "fn a() {\n    b();\n}\n");
+
+        let out = edit_file(
+            &json!({ "path": "m.rs", "old_text": "}\n", "new_text": "" }),
+            &sb.zone_config(),
+            sb.dir(),
+        )
+        .await
+        .unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+
+        assert!(v["error"].as_str().unwrap().contains("reverted"), "{v}");
+        assert_eq!(v["reverted"], true);
+        assert_eq!(
+            std::fs::read_to_string(sb.root.join("m.rs")).unwrap(),
+            "fn a() {\n    b();\n}\n",
+            "the file has to be back the way it was"
+        );
+    }
+
+    #[tokio::test]
+    async fn edit_file_reports_how_it_matched() {
+        let sb = Sandbox::new("matched");
+        sb.write("t.txt", "alpha\n  beta\ngamma\n");
+
+        let out = edit_file(
+            &json!({ "path": "t.txt", "old_text": "beta  ", "new_text": "delta" }),
+            &sb.zone_config(),
+            sb.dir(),
+        )
+        .await
+        .unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+
+        assert_eq!(v["ok"], true);
+        assert_eq!(v["matched"], "whitespace-tolerant");
+        assert_eq!(std::fs::read_to_string(sb.root.join("t.txt")).unwrap(), "alpha\n  delta\ngamma\n");
     }
 
     /// The page note is the only thing telling the model it is looking at part

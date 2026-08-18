@@ -43,9 +43,32 @@ pub struct Zone {
     /// the engine injects an orchestration preamble (listing the session's
     /// sub-agent roster) and the library/editor show a leader indicator.
     pub is_leader: bool,
+    /// Another zone to answer with when this one's provider will not serve the
+    /// request (0.14.1). Usually the same role pointed at a different provider.
+    /// Used once per turn — a fallback whose own provider is also down is a
+    /// dead run either way, and chaining them would hide that.
+    pub fallback_zone_id: Option<String>,
+    /// This zone's approval overrides as JSON (0.14.2), or `None` to inherit the
+    /// global policy entirely. See [`crate::approvals`] for the shape — a scout
+    /// that only reads, an implementer that may edit, and neither of them
+    /// holding unreviewed shell.
+    pub approvals: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }
+
+/// The column list every `SELECT … FROM zones` uses.
+///
+/// One definition, next to the struct it has to match, because four copies of
+/// it drifted: the API's had been missing `is_leader` since the field was
+/// added, so `GET /api/zones` failed to map a row and answered with an error —
+/// silently, since nothing in the app reads that route. `sqlx::query_as`
+/// requires every field, so a copy that falls behind does not fail to compile,
+/// it fails at runtime, in whichever path nobody happens to be watching.
+pub const ZONE_COLS: &str = "id, name, provider_id, model, system_prompt,
+    temperature_override AS temperature, max_tokens, top_p,
+    tools_enabled, tool_config, thinking_enabled, include_thinking_in_context,
+    icon, accent_color, is_leader, fallback_zone_id, approvals, created_at, updated_at";
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 #[serde(rename_all = "camelCase")]
@@ -86,6 +109,13 @@ pub struct Chat {
     /// this chat's requests and the model's job is to propose a plan the user
     /// approves. Cleared when a plan is approved, or by the user.
     pub plan_mode: bool,
+    /// This session's own spend ceiling in billed tokens (0.14.4), or `None` to
+    /// use the global default. `Some(0)` is a real answer meaning *no limit* —
+    /// which is why this is an `Option` rather than a plain `0`-means-unset.
+    ///
+    /// Read from and written to the session root, since spend is counted across
+    /// a chat and every sub-agent under it.
+    pub spend_limit: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -105,6 +135,11 @@ pub struct Project {
     /// When true, new chats created inside this project start with project
     /// context enabled automatically.
     pub default_context_enabled: bool,
+    /// Commands run against this project's tree once a turn's edits have landed
+    /// (0.14.5), so "the implementer thinks it is done" becomes evidence. None
+    /// or empty means the project has none, and none are inferred.
+    pub lint_command: Option<String>,
+    pub test_command: Option<String>,
     /// Knowledge (RAG) embedding config, bound to the index. The provider+model
     /// define the vector space; `kb_dimensions` is the embedding length captured
     /// at index time. `kb_indexed_at` is the last successful index (None if the
@@ -177,6 +212,11 @@ pub struct SubchatNode {
     pub parent_chat_id: Option<String>,
     /// Count of primary (zone_id IS NULL) user/assistant turns in the subchat.
     pub message_count: i64,
+    /// How many of this subchat's turns loop detection stopped (0.14.1). A
+    /// background sub-agent is the case this exists for: nobody is watching its
+    /// stream, so without a mark on its node in the tree the only trace is a
+    /// wrap-up message inside a transcript nobody opened.
+    pub runaway_count: i64,
     pub created_at: i64,
 }
 

@@ -205,6 +205,7 @@ fn build_router(state: ApiState) -> Router {
         )
         .route("/api/chats/:id/zone", post(set_chat_zone))
         .route("/api/chats/:id/smart", post(h::set_chat_smart))
+        .route("/api/chats/:id/spend-limit", post(h::set_chat_spend_limit))
         .route("/api/chats/:id/plan-mode", post(h::set_chat_plan_mode))
         .route("/api/chats/:id/plans", get(h::list_plans))
         .route("/api/chats/:id/plans/pending", get(h::pending_plan))
@@ -242,6 +243,9 @@ fn build_router(state: ApiState) -> Router {
         .route("/api/chats/:id/checkpoints", get(h::list_checkpoints))
         .route("/api/chats/:id/checkpoints/since/:messageId", get(h::checkpoints_since))
         .route("/api/chats/:id/restore-to/:messageId", post(h::restore_to_message))
+        .route("/api/chats/:id/rewind-to/:messageId", post(h::rewind_to_message))
+        .route("/api/chats/:id/rewind-forward", post(h::rewind_forward))
+        .route("/api/chats/:id/rewind-status", get(h::rewind_status))
         .route("/api/checkpoints/:id/restore", post(h::restore_checkpoint))
         .route("/api/checkpoints/usage", get(h::checkpoint_usage))
         .route("/api/checkpoints/prune", post(h::prune_checkpoints))
@@ -439,9 +443,7 @@ async fn health(State(st): State<ApiState>, req: axum::extract::Request) -> impl
     }))
 }
 
-const ZONE_COLS: &str = "id, name, provider_id, model, system_prompt, temperature_override AS temperature, max_tokens, top_p,
-    tools_enabled, tool_config, thinking_enabled, include_thinking_in_context,
-    icon, accent_color, created_at, updated_at";
+use crate::db::models::ZONE_COLS;
 
 async fn list_zones(State(st): State<ApiState>) -> ApiResult<Json<Vec<Zone>>> {
     let rows = sqlx::query_as::<_, Zone>(&format!("SELECT {ZONE_COLS} FROM zones ORDER BY name"))

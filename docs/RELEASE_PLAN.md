@@ -1022,7 +1022,16 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [x] Deliberately not message search — that is 0.15.0's box, it hits the database on every keystroke, and mixing "jump to a thing" with "find where something was said" makes both harder to read. The palette offers a row that opens it instead
 - [ ] Runtime-test: ⌘K from a chat, from the home screen and with Settings already open; confirm Escape closes only the palette, and that ⌘J still reaches the composer
 
-- [ ] Fork scope options: visible path / with branches / all, and standalone vs continuation context
+### 0.15.2 — A fork that carries the rest of the work
+
+*Status: built & tested (`cargo test --lib` 328 passing including 6 new, `npm run build` green); not yet runtime-tested. [chats.rs](../src-tauri/src/commands/chats.rs) `branch_chat`, the popover is in [MessageActions.tsx](../src/components/Message/MessageActions.tsx).*
+
+- [x] **Three scopes, not one.** *This thread* is the original behaviour and still the default. *With branches* also carries the branches and sub-agent runs hanging off the copied range, re-anchored onto the copied messages. *Everything* takes the whole transcript including the turns after the pivot. The case the single behaviour got wrong is the one where a fork is worth most: a chat whose actual work is spread across six sub-agents lost all of it
+- [x] **A branch past the cut is left behind, with its subtree.** Carrying it would leave it hanging off a message the fork does not have. A sub-agent run has no anchor message at all — it belongs to the chat rather than to one of its turns — so it travels whenever its parent does
+- [x] **Standalone vs continuation.** A continuation fork nests under the conversation it came from, which is right while you are still comparing the two. A standalone fork carries the same history as a root chat. Both copy the same messages; the difference is only where it lives
+- [x] The settings persist rather than being asked each time — the answer is a habit, not a per-message decision, which is why the reference implementation has a "remember" box. Branch still forks immediately with them; the caret beside it is where they change
+- [ ] Runtime-test: fork a chat that has two sub-agent runs and an earlier branch at each scope, and confirm the tree that arrives matches what was asked for
+
 - [ ] MCP `resources/list` as attachable context and `prompts/list` as slash commands — we call `tools/list` and `tools/call` only, so two protocol calls buy a whole surface
 - [ ] Saved parameterised runs: prompt template + zone + parameters in one shareable file. Zone teams already encode who does the work; this encodes the task
 - [ ] Quick assistant — a global-shortcut mini window over the base zone, the fast end of the fast-to-thorough spectrum the roadmap describes

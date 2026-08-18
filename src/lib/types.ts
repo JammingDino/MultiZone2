@@ -1511,3 +1511,13 @@ export interface SearchHit {
   snippet: string;
   createdAt: number;
 }
+
+/**
+ * How much of a conversation a fork carries (0.15.2).
+ *
+ * - `visible` — this chat's thread up to the pivot. The original behaviour.
+ * - `branches` — the above, plus the branches and sub-agent runs hanging off it.
+ * - `all` — the whole transcript including later turns, plus every child chat.
+ */
+export type ForkScope = "visible" | "branches" | "all";
+export const FORK_SCOPES: readonly ForkScope[] = ["visible", "branches", "all"];

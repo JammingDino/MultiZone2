@@ -5,6 +5,7 @@ use crate::llm::client::LlmClient;
 use crate::llm::thinking::strip_thinking_blocks;
 use crate::llm::types::{ChatMessage, ChatRequest, MessageContent};
 use crate::state::AppState;
+use sqlx::SqlitePool;
 use tauri::{AppHandle, Emitter, State};
 
 /// Every column of the `chats` table, in `Chat` field order. Shared with
@@ -431,6 +432,43 @@ pub async fn get_subchat_tree(
 ///
 /// Branching from a user message still cuts at the message itself, so the
 /// answers to it are left behind and the branch re-asks.
+
+/// How much of a conversation a fork carries (0.15.2).
+///
+/// Forking had one behaviour: the visible thread up to the click. That is the
+/// right default and the wrong only option — a chat whose work is spread across
+/// sub-agents and earlier branches loses all of it, which is the case where a
+/// fork is worth the most.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForkScope {
+    /// The messages of this chat alone, up to the pivot. The original
+    /// behaviour, and still the default.
+    VisiblePath,
+    /// The above, plus every chat hanging off the copied range — branches and
+    /// sub-agent runs — re-linked to the fork.
+    WithBranches,
+    /// The whole transcript including the turns after the pivot, plus every
+    /// child chat.
+    All,
+}
+
+impl ForkScope {
+    /// Unknown and absent both mean the default. A fork is not worth failing
+    /// over a typo in an optional argument from the HTTP API.
+    pub fn parse(s: Option<&str>) -> Self {
+        match s {
+            Some("branches") | Some("withBranches") => Self::WithBranches,
+            Some("all") => Self::All,
+            _ => Self::VisiblePath,
+        }
+    }
+
+    /// Does this scope carry the source's child chats?
+    fn carries_children(self) -> bool {
+        matches!(self, Self::WithBranches | Self::All)
+    }
+}
+
 #[tauri::command]
 pub async fn branch_chat(
     state: State<'_, AppState>,
@@ -438,8 +476,17 @@ pub async fn branch_chat(
     message_id: String,
     solo: Option<bool>,
     zone_id: Option<String>,
+    scope: Option<String>,
+    standalone: Option<bool>,
 ) -> AppResult<Chat> {
     let solo = solo.unwrap_or(false);
+    let scope = ForkScope::parse(scope.as_deref());
+    // A standalone fork is a root chat: same copied history, but it does not
+    // hang under the conversation it came from. The distinction is real once a
+    // chat has been forked a few times — a branch you are still comparing
+    // against its parent belongs nested under it, and a branch that has become
+    // its own piece of work does not.
+    let standalone = standalone.unwrap_or(false);
 
     // Resolve the pivot's timestamp and role — the role decides how far the copy
     // reaches past it.
@@ -456,7 +503,12 @@ pub async fn branch_chat(
     // For an assistant pivot, extend the copy to the end of its round — up to
     // (but not including) the next user message — so every participant's answer
     // to the same question comes along.
-    let copy_through_ts: i64 = if pivot_role == "user" {
+    let copy_through_ts: i64 = if scope == ForkScope::All {
+        // "Everything" means the whole transcript, not the part before the
+        // click. The pivot still anchors the branch link, so the fork remembers
+        // where it was taken from even though it carries the later turns too.
+        i64::MAX
+    } else if pivot_role == "user" {
         pivot_ts
     } else {
         let round_start: Option<i64> = sqlx::query_scalar(
@@ -531,83 +583,14 @@ pub async fn branch_chat(
     .bind(source.knowledge_enabled)
     .bind(&source.perspective_mode)
     .bind(branch_smart_routing)
-    .bind(&chat_id)
-    .bind(&message_id)
+    .bind(if standalone { None } else { Some(&chat_id) })
+    .bind(if standalone { None } else { Some(&message_id) })
     .bind(now)
     .execute(&state.db)
     .await?;
 
-    // Copy messages up to and including the pivot. Each gets a fresh primary key;
-    // tool_call_id is the model-supplied id (not a row PK) so copying it verbatim
-    // keeps tool calls matched within the branch. Map old→new ids for attachments.
-    let msgs = sqlx::query_as::<_, Message>(
-        "SELECT id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at
-         FROM messages WHERE chat_id = ?1 AND created_at <= ?2 ORDER BY created_at ASC",
-    )
-    .bind(&chat_id)
-    .bind(copy_through_ts)
-    .fetch_all(&state.db)
-    .await?;
-
-    let mut id_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-    for m in &msgs {
-        let nid = crate::commands::new_id();
-        id_map.insert(m.id.clone(), nid.clone());
-        sqlx::query(
-            "INSERT INTO messages
-               (id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-        )
-        .bind(&nid)
-        .bind(&new_id)
-        .bind(&m.role)
-        .bind(&m.content)
-        .bind(&m.tool_calls)
-        .bind(&m.tool_call_id)
-        .bind(&m.reasoning)
-        .bind(&m.zone_id)
-        .bind(&m.active_zone_id)
-        .bind(m.edited)
-        .bind(m.created_at)
-        .execute(&state.db)
-        .await?;
-    }
-
-    // Copy attachments for the copied messages, remapping to the new message ids.
-    let attachments = sqlx::query_as::<_, crate::db::models::Attachment>(
-        "SELECT id, message_id, chat_id, file_name, file_type, storage_path, content, page_count, created_at
-         FROM attachments WHERE chat_id = ?1 AND created_at <= ?2",
-    )
-    .bind(&chat_id)
-    .bind(copy_through_ts)
-    .fetch_all(&state.db)
-    .await?;
-    for a in &attachments {
-        // Drop attachments whose owning message wasn't copied (defensive).
-        let new_msg_id = match &a.message_id {
-            Some(mid) => match id_map.get(mid) {
-                Some(nid) => Some(nid.clone()),
-                None => continue,
-            },
-            None => None,
-        };
-        sqlx::query(
-            "INSERT INTO attachments
-               (id, message_id, chat_id, file_name, file_type, storage_path, content, page_count, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        )
-        .bind(crate::commands::new_id())
-        .bind(&new_msg_id)
-        .bind(&new_id)
-        .bind(&a.file_name)
-        .bind(&a.file_type)
-        .bind(&a.storage_path)
-        .bind(&a.content)
-        .bind(a.page_count)
-        .bind(a.created_at)
-        .execute(&state.db)
-        .await?;
-    }
+    // Messages and their attachments, up to the cut this scope decided on.
+    let id_map = copy_messages_and_attachments(&state.db, &chat_id, &new_id, copy_through_ts).await?;
 
     // Inherit tag links (and their per-chat context toggles).
     sqlx::query(
@@ -634,6 +617,14 @@ pub async fn branch_chat(
         .await?;
     }
 
+    // The children — branches taken off this chat earlier, and the sub-agent
+    // runs its turns spawned. Copied breadth-first so a branch of a branch
+    // arrives after the chat it hangs from, which is what lets the re-link find
+    // its new parent.
+    if scope.carries_children() {
+        copy_child_chats(&state.db, &chat_id, &new_id, &id_map, copy_through_ts).await?;
+    }
+
     let chat = sqlx::query_as::<_, Chat>(&format!(
         "SELECT {CHAT_COLS} FROM chats WHERE id = ?1"
     ))
@@ -641,6 +632,171 @@ pub async fn branch_chat(
     .fetch_one(&state.db)
     .await?;
     Ok(chat)
+}
+
+/// Copies one chat's messages and their attachments into another, up to
+/// `through_ts` (use `i64::MAX` for all of them).
+///
+/// Returns the old→new message id map, which is what lets a branch anchored at
+/// one of those messages be re-pointed at its copy.
+async fn copy_messages_and_attachments(
+    db: &SqlitePool,
+    src: &str,
+    dst: &str,
+    through_ts: i64,
+) -> AppResult<std::collections::HashMap<String, String>> {
+    // Copy messages up to and including the pivot. Each gets a fresh primary key;
+    // tool_call_id is the model-supplied id (not a row PK) so copying it verbatim
+    // keeps tool calls matched within the branch. Map old→new ids for attachments.
+    let msgs = sqlx::query_as::<_, Message>(
+        "SELECT id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at
+         FROM messages WHERE chat_id = ?1 AND created_at <= ?2 ORDER BY created_at ASC",
+    )
+    .bind(src)
+    .bind(through_ts)
+    .fetch_all(db)
+    .await?;
+
+    let mut id_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for m in &msgs {
+        let nid = crate::commands::new_id();
+        id_map.insert(m.id.clone(), nid.clone());
+        sqlx::query(
+            "INSERT INTO messages
+               (id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        )
+        .bind(&nid)
+        .bind(dst)
+        .bind(&m.role)
+        .bind(&m.content)
+        .bind(&m.tool_calls)
+        .bind(&m.tool_call_id)
+        .bind(&m.reasoning)
+        .bind(&m.zone_id)
+        .bind(&m.active_zone_id)
+        .bind(m.edited)
+        .bind(m.created_at)
+        .execute(db)
+        .await?;
+    }
+
+    // Copy attachments for the copied messages, remapping to the new message ids.
+    let attachments = sqlx::query_as::<_, crate::db::models::Attachment>(
+        "SELECT id, message_id, chat_id, file_name, file_type, storage_path, content, page_count, created_at
+         FROM attachments WHERE chat_id = ?1 AND created_at <= ?2",
+    )
+    .bind(src)
+    .bind(through_ts)
+    .fetch_all(db)
+    .await?;
+    for a in &attachments {
+        // Drop attachments whose owning message wasn't copied (defensive).
+        let new_msg_id = match &a.message_id {
+            Some(mid) => match id_map.get(mid) {
+                Some(nid) => Some(nid.clone()),
+                None => continue,
+            },
+            None => None,
+        };
+        sqlx::query(
+            "INSERT INTO attachments
+               (id, message_id, chat_id, file_name, file_type, storage_path, content, page_count, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        )
+        .bind(crate::commands::new_id())
+        .bind(&new_msg_id)
+        .bind(dst)
+        .bind(&a.file_name)
+        .bind(&a.file_type)
+        .bind(&a.storage_path)
+        .bind(&a.content)
+        .bind(a.page_count)
+        .bind(a.created_at)
+        .execute(db)
+        .await?;
+    }
+
+    Ok(id_map)
+}
+
+/// Copies every descendant chat of `src_parent` under `dst_parent`, breadth
+/// first.
+///
+/// `anchor_map` maps the parent's copied message ids old→new, so a branch that
+/// pointed at message X in the source points at X's copy in the fork. A branch
+/// whose anchor was *not* copied (it was taken from a turn after the pivot, and
+/// this fork stopped at the pivot) is skipped along with everything under it —
+/// carrying it would leave a branch hanging off a message the fork does not have.
+///
+/// Sub-agent chats carry no anchor message at all; they belong to the chat
+/// rather than to one of its turns, so they come along whenever their parent
+/// does, subject to the same `through_ts` cut on the parent's own messages.
+async fn copy_child_chats(
+    db: &SqlitePool,
+    src_parent: &str,
+    dst_parent: &str,
+    anchor_map: &std::collections::HashMap<String, String>,
+    through_ts: i64,
+) -> AppResult<()> {
+    let children = sqlx::query_as::<_, Chat>(&format!(
+        "SELECT {CHAT_COLS} FROM chats WHERE parent_chat_id = ?1 ORDER BY created_at ASC"
+    ))
+    .bind(src_parent)
+    .fetch_all(db)
+    .await?;
+
+    for child in children {
+        // Where this child attaches in the copy. `None` for a sub-agent chat,
+        // which has no anchor; `Some(new)` for a branch whose anchor came along.
+        let new_anchor = match &child.branched_from_message_id {
+            Some(old) => match anchor_map.get(old) {
+                Some(new) => Some(new.clone()),
+                // Anchored past this fork's cut — drop it and its subtree.
+                None => continue,
+            },
+            None => None,
+        };
+
+        let child_new_id = new_id();
+        let now = now_ts();
+        sqlx::query(
+            "INSERT INTO chats
+               (id, title, zone_id, project_id, project_context_enabled, knowledge_enabled, perspective_mode,
+                smart_routing, parent_chat_id, branched_from_message_id, initiated_by_zone_id, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12)",
+        )
+        .bind(&child_new_id)
+        .bind(&child.title)
+        .bind(&child.zone_id)
+        .bind(&child.project_id)
+        .bind(child.project_context_enabled)
+        .bind(child.knowledge_enabled)
+        .bind(&child.perspective_mode)
+        .bind(child.smart_routing)
+        .bind(dst_parent)
+        .bind(&new_anchor)
+        .bind(&child.initiated_by_zone_id)
+        .bind(now)
+        .execute(db)
+        .await?;
+
+        // A child is copied whole: its own history is all "before" its point,
+        // so there is nothing in it the parent's cut should trim.
+        let child_map = copy_messages_and_attachments(db, &child.id, &child_new_id, i64::MAX).await?;
+
+        sqlx::query(
+            "INSERT INTO chat_zones (chat_id, zone_id)
+             SELECT ?1, zone_id FROM chat_zones WHERE chat_id = ?2",
+        )
+        .bind(&child_new_id)
+        .bind(&child.id)
+        .execute(db)
+        .await?;
+
+        Box::pin(copy_child_chats(db, &child.id, &child_new_id, &child_map, through_ts)).await?;
+    }
+    Ok(())
 }
 
 /// Deletes the given message and everything chronologically after it in the same chat.
@@ -1372,5 +1528,152 @@ mod title_tests {
     fn an_empty_context_is_not_an_image() {
         assert!(!is_image_only(&[]));
         assert!(!is_image_only(&[parts_message(vec![])]));
+    }
+}
+
+#[cfg(test)]
+mod fork_tests {
+    use super::*;
+    use serde_json::json;
+
+    async fn pool() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        crate::db::MIGRATOR.run(&pool).await.unwrap();
+        pool
+    }
+
+    async fn chat(pool: &SqlitePool, id: &str, parent: Option<&str>, anchor: Option<&str>) {
+        sqlx::query(
+            "INSERT INTO chats (id, title, parent_chat_id, branched_from_message_id, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, 0, 0)",
+        )
+        .bind(id).bind(format!("chat {id}")).bind(parent).bind(anchor)
+        .execute(pool).await.unwrap();
+    }
+
+    async fn msg(pool: &SqlitePool, id: &str, chat_id: &str, ts: i64) {
+        sqlx::query(
+            "INSERT INTO messages (id, chat_id, role, content, created_at) VALUES (?1,?2,'user',?3,?4)",
+        )
+        .bind(id).bind(chat_id).bind(json!([{"type":"text","text":id}]).to_string()).bind(ts)
+        .execute(pool).await.unwrap();
+    }
+
+    async fn count(pool: &SqlitePool, chat_id: &str) -> i64 {
+        sqlx::query_scalar("SELECT COUNT(*) FROM messages WHERE chat_id = ?1")
+            .bind(chat_id).fetch_one(pool).await.unwrap()
+    }
+
+    #[test]
+    fn an_unknown_scope_is_the_safe_one() {
+        assert_eq!(ForkScope::parse(None), ForkScope::VisiblePath);
+        assert_eq!(ForkScope::parse(Some("nonsense")), ForkScope::VisiblePath);
+        assert_eq!(ForkScope::parse(Some("branches")), ForkScope::WithBranches);
+        assert_eq!(ForkScope::parse(Some("all")), ForkScope::All);
+        assert!(!ForkScope::VisiblePath.carries_children());
+        assert!(ForkScope::WithBranches.carries_children());
+        assert!(ForkScope::All.carries_children());
+    }
+
+    /// The cut is what separates "up to here" from "all of it", and it has to
+    /// be inclusive of the pivot itself.
+    #[tokio::test]
+    async fn the_copy_stops_where_it_was_told_to() {
+        let pool = pool().await;
+        chat(&pool, "src", None, None).await;
+        chat(&pool, "dst", None, None).await;
+        for (i, ts) in [("m1", 10), ("m2", 20), ("m3", 30)] {
+            msg(&pool, i, "src", ts).await;
+        }
+
+        let map = copy_messages_and_attachments(&pool, "src", "dst", 20).await.unwrap();
+        assert_eq!(count(&pool, "dst").await, 2);
+        assert!(map.contains_key("m1") && map.contains_key("m2"));
+        assert!(!map.contains_key("m3"), "the turn after the cut must not come along");
+    }
+
+    /// A branch points at a message; its copy has to point at *that message's
+    /// copy*, or the fork's tree hangs off ids belonging to another chat.
+    #[tokio::test]
+    async fn a_branch_is_re_anchored_onto_the_copied_message() {
+        let pool = pool().await;
+        chat(&pool, "src", None, None).await;
+        chat(&pool, "dst", None, None).await;
+        msg(&pool, "m1", "src", 10).await;
+        chat(&pool, "kid", Some("src"), Some("m1")).await;
+        msg(&pool, "k1", "kid", 15).await;
+
+        let map = copy_messages_and_attachments(&pool, "src", "dst", i64::MAX).await.unwrap();
+        copy_child_chats(&pool, "src", "dst", &map, i64::MAX).await.unwrap();
+
+        let (new_kid, anchor): (String, Option<String>) = sqlx::query_as(
+            "SELECT id, branched_from_message_id FROM chats WHERE parent_chat_id = 'dst'",
+        )
+        .fetch_one(&pool).await.unwrap();
+        assert_eq!(anchor.as_deref(), map.get("m1").map(|s| s.as_str()));
+        assert_eq!(count(&pool, &new_kid).await, 1, "the child's own history comes with it");
+    }
+
+    /// A branch taken off a turn this fork stopped short of cannot come along —
+    /// it would hang from a message the fork does not have.
+    #[tokio::test]
+    async fn a_branch_past_the_cut_is_left_behind() {
+        let pool = pool().await;
+        chat(&pool, "src", None, None).await;
+        chat(&pool, "dst", None, None).await;
+        msg(&pool, "m1", "src", 10).await;
+        msg(&pool, "m2", "src", 30).await;
+        chat(&pool, "late", Some("src"), Some("m2")).await;
+
+        let map = copy_messages_and_attachments(&pool, "src", "dst", 20).await.unwrap();
+        copy_child_chats(&pool, "src", "dst", &map, 20).await.unwrap();
+
+        let kids: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM chats WHERE parent_chat_id = 'dst'")
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(kids, 0);
+    }
+
+    /// A sub-agent chat has no anchor message — it belongs to the chat, not to
+    /// one of its turns — so it travels whenever its parent does.
+    #[tokio::test]
+    async fn a_sub_agent_run_has_no_anchor_and_still_travels() {
+        let pool = pool().await;
+        chat(&pool, "src", None, None).await;
+        chat(&pool, "dst", None, None).await;
+        msg(&pool, "m1", "src", 10).await;
+        chat(&pool, "agent", Some("src"), None).await;
+
+        let map = copy_messages_and_attachments(&pool, "src", "dst", i64::MAX).await.unwrap();
+        copy_child_chats(&pool, "src", "dst", &map, i64::MAX).await.unwrap();
+
+        let kids: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM chats WHERE parent_chat_id = 'dst'")
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(kids, 1);
+    }
+
+    /// A branch of a branch. The recursion has to re-link each level against
+    /// the level above it, not against the original.
+    #[tokio::test]
+    async fn the_whole_subtree_comes_across() {
+        let pool = pool().await;
+        chat(&pool, "src", None, None).await;
+        chat(&pool, "dst", None, None).await;
+        msg(&pool, "m1", "src", 10).await;
+        chat(&pool, "kid", Some("src"), Some("m1")).await;
+        msg(&pool, "k1", "kid", 15).await;
+        chat(&pool, "grandkid", Some("kid"), Some("k1")).await;
+        msg(&pool, "g1", "grandkid", 18).await;
+
+        let map = copy_messages_and_attachments(&pool, "src", "dst", i64::MAX).await.unwrap();
+        copy_child_chats(&pool, "src", "dst", &map, i64::MAX).await.unwrap();
+
+        let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM chats").fetch_one(&pool).await.unwrap();
+        // src, kid, grandkid, dst, and the two copies underneath dst.
+        assert_eq!(total, 6);
+        let new_kid: String = sqlx::query_scalar("SELECT id FROM chats WHERE parent_chat_id = 'dst'")
+            .fetch_one(&pool).await.unwrap();
+        let grandkids: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM chats WHERE parent_chat_id = ?1")
+            .bind(&new_kid).fetch_one(&pool).await.unwrap();
+        assert_eq!(grandkids, 1, "the branch of the branch re-linked onto the new middle chat");
     }
 }

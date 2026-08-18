@@ -784,6 +784,8 @@ pub async fn branch_chat(
         required(&body, "messageId")?,
         b(&body, "solo"),
         s(&body, "zoneId"),
+        s(&body, "scope"),
+        b(&body, "standalone"),
     )
     .await?;
     Ok(Json(chat).into_response())

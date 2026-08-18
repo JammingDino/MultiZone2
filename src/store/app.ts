@@ -538,6 +538,8 @@ interface AppStore {
     solo?: boolean,
     zoneId?: string | null,
     restoreFiles?: boolean,
+    scope?: import("@/lib/types").ForkScope,
+    standalone?: boolean,
   ) => Promise<import("@/lib/types").RestoreReport[]>;
   /** Hand-edit an assistant message's text in place (persists + flags edited). */
   editMessage: (chatId: string, messageId: string, text: string) => Promise<void>;
@@ -1097,11 +1099,19 @@ export const useApp = create<AppStore>((set, get) => ({
       await get().loadChatZones(id);
     }
   },
-  async branchFromMessage(chatId, messageId, solo = false, zoneId = null, restoreFiles = false) {
+  async branchFromMessage(
+    chatId,
+    messageId,
+    solo = false,
+    zoneId = null,
+    restoreFiles = false,
+    scope = "visible",
+    standalone = false,
+  ) {
     // Rewind first, on the source chat: the checkpoints belong to it, and a
     // branch that failed to be created should not leave a half-restored tree.
     const reports = restoreFiles ? await api.restoreToMessage(chatId, messageId) : [];
-    const branch = await api.branchChat(chatId, messageId, solo, zoneId);
+    const branch = await api.branchChat(chatId, messageId, solo, zoneId, scope, standalone);
     await get().refreshChats();
     await get().setActiveChat(branch.id);
     // The source chat's revert offers have changed shape — a rewound turn now

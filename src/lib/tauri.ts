@@ -18,6 +18,7 @@ import type {
   RewindReport,
   RewindStatus,
   SearchHit,
+  ForkScope,
   DbStats,
   IndexSummary,
   InputPart,
@@ -148,7 +149,9 @@ export const branchChat = (
   messageId: string,
   solo = false,
   zoneId: string | null = null,
-) => invoke<Chat>("branch_chat", { chatId, messageId, solo, zoneId });
+  scope: ForkScope = "visible",
+  standalone = false,
+) => invoke<Chat>("branch_chat", { chatId, messageId, solo, zoneId, scope, standalone });
 
 // Projects
 export const listProjects = () => invoke<Project[]>("list_projects");

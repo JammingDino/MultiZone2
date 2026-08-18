@@ -93,3 +93,34 @@ export function usePersistentBool(key: string, defaultValue: boolean): [boolean,
   );
   return [value, update];
 }
+
+/**
+ * A single string persisted under `ui.<key>`, constrained to a known set.
+ *
+ * The `allowed` list is what makes this safe to read back: localStorage is
+ * user-writable and survives across versions, so a value that was legal in an
+ * older build (or typed in by hand) must not be able to reach code that assumes
+ * it is one of today's options.
+ */
+export function usePersistentChoice<T extends string>(
+  key: string,
+  defaultValue: T,
+  allowed: readonly T[],
+): [T, (v: T) => void] {
+  const [value, setValue] = useState<T>(() => {
+    try {
+      const raw = localStorage.getItem(PREFIX + key) as T | null;
+      return raw !== null && allowed.includes(raw) ? raw : defaultValue;
+    } catch {
+      return defaultValue;
+    }
+  });
+  const update = useCallback(
+    (v: T) => {
+      setValue(v);
+      try { localStorage.setItem(PREFIX + key, v); } catch { /* ignore */ }
+    },
+    [key],
+  );
+  return [value, update];
+}

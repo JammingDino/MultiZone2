@@ -1,9 +1,12 @@
 import { useMemo, useState } from "react";
-import { Copy, Check, RotateCcw, BarChart3, Pencil, GitBranch, History, Redo2, Volume2, Pause, Play, Square, TriangleAlert } from "lucide-react";
+import { Copy, Check, RotateCcw, BarChart3, Pencil, GitBranch, History, Redo2, Volume2, Pause, Play, Square, TriangleAlert, ChevronDown } from "lucide-react";
 import type { Checkpoint, RestoreReport } from "@/lib/types";
 import { useApp } from "@/store/app";
 import { useTts, zoneVoice } from "@/store/tts";
 import * as api from "@/lib/tauri";
+import { usePersistentBool, usePersistentChoice } from "@/lib/uiState";
+import { FORK_SCOPES, type ForkScope } from "@/lib/types";
+import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 import { formatTokens } from "@/lib/format";
 import { estimateTokens } from "@/lib/tokens";
 import { ACTION_ICON, CHROME_OUTLINED, CHROME_QUIET } from "@/lib/chrome";
@@ -65,6 +68,13 @@ export function MessageActions({
 }: Props) {
   const [copied, setCopied] = useState(false);
   const [branching, setBranching] = useState(false);
+  // Fork settings persist, because the answer is a habit rather than a
+  // per-message decision — the same reason LibreChat's fork dialog has a
+  // "remember" box. The plain Branch button uses them without asking; the caret
+  // beside it is where they get changed.
+  const [forkScope, setForkScope] = usePersistentChoice<ForkScope>("forkScope", "visible", FORK_SCOPES);
+  const [forkStandalone, setForkStandalone] = usePersistentBool("forkStandalone", false);
+  const [forkMenu, setForkMenu] = useState(false);
   /** Later turns that changed files, when a branch has to ask about them. */
   const [rewind, setRewind] = useState<Checkpoint[] | null>(null);
   const [rewindNote, setRewindNote] = useState<string | null>(null);
@@ -121,6 +131,8 @@ export function MessageActions({
         branchSolo,
         branchSoloZoneId,
         restoreFiles,
+        forkScope,
+        forkStandalone,
       );
       // A file edited outside the app is left exactly as found; the branch
       // still happened, so say which paths didn't come back rather than
@@ -217,6 +229,22 @@ export function MessageActions({
           >
             <GitBranch size={ACTION_ICON} />
           </ActionButton>
+          <ActionButton
+            onClick={() => setForkMenu((v) => !v)}
+            label="Fork options"
+            disabled={isBusy || branching}
+          >
+            <ChevronDown size={ACTION_ICON} />
+          </ActionButton>
+          {forkMenu && (
+            <ForkOptions
+              scope={forkScope}
+              standalone={forkStandalone}
+              onScope={setForkScope}
+              onStandalone={setForkStandalone}
+              onClose={() => setForkMenu(false)}
+            />
+          )}
           {rewind && (
             <RewindPrompt
               checkpoints={rewind}
@@ -734,5 +762,79 @@ function formatTokenTotal(stats: {
 }) {
   return formatTokens(
     estimateTokens(stats.contentChars + stats.reasoningChars + (stats.toolCallChars ?? 0)),
+  );
+}
+
+
+const SCOPE_LABELS: Record<ForkScope, { title: string; detail: string }> = {
+  visible: { title: "This thread", detail: "The conversation up to this message" },
+  branches: { title: "With branches", detail: "Also the branches and sub-agent runs hanging off it" },
+  all: { title: "Everything", detail: "The whole chat including later turns, and every branch" },
+};
+
+/**
+ * The fork settings (0.15.2), as a popover on the Branch button's caret.
+ *
+ * Not a dialog in front of every fork: the default is right almost always, and
+ * a confirmation step on the common path costs more than the option is worth.
+ * The choice made here persists, so it is answered once rather than each time.
+ */
+function ForkOptions({
+  scope,
+  standalone,
+  onScope,
+  onStandalone,
+  onClose,
+}: {
+  scope: ForkScope;
+  standalone: boolean;
+  onScope: (s: ForkScope) => void;
+  onStandalone: (v: boolean) => void;
+  onClose: () => void;
+}) {
+  useDismissOnEscape(true, onClose);
+  return (
+    <>
+      <div className="fixed inset-0 z-40" onClick={onClose} />
+      <div className="absolute bottom-full right-0 z-50 mb-1 w-64 rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] p-1.5 shadow-lg">
+        <p className="px-1.5 pb-1 text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">
+          Fork carries
+        </p>
+        {FORK_SCOPES.map((s) => (
+          <button
+            key={s}
+            onClick={() => onScope(s)}
+            className={`w-full rounded px-1.5 py-1 text-left transition hover:bg-[var(--color-panel-hover)] ${
+              scope === s ? "bg-[var(--color-panel-hover)]" : ""
+            }`}
+          >
+            <span className="flex items-center gap-1.5 text-xs">
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${scope === s ? "bg-[var(--color-accent)]" : "bg-transparent"}`}
+              />
+              {SCOPE_LABELS[s].title}
+            </span>
+            <span className="block pl-3 text-[10px] leading-snug text-[var(--color-text-muted)]">
+              {SCOPE_LABELS[s].detail}
+            </span>
+          </button>
+        ))}
+        <div className="my-1 border-t border-[var(--color-border)]" />
+        <label className="flex cursor-pointer items-start gap-1.5 rounded px-1.5 py-1 hover:bg-[var(--color-panel-hover)]">
+          <input
+            type="checkbox"
+            checked={standalone}
+            onChange={(e) => onStandalone(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span>
+            <span className="block text-xs">Start as a separate chat</span>
+            <span className="block text-[10px] leading-snug text-[var(--color-text-muted)]">
+              Same copied history, but not nested under this conversation
+            </span>
+          </span>
+        </label>
+      </div>
+    </>
   );
 }

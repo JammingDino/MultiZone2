@@ -195,6 +195,7 @@ fn build_router(state: ApiState) -> Router {
         .route("/api/chat-tags", get(h::all_chat_tags))
         // Chats
         .route("/api/chats", get(list_chats).post(create_chat))
+        .route("/api/search", get(h::search_messages))
         .route("/api/chats/:id", axum::routing::delete(h::delete_chat))
         .route("/api/chats/:id/messages", get(get_messages).post(send_message))
         .route("/api/chats/:id/messages/:messageId", axum::routing::patch(h::update_message))

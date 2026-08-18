@@ -243,6 +243,7 @@ The most-used handful:
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/chats` | List chats. |
+| `GET` | `/api/search` | Search every message of every chat. Query: `?q=`. Returns the matching message, its chat, and a snippet with the hits wrapped in the STX/ETX control characters (U+0002 / U+0003). |
 | `POST` | `/api/chats` | Create a chat. Body: `{ "zoneId"?, "projectId"? }`. |
 | `GET` | `/api/chats/:id/messages` | List a chat's messages. |
 | `POST` | `/api/chats/:id/messages` | Send a message (see below). |

@@ -12,6 +12,7 @@ mod mcp;
 mod ocr;
 mod plans;
 mod repomap;
+mod search;
 mod review;
 mod pdf_bridge;
 mod skillpacks;
@@ -204,6 +205,7 @@ pub fn run() {
             commands::zones::upsert_zone,
             commands::zones::delete_zone,
             commands::chats::list_chats,
+            commands::search::search_messages,
             commands::chats::create_chat,
             commands::chats::rename_chat,
             commands::chats::set_chat_zone,

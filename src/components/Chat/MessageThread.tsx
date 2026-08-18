@@ -223,6 +223,36 @@ export function MessageThread({ chatId }: { chatId: string }) {
     Object.keys(perspectiveStreams).length,
   ]);
 
+  // Cross-chat search lands here (0.15.0): scroll the hit into view and flash
+  // it, so arriving in a 200-message chat shows *where* the match was rather
+  // than dropping the user at the bottom to hunt for it.
+  //
+  // Waits on `messagesLoaded` because the anchor does not exist until the
+  // thread has rendered, and clears the flag either way — a jump to a message
+  // that has since been deleted should not re-fire on every later visit.
+  const pendingJumpMessageId = useApp((s) => s.pendingJumpMessageId);
+  const clearPendingJump = useApp((s) => s.clearPendingJump);
+  useEffect(() => {
+    if (!pendingJumpMessageId || !messagesLoaded) return;
+    const id = window.requestAnimationFrame(() => {
+      const el = innerRef.current?.querySelector(`[data-msg~="${CSS.escape(pendingJumpMessageId)}"]`);
+      // The unit wrapper is `display: contents` outside columns mode, which has
+      // no box to scroll to — its first child is the real one.
+      const target = (el?.firstElementChild ?? el) as HTMLElement | null;
+      if (target) {
+        programmaticScrollRef.current = true;
+        target.scrollIntoView({ block: "center", behavior: "smooth" });
+        target.classList.add("mz-jump-flash");
+        window.setTimeout(() => target.classList.remove("mz-jump-flash"), 1600);
+        window.setTimeout(() => {
+          programmaticScrollRef.current = false;
+        }, 600);
+      }
+      clearPendingJump();
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [pendingJumpMessageId, messagesLoaded, clearPendingJump]);
+
   const scrollToBottom = useCallback(() => {
     const c = containerRef.current;
     if (!c) return;
@@ -259,10 +289,15 @@ export function MessageThread({ chatId }: { chatId: string }) {
                 <BotTurnView turn={unit} isLatest={i === lastBotIdx} />
               );
             const key = unit.type === "user" ? unit.message.id : `bot-${i}`;
+            // Anchor for cross-chat search (0.15.0). A bot turn lists every
+            // assistant message it merged, so a hit on any of them finds the
+            // turn that rendered it.
+            const anchor =
+              unit.type === "user" ? unit.message.id : unit.messageIds.join(" ");
             return spansFull ? (
-              <div key={key}>{node}</div>
+              <div key={key} data-msg={anchor}>{node}</div>
             ) : (
-              <div key={key} className={columnsMode ? "mx-auto w-full max-w-3xl" : "contents"}>
+              <div key={key} data-msg={anchor} className={columnsMode ? "mx-auto w-full max-w-3xl" : "contents"}>
                 {node}
               </div>
             );

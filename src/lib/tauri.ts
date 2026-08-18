@@ -17,6 +17,7 @@ import type {
   RestoreReport,
   RewindReport,
   RewindStatus,
+  SearchHit,
   DbStats,
   IndexSummary,
   InputPart,
@@ -65,6 +66,9 @@ export const deleteZone = (id: string) => invoke<void>("delete_zone", { id });
 
 // Chats
 export const listChats = () => invoke<Chat[]>("list_chats");
+/** Cross-chat message search (0.15.0). Safe to call on every keystroke. */
+export const searchMessages = (query: string) =>
+  invoke<SearchHit[]>("search_messages", { query });
 export const createChat = (zoneId: string | null, projectId?: string | null) =>
   invoke<Chat>("create_chat", { zoneId, projectId: projectId ?? null });
 export const renameChat = (id: string, title: string) =>

@@ -4,6 +4,7 @@ import { useApp } from "@/store/app";
 import { useShallow } from "zustand/react/shallow";
 import * as api from "@/lib/tauri";
 import { ChatList } from "./ChatList";
+import { ChatSearch } from "./ChatSearch";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import { usePersistentSet } from "@/lib/uiState";
 import { resolveBaseModel } from "@/lib/baseZone";
@@ -73,6 +74,10 @@ export function Sidebar() {
   const collapsed = usePersistentSet("collapsedProjects");
   const [projectMenu, setProjectMenu] = useState<{ projectId: string; x: number; y: number } | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<Project | null>(null);
+  // While a message search is running its results take the chat list's place —
+  // the question is "which chat was that in", so the answer belongs where the
+  // chats normally are (0.15.0).
+  const [searching, setSearching] = useState(false);
 
   // Tag filtering: a chat matches when no filter is set, or it carries any of
   // the selected tags (union). Built from the flat chat↔tag link list.
@@ -281,8 +286,10 @@ export function Sidebar() {
         </button>
       </div>
 
+      <ChatSearch onActiveChange={setSearching} />
+
       {/* Tag filter bar */}
-      {tags.length > 0 && (
+      {!searching && tags.length > 0 && (
         <div className="mx-2 mb-1 flex items-center gap-1">
           <TagIcon size={11} className="mr-0.5 shrink-0 text-[var(--color-text-muted)]" />
           {/* One scrolling strip so a long tag list never grows the sidebar header. */}
@@ -324,8 +331,9 @@ export function Sidebar() {
         </div>
       )}
 
-      {/* Chat list with project folders */}
-      <div className="flex-1 overflow-y-auto">
+      {/* Chat list with project folders. Hidden outright while a search is
+          running — the results took its place rather than filtering it. */}
+      <div className={`flex-1 overflow-y-auto ${searching ? "hidden" : ""}`}>
         {projects.map((project) => {
           const projectChats = chats.filter((c) => c.projectId === project.id && matchesTagFilter(c.id));
           // While a tag filter is active, hide projects with no matching chats.

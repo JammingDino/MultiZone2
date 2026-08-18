@@ -84,6 +84,7 @@ pub const ROUTES: &[RouteDef] = &[
 
     // Chats
     r("GET", "/api/chats", "All chats, most recently updated first"),
+    r("GET", "/api/search", "Search every message of every chat (?q=)"),
     r("POST", "/api/chats", "Create a chat"),
     r("DELETE", "/api/chats/:id", "Delete a chat"),
     r("GET", "/api/chats/:id/messages", "Every message in a chat"),
@@ -239,6 +240,7 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("projects::delete_tag", Route("DELETE /api/tags/:id")),
 
     ("chats::list_chats", Route("GET /api/chats")),
+    ("search::search_messages", Route("GET /api/search")),
     ("chats::create_chat", Route("POST /api/chats")),
     ("chats::delete_chat", Route("DELETE /api/chats/:id")),
     ("chats::get_messages", Route("GET /api/chats/:id/messages")),
@@ -1296,6 +1298,22 @@ pub async fn reset_tool_usage(
 ) -> ApiResult<StatusCode> {
     commands::tool_usage::reset_tool_usage(app_state(&st), q.zone_id).await?;
     Ok(NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+pub struct SearchQuery {
+    #[serde(default)]
+    q: String,
+}
+
+/// Cross-chat message search (0.15.0). A remote caller wants this at least as
+/// much as the window does: on a phone, scrolling a chat list to find the one
+/// conversation is the whole problem.
+pub async fn search_messages(
+    State(st): State<ApiState>,
+    Query(q): Query<SearchQuery>,
+) -> ApiResult<Response> {
+    Ok(Json(commands::search::search_messages(app_state(&st), q.q).await?).into_response())
 }
 
 pub async fn lifetime_usage(State(st): State<ApiState>) -> ApiResult<Response> {

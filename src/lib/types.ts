@@ -1494,3 +1494,20 @@ export const ALL_TOOLS: ToolInfo[] = [
   { id: "wsl_exec",     label: "Run Linux commands (WSL)", category: "System", safety: 2, description: "Run Linux commands in WSL. Each call is independent by default; the assistant can opt into a shell that persists for this chat, so working directory, environment and virtualenvs carry across steps. Requires WSL to be installed." },
   { id: "app_control",  label: "Change MultiZone itself",  category: "System", safety: 2, description: "Let the assistant read and change the app you are talking to it in — switch to dark mode, create a zone, add a provider, file a chat under a project, turn a skill on. It goes through the same API a script would use, so it can do what you can do in the app and no more. You approve every change; reading is free." },
 ];
+
+/**
+ * One message matching a cross-chat search (0.15.0). `snippet` carries the
+ * matched terms wrapped in STX/ETX control characters rather than markup, so it
+ * can be rendered as plain text without a message being able to inject markup
+ * of its own; see `splitSnippet`.
+ */
+export interface SearchHit {
+  messageId: string;
+  chatId: string;
+  chatTitle: string;
+  /** Set when the hit is in a sub-agent or a branch rather than a top-level chat. */
+  parentChatId: string | null;
+  role: string;
+  snippet: string;
+  createdAt: number;
+}

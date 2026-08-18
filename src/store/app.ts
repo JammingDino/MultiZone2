@@ -515,6 +515,15 @@ interface AppStore {
   refreshChats: () => Promise<void>;
   setActiveChat: (id: string | null) => Promise<void>;
   /**
+   * A message the thread should scroll to and flash once it is rendered
+   * (0.15.0). Set by cross-chat search; cleared by `MessageThread` as soon as
+   * it has landed, so re-entering the chat later does not jump again.
+   */
+  pendingJumpMessageId: string | null;
+  /** Open `chatId` and scroll to `messageId` once its thread has loaded. */
+  jumpToMessage: (chatId: string, messageId: string) => Promise<void>;
+  clearPendingJump: () => void;
+  /**
    * Fork a chat at a message into a new chat and switch to it.
    *
    * `restoreFiles` rewinds the working tree to the same point (0.10.1), so the
@@ -1048,6 +1057,17 @@ export const useApp = create<AppStore>((set, get) => ({
   async refreshChats() {
     const chats = await api.listChats();
     set({ chats });
+  },
+  pendingJumpMessageId: null,
+  async jumpToMessage(chatId, messageId) {
+    // Order matters: the flag is set before the switch so a thread that is
+    // already mounted for this chat sees it on the same render that the
+    // messages arrive, rather than a frame later.
+    set({ pendingJumpMessageId: messageId });
+    await get().setActiveChat(chatId);
+  },
+  clearPendingJump() {
+    set({ pendingJumpMessageId: null });
   },
   async setActiveChat(id) {
     set({ activeChatId: id });

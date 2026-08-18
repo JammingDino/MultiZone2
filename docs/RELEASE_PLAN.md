@@ -997,9 +997,20 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ## 0.15.x — Smaller lifts
 
-*The rest of [BORROWABLES.md](BORROWABLES.md) — each independently useful, none load-bearing for 1.0.*
+*The rest of [BORROWABLES.md](BORROWABLES.md) — each independently useful, none load-bearing for 1.0. Worked in listed order.*
 
-- [ ] Cross-chat full-text search over messages (FTS5 is already available). Subchats multiply the number of conversations by the size of the panel and there is currently no way to find one
+### 0.15.0 — Finding the conversation
+
+*Status: built & tested (`cargo test --lib` 322 passing including 8 new, `npm run build` green); not yet runtime-tested against a real history. The index is migration [042](../src-tauri/migrations/042_message_search.sql), the query side is [search.rs](../src-tauri/src/search.rs), the box is [ChatSearch.tsx](../src/components/Sidebar/ChatSearch.tsx).*
+
+- [x] **Cross-chat full-text search over messages.** An FTS5 index over every user and assistant message, backfilled from existing history and kept current from then on. Sub-agents, perspectives and branches multiply the number of conversations by the size of the panel, and the sidebar only ever offered titles — most of which the model wrote. Results replace the chat list rather than opening over it, because the question being asked is *which chat was that in*, and the answer belongs where the chats normally are
+- [x] **The index is maintained by triggers, not by Rust.** A message is written from a dozen places — the turn loop, an edit, a branch, a rewind, a checkpoint restore, the HTTP API — and an index that each of them has to remember to call is an index that goes stale the first time one of them forgets. `content` is a JSON array of content parts, so the trigger reaches into it with `json_each` and indexes the `text` ones. Deliberately not `hidden_text`: that is context injected behind the user's back, and a hit the user cannot see in the transcript is a result they cannot act on
+- [x] **A search box cannot be allowed to throw.** FTS5's query language is a real grammar — a bare `AND`, an unbalanced quote, a leading `-` are all syntax errors, and the box is typed into one character at a time, so every prefix of every query has to parse. Each token is quoted as a phrase, which strips the operators of their meaning, and the last one gets a `*` so results narrow while the word is still being typed
+- [x] **A hit lands on the message, not the chat.** Arriving at the bottom of a 200-message conversation to hunt for the thing you searched for is barely better than not finding it. Each turn carries a `data-msg` anchor, and the thread scrolls the hit into view and flashes it once
+- [x] Also on the API (`GET /api/search?q=`), which matters more remotely than locally: on a phone, scrolling a chat list to find the one conversation *is* the problem. The snippet marks its hits with STX/ETX rather than markup, so a message cannot inject anything into the surface that renders it
+- [ ] Runtime-test against a real history: search a word that appears in a sub-agent's chat, confirm the result names the conversation it lives under, and confirm the jump lands and flashes
+- [ ] Runtime-test the backfill on an existing database — the migration indexes what is already there, and that path never runs in a fresh test DB
+
 - [ ] Command palette over zones, chats, settings and skills — everything reachable is a named thing behind a menu. Note `Ctrl/Cmd+K` is already bound to composer focus and would need rebinding
 - [ ] Fork scope options: visible path / with branches / all, and standalone vs continuation context
 - [ ] MCP `resources/list` as attachable context and `prompts/list` as slash commands — we call `tools/list` and `tools/call` only, so two protocol calls buy a whole surface

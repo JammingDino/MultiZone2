@@ -22,6 +22,7 @@ pub mod plans;
 pub mod voice;
 pub mod tool_usage;
 pub mod usage;
+pub mod search;
 
 pub fn now_ts() -> i64 {
     chrono::Utc::now().timestamp_millis()

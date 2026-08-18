@@ -873,3 +873,19 @@ html.shadows [class*="shadow-xl"] {
   padding: 0;
 }
 .markdown.mz-plan-prose table { font-size: 0.95em; }
+
+/* Cross-chat search landing (0.15.0). A hit opened from search scrolls into
+   view and flashes once — long enough to catch the eye, short enough that it
+   is gone by the time the user starts reading. Two keyframes rather than a
+   transition so it plays on an element that was already on screen. */
+@keyframes mz-jump-flash {
+  0%   { background-color: color-mix(in srgb, var(--color-accent) 26%, transparent); }
+  100% { background-color: transparent; }
+}
+.mz-jump-flash {
+  animation: mz-jump-flash 1.6s ease-out;
+  border-radius: 0.5rem;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mz-jump-flash { animation-duration: 0.01ms; }
+}

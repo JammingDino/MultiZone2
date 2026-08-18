@@ -20,6 +20,9 @@ import type {
   SearchHit,
   ForkScope,
   McpResource,
+  SavedRun,
+  RunParam,
+  RenderedRun,
   McpPrompt,
   DbStats,
   IndexSummary,
@@ -78,6 +81,20 @@ export const listMcpPrompts = (id: string) =>
   invoke<McpPrompt[]>("list_mcp_prompts", { id });
 export const getMcpPrompt = (id: string, name: string, args: Record<string, string> = {}) =>
   invoke<string>("get_mcp_prompt", { id, name, arguments: args });
+
+// Saved parameterised runs (0.15.4).
+export const listSavedRuns = () => invoke<SavedRun[]>("list_saved_runs");
+export const upsertSavedRun = (run: {
+  id?: string;
+  name: string;
+  description?: string | null;
+  template: string;
+  params?: RunParam[];
+  zoneId?: string | null;
+}) => invoke<SavedRun>("upsert_saved_run", { run });
+export const deleteSavedRun = (id: string) => invoke<void>("delete_saved_run", { id });
+export const renderSavedRun = (id: string, values: Record<string, string> = {}) =>
+  invoke<RenderedRun>("render_saved_run", { id, values });
 
 export const listChats = () => invoke<Chat[]>("list_chats");
 /** Cross-chat message search (0.15.0). Safe to call on every keystroke. */

@@ -353,6 +353,9 @@ interface AppStore {
   tags: Tag[];
   /** Global skill catalog — managed in Settings → Skills. */
   skills: Skill[];
+  /** Saved parameterised runs (0.15.4). */
+  savedRuns: import("@/lib/types").SavedRun[];
+  refreshSavedRuns: () => Promise<void>;
   /** Folder-backed skills found on disk, offered alongside `skills`. */
   skillPacks: SkillPack[];
   /** Registered MCP servers (+ their tools and live status) — Settings → MCP. */
@@ -600,6 +603,13 @@ interface AppStore {
   toggleSidebar: () => void;
   /** Signal the active composer to take keyboard focus. */
   focusComposer: () => void;
+  /**
+   * Text to drop into the chat composer, with a nonce so the same text can be
+   * staged twice (0.15.4). Staged rather than sent: a saved run is kept because
+   * it worked once, and seeing the filled-in prompt is how you tell it still does.
+   */
+  composerDraft: { text: string; nonce: number };
+  setComposerDraft: (text: string) => void;
   /** Command palette (0.15.1) — one keystroke to anything with a name. */
   commandPaletteOpen: boolean;
   /**
@@ -973,6 +983,7 @@ export const useApp = create<AppStore>((set, get) => ({
   projects: [],
   tags: [],
   skills: [],
+  savedRuns: [],
   skillPacks: [],
   mcpServers: [],
   memories: [],
@@ -1993,6 +2004,11 @@ export const useApp = create<AppStore>((set, get) => ({
     set({ sidebarOpen: next });
   },
   focusComposer: () => set((s) => ({ focusComposerNonce: s.focusComposerNonce + 1 })),
+  composerDraft: { text: "", nonce: 0 },
+  setComposerDraft: (text) => set((s) => ({ composerDraft: { text, nonce: s.composerDraft.nonce + 1 } })),
+  async refreshSavedRuns() {
+    set({ savedRuns: await api.listSavedRuns() });
+  },
   commandPaletteOpen: false,
   focusChatSearchNonce: 0,
   focusChatSearch: () => set((st) => ({ sidebarOpen: true, focusChatSearchNonce: st.focusChatSearchNonce + 1 })),

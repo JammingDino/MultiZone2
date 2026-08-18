@@ -1043,7 +1043,19 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [x] All four on the API as well (`/api/mcp/servers/:id/resources`, `…/resources/read`, `…/prompts`, `…/prompts/get`)
 - [ ] Runtime-test against a server that offers both — the renderers are tested against the shapes the spec allows, but nothing here has met a real server yet
 
-- [ ] Saved parameterised runs: prompt template + zone + parameters in one shareable file. Zone teams already encode who does the work; this encodes the task
+### 0.15.4 — The task, saved
+
+*Status: backend built & tested (`cargo test --lib` 341 passing including 7 new), reachable from the palette and over the API. **The editor UI is not built yet** — a run can be created over `POST /api/runs` and run from the palette, but not written in the app. [runs.rs](../src-tauri/src/runs.rs), migration [043](../src-tauri/migrations/043_saved_runs.sql).*
+
+- [x] **A run is a prompt template, its parameters, and the zone that answers it.** Zones and teams encode *who* does the work and are the app's main unit of configuration; nothing encoded the *task*. A job done every week is retyped from memory every week, slightly differently each time, and the version that worked is whichever chat it happened in
+- [x] **Rendering is dumb text substitution**, and that is a decision rather than a shortcut. `{{param}}`, no expressions, no conditionals. The output is a chat message — there is nothing to inject *into*, and a template language would be a second thing to learn and a second thing to get wrong
+- [x] **An unfilled placeholder leaves a gap, not scaffolding.** A prompt reaching the model with `{{repo}}` still in it is worse than one with a hole, because the model tries to interpret the scaffolding. Blank values fall back to the parameter's default first; required parameters with nothing to fill them are reported rather than silently rendered
+- [x] Running one from the palette fills the template, opens a chat in the run's zone, and *stages* the prompt without sending it — a run is kept because it worked once, and seeing the filled-in prompt is how you tell it still does
+- [x] A run whose params JSON is unreadable still has its template. Refusing to load it would lose the part that took the work
+- [x] On the API: `GET/POST /api/runs`, `DELETE /api/runs/:id`, `POST /api/runs/:id/render`
+- [ ] **The editor.** Writing a run in the app — name, template, parameter rows, zone — plus export and import as one file, which is the "shareable" half of the item and the reason parameters exist rather than a saved prompt
+- [ ] Runtime-test: save a run with two parameters, run it from the palette, confirm the staged prompt is filled and the chat opened in the right zone
+
 - [ ] Quick assistant — a global-shortcut mini window over the base zone, the fast end of the fast-to-thorough spectrum the roadmap describes
 
 ---

@@ -7,6 +7,7 @@ import {
   FolderKanban,
   Sparkles,
   Plus,
+  Play,
   PanelLeft,
   Keyboard,
   CornerDownLeft,
@@ -86,12 +87,18 @@ export function CommandPalette() {
   const zones = useApp((s) => s.zones);
   const projects = useApp((s) => s.projects);
   const skills = useApp((s) => s.skills);
+  const savedRuns = useApp((s) => s.savedRuns);
+  const refreshSavedRuns = useApp((s) => s.refreshSavedRuns);
   const activeChatId = useApp((s) => s.activeChatId);
 
   useDismissOnEscape(open, close);
 
   // A palette always opens empty — it is a fresh question every time, and a
   // stale query is one the user has to clear before they can start.
+  useEffect(() => {
+    if (open) void refreshSavedRuns();
+  }, [open, refreshSavedRuns]);
+
   useEffect(() => {
     if (open) {
       setQuery("");
@@ -159,6 +166,27 @@ export function CommandPalette() {
       });
     }
 
+    // A saved run is a task worth repeating. Running it from here fills the
+    // template with its defaults and opens a chat with the prompt staged — not
+    // sent, because a run is kept *because* it worked once and seeing the
+    // filled-in prompt is how you tell it still does.
+    for (const r of savedRuns) {
+      out.push({
+        id: `run:${r.id}`,
+        label: `Run: ${r.name}`,
+        detail: r.description ?? undefined,
+        group: "Saved runs",
+        icon: <Play size={14} />,
+        run: go(async () => {
+          const rendered = await api.renderSavedRun(r.id);
+          const chat = await api.createChat(rendered.zoneId, null);
+          await s.refreshChats();
+          await s.setActiveChat(chat.id);
+          s.setComposerDraft(rendered.prompt);
+        }),
+      });
+    }
+
     // Skills are otherwise three clicks deep in a settings tab, and the thing
     // you actually want to do to one is turn it on or off.
     for (const sk of skills) {
@@ -176,7 +204,7 @@ export function CommandPalette() {
     }
 
     return out;
-  }, [open, chats, zones, projects, skills, activeChatId, close]);
+  }, [open, chats, zones, projects, skills, savedRuns, activeChatId, close]);
 
   const results = useMemo(() => {
     const q = query.trim();

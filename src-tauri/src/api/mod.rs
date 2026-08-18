@@ -196,6 +196,9 @@ fn build_router(state: ApiState) -> Router {
         // Chats
         .route("/api/chats", get(list_chats).post(create_chat))
         .route("/api/search", get(h::search_messages))
+        .route("/api/runs", get(h::list_saved_runs).post(h::upsert_saved_run))
+        .route("/api/runs/:id", axum::routing::delete(h::delete_saved_run))
+        .route("/api/runs/:id/render", post(h::render_saved_run))
         .route("/api/chats/:id", axum::routing::delete(h::delete_chat))
         .route("/api/chats/:id/messages", get(get_messages).post(send_message))
         .route("/api/chats/:id/messages/:messageId", axum::routing::patch(h::update_message))

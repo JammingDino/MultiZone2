@@ -1537,3 +1537,44 @@ export interface McpPrompt {
   /** `{ name, description?, required? }` per the MCP spec. */
   arguments: { name: string; description?: string; required?: boolean }[];
 }
+
+/** One declared parameter of a saved run (0.15.4). */
+export interface RunParam {
+  name: string;
+  label?: string;
+  description?: string;
+  default?: string;
+  required?: boolean;
+}
+
+/**
+ * A saved parameterised run (0.15.4) — the task, the way a zone is the worker.
+ * `paramsJson` is the stored JSON; use `runParams()` to read it.
+ */
+export interface SavedRun {
+  id: string;
+  name: string;
+  description: string | null;
+  template: string;
+  paramsJson: string;
+  zoneId: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** The declared parameters of a run, or none if the column is unreadable. */
+export function runParams(run: SavedRun): RunParam[] {
+  try {
+    const v = JSON.parse(run.paramsJson);
+    return Array.isArray(v) ? (v as RunParam[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** What a run's template produces for a set of values. */
+export interface RenderedRun {
+  prompt: string;
+  missing: string[];
+  zoneId: string | null;
+}

@@ -54,6 +54,18 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
   const [text, setText] = useState("");
   // Escape (or a pick) closes the slash menu without clearing what was typed;
   // it re-arms when the text stops being a slash query.
+  // A saved run stages its rendered prompt here (0.15.4). Keyed on the nonce so
+  // running the same one twice still lands, and skipped on first render so a
+  // stale draft does not overwrite what is already typed.
+  const composerDraft = useApp((s) => s.composerDraft);
+  const seenDraftNonce = useRef(composerDraft.nonce);
+  useEffect(() => {
+    if (composerDraft.nonce === seenDraftNonce.current) return;
+    seenDraftNonce.current = composerDraft.nonce;
+    setText(composerDraft.text);
+    taRef.current?.focus();
+  }, [composerDraft]);
+
   const [slashDismissed, setSlashDismissed] = useState(false);
   const slash = slashDismissed ? null : slashQuery(text);
   const [sending, setSending] = useState(false);

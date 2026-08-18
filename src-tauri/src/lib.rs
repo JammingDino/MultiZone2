@@ -12,6 +12,7 @@ mod mcp;
 mod ocr;
 mod plans;
 mod repomap;
+mod runs;
 mod search;
 mod review;
 mod pdf_bridge;
@@ -206,6 +207,10 @@ pub fn run() {
             commands::zones::delete_zone,
             commands::chats::list_chats,
             commands::search::search_messages,
+            commands::runs::list_saved_runs,
+            commands::runs::upsert_saved_run,
+            commands::runs::delete_saved_run,
+            commands::runs::render_saved_run,
             commands::mcp::list_mcp_resources,
             commands::mcp::read_mcp_resource,
             commands::mcp::list_mcp_prompts,

@@ -85,6 +85,10 @@ pub const ROUTES: &[RouteDef] = &[
     // Chats
     r("GET", "/api/chats", "All chats, most recently updated first"),
     r("GET", "/api/search", "Search every message of every chat (?q=)"),
+    r("GET", "/api/runs", "Every saved parameterised run"),
+    r("POST", "/api/runs", "Create or update a saved run"),
+    r("DELETE", "/api/runs/:id", "Delete a saved run"),
+    r("POST", "/api/runs/:id/render", "Fill a run's template. Body: { \"values\"? }"),
     r("POST", "/api/chats", "Create a chat"),
     r("DELETE", "/api/chats/:id", "Delete a chat"),
     r("GET", "/api/chats/:id/messages", "Every message in a chat"),
@@ -245,6 +249,10 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
 
     ("chats::list_chats", Route("GET /api/chats")),
     ("search::search_messages", Route("GET /api/search")),
+    ("runs::list_saved_runs", Route("GET /api/runs")),
+    ("runs::upsert_saved_run", Route("POST /api/runs")),
+    ("runs::delete_saved_run", Route("DELETE /api/runs/:id")),
+    ("runs::render_saved_run", Route("POST /api/runs/:id/render")),
     ("chats::create_chat", Route("POST /api/chats")),
     ("chats::delete_chat", Route("DELETE /api/chats/:id")),
     ("chats::get_messages", Route("GET /api/chats/:id/messages")),
@@ -1362,6 +1370,36 @@ pub async fn search_messages(
     Query(q): Query<SearchQuery>,
 ) -> ApiResult<Response> {
     Ok(Json(commands::search::search_messages(app_state(&st), q.q).await?).into_response())
+}
+
+pub async fn list_saved_runs(State(st): State<ApiState>) -> ApiResult<Response> {
+    Ok(Json(commands::runs::list_saved_runs(app_state(&st)).await?).into_response())
+}
+
+pub async fn upsert_saved_run(
+    State(st): State<ApiState>,
+    Json(body): Json<Value>,
+) -> ApiResult<Response> {
+    let input: commands::runs::SavedRunInput =
+        serde_json::from_value(body).map_err(|e| ApiError(crate::error::AppError::Invalid(e.to_string())))?;
+    Ok(Json(commands::runs::upsert_saved_run(app_state(&st), input).await?).into_response())
+}
+
+pub async fn delete_saved_run(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+) -> ApiResult<StatusCode> {
+    commands::runs::delete_saved_run(app_state(&st), id).await?;
+    Ok(NO_CONTENT)
+}
+
+pub async fn render_saved_run(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> ApiResult<Response> {
+    let values = body.get("values").cloned();
+    Ok(Json(commands::runs::render_saved_run(app_state(&st), id, values).await?).into_response())
 }
 
 pub async fn lifetime_usage(State(st): State<ApiState>) -> ApiResult<Response> {

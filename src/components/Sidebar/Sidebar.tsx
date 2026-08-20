@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Plus, Settings, Layers, ChevronRight, ChevronDown, FolderPlus, ChevronLeft, Pencil, Trash2, Tag as TagIcon, X, Sparkles, Keyboard } from "lucide-react";
+import { Popover, pointRect } from "@/components/common/Popover";
 import { useApp } from "@/store/app";
 import { useShallow } from "zustand/react/shallow";
 import * as api from "@/lib/tauri";
@@ -398,12 +399,14 @@ export function Sidebar() {
 
       {/* Project right-click menu */}
       {projectMenu && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setProjectMenu(null)} onContextMenu={(e) => { e.preventDefault(); setProjectMenu(null); }} />
-          <div
-            className="fixed z-50 min-w-[180px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg"
-            style={{ left: projectMenu.x, top: projectMenu.y }}
-          >
+        <Popover
+          open
+          onClose={() => setProjectMenu(null)}
+          anchorRect={pointRect(projectMenu.x, projectMenu.y)}
+          zIndex={40}
+          className="min-w-[180px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg"
+        >
+          <div>
             <button
               onClick={() => { setProjectMenu(null); onNewChat(projectMenu.projectId); }}
               className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)]"
@@ -428,7 +431,7 @@ export function Sidebar() {
               <Trash2 size={14} /> Delete project
             </button>
           </div>
-        </>
+        </Popover>
       )}
 
       {/* Delete-project confirmation: keep chats (move to Ungrouped) or delete all */}
@@ -487,7 +490,11 @@ function ProjectFolderHeader({
       <button
         onClick={onToggle}
         onContextMenu={onContextMenu}
-        className="flex flex-1 items-center gap-1.5 rounded px-1 py-0.5 text-xs font-medium text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
+        // `min-w-0` so the truncating name below actually truncates (#12): a
+        // flex item's automatic minimum is its content, so without this the
+        // button grew to fit a long project name and pushed the row — count,
+        // new-chat button and all — out past the sidebar's edge.
+        className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-1 py-0.5 text-xs font-medium text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
       >
         {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         <span
@@ -496,7 +503,9 @@ function ProjectFolderHeader({
         >
           <ProjectIcon size={10} color="white" />
         </span>
-        <span className="flex-1 truncate text-left">{project.name}</span>
+        <span className="min-w-0 flex-1 truncate text-left" title={project.name}>
+          {project.name}
+        </span>
         {chatCount > 0 && (
           <span className="shrink-0 text-[10px] text-[var(--color-text-muted)]">
             {chatCount}

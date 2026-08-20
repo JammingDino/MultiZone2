@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
+import { Popover } from "@/components/common/Popover";
 
 interface Props {
   value: string;
@@ -28,7 +29,14 @@ export function ModelCombobox({ value, onChange, options, placeholder, className
   useEffect(() => {
     if (!open) return;
     function onDown(e: MouseEvent) {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+      const target = e.target as HTMLElement;
+      // The list is portalled to `body` (so a modal's scroll box can't clip
+      // it), which puts it outside `wrapRef` — hence the second test.
+      if (
+        wrapRef.current &&
+        !wrapRef.current.contains(target) &&
+        !target.closest("[data-mz-popover]")
+      ) {
         setOpen(false);
         setFilter(null);
       }
@@ -69,8 +77,16 @@ export function ModelCombobox({ value, onChange, options, placeholder, className
       >
         <ChevronDown size={14} />
       </button>
-      {open && list.length > 0 && (
-        <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-56 overflow-y-auto rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg">
+      <Popover
+        open={open && list.length > 0}
+        onClose={() => { setOpen(false); setFilter(null); }}
+        anchorRef={wrapRef}
+        matchAnchorWidth
+        backdrop={false}
+        zIndex={90}
+        className="rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg"
+      >
+        <div>
           {list.map((opt) => (
             <button
               key={opt}
@@ -83,7 +99,7 @@ export function ModelCombobox({ value, onChange, options, placeholder, className
             </button>
           ))}
         </div>
-      )}
+      </Popover>
     </div>
   );
 }

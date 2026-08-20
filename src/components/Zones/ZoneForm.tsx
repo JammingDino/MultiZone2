@@ -4,6 +4,7 @@ import {
   Sliders, MessageSquareText, Wrench, Gauge, Cog, Brain,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { Popover } from "@/components/common/Popover";
 import * as api from "@/lib/tauri";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
 import { VisionOverrideSelect } from "@/components/common/VisionOverrideSelect";
@@ -416,7 +417,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
   const [loadingModels, setLoadingModels] = useState(false);
   const [saving, setSaving] = useState(false);
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
-  const templatePickerRef = useRef<HTMLDivElement>(null);
+  const templateBtnRef = useRef<HTMLButtonElement>(null);
   /** Which tool groups are expanded. Missing key = collapsed. */
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
 
@@ -777,9 +778,10 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
           <div className="mb-1 flex items-center justify-between text-xs text-[var(--color-text-muted)]">
             <label htmlFor="zone-system-prompt">System prompt (optional)</label>
             {/* Template picker */}
-            <div className="relative" ref={templatePickerRef}>
+            <div>
               <button
                 type="button"
+                ref={templateBtnRef}
                 onClick={() => setTemplatePickerOpen((v) => !v)}
                 className="flex items-center gap-1 rounded border border-[var(--color-border)] px-1.5 py-0.5 hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
               >
@@ -787,13 +789,15 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
                 Templates
                 <ChevronDown size={10} />
               </button>
-              {templatePickerOpen && (
-                <>
-                  <div
-                    className="fixed inset-0 z-30"
-                    onMouseDown={(e) => { e.preventDefault(); setTemplatePickerOpen(false); }}
-                  />
-                  <div className="absolute right-0 top-full z-40 mt-1 w-72 rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-xl">
+              <Popover
+                open={templatePickerOpen}
+                onClose={() => setTemplatePickerOpen(false)}
+                anchorRef={templateBtnRef}
+                align="end"
+                zIndex={90}
+                className="w-72 rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-xl"
+              >
+                  <div>
                     <div className="px-3 py-1.5 text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">
                       Prompt templates
                     </div>
@@ -820,8 +824,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
                       ))}
                     </div>
                   </div>
-                </>
-              )}
+              </Popover>
             </div>
           </div>
           <textarea

@@ -1,5 +1,6 @@
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
 import { Paperclip, Send, X, Loader2, Square, SlidersHorizontal, Zap, Brain, ScanText, AudioLines, Clock, CornerDownRight, ClipboardList } from "lucide-react";
+import { Popover } from "@/components/common/Popover";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { useTts } from "@/store/tts";
@@ -165,8 +166,8 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
   const [ovZone, setOvZone] = useState<string | null | undefined>(undefined);
   const [ovModel, setOvModel] = useState("");
   const [ovOpen, setOvOpen] = useState(false);
+  const ovBtnRef = useRef<HTMLButtonElement>(null);
   const [ovModels, setOvModels] = useState<string[]>([]);
-  useDismissOnEscape(ovOpen, () => setOvOpen(false));
 
   const chat = chats.find((c) => c.id === chatId) ?? null;
   // A Quick turn runs the base zone (Settings → Chat), or the first provider's
@@ -477,8 +478,9 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
               <AudioLines size={16} className={conversationActive ? "animate-pulse" : ""} />
             </button>
           )}
-          <div className="relative">
+          <div>
             <button
+              ref={ovBtnRef}
               onClick={() => setOvOpen((v) => !v)}
               disabled={disabled}
               title="Options for this message (zone / model)"
@@ -488,10 +490,15 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
             >
               <SlidersHorizontal size={16} />
             </button>
-            {ovOpen && (
-              <>
-                <div className="fixed inset-0 z-30" onClick={() => setOvOpen(false)} />
-                <div className="absolute bottom-full left-0 z-40 mb-2 w-72 rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] p-3 shadow-lg">
+            <Popover
+              open={ovOpen}
+              onClose={() => setOvOpen(false)}
+              anchorRef={ovBtnRef}
+              side="top"
+              zIndex={30}
+              className="w-72 rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] p-3 shadow-lg"
+            >
+                <div>
                   <div className="mb-2 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
                     For this message only
                   </div>
@@ -525,8 +532,7 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
                     placeholder="Zone's default model"
                   />
                 </div>
-              </>
-            )}
+            </Popover>
           </div>
           {/* MCP prompts and resources (0.15.3). Opens on a `/` in the first
               column only — a path mid-sentence is not a command. */}

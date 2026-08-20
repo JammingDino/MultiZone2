@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { ChevronDown, Check, Plus, Layers, Zap, Brain, Loader2, Crown } from "lucide-react";
 import { useApp } from "@/store/app";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import { CHROME_ACTIVE, CHROME_QUIET, HEADER_CHEVRON, HEADER_ICON } from "@/lib/chrome";
-import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
+import { Popover } from "@/components/common/Popover";
 
 type RoutingState =
   | { status: "routing" }
@@ -23,7 +23,7 @@ export function ZonePicker({ chatId, currentZoneId, smartRouting, routingState }
   const setChatSmart = useApp((s) => s.setChatSmart);
   const openZoneEditor = useApp((s) => s.openZoneEditor);
   const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
 
   const current = zones.find((z) => z.id === currentZoneId) ?? null;
   const CurrentIcon = getZoneIcon(current?.icon);
@@ -35,19 +35,6 @@ export function ZonePicker({ chatId, currentZoneId, smartRouting, routingState }
       ? (zones.find((z) => z.id === routingState.zoneId) ?? null)
       : null;
   const RoutedIcon = getZoneIcon(routedZone?.icon);
-
-  useEffect(() => {
-    if (!open) return;
-    function onClick(e: MouseEvent) {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    }
-    window.addEventListener("mousedown", onClick);
-    return () => window.removeEventListener("mousedown", onClick);
-  }, [open]);
-
-  useDismissOnEscape(open, () => setOpen(false));
 
   async function pick(zoneId: string | null) {
     setOpen(false);
@@ -64,8 +51,9 @@ export function ZonePicker({ chatId, currentZoneId, smartRouting, routingState }
   }
 
   return (
-    <div ref={wrapRef} className="relative">
+    <>
       <button
+        ref={buttonRef}
         onClick={() => setOpen((v) => !v)}
         className={`flex min-w-0 max-w-full items-center gap-1.5 rounded px-1.5 py-0.5 text-xs ${open ? CHROME_ACTIVE : CHROME_QUIET}`}
         title="Change zone"
@@ -120,8 +108,14 @@ export function ZonePicker({ chatId, currentZoneId, smartRouting, routingState }
         <ChevronDown size={HEADER_CHEVRON} className="shrink-0" />
       </button>
 
-      {open && (
-        <div className="absolute right-0 top-full z-40 mt-1 min-w-[260px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg">
+      <Popover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={buttonRef}
+        align="end"
+        className="min-w-[260px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg"
+      >
+        <div>
           <button
             onClick={() => pick(null)}
             className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)]"
@@ -202,7 +196,7 @@ export function ZonePicker({ chatId, currentZoneId, smartRouting, routingState }
             </button>
           )}
         </div>
-      )}
-    </div>
+      </Popover>
+    </>
   );
 }

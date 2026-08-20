@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { getZoneIcon, ZONE_ICONS, ZONE_ICON_GROUPS } from "@/lib/zoneIcons";
-import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
+import { Popover } from "@/components/common/Popover";
 
 /**
  * The app's one icon picker.
@@ -31,6 +31,7 @@ export function IconPicker({
   label?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
   const [search, setSearch] = useState("");
 
   // null = show the grouped grid; an array = flat search results.
@@ -42,7 +43,6 @@ export function IconPicker({
 
   const SelectedIcon = getZoneIcon(value);
 
-  useDismissOnEscape(open, () => { setOpen(false); setSearch(""); });
 
   function pick(iconId: string) {
     // Clicking the current icon clears it, which is the only way back to the
@@ -81,6 +81,7 @@ export function IconPicker({
         )}
       </div>
       <button
+        ref={buttonRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center gap-2 rounded border border-[var(--color-border)] px-2 py-1 text-left hover:border-[var(--color-accent)]"
@@ -95,15 +96,15 @@ export function IconPicker({
         <span className="ml-auto shrink-0 text-[11px] text-[var(--color-text-muted)]">Change</span>
       </button>
 
-      {open && (
-        <>
-          {/* Preventing default on mousedown keeps focus where it was, so
-              closing the popover doesn't blur the field behind it. */}
-          <div
-            className="fixed inset-0 z-30"
-            onMouseDown={(e) => { e.preventDefault(); setOpen(false); }}
-          />
-          <div className="absolute left-0 top-full z-40 mt-1 w-[320px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] p-2 shadow-xl">
+      <Popover
+        open={open}
+        onClose={() => { setOpen(false); setSearch(""); }}
+        anchorRef={buttonRef}
+        matchAnchorWidth
+        zIndex={90}
+        className="w-[320px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] p-2 shadow-xl"
+      >
+          <div>
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -134,8 +135,7 @@ export function IconPicker({
               )}
             </div>
           </div>
-        </>
-      )}
+      </Popover>
     </div>
   );
 }

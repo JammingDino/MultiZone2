@@ -5,7 +5,7 @@ import * as api from "@/lib/tauri";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import { CHROME_ACTIVE, CHROME_OUTLINED, CHROME_QUIET, PRIMARY_ACTION } from "@/lib/chrome";
 import type { InputPart, Zone } from "@/lib/types";
-import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
+import { Popover } from "@/components/common/Popover";
 import { attachmentToParts } from "@/lib/attachFiles";
 import {
   appendTranscript,
@@ -174,6 +174,9 @@ export function HomeScreen() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [tagMenuOpen, setTagMenuOpen] = useState(false);
+  const menuBtnRef = useRef<HTMLButtonElement>(null);
+  const projectMenuBtnRef = useRef<HTMLButtonElement>(null);
+  const tagMenuBtnRef = useRef<HTMLButtonElement>(null);
   const [sending, setSending] = useState(false);
   // Initialize project from any pending new-chat context set by the sidebar.
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(newChatProjectId);
@@ -189,13 +192,6 @@ export function HomeScreen() {
   // i.e. the first available Response Leader zone).
   const [multizoneLeaderId, setMultizoneLeaderId] = useState<string | null>(null);
   const [leaderMenuOpen, setLeaderMenuOpen] = useState(false);
-  // Escape closes whichever of the composer's menus is open (most recent first).
-  useDismissOnEscape(menuOpen, () => setMenuOpen(false));
-  useDismissOnEscape(projectMenuOpen, () => setProjectMenuOpen(false));
-  useDismissOnEscape(tagMenuOpen, () => setTagMenuOpen(false));
-  useDismissOnEscape(perspMenuOpen, () => setPerspMenuOpen(false));
-  useDismissOnEscape(subagentMenuOpen, () => setSubagentMenuOpen(false));
-  useDismissOnEscape(leaderMenuOpen, () => setLeaderMenuOpen(false));
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   // Dictation (0.8.0) for the new-chat composer — same mic behavior as the
@@ -547,8 +543,9 @@ export function HomeScreen() {
             <div className="flex flex-1 items-center gap-2">
 
             {/* Mode */}
-            <div className="relative shrink-0">
+            <div className="shrink-0">
               <button
+                ref={menuBtnRef}
                 onClick={() => setMenuOpen((v) => !v)}
                 className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs ${
                   menuOpen ? CHROME_ACTIVE : CHROME_OUTLINED
@@ -590,10 +587,16 @@ export function HomeScreen() {
                   <ChevronDown size={12} className="ml-auto shrink-0" />
                 </button>
 
-                {menuOpen && (
-                  <>
-                    <div className="fixed inset-0 z-30" onClick={() => setMenuOpen(false)} />
-                    <div className="absolute bottom-full left-0 z-40 mb-1 max-h-72 min-w-[260px] overflow-y-auto rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg">
+                <Popover
+                  open={menuOpen}
+                  onClose={() => setMenuOpen(false)}
+                  anchorRef={menuBtnRef}
+                  side="top"
+                  align="start"
+                  zIndex={30}
+                  className="max-h-72 min-w-[260px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg"
+                >
+                  <div>
                       <button
                         onClick={() => { setMode({ type: "quick" }); setMenuOpen(false); }}
                         className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)]"
@@ -681,9 +684,8 @@ export function HomeScreen() {
                       >
                         <Layers size={12} /> New zone…
                       </button>
-                    </div>
-                  </>
-                )}
+                  </div>
+                </Popover>
               </div>
 
             {/* Multizone leader picker — choose which Response Leader orchestrates
@@ -746,7 +748,7 @@ export function HomeScreen() {
 
             {/* Project — custom dropdown */}
             {projects.length > 0 && (
-              <div className="relative shrink-0">
+              <div className="shrink-0">
                 {/* Icon only, and the same folder glyph the active chat's header
                     uses for the same thing — this is the one control that named
                     its own empty state ("No project"), which is the least
@@ -754,6 +756,7 @@ export function HomeScreen() {
                     project shows its own icon and colour, exactly as it does in
                     the header. */}
                 <button
+                  ref={projectMenuBtnRef}
                   onClick={() => setProjectMenuOpen((v) => !v)}
                   title={
                     selectedProject
@@ -776,10 +779,16 @@ export function HomeScreen() {
                     <Folder size={15} />
                   )}
                 </button>
-                {projectMenuOpen && (
-                  <>
-                    <div className="fixed inset-0 z-30" onClick={() => setProjectMenuOpen(false)} />
-                    <div className="absolute bottom-full left-1/2 z-40 mb-1 min-w-[180px] -translate-x-1/2 rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg">
+                <Popover
+                  open={projectMenuOpen}
+                  onClose={() => setProjectMenuOpen(false)}
+                  anchorRef={projectMenuBtnRef}
+                  side="top"
+                  align="center"
+                  zIndex={30}
+                  className="min-w-[180px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg"
+                >
+                  <div>
                       <button
                         onClick={() => { setSelectedProjectId(null); setProjectMenuOpen(false); }}
                         className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)]"
@@ -809,9 +818,8 @@ export function HomeScreen() {
                           </button>
                         );
                       })}
-                    </div>
-                  </>
-                )}
+                  </div>
+                </Popover>
               </div>
             )}
 
@@ -835,6 +843,7 @@ export function HomeScreen() {
                   );
                 })}
                 <button
+                  ref={tagMenuBtnRef}
                   onClick={() => setTagMenuOpen((v) => !v)}
                   title="Tag this chat"
                   aria-label="Tag this chat"
@@ -844,10 +853,16 @@ export function HomeScreen() {
                 >
                   <Tag size={15} />
                 </button>
-                {tagMenuOpen && (
-                  <>
-                    <div className="fixed inset-0 z-30" onClick={() => setTagMenuOpen(false)} />
-                    <div className="absolute bottom-full right-0 z-40 mb-1 min-w-[160px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg">
+                <Popover
+                  open={tagMenuOpen}
+                  onClose={() => setTagMenuOpen(false)}
+                  anchorRef={tagMenuBtnRef}
+                  side="top"
+                  align="end"
+                  zIndex={30}
+                  className="min-w-[160px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg"
+                >
+                  <div>
                       {tags.map((t) => {
                         const active = selectedTagIds.has(t.id);
                         return (
@@ -862,9 +877,8 @@ export function HomeScreen() {
                           </button>
                         );
                       })}
-                    </div>
-                  </>
-                )}
+                  </div>
+                </Popover>
               </div>
             )}
 
@@ -954,9 +968,12 @@ function PerspectivePicker({
   const addable = zones.filter((z) => z.id !== primaryZoneId);
   const count = addable.filter((z) => selected.has(z.id)).length;
 
+  const openBtnRef = useRef<HTMLButtonElement>(null);
+
   return (
-    <div className="relative shrink-0">
+    <div className="shrink-0">
       <button
+        ref={openBtnRef}
         onClick={() => setOpen((v) => !v)}
         title="Perspectives — get answers from multiple zones side by side"
         className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs ${
@@ -966,10 +983,16 @@ function PerspectivePicker({
         <SplitSquareHorizontal size={12} />
         {count > 0 ? `${count} perspective${count > 1 ? "s" : ""}` : "Perspectives"}
       </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute bottom-full left-1/2 z-40 mb-1 max-h-72 min-w-[240px] -translate-x-1/2 overflow-y-auto rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg">
+      <Popover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={openBtnRef}
+        side="top"
+        align="center"
+        zIndex={30}
+        className="max-h-72 min-w-[240px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg"
+      >
+        <div>
             <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
               Answer alongside the primary
             </div>
@@ -1005,9 +1028,8 @@ function PerspectivePicker({
             <div className="px-3 py-1.5 text-[11px] text-[var(--color-text-muted)]">
               Runs {globalMode} (set in Settings → Chat). The mode picker is the primary.
             </div>
-          </div>
-        </>
-      )}
+        </div>
+      </Popover>
     </div>
   );
 }
@@ -1028,9 +1050,12 @@ function LeaderPicker({
   setOpen: (v: boolean | ((p: boolean) => boolean)) => void;
   onSelect: (zoneId: string) => void;
 }) {
+  const openBtnRef = useRef<HTMLButtonElement>(null);
+
   return (
-    <div className="relative shrink-0">
+    <div className="shrink-0">
       <button
+        ref={openBtnRef}
         onClick={() => setOpen((v) => !v)}
         title="Leader — the Response Leader zone that coordinates the panel"
         className="flex items-center gap-1.5 rounded-full border border-amber-500 px-2.5 py-1 text-xs text-amber-500 transition hover:opacity-90"
@@ -1039,10 +1064,16 @@ function LeaderPicker({
         Leader
         <ChevronDown size={12} />
       </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute bottom-full left-1/2 z-40 mb-1 max-h-72 min-w-[240px] -translate-x-1/2 overflow-y-auto rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg">
+      <Popover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={openBtnRef}
+        side="top"
+        align="center"
+        zIndex={30}
+        className="max-h-72 min-w-[240px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg"
+      >
+        <div>
             <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
               Response Leader for this session
             </div>
@@ -1072,9 +1103,8 @@ function LeaderPicker({
                 </button>
               );
             })}
-          </div>
-        </>
-      )}
+        </div>
+      </Popover>
     </div>
   );
 }
@@ -1101,9 +1131,12 @@ function SubagentPicker({
   const addable = zones.filter((z) => z.id !== leaderZoneId);
   const count = addable.filter((z) => selected.has(z.id)).length;
 
+  const openBtnRef = useRef<HTMLButtonElement>(null);
+
   return (
-    <div className="relative shrink-0">
+    <div className="shrink-0">
       <button
+        ref={openBtnRef}
         onClick={() => setOpen((v) => !v)}
         title="Sub-agents — specialist zones the leader can delegate to"
         className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition ${
@@ -1115,10 +1148,16 @@ function SubagentPicker({
         <Users size={12} />
         {count > 0 ? `${count} sub-agent${count > 1 ? "s" : ""}` : "Sub-agents"}
       </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute bottom-full left-1/2 z-40 mb-1 max-h-72 min-w-[240px] -translate-x-1/2 overflow-y-auto rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg">
+      <Popover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={openBtnRef}
+        side="top"
+        align="center"
+        zIndex={30}
+        className="max-h-72 min-w-[240px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg"
+      >
+        <div>
             <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
               Specialists the leader can delegate to
             </div>
@@ -1157,9 +1196,8 @@ function SubagentPicker({
             <div className="px-3 py-1.5 text-[11px] text-[var(--color-text-muted)]">
               The leader spawns these as sub-agents and synthesizes their answers.
             </div>
-          </div>
-        </>
-      )}
+        </div>
+      </Popover>
     </div>
   );
 }

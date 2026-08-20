@@ -7,6 +7,8 @@ import { UserMessage, BotTurnView } from "@/components/Message/Message";
 import { TurnErrorNotice } from "./TurnErrorNotice";
 import { SpendLimitNotice } from "./SpendLimitNotice";
 import { groupMessages } from "@/lib/grouping";
+import { systemTurnNotice } from "@/lib/systemTurn";
+import type { ContentPart } from "@/lib/types";
 
 const PIN_THRESHOLD_PX = 60;
 
@@ -282,9 +284,14 @@ export function MessageThread({ chatId }: { chatId: string }) {
             // A bot turn with perspectives spans the full (widened) frame so its
             // columns can spread; everything else stays at the normal width.
             const spansFull = columnsMode && unit.type === "bot" && unit.perspectives.length > 0;
+            const notice = unit.type === "user" ? noticeFor(unit.message) : null;
             const node =
               unit.type === "user" ? (
-                <UserMessage message={unit.message} />
+                notice ? (
+                  <SystemNotice text={notice} />
+                ) : (
+                  <UserMessage message={unit.message} />
+                )
               ) : (
                 <BotTurnView turn={unit} isLatest={i === lastBotIdx} />
               );
@@ -326,6 +333,31 @@ export function MessageThread({ chatId }: { chatId: string }) {
           {streaming ? "New content below" : "Jump to latest"}
         </button>
       )}
+    </div>
+  );
+}
+
+/**
+ * The system line a turn the app sent renders as — a plan approval, today.
+ *
+ * Parsed here rather than inside `UserMessage` so the turn never becomes a
+ * message bubble at all: it has no author, nothing to copy, and nothing to edit
+ * or resend.
+ */
+function noticeFor(message: Message): string | null {
+  try {
+    return systemTurnNotice(JSON.parse(message.content) as ContentPart[]);
+  } catch {
+    return null;
+  }
+}
+
+function SystemNotice({ text }: { text: string }) {
+  return (
+    <div className="flex items-center gap-2 py-0.5 text-xs text-[var(--color-text-muted)]">
+      <span className="h-px flex-1 bg-[var(--color-border)]" />
+      <span className="shrink-0">{text}</span>
+      <span className="h-px flex-1 bg-[var(--color-border)]" />
     </div>
   );
 }

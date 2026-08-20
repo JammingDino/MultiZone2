@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Crown, Download, Pencil, Settings as SettingsIcon, Star, Trash2 } from "lucide-react";
+import { Popover, pointRect } from "@/components/common/Popover";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import type { Zone } from "@/lib/types";
@@ -261,23 +262,21 @@ export function ZoneContextMenu({
   onEdit: () => void; onRename: () => void; onExport: () => void; onDelete: () => void;
 }) {
   return (
-    <>
-      <div
-        className="fixed inset-0 z-[70]"
-        onClick={onClose}
-        onContextMenu={(e) => { e.preventDefault(); onClose(); }}
-      />
-      <div
-        className="fixed z-[80] min-w-[160px] rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-2xl"
-        style={{ left: x, top: y }}
-      >
+    <Popover
+      open
+      onClose={onClose}
+      anchorRect={pointRect(x, y)}
+      zIndex={70}
+      className="min-w-[160px] rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-2xl"
+    >
+      <div>
         <MenuItem icon={<SettingsIcon size={13} />} label="Edit" onClick={onEdit} />
         <MenuItem icon={<Pencil size={13} />} label="Rename" onClick={onRename} />
         <MenuItem icon={<Download size={13} />} label="Export JSON" onClick={onExport} />
         <div className="my-1 border-t border-[var(--color-border)]" />
         <MenuItem icon={<Trash2 size={13} />} label="Delete" onClick={onDelete} danger />
       </div>
-    </>
+    </Popover>
   );
 }
 

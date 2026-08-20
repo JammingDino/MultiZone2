@@ -1,12 +1,13 @@
 import { useMemo, useRef, useState } from "react";
 import type { Chat, ChatTagLink } from "@/lib/types";
-import { MessageSquare, Pencil, Trash2, Sparkles, Loader2, FolderInput, FolderMinus, GitBranch, ChevronRight, ChevronDown, ShieldAlert } from "lucide-react";
+import { MessageSquare, Pencil, Trash2, Sparkles, Loader2, FolderInput, FolderMinus, GitBranch, ChevronRight, ChevronDown, ShieldAlert, History, FileText, FileType } from "lucide-react";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { useShallow } from "zustand/react/shallow";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import { usePersistentSet } from "@/lib/uiState";
-import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
+import { Popover, pointRect } from "@/components/common/Popover";
+import { useChatExport } from "@/lib/useChatExport";
 
 interface Props {
   chats: Chat[];
@@ -43,6 +44,10 @@ export function ChatList({ chats, activeId, onSelect, projectId }: Props) {
   // Folded branch groups persist across sessions (keyed by parent chat id).
   const collapsedBranches = usePersistentSet("collapsedBranches");
   const moveRef = useRef<HTMLDivElement>(null);
+  const openReplay = useApp((s) => s.openReplay);
+  // Bound to whichever chat the menu is open on; an empty id is harmless
+  // because nothing runs until an entry is clicked.
+  const { exportAs } = useChatExport(menu?.chatId ?? "");
 
   // Group every chat↔tag link by chat so each item can show its tag chips.
   const tagsByChatId = useMemo(() => {
@@ -143,7 +148,9 @@ export function ChatList({ chats, activeId, onSelect, projectId }: Props) {
         <div
           onClick={() => onSelect(chat.id)}
           onContextMenu={(e) => openMenu(e, chat.id)}
-          style={{ marginLeft: depth * 12 }}
+          // Indent is capped (#12): a deep sub-agent tree otherwise walked the
+          // title off the right-hand edge one level at a time.
+          style={{ marginLeft: Math.min(depth, 5) * 12 }}
           className={`group mx-1 my-0.5 cursor-pointer rounded px-2 py-1.5 text-sm transition-colors ${
             active
               ? "bg-[color-mix(in_srgb,var(--color-accent)_14%,transparent)] font-medium text-[var(--color-text)] shadow-[inset_2px_0_0_var(--color-accent)]"
@@ -189,7 +196,7 @@ export function ChatList({ chats, activeId, onSelect, projectId }: Props) {
                 className="flex-1 rounded bg-[var(--color-bg)] px-1 text-sm"
               />
             ) : (
-              <span className="flex-1 truncate">
+              <span className="min-w-0 flex-1 truncate" title={chat.title}>
                 {chat.title}
                 {isRegenerating && (
                   <span className="ml-2 text-xs text-[var(--color-text-muted)]">renaming…</span>
@@ -269,6 +276,31 @@ export function ChatList({ chats, activeId, onSelect, projectId }: Props) {
                 }]
               : []),
             {
+              label: "View replay session",
+              icon: <History size={14} />,
+              onClick: () => {
+                const id = menu.chatId;
+                setMenu(null);
+                openReplay(id);
+              },
+            },
+            {
+              label: "Export as Markdown",
+              icon: <FileText size={14} />,
+              onClick: () => {
+                setMenu(null);
+                void exportAs("md");
+              },
+            },
+            {
+              label: "Export as PDF",
+              icon: <FileType size={14} />,
+              onClick: () => {
+                setMenu(null);
+                void exportAs("pdf");
+              },
+            },
+            {
               label: "Delete",
               icon: <Trash2 size={14} />,
               onClick: () => onDelete(menu.chatId),
@@ -301,19 +333,13 @@ function ContextMenu({
   }[];
   moveRef: React.RefObject<HTMLDivElement | null>;
 }) {
-  useDismissOnEscape(true, onClose);
-
+  // Anchored on the click point and clamped to the window (#12): a right-click
+  // near the bottom of a full sidebar used to open a menu whose last entries —
+  // Delete among them — were off-screen with no way to scroll to them.
   return (
-    <>
-      <div
-        className="fixed inset-0 z-40"
-        onClick={onClose}
-        onContextMenu={(e) => { e.preventDefault(); onClose(); }}
-      />
-      <div
-        className="fixed z-50 min-w-[180px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg"
-        style={{ left: x, top: y }}
-      >
+    <Popover open onClose={onClose} anchorRect={pointRect(x, y)} zIndex={40}
+      className="min-w-[180px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg">
+      <div>
         {items.map((item, i) => (
           <div key={i}>
             <button
@@ -341,6 +367,6 @@ function ContextMenu({
           </div>
         ))}
       </div>
-    </>
+    </Popover>
   );
 }

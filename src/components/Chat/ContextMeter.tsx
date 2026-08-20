@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { DollarSign, Gauge, Users } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { CHROME_ACTIVE, CHROME_QUIET, HEADER_ICON } from "@/lib/chrome";
 import { formatTokens } from "@/lib/format";
 import { chatContextEstimate } from "@/lib/tokens";
-import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
+import { Popover } from "@/components/common/Popover";
 import type { AgentUsage, Chat, SessionUsage } from "@/lib/types";
 
 const EMPTY: never[] = [];
@@ -79,7 +79,7 @@ function sessionMemberIds(chats: Chat[], chatId: string): Set<string> {
  */
 export function ContextMeter({ chatId }: { chatId: string }) {
   const [open, setOpen] = useState(false);
-  useDismissOnEscape(open, () => setOpen(false));
+  const buttonRef = useRef<HTMLButtonElement>(null);
   const messages = useApp((s) => s.messagesByChat[chatId] ?? EMPTY);
   const chats = useApp((s) => s.chats);
   const setActiveChat = useApp((s) => s.setActiveChat);
@@ -166,8 +166,9 @@ export function ContextMeter({ chatId }: { chatId: string }) {
   if (messages.length === 0 && baseline === 0) return null;
 
   return (
-    <div className="relative shrink-0">
+    <div className="shrink-0">
       <button
+        ref={buttonRef}
         onClick={() => setOpen((v) => !v)}
         className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-xs ${open ? CHROME_ACTIVE : CHROME_QUIET}`}
         title={[
@@ -217,10 +218,15 @@ export function ContextMeter({ chatId }: { chatId: string }) {
           </span>
         )}
       </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full z-40 mt-1 min-w-[290px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] p-2 text-xs shadow-lg">
+      <Popover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={buttonRef}
+        align="end"
+        zIndex={30}
+        className="min-w-[290px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] p-2 text-xs shadow-lg"
+      >
+          <div>
             <div className="mb-1 font-medium text-[var(--color-text)]">This chat (est.)</div>
 
             <MeterRow label="Baseline, every request" value={baseline} />
@@ -375,8 +381,7 @@ export function ContextMeter({ chatId }: { chatId: string }) {
               )}
             </div>
           </div>
-        </>
-      )}
+      </Popover>
     </div>
   );
 }

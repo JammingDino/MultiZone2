@@ -506,6 +506,15 @@ interface AppStore {
    * returns to the Zones entry it was launched from rather than to Providers.
    */
   settingsInitialTab: string | null;
+  /**
+   * The chat whose session replay is on screen, or null.
+   *
+   * Kept in the store rather than in the chat panel because replay is offered
+   * from two places now (#13) — the chat's own menu and the sidebar's
+   * right-click menu — and the sidebar can ask for a chat that isn't the open
+   * one.
+   */
+  replayChatId: string | null;
   defaultZoneId: string | null;
   shortcutsHelpOpen: boolean;
   /** Whether the sidebar is expanded. Persisted across sessions (ui.sidebarOpen). */
@@ -588,6 +597,9 @@ interface AppStore {
 
   openSettings: () => void;
   closeSettings: () => void;
+  /** Show the session replay for `chatId`. */
+  openReplay: (chatId: string) => void;
+  closeReplay: () => void;
   /** Open Configure Zones on the editor for `id` (null = a new zone). */
   openZoneEditor: (id: string | null, returnTo?: "settings") => void;
   openZonesPanel: () => void;
@@ -1041,6 +1053,7 @@ export const useApp = create<AppStore>((set, get) => ({
   zoneLibraryReturnTo: null,
   zoneLibraryInitialEdit: null,
   settingsInitialTab: null,
+  replayChatId: null,
   defaultZoneId: null,
   shortcutsHelpOpen: false,
   sidebarOpen: readSidebarOpen(),
@@ -1975,6 +1988,8 @@ export const useApp = create<AppStore>((set, get) => ({
   },
   openSettings: () => set({ settingsOpen: true }),
   closeSettings: () => set({ settingsOpen: false }),
+  openReplay: (chatId) => set({ replayChatId: chatId }),
+  closeReplay: () => set({ replayChatId: null }),
   // Editing a zone is the library panel opened on its editor, not a panel of
   // its own — see `zoneLibraryInitialEdit` for why there is only one now.
   openZoneEditor: (id, returnTo) =>

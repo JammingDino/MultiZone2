@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Copy, Check, RotateCcw, BarChart3, Pencil, GitBranch, History, Redo2, Volume2, Pause, Play, Square, TriangleAlert, ChevronDown } from "lucide-react";
 import type { Checkpoint, RestoreReport } from "@/lib/types";
 import { useApp } from "@/store/app";
@@ -6,7 +6,7 @@ import { useTts, zoneVoice } from "@/store/tts";
 import * as api from "@/lib/tauri";
 import { usePersistentBool, usePersistentChoice } from "@/lib/uiState";
 import { FORK_SCOPES, type ForkScope } from "@/lib/types";
-import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
+import { Popover } from "@/components/common/Popover";
 import { formatTokens } from "@/lib/format";
 import { estimateTokens } from "@/lib/tokens";
 import { ACTION_ICON, CHROME_OUTLINED, CHROME_QUIET } from "@/lib/chrome";
@@ -75,6 +75,8 @@ export function MessageActions({
   const [forkScope, setForkScope] = usePersistentChoice<ForkScope>("forkScope", "visible", FORK_SCOPES);
   const [forkStandalone, setForkStandalone] = usePersistentBool("forkStandalone", false);
   const [forkMenu, setForkMenu] = useState(false);
+  const branchGroupRef = useRef<HTMLDivElement>(null);
+  const statsRef = useRef<HTMLDivElement>(null);
   /** Later turns that changed files, when a branch has to ask about them. */
   const [rewind, setRewind] = useState<Checkpoint[] | null>(null);
   const [rewindNote, setRewindNote] = useState<string | null>(null);
@@ -221,7 +223,7 @@ export function MessageActions({
       )}
 
       {branchFromMessageId && (
-        <div className="relative">
+        <div ref={branchGroupRef} className="flex items-center gap-1">
           <ActionButton
             onClick={onBranch}
             label={branching ? "Branching…" : "Branch"}
@@ -236,22 +238,21 @@ export function MessageActions({
           >
             <ChevronDown size={ACTION_ICON} />
           </ActionButton>
-          {forkMenu && (
-            <ForkOptions
-              scope={forkScope}
-              standalone={forkStandalone}
-              onScope={setForkScope}
-              onStandalone={setForkStandalone}
-              onClose={() => setForkMenu(false)}
-            />
-          )}
-          {rewind && (
-            <RewindPrompt
-              checkpoints={rewind}
-              onChoose={(restoreFiles) => void runBranch(restoreFiles)}
-              onCancel={() => setRewind(null)}
-            />
-          )}
+          <ForkOptions
+            open={forkMenu}
+            anchorRef={branchGroupRef}
+            scope={forkScope}
+            standalone={forkStandalone}
+            onScope={setForkScope}
+            onStandalone={setForkStandalone}
+            onClose={() => setForkMenu(false)}
+          />
+          <RewindPrompt
+            checkpoints={rewind}
+            anchorRef={branchGroupRef}
+            onChoose={(restoreFiles) => void runBranch(restoreFiles)}
+            onCancel={() => setRewind(null)}
+          />
         </div>
       )}
 
@@ -267,7 +268,7 @@ export function MessageActions({
       )}
 
       {variant !== "user" && stats && (
-        <div className="relative">
+        <div ref={statsRef}>
           <ActionButton
             onClick={() => setShowStats((v) => !v)}
             label="Timing and token count for this answer"
@@ -275,8 +276,14 @@ export function MessageActions({
           >
             <BarChart3 size={ACTION_ICON} />
           </ActionButton>
-          {showStats && (
-            <div className="absolute bottom-full left-0 z-40 mb-1 min-w-[220px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] p-2 text-xs shadow-lg">
+          <Popover
+            open={showStats}
+            onClose={() => setShowStats(false)}
+            anchorRef={statsRef}
+            side="top"
+            className="min-w-[220px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] p-2 text-xs shadow-lg"
+          >
+            <div>
               {stats.timeToFirstTokenMs !== null && (
                 <StatRow
                   label="Time to first token"
@@ -352,7 +359,7 @@ export function MessageActions({
               <StatRow label="Speed" value={formatSpeed(stats)} />
               <StatRow label="Chars" value={String(stats.contentChars)} />
             </div>
-          )}
+          </Popover>
         </div>
       )}
 
@@ -394,6 +401,7 @@ function RewindControls({
   const rewindForward = useApp((s) => s.rewindForward);
 
   const [confirming, setConfirming] = useState(false);
+  const groupRef = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
 
@@ -443,7 +451,7 @@ function RewindControls({
     });
 
   return (
-    <div className="relative flex items-center gap-1">
+    <div ref={groupRef} className="flex items-center gap-1">
       {later.length > 0 && (
         <ActionButton
           onClick={() => setConfirming((v) => !v)}
@@ -483,8 +491,14 @@ function RewindControls({
         </span>
       )}
 
-      {confirming && (
-        <div className="absolute bottom-full left-0 z-40 mb-1 w-[300px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] p-2.5 text-xs shadow-lg">
+      <Popover
+        open={confirming}
+        onClose={() => setConfirming(false)}
+        anchorRef={groupRef}
+        side="top"
+        className="w-[300px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] p-2.5 text-xs shadow-lg"
+      >
+        <div>
           <p className="text-[var(--color-text)]">
             {later.length} later turn{later.length === 1 ? "" : "s"} changed {paths.size} file
             {paths.size === 1 ? "" : "s"}.
@@ -523,7 +537,7 @@ function RewindControls({
             </button>
           </div>
         </div>
-      )}
+      </Popover>
     </div>
   );
 }
@@ -547,22 +561,31 @@ function restoreSummary(reports: RestoreReport[]): string {
  */
 function RewindPrompt({
   checkpoints,
+  anchorRef,
   onChoose,
   onCancel,
 }: {
-  checkpoints: Checkpoint[];
+  checkpoints: Checkpoint[] | null;
+  anchorRef: React.RefObject<HTMLDivElement | null>;
   onChoose: (restoreFiles: boolean) => void;
   onCancel: () => void;
 }) {
-  const paths = new Set(checkpoints.flatMap((c) => c.files.map((f) => f.path)));
-  const diverged = checkpoints
+  const paths = new Set((checkpoints ?? []).flatMap((c) => c.files.map((f) => f.path)));
+  const diverged = (checkpoints ?? [])
     .flatMap((c) => c.files)
     .filter((f) => f.diverged).length;
 
   return (
-    <div className="absolute bottom-full left-0 z-40 mb-1 w-[300px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] p-2.5 text-xs shadow-lg">
+    <Popover
+      open={!!checkpoints}
+      onClose={onCancel}
+      anchorRef={anchorRef}
+      side="top"
+      className="w-[300px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] p-2.5 text-xs shadow-lg"
+    >
+      <div>
       <p className="text-[var(--color-text)]">
-        {checkpoints.length} later turn{checkpoints.length === 1 ? "" : "s"} changed {paths.size} file
+        {(checkpoints ?? []).length} later turn{(checkpoints ?? []).length === 1 ? "" : "s"} changed {paths.size} file
         {paths.size === 1 ? "" : "s"}.
       </p>
       <p className="mt-1 text-[var(--color-text-muted)]">
@@ -594,7 +617,8 @@ function RewindPrompt({
           Cancel
         </button>
       </div>
-    </div>
+      </div>
+    </Popover>
   );
 }
 
@@ -780,23 +804,32 @@ const SCOPE_LABELS: Record<ForkScope, { title: string; detail: string }> = {
  * The choice made here persists, so it is answered once rather than each time.
  */
 function ForkOptions({
+  open,
+  anchorRef,
   scope,
   standalone,
   onScope,
   onStandalone,
   onClose,
 }: {
+  open: boolean;
+  anchorRef: React.RefObject<HTMLDivElement | null>;
   scope: ForkScope;
   standalone: boolean;
   onScope: (s: ForkScope) => void;
   onStandalone: (v: boolean) => void;
   onClose: () => void;
 }) {
-  useDismissOnEscape(true, onClose);
   return (
-    <>
-      <div className="fixed inset-0 z-40" onClick={onClose} />
-      <div className="absolute bottom-full right-0 z-50 mb-1 w-64 rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] p-1.5 shadow-lg">
+    <Popover
+      open={open}
+      onClose={onClose}
+      anchorRef={anchorRef}
+      side="top"
+      align="end"
+      className="w-64 rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] p-1.5 shadow-lg"
+    >
+      <div>
         <p className="px-1.5 pb-1 text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">
           Fork carries
         </p>
@@ -835,6 +868,6 @@ function ForkOptions({
           </span>
         </label>
       </div>
-    </>
+    </Popover>
   );
 }

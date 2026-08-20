@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Upload, Tag as TagIcon, X, Zap, Folder, FolderX, ChevronDown, ChevronRight, SplitSquareHorizontal, Plus, ShieldAlert, Eye, Database, History } from "lucide-react";
+import { Upload, Tag as TagIcon, X, Zap, Folder, FolderX, ChevronDown, ChevronRight, SplitSquareHorizontal, Plus, ShieldAlert, Eye, Database } from "lucide-react";
 import { useApp } from "@/store/app";
 import { useShallow } from "zustand/react/shallow";
 import * as api from "@/lib/tauri";
 import { MessageThread } from "./MessageThread";
 import { InputBar, type InputBarHandle } from "./InputBar";
 import { ZonePicker } from "./ZonePicker";
-import { ExportMenu } from "./ExportMenu";
+import { ChatMenu } from "./ChatMenu";
 import { ConversationIndicator } from "./ConversationIndicator";
 import { ContextMeter } from "./ContextMeter";
 import { ReviewQueue } from "./ReviewQueue";
@@ -30,6 +30,8 @@ import { ReplayView } from "@/components/Chat/ReplayView";
 import { resolveBaseModel } from "@/lib/baseZone";
 import { CHROME_ACTIVE, CHROME_OUTLINED, CHROME_QUIET, HEADER_ICON, PRIMARY_ACTION } from "@/lib/chrome";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
+import { Popover } from "@/components/common/Popover";
+import { PLAN_APPROVED, systemTurnParts } from "@/lib/systemTurn";
 import { usePersistentBool } from "@/lib/uiState";
 import type { FileDiff, StreamEnvelope } from "@/lib/types";
 
@@ -186,7 +188,10 @@ export function ChatPanel() {
   const approvePlan = useApp((s) => s.approvePlan);
   const rejectPlan = useApp((s) => s.rejectPlan);
   const [planBusy, setPlanBusy] = useState(false);
-  const [replayOpen, setReplayOpen] = useState(false);
+  // Replay lives in the store because the sidebar's right-click menu can open
+  // it for a chat that isn't the one on screen (#13).
+  const replayChatId = useApp((s) => s.replayChatId);
+  const closeReplay = useApp((s) => s.closeReplay);
   // Whether the project/tag strip is showing. Persisted per install rather than
   // per chat: someone who files every conversation wants the row up permanently,
   // and someone who never does should not have to close it again tomorrow.
@@ -415,14 +420,7 @@ export function ChatPanel() {
               project={projects.find((p) => p.id === activeChat.projectId) ?? null}
               tagCount={(tagsByChat[activeChat.id] ?? []).length}
             />
-            <button
-              onClick={() => setReplayOpen(true)}
-              title="Replay this session — every tool call, approval, failure and plan decision in order"
-              className={`rounded p-1.5 ${CHROME_QUIET}`}
-            >
-              <History size={HEADER_ICON} />
-            </button>
-            <ExportMenu chatId={activeChat.id} />
+            <ChatMenu chatId={activeChat.id} />
             <PerspectiveZonePicker
               chatId={activeChat.id}
               primaryZoneId={activeChat.zoneId}
@@ -547,10 +545,10 @@ export function ChatPanel() {
                       await approvePlan(activeChat.id, pendingPlan.id, steps, edited);
                       // Approval is a decision, not a message: the turn that
                       // executes it starts here rather than waiting for the
-                      // user to also type "go".
-                      await api.sendMessage(activeChat.id, [
-                        { type: "text", text: "Approved — carry out the plan." },
-                      ]);
+                      // user to also type "go". Sent as a system turn so the
+                      // model is told to proceed without the transcript
+                      // claiming the user typed the sentence.
+                      await api.sendMessage(activeChat.id, systemTurnParts(PLAN_APPROVED));
                     } finally {
                       setPlanBusy(false);
                     }
@@ -640,8 +638,8 @@ export function ChatPanel() {
           </div>
         </div>
       )}
-      {replayOpen && activeChat && (
-        <ReplayView chatId={activeChat.id} onClose={() => setReplayOpen(false)} />
+      {replayChatId && (
+        <ReplayView chatId={replayChatId} onClose={closeReplay} />
       )}
       {settingsOpen && <SettingsModal />}
       {zoneLibraryOpen && <ZoneLibrary />}
@@ -777,9 +775,9 @@ function ProjectTagStrip({
 }) {
   const [showTagPicker, setShowTagPicker] = useState(false);
   const [showProjectPicker, setShowProjectPicker] = useState(false);
+  const projectBtnRef = useRef<HTMLButtonElement>(null);
+  const tagBtnRef = useRef<HTMLButtonElement>(null);
   const [showContext, setShowContext] = useState(false);
-  useDismissOnEscape(showTagPicker, () => setShowTagPicker(false));
-  useDismissOnEscape(showProjectPicker, () => setShowProjectPicker(false));
   useDismissOnEscape(showContext, () => setShowContext(false));
   const project = projects.find((p) => p.id === projectId) ?? null;
   const ProjectIcon = project ? getZoneIcon(project.icon) : null;
@@ -807,8 +805,9 @@ function ProjectTagStrip({
     <div className="border-b border-[var(--color-border)]">
     <div className="flex flex-wrap items-center gap-1.5 px-4 py-1.5">
       {/* Project selector */}
-      <div className="relative">
+      <div>
         <button
+          ref={projectBtnRef}
           onClick={() => setShowProjectPicker((v) => !v)}
           title="Set the project this chat belongs to"
           className="flex items-center gap-1.5 rounded-full border border-[var(--color-border)] px-2 py-0.5 text-xs text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
@@ -829,10 +828,14 @@ function ProjectTagStrip({
           )}
           <ChevronDown size={11} />
         </button>
-        {showProjectPicker && (
-          <>
-            <div className="fixed inset-0 z-30" onClick={() => setShowProjectPicker(false)} />
-            <div className="absolute left-0 top-full z-40 mt-1 min-w-[180px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg">
+        <Popover
+          open={showProjectPicker}
+          onClose={() => setShowProjectPicker(false)}
+          anchorRef={projectBtnRef}
+          zIndex={30}
+          className="min-w-[180px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg"
+        >
+            <div>
               <button
                 onClick={() => { onSetProject(null); setShowProjectPicker(false); }}
                 className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)] ${!project ? "text-[var(--color-accent)]" : ""}`}
@@ -860,8 +863,7 @@ function ProjectTagStrip({
                 );
               })}
             </div>
-          </>
-        )}
+        </Popover>
       </div>
 
       {/* Project context toggle (only meaningful when a project is set) */}
@@ -946,17 +948,22 @@ function ProjectTagStrip({
 
       {/* Add tag */}
       {unassignedTags.length > 0 && (
-        <div className="relative">
+        <div>
           <button
+            ref={tagBtnRef}
             onClick={() => setShowTagPicker((v) => !v)}
             className="flex items-center gap-1 rounded-full border border-dashed border-[var(--color-border)] px-2 py-0.5 text-xs text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
           >
             <TagIcon size={10} /> Add tag
           </button>
-          {showTagPicker && (
-            <>
-              <div className="fixed inset-0 z-30" onClick={() => setShowTagPicker(false)} />
-              <div className="absolute left-0 top-full z-40 mt-1 min-w-[160px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg">
+          <Popover
+            open={showTagPicker}
+            onClose={() => setShowTagPicker(false)}
+            anchorRef={tagBtnRef}
+            zIndex={30}
+            className="min-w-[160px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg"
+          >
+              <div>
                 {unassignedTags.map((t) => (
                   <button
                     key={t.id}
@@ -968,8 +975,7 @@ function ProjectTagStrip({
                   </button>
                 ))}
               </div>
-            </>
-          )}
+          </Popover>
         </div>
       )}
 
@@ -1075,7 +1081,7 @@ function PerspectiveZonePicker({
   onSetMode: (mode: "sequential" | "parallel" | null) => void;
 }) {
   const [open, setOpen] = useState(false);
-  useDismissOnEscape(open, () => setOpen(false));
+  const buttonRef = useRef<HTMLButtonElement>(null);
   const perspZoneIds = new Set(perspectiveZones.map((z) => z.zoneId));
   const addable = allZones.filter((z) => z.id !== primaryZoneId && !perspZoneIds.has(z.id));
   const count = perspectiveZones.length;
@@ -1087,8 +1093,9 @@ function PerspectiveZonePicker({
   ];
 
   return (
-    <div className="relative">
+    <>
       <button
+        ref={buttonRef}
         onClick={() => setOpen((v) => !v)}
         title="Perspective zones — get responses from multiple zones simultaneously"
         className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs ${
@@ -1099,10 +1106,15 @@ function PerspectiveZonePicker({
         {count > 0 ? `${count} perspective${count > 1 ? "s" : ""}` : "Perspectives"}
       </button>
 
-      {open && (
-        <>
-          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full z-40 mt-1 min-w-[220px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg">
+      <Popover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={buttonRef}
+        align="end"
+        zIndex={30}
+        className="min-w-[220px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg"
+      >
+          <div>
             <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
               Active perspectives
             </div>
@@ -1189,9 +1201,8 @@ function PerspectiveZonePicker({
               })}
             </div>
           </div>
-        </>
-      )}
-    </div>
+      </Popover>
+    </>
   );
 }
 

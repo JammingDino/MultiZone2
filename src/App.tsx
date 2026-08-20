@@ -19,6 +19,7 @@ import { seedDefaultZones } from "./lib/defaultZones";
 import { seedDefaultSkills, SKILL_SEED_VERSION } from "./lib/defaultSkills";
 import { resolveBaseProvider } from "./lib/baseZone";
 import * as api from "./lib/tauri";
+import { installPerfHandle, mark, markInteractive } from "./lib/perf";
 
 export default function App() {
   const providersLoaded = useApp((s) => s.providersLoaded);
@@ -36,6 +37,18 @@ export default function App() {
   const refreshSkills = useApp((s) => s.refreshSkills);
   const shortcutsHelpOpen = useApp((s) => s.shortcutsHelpOpen);
   const closeShortcutsHelp = useApp((s) => s.closeShortcutsHelp);
+
+  // Launch marks, off unless `localStorage.mzPerf = "1"` — see lib/perf.ts. The
+  // 1.0.0 performance item wants a number, and this is where the number starts.
+  useEffect(() => {
+    installPerfHandle();
+    mark("app mounted");
+  }, []);
+  // "Interactive" is providers *and* settings resolved: before both, the window
+  // is drawn but every control in it is still guessing.
+  useEffect(() => {
+    if (providersLoaded && appSettingsLoaded) markInteractive();
+  }, [providersLoaded, appSettingsLoaded]);
 
   // App-wide keyboard shortcuts (new chat, settings, sidebar, navigation, …).
   useGlobalShortcuts();

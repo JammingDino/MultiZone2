@@ -17,6 +17,8 @@
 //   pause=250      a one-off stall (ms) halfway through, for buffer behaviour
 //   fail=8000      abort the connection after this token, for recovery paths
 //   tool=1         emit a tool call before the text, for the pending-args path
+//   mix=<n>        stream a synthetic answer (prose/code/table/diagram) seeded
+//                  by n, for the performance seeder rather than the drop check
 //
 // e.g. sending "tokens=100000 delay=0" streams 100k tokens as fast as the
 // socket takes them.
@@ -24,6 +26,7 @@
 import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
 import { deltas, expectedText } from "./token-sequence.mjs";
+import { mixedAnswer } from "./seed-content.mjs";
 
 const argv = process.argv.slice(2);
 function flag(name, fallback) {
@@ -57,6 +60,7 @@ function optionsFromPrompt(body) {
     pause: num("pause", 0),
     fail: num("fail", 0),
     tool: num("tool", 0) > 0,
+    mix: num("mix", 0),
   };
 }
 
@@ -97,6 +101,17 @@ async function streamCompletion(res, opts) {
     sse(res, chunk({ tool_calls: [{ index: 0, function: { arguments: '{"time' } }] }));
     sse(res, chunk({ tool_calls: [{ index: 0, function: { arguments: 'zone":"UTC"}' } }] }));
     sse(res, chunk({}, "tool_calls"));
+    res.write("data: [DONE]\n\n");
+    res.end();
+    return;
+  }
+
+  // The seeder wants a realistic answer rather than a checkable one, so `mix`
+  // replaces the sequence with synthetic content and streams it in one go —
+  // seeding 2000 messages token by token would take longer than it is worth.
+  if (opts.mix) {
+    sse(res, chunk({ content: mixedAnswer(opts.mix) }));
+    sse(res, chunk({}, "stop"));
     res.write("data: [DONE]\n\n");
     res.end();
     return;
@@ -163,6 +178,16 @@ export function createMockProvider() {
       const opts = optionsFromPrompt(body);
 
       if (body.stream === false) {
+        if (opts.mix) {
+          return json(res, 200, {
+            id: "chatcmpl-mock",
+            object: "chat.completion",
+            created: Math.floor(Date.now() / 1000),
+            model: MODEL_ID,
+            choices: [{ index: 0, message: { role: "assistant", content: mixedAnswer(opts.mix) }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 8, completion_tokens: 200, total_tokens: 208 },
+          });
+        }
         return json(res, 200, {
           id: "chatcmpl-mock",
           object: "chat.completion",

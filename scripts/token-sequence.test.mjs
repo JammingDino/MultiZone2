@@ -175,3 +175,34 @@ test("the models endpoint lists the mock, so the app's model picker fills in", a
     assert.deepEqual(body.data.map((m) => m.id), ["mock-stream"]);
   });
 });
+
+// ─── The seeder's content ────────────────────────────────────────────────────
+
+test("mix= returns the same answer for the same seed and a different one otherwise", async () => {
+  await withServer(async (base) => {
+    const a = await collect(base, "mix=7");
+    const b = await collect(base, "mix=7");
+    const c = await collect(base, "mix=8");
+    assert.equal(a.text, b.text, "the same seed must produce the same chat twice");
+    assert.notEqual(a.text, c.text);
+    assert.ok(a.text.length > 50);
+  });
+});
+
+test("the stated mix holds across a run, so two measurements are comparable", async () => {
+  const { mixedAnswer } = await import("./seed-content.mjs");
+  const kinds = { prose: 0, code: 0, table: 0, diagram: 0 };
+  for (let i = 0; i < 400; i++) {
+    const a = mixedAnswer(i);
+    if (a.includes("```mermaid")) kinds.diagram++;
+    else if (a.includes("```ts")) kinds.code++;
+    else if (a.includes("| --- |")) kinds.table++;
+    else kinds.prose++;
+  }
+  // Proportions are 55/20/15/10; the bands are wide enough not to be flaky and
+  // tight enough to catch the mix being changed by accident.
+  assert.ok(kinds.prose > 180 && kinds.prose < 260, `prose ${kinds.prose}`);
+  assert.ok(kinds.code > 40 && kinds.code < 120, `code ${kinds.code}`);
+  assert.ok(kinds.table > 25 && kinds.table < 100, `table ${kinds.table}`);
+  assert.ok(kinds.diagram > 15 && kinds.diagram < 80, `diagram ${kinds.diagram}`);
+});

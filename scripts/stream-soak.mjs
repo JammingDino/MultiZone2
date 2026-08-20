@@ -163,16 +163,34 @@ const SCENARIOS = {
   // The negative control. If this one *passes*, the checker is not checking:
   // the provider hangs up at token 400 of 5000 and the app cannot have them all.
   truncated: async (zone) => {
-    const r = await runOne(zone, "tokens=5000 delay=0 fail=400", 5000, { label: "truncated" });
+    const CUT = 400;
+    const r = await runOne(zone, `tokens=5000 delay=0 fail=${CUT}`, 5000, { label: "truncated" });
+
+    // Two things have to be true, and they used to disagree. The stream must be
+    // *detected* as short — otherwise the checker is not checking. And the
+    // tokens that did arrive must be *kept*: a dropped connection used to
+    // discard them while pressing stop kept them, so the user watched text
+    // appear and then vanish with no visible logic to it.
     const detected = !r.ok;
-    return [{
-      ...r,
-      ok: detected,
-      label: "truncated — a cut stream is detected, not silently accepted",
-      note: detected
-        ? `provider cut at 400/5000; the app stored ${r.received} and the check caught it`
-        : "THE APP REPORTED A COMPLETE SEQUENCE FROM A STREAM THAT WAS CUT SHORT",
-    }];
+    const keptPartial = r.received > 0;
+    return [
+      {
+        ...r,
+        ok: detected,
+        label: "truncated — a cut stream is detected, not silently accepted",
+        note: detected
+          ? `provider cut at ${CUT}/5000; the app stored ${r.received} and the check caught it`
+          : "THE APP REPORTED A COMPLETE SEQUENCE FROM A STREAM THAT WAS CUT SHORT",
+      },
+      {
+        ...r,
+        ok: keptPartial,
+        label: "truncated — the partial answer survives the drop",
+        note: keptPartial
+          ? `${r.received} of the ~${CUT - 1} delivered tokens were persisted rather than discarded`
+          : "THE APP DISCARDED EVERY TOKEN THAT ARRIVED BEFORE THE DROP",
+      },
+    ];
   },
 };
 

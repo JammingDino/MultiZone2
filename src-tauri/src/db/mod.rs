@@ -1,6 +1,6 @@
 pub mod models;
 
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use sha2::{Digest, Sha384};
 use sqlx::migrate::Migrator;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
@@ -76,6 +76,50 @@ async fn repair_line_ending_checksums(pool: &SqlitePool) -> AppResult<()> {
     Ok(())
 }
 
+/// Refuse a database written by a newer build, in words that name the remedy.
+///
+/// sqlx already refuses it — `run()` reports `VersionMissing` for a migration
+/// the database has applied and this binary has never heard of — but it says
+/// "migration 37 was previously applied but is missing in the resolved
+/// migrations", which describes sqlx's bookkeeping rather than the user's
+/// situation. The situation is that they are holding an old copy.
+///
+/// Reachable in ordinary use now that the updater ships: a rollback, a machine
+/// restored from a backup, a second install someone never updated, or simply
+/// opening the older build still sitting in Downloads. Refusing is correct and
+/// stays; only the sentence changes.
+///
+/// Checked before the migrator runs so the message is ours rather than
+/// whichever migration sqlx happened to trip on first.
+async fn check_not_from_newer_build(pool: &SqlitePool) -> AppResult<()> {
+    // Absent on a fresh database, which is by definition not from the future.
+    let table: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM sqlite_master WHERE type='table' AND name='_sqlx_migrations'")
+            .fetch_optional(pool)
+            .await?;
+    if table.is_none() {
+        return Ok(());
+    }
+
+    // MAX over an empty table is one NULL row, not zero rows.
+    let applied: Option<i64> = sqlx::query_scalar("SELECT MAX(version) FROM _sqlx_migrations")
+        .fetch_one(pool)
+        .await?;
+    let Some(applied) = applied else {
+        return Ok(());
+    };
+
+    let ours = MIGRATOR.iter().map(|m| m.version).max().unwrap_or(0);
+    if applied > ours {
+        return Err(AppError::DatabaseFromNewerBuild {
+            running: env!("CARGO_PKG_VERSION").to_string(),
+            ours,
+            applied,
+        });
+    }
+    Ok(())
+}
+
 pub async fn init(app_data_dir: &Path) -> AppResult<SqlitePool> {
     let db_path = app_data_dir.join("multizone.db");
 
@@ -95,9 +139,11 @@ pub async fn init(app_data_dir: &Path) -> AppResult<SqlitePool> {
         .connect_with(options)
         .await?;
 
-    // Must run before the migrator, which rejects the whole database on the
-    // first checksum it disagrees with.
+    // Both run before the migrator: the first because it rejects the whole
+    // database on the first checksum it disagrees with, the second so a
+    // downgrade is reported in our words rather than sqlx's.
     repair_line_ending_checksums(&pool).await?;
+    check_not_from_newer_build(&pool).await?;
 
     MIGRATOR.run(&pool).await?;
 
@@ -147,6 +193,72 @@ mod tests {
         .fetch_one(&pool)
         .await;
         assert!(new.is_ok(), "CHAT_COLS should decode Chat: {new:?}");
+    }
+
+    /// A database from a newer build is refused, and refused in words that name
+    /// the remedy.
+    ///
+    /// The situation is reachable in ordinary use now that the updater ships —
+    /// a rollback, a restored backup, an older copy still in Downloads — and it
+    /// used to surface as "migration 37 was previously applied but is missing in
+    /// the resolved migrations", which describes sqlx's bookkeeping rather than
+    /// what the person should do.
+    #[tokio::test]
+    async fn a_database_from_a_newer_build_is_refused_by_name() {
+        let pool = migrated_pool().await;
+        let ours = super::MIGRATOR.iter().map(|m| m.version).max().unwrap();
+
+        // Exactly what a newer build leaves behind: a migration row this binary
+        // has never heard of.
+        sqlx::query(
+            "INSERT INTO _sqlx_migrations
+               (version, description, installed_on, success, checksum, execution_time)
+             VALUES (?1, 'from the future', CURRENT_TIMESTAMP, 1, X'00', 0)",
+        )
+        .bind(ours + 1)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let err = super::check_not_from_newer_build(&pool)
+            .await
+            .expect_err("a newer database must be refused");
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains("older than the data on this machine"),
+            "the message should name the cause, got: {msg}"
+        );
+        assert!(
+            msg.contains("Install a newer MultiZone"),
+            "the message should name the remedy, got: {msg}"
+        );
+        assert!(
+            msg.contains("not been changed") || msg.contains("not been lost"),
+            "the message should say the data is safe, got: {msg}"
+        );
+        assert!(
+            !msg.contains("resolved migrations"),
+            "sqlx's wording should not reach the user, got: {msg}"
+        );
+    }
+
+    /// The guard must not fire on the ordinary cases, or it would refuse every
+    /// launch: a database at our own revision, and a fresh one with no table.
+    #[tokio::test]
+    async fn an_ordinary_database_passes_the_downgrade_guard() {
+        let pool = migrated_pool().await;
+        assert!(super::check_not_from_newer_build(&pool).await.is_ok());
+
+        let fresh = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        assert!(
+            super::check_not_from_newer_build(&fresh).await.is_ok(),
+            "a database with no _sqlx_migrations table is new, not from the future"
+        );
     }
 
     async fn migrated_pool() -> sqlx::SqlitePool {

@@ -16,6 +16,17 @@ pub struct StreamAggregate {
     pub finish_reason: Option<String>,
     /// True if the caller signalled cancellation mid-stream.
     pub cancelled: bool,
+    /// Set when the transport failed part-way through — the provider hung up,
+    /// the socket died, a chunk would not decode.
+    ///
+    /// A sibling of `cancelled` rather than an `Err` return, and deliberately:
+    /// both mean "the stream stopped before the model was finished", and the
+    /// half-answer that already arrived is worth exactly as much in either case.
+    /// Returning `Err` discarded it, so a dropped connection silently threw away
+    /// text the user had already watched appear, while pressing stop kept it.
+    /// The caller decides what a partial is worth; this type's job is to still
+    /// have it.
+    pub error: Option<String>,
     /// The provider's own token counts, when it sent them. Arrives in a final
     /// chunk with no choices, after the last content delta — so a stream the
     /// user cancelled generally ends before it, and the caller falls back to the
@@ -211,8 +222,12 @@ where
                 }
             }
             Err(e) => {
+                // Break rather than return: the flush and flatten below still
+                // run, so whatever arrived before the failure — text, reasoning,
+                // half-accumulated tool calls — reaches the caller intact.
                 on_event(StreamEvent::Error { message: e.to_string() });
-                return Err(crate::error::AppError::Other(e.to_string()));
+                agg.error = Some(e.to_string());
+                break;
             }
         }
     }

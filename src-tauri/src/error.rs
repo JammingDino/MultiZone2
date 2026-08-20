@@ -8,6 +8,28 @@ pub enum AppError {
     #[error("migration error: {0}")]
     Migrate(#[from] sqlx::migrate::MigrateError),
 
+    /// The database was written by a newer build than this one.
+    ///
+    /// Its own variant because it is the one startup failure with an obvious
+    /// user action, and sqlx's wording for it — "migration 37 was previously
+    /// applied but is missing in the resolved migrations" — names neither the
+    /// cause nor the remedy. Carries both revision numbers so the log keeps the
+    /// detail the dialog leaves out.
+    #[error(
+        "This copy of MultiZone is older than the data on this machine.\n\n\
+         You are running {running}, which understands database revisions up to \
+         {ours}, but this machine's data is at revision {applied} — written by a \
+         newer version.\n\n\
+         Install a newer MultiZone to open it. Your data has not been changed \
+         or lost: an older build refuses to open a newer database precisely so \
+         that it cannot damage it."
+    )]
+    DatabaseFromNewerBuild {
+        running: String,
+        ours: i64,
+        applied: i64,
+    },
+
     #[error("http error: {0}")]
     Http(#[from] reqwest::Error),
 

@@ -1971,7 +1971,7 @@ async fn run_participant_turn(
         // long run of file reads ended in an empty bubble and how "now opening
         // the six opportunities" ended without opening anything. Cancellation
         // and the final step are real endings and are never second-guessed.
-        let stall = if agg.cancelled || final_step || !agg.tool_calls.is_empty() {
+        let stall = if agg.cancelled || agg.error.is_some() || final_step || !agg.tool_calls.is_empty() {
             Stall::None
         } else if nudges_used >= continuity::MAX_NUDGES_PER_TURN {
             // A model that keeps stalling is stuck on something re-asking won't
@@ -2082,6 +2082,47 @@ async fn run_participant_turn(
         if agg.cancelled {
             sink.emit_for(chat_id, persp, StreamPayload::Cancelled);
             return Ok(());
+        }
+
+        // The stream stopped because the transport failed, not because the model
+        // finished. Deliberately placed here, immediately after cancellation and
+        // *after* the persistence above: the two are the same event as far as the
+        // half-answer is concerned, and the whole point of this branch is that
+        // what arrived is already in the database before the turn fails.
+        //
+        // It used to `?` out of `consume_stream`, which meant a dropped
+        // connection threw away text the user had watched appear, while pressing
+        // stop kept it — an asymmetry with no visible logic, in the direction
+        // where the more common case lost the data.
+        if let Some(stream_error) = agg.error.clone() {
+            crate::events::record(
+                &ctx.db,
+                chat_id,
+                Some(&turn_id),
+                persp,
+                "stream_error",
+                format!("The connection to {} dropped mid-response", zone.name),
+                Some(serde_json::json!({
+                    "zone": zone.name,
+                    "error": stream_error,
+                    "partialKept": !skip_persist,
+                })),
+            )
+            .await;
+            return Err(AppError::Provider(if skip_persist {
+                format!(
+                    "The connection to {} dropped before it sent anything ({stream_error}). \
+                     Nothing was saved — send the message again.",
+                    zone.name
+                )
+            } else {
+                format!(
+                    "The connection to {} dropped part-way through its answer \
+                     ({stream_error}). What had arrived is kept above, but it is \
+                     unfinished.",
+                    zone.name
+                )
+            }));
         }
 
         // Push assistant turn into history. Two layers of thinking-token

@@ -1,5 +1,14 @@
 # Test strategy for the open 1.0.0 items
 
+> **Status, 2026-08-20.** The tooling this document argued for now exists:
+> a mock streaming provider with a sequence checker, a soak driver over the
+> HTTP API, launch marks, a scroll sampler, a deterministic chat seeder and an
+> uninstall audit script. What remains is *running* them, which needs a machine
+> rather than a commit — the operator's version is
+> [RELEASE_TESTS.md](RELEASE_TESTS.md). The installer question in section 3 has
+> been decided: option 1, Windows for 1.0.
+
+
 [TEST_CHECKLIST.md](TEST_CHECKLIST.md) is the manual pass. This file is about
 the six 1.0.0 items that a manual pass cannot honestly close, and what it would
 take to close each one for real.

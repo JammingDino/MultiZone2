@@ -253,7 +253,11 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
     // for it — the audio chip carries no content until then. Guarded here as
     // well as on the button because Enter doesn't go through the button.
     if (tray.transcribing) return;
-    const sourceText = explicitText ?? text;
+    // Send pressed mid-dictation means "send what I am saying": stop the mic,
+    // wait for the transcript, and send that. `explicitText` is conversation
+    // mode, which is already sending a transcript and must not stop the loop.
+    const dictated = explicitText === undefined ? await dictation.finishForSend() : null;
+    const sourceText = explicitText ?? dictated ?? text;
     const hasText = sourceText.trim().length > 0;
     if (!hasText && pending.length === 0) return;
 
@@ -308,8 +312,10 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
    * any are staged rather than dropping them silently.
    */
   async function onQueue() {
-    const body = text.trim();
-    if (!body || sending || disabled || pending.length > 0) return;
+    if (sending || disabled || pending.length > 0) return;
+    const dictated = await dictation.finishForSend();
+    const body = (dictated ?? text).trim();
+    if (!body) return;
     setSending(true);
     setText("");
     try {
@@ -578,7 +584,12 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
             <>
               <button
                 onClick={onQueue}
-                disabled={disabled || sending || text.trim() === "" || pending.length > 0}
+                disabled={
+                  disabled || sending || pending.length > 0 ||
+                  // Nothing typed is still something to send while the mic is
+                  // live — the words are in the air, not in the box yet.
+                  (text.trim() === "" && !dictation.voiceRecording)
+                }
                 title={
                   pending.length > 0
                     ? "Attachments can't be queued — wait for this turn to finish"
@@ -602,7 +613,10 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
           ) : (
             <button
               onClick={() => onSend()}
-              disabled={disabled || sending || tray.transcribing || (text.trim() === "" && pending.length === 0)}
+              disabled={
+                disabled || sending || tray.transcribing ||
+                (text.trim() === "" && pending.length === 0 && !dictation.voiceRecording)
+              }
               className={`rounded p-1.5 ${PRIMARY_ACTION}`}
               title={tray.transcribing ? "Waiting for the transcript…" : "Send"}
             >

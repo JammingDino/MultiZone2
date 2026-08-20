@@ -253,7 +253,9 @@ export function HomeScreen() {
   const multizoneSelectedButUnavailable = mode.type === "multizone" && !multizoneAvailable;
   const smartWithNoZones = mode.type === "smart" && zones.length === 0 && quickAvailable;
   const canSend =
-    (text.trim().length > 0 || pending.length > 0) &&
+    // Nothing typed is still something to send while the mic is live — the
+    // words are in the air, not in the box yet.
+    (text.trim().length > 0 || pending.length > 0 || dictation.voiceRecording) &&
     !sending &&
     // An audio chip carries no content until its transcript lands, so sending
     // mid-transcription would quietly drop the recording.
@@ -338,12 +340,17 @@ export function HomeScreen() {
 
   async function start() {
     if (!canSend) return;
+    // Send pressed mid-dictation means "send what I am saying": stop the mic
+    // and wait for the transcript, rather than sending the partial and letting
+    // the final land back in a composer this is about to empty.
+    const dictated = await dictation.finishForSend();
     setSending(true);
 
-    // Build parts synchronously RIGHT NOW before any awaits. This is the
-    // safest point: the component is still mounted, all state is current, and
-    // no React re-renders have occurred since the user clicked Send.
-    const currentText = text;
+    // Build parts before any *further* awaits. This is the safest point: the
+    // component is still mounted and all state is current. (The dictation stop
+    // above is the one exception, and it deliberately leaves the composer
+    // alone — its transcript arrives as `dictated` instead.)
+    const currentText = dictated ?? text;
     const currentPending = pending;
     const currentMode = mode;
 

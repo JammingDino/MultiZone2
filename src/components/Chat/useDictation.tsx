@@ -66,6 +66,18 @@ export function useDictation({
   // handover can't land on top of the final transcript.
   const stoppingRef = useRef(false);
 
+  /**
+   * What the composer reads once `next` replaces whatever the dictation last
+   * wrote into `prev`. Separate from the splice below because sending mid-
+   * dictation needs this string *without* it being written to the field.
+   */
+  function composeWith(prev: string, next: string): string {
+    const range = dictationRangeRef.current;
+    if (sttInsertionMode === "replace" || range == null) return next;
+    const tail = dictationTailRef.current ?? range.end;
+    return prev.slice(0, range.start) + next + prev.slice(tail);
+  }
+
   /** Splices `next` into the field over whatever the dictation last wrote. */
   function spliceTranscript(next: string, final: boolean) {
     const range = dictationRangeRef.current;
@@ -73,8 +85,7 @@ export function useDictation({
       setText(next);
       return;
     }
-    const tail = dictationTailRef.current ?? range.end;
-    setText((prev) => prev.slice(0, range.start) + next + prev.slice(tail));
+    setText((prev) => composeWith(prev, next));
     dictationTailRef.current = range.start + next.length;
     if (!final) return;
     // Leave the caret after the words just spoken, collapsed — again, where
@@ -123,17 +134,82 @@ export function useDictation({
     }
   }
 
-  async function endDictation() {
+  /**
+   * The one stop, shared by the mic button and by sending mid-dictation.
+   *
+   * A second caller arriving while a stop is already in flight joins it rather
+   * than starting another — pressing Send a beat after the mic must not race
+   * the transcript it is waiting for. Resolves with both the raw transcript
+   * (what `onCommit` is told) and the composer text it produces.
+   */
+  const stopRef = useRef<Promise<{ composed: string; final: string }> | null>(null);
+  // The stop whose transcript a send has already taken. Whoever else is waiting
+  // on it must not also write those words into the composer.
+  const claimedRef = useRef<Promise<{ composed: string; final: string }> | null>(null);
+
+  function runStop(): Promise<{ composed: string; final: string }> | null {
+    if (stopRef.current) return stopRef.current;
+    if (!useApp.getState().voiceRecording) return null;
     stoppingRef.current = true;
     setTranscribing(true);
+    const p = (async () => {
+      try {
+        const final = await stopDictationAction();
+        // Read off the field rather than the `text` state: this resolves an
+        // await later, and the field is the value that is actually on screen.
+        return { composed: composeWith(taRef.current?.value ?? "", final), final };
+      } finally {
+        setTranscribing(false);
+        stopRef.current = null;
+      }
+    })();
+    stopRef.current = p;
+    return p;
+  }
+
+  async function endDictation() {
+    const p = runStop();
+    if (!p) return;
     try {
-      const finalText = await stopDictationAction();
-      commitTranscript(finalText);
-      if (finalText && onCommit) onCommit(finalText);
+      const { final } = await p;
+      // A send claimed this transcript while it was in flight — it is going out
+      // in the message, so putting it in the composer too is the bug.
+      if (claimedRef.current === p) return;
+      commitTranscript(final);
+      if (final && onCommit) onCommit(final);
     } catch (e) {
       setVoiceError(String(e));
-    } finally {
-      setTranscribing(false);
+    }
+  }
+
+  /**
+   * Stop dictating because the message is being sent: wait for the transcript
+   * and hand back the text to send, without writing it into the composer.
+   *
+   * Pressing Send mid-dictation used to send whatever partial had landed and
+   * then let the final transcript splice itself into the composer the send had
+   * just emptied — the message went out short, and the words the user had
+   * already said were sitting in the box afterwards as if they had typed them
+   * again. Returns null when nothing was being recorded, in which case the
+   * caller sends what it already had.
+   */
+  async function finishForSend(): Promise<string | null> {
+    const p = runStop();
+    if (!p) return null;
+    // Claimed synchronously, so a stop started by the mic button a moment
+    // earlier knows not to commit once it resolves.
+    claimedRef.current = p;
+    try {
+      const { composed } = await p;
+      // The words are going out in the message. Forgetting the splice range
+      // stops a late partial, or a `commitTranscript` racing this one, from
+      // putting them back into the emptied composer.
+      dictationRangeRef.current = null;
+      dictationTailRef.current = null;
+      return composed;
+    } catch (e) {
+      setVoiceError(String(e));
+      return null;
     }
   }
 
@@ -221,6 +297,7 @@ export function useDictation({
     // Programmatic controls for conversation mode (0.8.2).
     startListening: beginDictation,
     stopListening: endDictation,
+    finishForSend,
     cancelListening: () => {
       if (!voiceRecording) return;
       stoppingRef.current = true;

@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { Copy, Check, RotateCcw, BarChart3, Pencil, GitBranch, History, Redo2, Volume2, Pause, Play, Square, TriangleAlert, ChevronDown } from "lucide-react";
+import { Copy, Check, RotateCcw, BarChart3, Pencil, GitBranch, History, Redo2, Volume2, Pause, Play, Square, TriangleAlert } from "lucide-react";
 import type { Checkpoint, RestoreReport } from "@/lib/types";
 import { useApp } from "@/store/app";
 import { useTts, zoneVoice } from "@/store/tts";
@@ -70,11 +70,10 @@ export function MessageActions({
   const [branching, setBranching] = useState(false);
   // Fork settings persist, because the answer is a habit rather than a
   // per-message decision — the same reason LibreChat's fork dialog has a
-  // "remember" box. The plain Branch button uses them without asking; the caret
-  // beside it is where they get changed.
+  // "remember" box. The Branch button uses them without asking; the turn's
+  // history popup is where they get changed.
   const [forkScope, setForkScope] = usePersistentChoice<ForkScope>("forkScope", "visible", FORK_SCOPES);
   const [forkStandalone, setForkStandalone] = usePersistentBool("forkStandalone", false);
-  const [forkMenu, setForkMenu] = useState(false);
   const branchGroupRef = useRef<HTMLDivElement>(null);
   const statsRef = useRef<HTMLDivElement>(null);
   /** Later turns that changed files, when a branch has to ask about them. */
@@ -219,7 +218,15 @@ export function MessageActions({
       )}
 
       {branchFromMessageId && (
-        <RewindControls chatId={chatId} messageId={branchFromMessageId} disabled={isBusy} />
+        <TurnHistory
+          chatId={chatId}
+          messageId={branchFromMessageId}
+          disabled={isBusy}
+          scope={forkScope}
+          standalone={forkStandalone}
+          onScope={setForkScope}
+          onStandalone={setForkStandalone}
+        />
       )}
 
       {branchFromMessageId && (
@@ -231,22 +238,6 @@ export function MessageActions({
           >
             <GitBranch size={ACTION_ICON} />
           </ActionButton>
-          <ActionButton
-            onClick={() => setForkMenu((v) => !v)}
-            label="Fork options"
-            disabled={isBusy || branching}
-          >
-            <ChevronDown size={ACTION_ICON} />
-          </ActionButton>
-          <ForkOptions
-            open={forkMenu}
-            anchorRef={branchGroupRef}
-            scope={forkScope}
-            standalone={forkStandalone}
-            onScope={setForkScope}
-            onStandalone={setForkStandalone}
-            onClose={() => setForkMenu(false)}
-          />
           <RewindPrompt
             checkpoints={rewind}
             anchorRef={branchGroupRef}
@@ -373,26 +364,36 @@ export function MessageActions({
 }
 
 /**
- * Rewind, in both directions (1.1).
+ * The turn's history, as one popup (1.1, reworked).
  *
- * Putting the working tree back to a moment in the conversation used to be
- * reachable only as a side-offer of "branch from here" — you could not rewind
- * without forking the chat, and you could not change your mind afterwards. It
- * is its own action now, on every turn either side of the conversation, and it
- * is reversible: the rewind records where the tree stood before it moved, so
- * the same spot in the transcript offers the way back out.
+ * Two things belong to a point in the transcript: the working tree as it stood
+ * there, and what a branch taken from there would carry. They were three
+ * separate controls in the hover bar — a rewind button, a rewind-forward
+ * button, and a caret hanging off Branch that wrapped onto its own row and read
+ * as detached from everything around it. One clock icon opens both.
  *
- * Both buttons are hidden when they would do nothing, so an ordinary chat that
- * never touched a file never grows a control for undoing file changes.
+ * It is offered on every turn, not only where there is something to undo. The
+ * point of the feature is that you can put the files back to how they stood
+ * before the agent did something you did not ask for; a control that appears
+ * only once that has happened is one nobody knows exists until it is too late
+ * to have gone looking for it.
  */
-function RewindControls({
+function TurnHistory({
   chatId,
   messageId,
   disabled,
+  scope,
+  standalone,
+  onScope,
+  onStandalone,
 }: {
   chatId: string;
   messageId: string;
   disabled?: boolean;
+  scope: ForkScope;
+  standalone: boolean;
+  onScope: (s: ForkScope) => void;
+  onStandalone: (v: boolean) => void;
 }) {
   const checkpoints = useApp((s) => s.checkpointsByChat[chatId]);
   const messages = useApp((s) => s.messagesByChat[chatId]);
@@ -400,14 +401,14 @@ function RewindControls({
   const rewindToMessage = useApp((s) => s.rewindToMessage);
   const rewindForward = useApp((s) => s.rewindForward);
 
-  const [confirming, setConfirming] = useState(false);
-  const groupRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
 
   // The turns after this message that changed files — what a rewind would undo.
   // Read off the loaded transcript rather than asked of the backend, because
-  // this decides whether to *render* a button, on every turn in the chat.
+  // this decides what to *render*, on every turn in the chat.
   const later = useMemo(() => {
     const order = new Map((messages ?? []).map((m, i) => [m.id, i] as const));
     const pivot = order.get(messageId);
@@ -421,13 +422,11 @@ function RewindControls({
   }, [checkpoints, messages, messageId]);
 
   const canForward = Boolean(status?.canForward) && status?.forwardMessageId === messageId;
-  if (later.length === 0 && !canForward) return null;
-
   const paths = new Set(later.flatMap((c) => c.files.map((f) => f.path)));
   const diverged = later.flatMap((c) => c.files).filter((f) => f.diverged).length;
 
   async function run(fn: () => Promise<string>) {
-    setConfirming(false);
+    setOpen(false);
     setBusy(true);
     try {
       setNote(await fn());
@@ -451,34 +450,20 @@ function RewindControls({
     });
 
   return (
-    <div ref={groupRef} className="flex items-center gap-1">
-      {later.length > 0 && (
-        <ActionButton
-          onClick={() => setConfirming((v) => !v)}
-          label={
-            busy
-              ? "Rewinding…"
-              : `Rewind files to here — undo what ${later.length} later turn${
-                  later.length === 1 ? "" : "s"
-                } wrote`
-          }
-          disabled={disabled || busy}
-        >
-          <History size={ACTION_ICON} />
-        </ActionButton>
-      )}
-
-      {canForward && (
-        <ActionButton
-          onClick={() => void forward()}
-          label={`Rewind forward — put back the ${status?.forwardFiles ?? 0} file${
-            status?.forwardFiles === 1 ? "" : "s"
-          } this rewind undid`}
-          disabled={disabled || busy}
-        >
-          <Redo2 size={ACTION_ICON} />
-        </ActionButton>
-      )}
+    <div ref={btnRef} className="flex items-center gap-1">
+      <ActionButton
+        onClick={() => setOpen((v) => !v)}
+        label={
+          busy
+            ? "Rewinding…"
+            : later.length > 0
+              ? `History — put ${paths.size} file${paths.size === 1 ? "" : "s"} back to how they stood here`
+              : "History — the files at this point, and what a branch from here carries"
+        }
+        disabled={disabled || busy}
+      >
+        <History size={ACTION_ICON} />
+      </ActionButton>
 
       {note && (
         <span
@@ -492,50 +477,108 @@ function RewindControls({
       )}
 
       <Popover
-        open={confirming}
-        onClose={() => setConfirming(false)}
-        anchorRef={groupRef}
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={btnRef}
         side="top"
         className="w-[300px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] p-2.5 text-xs shadow-lg"
       >
         <div>
-          <p className="text-[var(--color-text)]">
-            {later.length} later turn{later.length === 1 ? "" : "s"} changed {paths.size} file
-            {paths.size === 1 ? "" : "s"}.
+          <p className="pb-1 text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">
+            Files at this point
           </p>
-          <p className="mt-1 text-[var(--color-text-muted)]">
-            Put them back to how they stood here. The conversation is left alone, and you can
-            walk it forward again from this same spot.
-          </p>
-          {diverged > 0 && (
-            <p className="mt-1 flex items-start gap-1 text-amber-500">
-              <TriangleAlert size={12} className="mt-0.5 shrink-0" />
-              {diverged} {diverged === 1 ? "has" : "have"} been edited outside the app and will be
-              left as found.
+          {later.length > 0 ? (
+            <>
+              <p className="text-[var(--color-text)]">
+                {later.length} later turn{later.length === 1 ? "" : "s"} changed {paths.size} file
+                {paths.size === 1 ? "" : "s"}.
+              </p>
+              <p className="mt-1 text-[var(--color-text-muted)]">
+                Put them back to how they stood here. The conversation is left alone, and you can
+                walk it forward again from this same spot.
+              </p>
+              {diverged > 0 && (
+                <p className="mt-1 flex items-start gap-1 text-amber-500">
+                  <TriangleAlert size={12} className="mt-0.5 shrink-0" />
+                  {diverged} {diverged === 1 ? "has" : "have"} been edited outside the app and will
+                  be left as found.
+                </p>
+              )}
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                <button
+                  onClick={() => void rewind(false)}
+                  className={`rounded px-2 py-1 ${CHROME_OUTLINED}`}
+                >
+                  Rewind files to here
+                </button>
+                {diverged > 0 && (
+                  <button
+                    onClick={() => void rewind(true)}
+                    className={`rounded px-2 py-1 ${CHROME_OUTLINED}`}
+                  >
+                    Rewind, discarding those edits
+                  </button>
+                )}
+              </div>
+            </>
+          ) : (
+            <p className="text-[var(--color-text-muted)]">
+              Nothing after this point has changed a file, so there is nothing to put back.
             </p>
           )}
-          <div className="mt-2 flex flex-wrap gap-1.5">
+
+          {canForward && (
             <button
-              onClick={() => void rewind(false)}
-              className={`rounded px-2 py-1 ${CHROME_OUTLINED}`}
+              onClick={() => void forward()}
+              className={`mt-2 flex items-center gap-1.5 rounded px-2 py-1 ${CHROME_OUTLINED}`}
             >
-              Rewind
+              <Redo2 size={12} />
+              Walk forward — put back the {status?.forwardFiles ?? 0} file
+              {status?.forwardFiles === 1 ? "" : "s"} this rewind undid
             </button>
-            {diverged > 0 && (
-              <button
-                onClick={() => void rewind(true)}
-                className={`rounded px-2 py-1 ${CHROME_OUTLINED}`}
-              >
-                Rewind, discarding those edits
-              </button>
-            )}
+          )}
+
+          {/* Branch settings live here rather than on a caret beside Branch:
+              they persist, so they are answered once rather than each time, and
+              this is the other question about what this point in the run
+              carries. */}
+          <div className="my-2 border-t border-[var(--color-border)]" />
+          <p className="pb-1 text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">
+            A branch from here carries
+          </p>
+          {FORK_SCOPES.map((sc) => (
             <button
-              onClick={() => setConfirming(false)}
-              className="rounded px-2 py-1 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+              key={sc}
+              onClick={() => onScope(sc)}
+              className={`w-full rounded px-1.5 py-1 text-left transition hover:bg-[var(--color-panel-hover)] ${
+                scope === sc ? "bg-[var(--color-panel-hover)]" : ""
+              }`}
             >
-              Cancel
+              <span className="flex items-center gap-1.5 text-xs">
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${scope === sc ? "bg-[var(--color-accent)]" : "bg-transparent"}`}
+                />
+                {SCOPE_LABELS[sc].title}
+              </span>
+              <span className="block pl-3 text-[10px] leading-snug text-[var(--color-text-muted)]">
+                {SCOPE_LABELS[sc].detail}
+              </span>
             </button>
-          </div>
+          ))}
+          <label className="mt-0.5 flex cursor-pointer items-start gap-1.5 rounded px-1.5 py-1 hover:bg-[var(--color-panel-hover)]">
+            <input
+              type="checkbox"
+              checked={standalone}
+              onChange={(e) => onStandalone(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              <span className="block text-xs">Start as a separate chat</span>
+              <span className="block text-[10px] leading-snug text-[var(--color-text-muted)]">
+                Same copied history, but not nested under this conversation
+              </span>
+            </span>
+          </label>
         </div>
       </Popover>
     </div>
@@ -789,85 +832,9 @@ function formatTokenTotal(stats: {
   );
 }
 
-
 const SCOPE_LABELS: Record<ForkScope, { title: string; detail: string }> = {
   visible: { title: "This thread", detail: "The conversation up to this message" },
   branches: { title: "With branches", detail: "Also the branches and sub-agent runs hanging off it" },
   all: { title: "Everything", detail: "The whole chat including later turns, and every branch" },
 };
 
-/**
- * The fork settings (0.15.2), as a popover on the Branch button's caret.
- *
- * Not a dialog in front of every fork: the default is right almost always, and
- * a confirmation step on the common path costs more than the option is worth.
- * The choice made here persists, so it is answered once rather than each time.
- */
-function ForkOptions({
-  open,
-  anchorRef,
-  scope,
-  standalone,
-  onScope,
-  onStandalone,
-  onClose,
-}: {
-  open: boolean;
-  anchorRef: React.RefObject<HTMLDivElement | null>;
-  scope: ForkScope;
-  standalone: boolean;
-  onScope: (s: ForkScope) => void;
-  onStandalone: (v: boolean) => void;
-  onClose: () => void;
-}) {
-  return (
-    <Popover
-      open={open}
-      onClose={onClose}
-      anchorRef={anchorRef}
-      side="top"
-      align="end"
-      className="w-64 rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] p-1.5 shadow-lg"
-    >
-      <div>
-        <p className="px-1.5 pb-1 text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">
-          Fork carries
-        </p>
-        {FORK_SCOPES.map((s) => (
-          <button
-            key={s}
-            onClick={() => onScope(s)}
-            className={`w-full rounded px-1.5 py-1 text-left transition hover:bg-[var(--color-panel-hover)] ${
-              scope === s ? "bg-[var(--color-panel-hover)]" : ""
-            }`}
-          >
-            <span className="flex items-center gap-1.5 text-xs">
-              <span
-                className={`h-1.5 w-1.5 rounded-full ${scope === s ? "bg-[var(--color-accent)]" : "bg-transparent"}`}
-              />
-              {SCOPE_LABELS[s].title}
-            </span>
-            <span className="block pl-3 text-[10px] leading-snug text-[var(--color-text-muted)]">
-              {SCOPE_LABELS[s].detail}
-            </span>
-          </button>
-        ))}
-        <div className="my-1 border-t border-[var(--color-border)]" />
-        <label className="flex cursor-pointer items-start gap-1.5 rounded px-1.5 py-1 hover:bg-[var(--color-panel-hover)]">
-          <input
-            type="checkbox"
-            checked={standalone}
-            onChange={(e) => onStandalone(e.target.checked)}
-            className="mt-0.5"
-          />
-          <span>
-            <span className="block text-xs">Start as a separate chat</span>
-            <span className="block text-[10px] leading-snug text-[var(--color-text-muted)]">
-              Same copied history, but not nested under this conversation
-            </span>
-          </span>
-        </label>
-      </div>
-    </Popover>
-  );
-}

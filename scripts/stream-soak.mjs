@@ -57,14 +57,31 @@ async function call(method, path, body) {
   return res.status === 204 ? null : res.json();
 }
 
-/** The assistant text of the last turn, however the app chose to store it. */
+/**
+ * The assistant text of the last turn.
+ *
+ * `Message.content` is a JSON-encoded array of content parts, not a plain
+ * string — so it has to be parsed rather than read. Reading it raw happens to
+ * work, because the checker only extracts numbers and the JSON scaffolding has
+ * none, but working by accident is not the same as working.
+ */
 function lastAssistantText(messages) {
   const assistant = messages.filter((m) => m.role === "assistant");
   const last = assistant[assistant.length - 1];
   if (!last) return "";
-  if (typeof last.content === "string") return last.content;
-  if (Array.isArray(last.content)) return last.content.map((p) => p?.text ?? "").join("");
-  return String(last.content ?? "");
+  const raw = last.content;
+  if (Array.isArray(raw)) return raw.map((p) => p?.text ?? "").join("");
+  if (typeof raw === "string") {
+    try {
+      const parts = JSON.parse(raw);
+      if (Array.isArray(parts)) return parts.map((p) => (typeof p === "string" ? p : (p?.text ?? ""))).join("");
+      if (typeof parts === "string") return parts;
+    } catch {
+      // Stored as a bare string by an older path — use it as it is.
+    }
+    return raw;
+  }
+  return String(raw ?? "");
 }
 
 async function setup() {
@@ -84,7 +101,10 @@ async function setup() {
 }
 
 async function runOne(zone, prompt, count, { label }) {
-  const chat = await call("POST", "/chats", { title: `soak — ${label}`, zoneId: zone.id });
+  // CreateChatBody carries only zoneId/projectId — the title is a separate
+  // route, and worth setting so `--keep` leaves something readable behind.
+  const chat = await call("POST", "/chats", { zoneId: zone.id });
+  await call("POST", `/chats/${chat.id}/title`, { title: `soak — ${label}` }).catch(() => {});
   const started = Date.now();
   await call("POST", `/chats/${chat.id}/messages?wait=true`, { text: prompt });
   const elapsed = Date.now() - started;

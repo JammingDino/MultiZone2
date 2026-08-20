@@ -81,7 +81,8 @@ async function main() {
     model: "mock-stream",
     toolsEnabled: "[]",
   });
-  const chat = await call("POST", "/chats", { title: TITLE, zoneId: zone.id });
+  const chat = await call("POST", "/chats", { zoneId: zone.id });
+  await call("POST", `/chats/${chat.id}/title`, { title: TITLE }).catch(() => {});
 
   const pairs = Math.floor(TOTAL / 2);
   const started = Date.now();

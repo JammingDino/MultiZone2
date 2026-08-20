@@ -120,7 +120,12 @@ async function runOne(zone, prompt, count, { label }) {
 
 function report(r) {
   const mark = r.ok ? "PASS" : "FAIL";
-  console.log(`[${mark}] ${r.label} — ${describe(r)} (${(r.elapsed / 1000).toFixed(1)}s, ~${r.rate} tok/s)`);
+  // `note` lets a scenario say what happened in its own words. The truncated
+  // control needs it: its `ok` is deliberately inverted, and describe() reads
+  // that flag, so it would cheerfully report "all 5000 tokens arrived in order"
+  // about a stream that was cut at 400.
+  const detail = r.note ?? describe(r);
+  console.log(`[${mark}] ${r.label} — ${detail} (${(r.elapsed / 1000).toFixed(1)}s, ~${r.rate} tok/s)`);
   return r.ok;
 }
 
@@ -152,10 +157,16 @@ const SCENARIOS = {
   // The negative control. If this one *passes*, the checker is not checking:
   // the provider hangs up at token 400 of 5000 and the app cannot have them all.
   truncated: async (zone) => {
-    const r = await runOne(zone, "tokens=5000 delay=0 fail=400", 5000, { label: "truncated (expected to fail)" });
-    const inverted = { ...r, ok: !r.ok, label: "truncated — a cut stream is detected, not silently accepted" };
-    if (r.ok) console.log("   the app reported a complete sequence from a stream that was cut short");
-    return [inverted];
+    const r = await runOne(zone, "tokens=5000 delay=0 fail=400", 5000, { label: "truncated" });
+    const detected = !r.ok;
+    return [{
+      ...r,
+      ok: detected,
+      label: "truncated — a cut stream is detected, not silently accepted",
+      note: detected
+        ? `provider cut at 400/5000; the app stored ${r.received} and the check caught it`
+        : "THE APP REPORTED A COMPLETE SEQUENCE FROM A STREAM THAT WAS CUT SHORT",
+    }];
   },
 };
 

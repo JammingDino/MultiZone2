@@ -41,15 +41,40 @@ node scripts/stream-soak.mjs --token $env:MULTIZONE_API_TOKEN
 ```
 
 It creates its own provider, zone and chats, runs every scenario, and cleans up
-after itself. Expect:
+after itself. The whole run takes about 40 seconds.
+
+**Measured on Windows 11, 0.15.4, 2026-08-20 — all twelve scenarios passed:**
+
+| Scenario | Result |
+| --- | --- |
+| quick — 2k | 2000/2000 in order, ~20k tok/s |
+| sustained — 100k, no delay | 100000/100000 in order, 3.0s, ~33k tok/s |
+| sustained — 20k with a 1.5s stall | 20000/20000 in order, 2.0s |
+| concurrent — 7 × 20k | 20000/20000 each, ~3.8s each, ~5.2k tok/s each (~37k aggregate) |
+| tools — 500 | 500/500 in order |
+| truncated (control) | cut at 400/5000 detected; the app stored 0 |
+
+Memory over a sustained run held at 128→137 MB with handles and threads flat
+(557 / 33) — no leak signature, though the 30-minute soak is still worth doing.
+
+**A harness caveat, because it cost an hour to find.** `delay=` values under
+~15ms cannot be honoured on Windows: `setTimeout(fn, 1)` sleeps ~15.6ms, so
+`delay=1` over 20k tokens costs minutes of *harness* time and reads exactly
+like the app shedding throughput under load. Timing the mock with no app in the
+path is what settles that kind of question — 20k tokens took 0.1s at `delay=0`
+and over two minutes at `delay=1`. Use `pause=` for a stall; use `delay=` only
+at 15ms or more.
+
+Expect:
 
 ```
-[PASS] quick — 2k tokens — all 2000 tokens arrived in order (1.2s, ~1600 tok/s)
-[PASS] sustained — 100k tokens, no delay — all 100000 tokens arrived in order
+[PASS] quick — 2k tokens — all 2000 tokens arrived in order (0.1s, ~19802 tok/s)
+[PASS] sustained — 100k tokens, no delay — all 100000 tokens arrived in order (3.0s)
 [PASS] sustained — 20k with a 1.5s mid-stream stall — all 20000 tokens …
 [PASS] concurrent 1/7 — 20k tokens — all 20000 tokens arrived in order
 …
-[PASS] truncated — a cut stream is detected, not silently accepted
+[PASS] truncated — a cut stream is detected, not silently accepted — provider cut
+       at 400/5000; the app stored 0 and the check caught it
 no dropped tokens
 ```
 
@@ -70,10 +95,10 @@ zone at model `mock-stream`, and send:
 | Send this | Watch for |
 | --- | --- |
 | `tokens=100000 delay=0` | The thread staying responsive while it streams; scroll during it |
-| `tokens=5000 delay=1 pause=2000` | The stall not being mistaken for the end of the turn |
+| `tokens=5000 delay=0 pause=2000` | The stall not being mistaken for the end of the turn |
 | `tokens=50000 delay=0` then switch chats mid-stream | 🔁 the crossover regression — go back and check the answer is whole |
 | `tokens=50000 delay=0` then press stop | Cancellation leaving a consistent partial message |
-| `fail=500` | An honest error rather than a silent truncation presented as an answer |
+| `fail=500` | An honest error rather than a silent truncation presented as an answer — **and whether the partial text you just watched arrive survives**; over the API it does not (see RELEASE_PLAN.md) |
 | `tool=1` | The tool call's arguments building up on screen |
 
 Leave one running 30 minutes and watch memory in Task Manager for the "sustained

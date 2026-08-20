@@ -12,6 +12,7 @@ import { Modal, ModalTitle } from "@/components/common/Modal";
 import { HexColorField } from "@/components/common/ColorPicker";
 import { UpdateSection } from "@/components/Settings/UpdateSection";
 import { Toggle, ToggleRow } from "@/components/common/Toggle";
+import { PrivacyStatementLink } from "@/components/common/PrivacyStatement";
 import { InstalledZones, useZoneActions } from "@/components/Zones/InstalledZones";
 import { getVersion } from "@tauri-apps/api/app";
 import { saveTextFile } from "@/lib/saveFile";
@@ -3864,6 +3865,28 @@ function DataTab() {
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Privacy first, because this tab is where someone comes to find out
+          what the app is holding, and the two disclosures below are the ones a
+          settings panel is otherwise free to leave unsaid. */}
+      <section>
+        <h3 className="mb-3 text-sm font-medium">Privacy</h3>
+        <div className="flex flex-col gap-2.5 rounded border border-[var(--color-border)] px-3 py-3 text-xs text-[var(--color-text-muted)]">
+          <p>
+            Everything is on this machine. No account, no telemetry, no analytics, no cloud sync
+            — nothing is collected, by anyone. What leaves the machine leaves because you sent a
+            message to a cloud model, ran a web search, or connected a service, and each of those
+            is listed in the statement.
+          </p>
+          <p>
+            <span className="text-[var(--color-text)]">Provider API keys are stored in plain text</span>{" "}
+            in the database below — not encrypted, not in your OS keychain. Anyone who can read
+            your user profile can read them, so treat that file as being as sensitive as the keys
+            themselves. Moving them to the keychain is scheduled work, not a thing already done.
+          </p>
+          <PrivacyStatementLink className="self-start" />
+        </div>
+      </section>
+
       <UpdateSection />
 
       {/* Stats */}
@@ -4780,6 +4803,14 @@ function ProviderForm({ value, onClose, onDeleted }: { value: Partial<Provider>;
       <Field label={preset && !preset.needsKey ? "API key (not needed for a local server)" : "API key (optional)"}>
         <input value={apiKey} onChange={(e) => setApiKey(e.target.value)} type="password" className="input" placeholder="sk-..." />
       </Field>
+      {/* Said where the key is typed rather than only in the privacy statement,
+          because this is the moment someone decides whether to paste one. */}
+      {apiKey.trim() !== "" && (
+        <p className="-mt-1 mb-2 text-[11px] text-[var(--color-text-muted)]">
+          Stored in plain text in this app’s local database — not encrypted, not in your OS
+          keychain. It never leaves the machine except to the provider above.
+        </p>
+      )}
       {preset?.keyUrl && (
         <p className="-mt-1 mb-2 text-[11px] text-[var(--color-text-muted)]">
           Get a {preset.name} key at{" "}

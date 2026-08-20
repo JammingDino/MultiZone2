@@ -293,6 +293,19 @@ Both serve the request through the same router the socket does, in-process — s
 
 Two routes are refused from inside a turn: sending or regenerating a message (a turn calling itself — that is what the `subchat` tool is for, under your supervision), and answering a tool approval (the model granting itself permission). The group is classed dangerous, so it never lands in a default toolset.
 
+## Privacy
+
+Nothing is collected. No account, no telemetry, no analytics, no crash reporting, no cloud sync — there is no server to send any of it to. Chats, zones, settings and indexes live in one local SQLite file whose location Settings → Data shows you.
+
+What leaves the machine leaves because you sent it: a message to a cloud provider, a web search, a page fetch, a remote MCP server, or an API-based voice endpoint. Run a local model with no web tools and nothing leaves at all. Two consequences worth stating rather than burying — a cloud model sees your files when a tool reads them, and a search query is a disclosure to the engines it fans out to.
+
+Two things a short version would gloss over, so they are here as well as in the statement:
+
+- **The app checks for updates ~2.5 seconds after launch.** A plain GET for a static manifest, no identifier, silent on failure. **Settings → Data** turns it off; with it off, MultiZone makes no network request you did not start.
+- **Provider API keys are stored in plain text** in that SQLite file — not encrypted, not in the OS keychain. Treat the database as being as sensitive as the keys.
+
+The full statement is [docs/PRIVACY.md](docs/PRIVACY.md), and is also readable inside the app (Settings → Data → Read the privacy statement) without a network connection.
+
 ## Contributing
 
 Build instructions, project layout and conventions are in [CONTRIBUTING.md](CONTRIBUTING.md).

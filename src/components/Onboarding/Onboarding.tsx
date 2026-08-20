@@ -3,6 +3,7 @@ import { Layers, Loader2, Server, Sparkles, ArrowRight, Check, FileUp, Upload } 
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
+import { PrivacyStatementModal } from "@/components/common/PrivacyStatement";
 import { seedDefaultZones } from "@/lib/defaultZones";
 import { claimSettingsDrop, pickBundleFile } from "@/lib/importSettings";
 import { PROVIDER_PRESETS, presetForBaseUrl } from "@/lib/providerPresets";
@@ -156,6 +157,8 @@ export function Onboarding() {
     });
   }
 
+  const [showPrivacy, setShowPrivacy] = useState(false);
+
   /** Dismiss setup without a provider. The banner in App.tsx takes over. */
   async function onSkip() {
     await setAppSettings({ onboardingSkipped: true });
@@ -297,6 +300,20 @@ export function Onboarding() {
             Skip for now
           </button>
         </div>
+
+        {/* First run is where someone decides whether to trust this with a key,
+            so the answer to "what does it do with my data" belongs here rather
+            than only in a settings tab they may never open. */}
+        <div className="mt-3 flex items-center justify-between gap-3 text-[11px] text-[var(--color-text-muted)]">
+          <span>Everything stays on this machine. No account, no telemetry.</span>
+          <button
+            onClick={() => setShowPrivacy(true)}
+            className="shrink-0 text-[var(--color-accent)] hover:underline"
+          >
+            Privacy
+          </button>
+        </div>
+        {showPrivacy && <PrivacyStatementModal onClose={() => setShowPrivacy(false)} />}
       </div>
       <style>{`.ob-input { width: 100%; border: 1px solid var(--color-border); border-radius: 6px; padding: 7px 10px; background: var(--color-bg); font-size: 13px; } .ob-input:focus { border-color: var(--color-accent); outline: none; }`}</style>
     </div>

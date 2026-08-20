@@ -66,6 +66,9 @@ function optionsFromPrompt(body) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/** Below this, a setTimeout costs more than it sleeps — see the debt loop. */
+const MIN_SLEEP_MS = 15;
+
 function sse(res, payload) {
   return res.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
@@ -119,6 +122,7 @@ async function streamCompletion(res, opts) {
 
   const parts = deltas(opts.tokens);
   const halfway = Math.floor(parts.length / 2);
+  let debt = 0;
 
   for (let i = 0; i < parts.length; i++) {
     if (opts.fail && i + 1 >= opts.fail) {
@@ -133,7 +137,21 @@ async function streamCompletion(res, opts) {
     // Respect backpressure rather than queueing the whole stream in memory —
     // otherwise a 100k-token run measures Node's buffer, not the app.
     if (!ok) await new Promise((r) => res.once("drain", r));
-    if (opts.delay) await sleep(opts.delay);
+
+    // Pay the delay in arrears rather than per token. `setTimeout(fn, 1)` does
+    // not sleep 1ms — Windows' timer granularity is ~15.6ms, so a per-token
+    // sleep turned `delay=1` over 20k tokens into 178 seconds instead of 20,
+    // and the run looked like the app was slow when it was the harness. Debt is
+    // accumulated and discharged in one sleep once it is worth sleeping for,
+    // which makes the *average* rate honest even though individual gaps are not.
+    if (opts.delay) {
+      debt += opts.delay;
+      if (debt >= MIN_SLEEP_MS) {
+        const owed = debt;
+        debt = 0;
+        await sleep(owed);
+      }
+    }
   }
 
   sse(res, chunk({}, "stop"));

@@ -13,14 +13,7 @@ import type { ApprovalCategory, ApprovalPolicy, Provider, ToolFunctionInfo, Tool
 import { ALL_TOOLS, TOOL_CATEGORIES, mcpToolEnableId } from "@/lib/types";
 import { useApp } from "@/store/app";
 import { DEFAULT_ZONES } from "@/lib/defaultZones";
-
-const EMPTY_APPROVALS: ApprovalPolicy = {
-  categories: {},
-  shellAllow: [],
-  shellDeny: [],
-  editAllow: [],
-  editDeny: [],
-};
+import { EMPTY_APPROVALS, parseApprovals, serializeApprovals } from "@/lib/approvals";
 
 /** Zone override categories, short labels — the long descriptions live in
  * Settings, where the global policy is set and explained. */
@@ -33,34 +26,6 @@ const ZONE_APPROVAL_CATEGORIES: [ApprovalCategory, string][] = [
   ["spawn", "Sub-agents"],
   ["state", "App state"],
 ];
-
-function parseApprovals(raw: string | null | undefined): ApprovalPolicy {
-  if (!raw?.trim()) return EMPTY_APPROVALS;
-  try {
-    const v = JSON.parse(raw) as Partial<ApprovalPolicy>;
-    return {
-      categories: v.categories ?? {},
-      shellAllow: v.shellAllow ?? [],
-      shellDeny: v.shellDeny ?? [],
-      editAllow: v.editAllow ?? [],
-      editDeny: v.editDeny ?? [],
-    };
-  } catch {
-    return EMPTY_APPROVALS;
-  }
-}
-
-/** `null` when the zone overrides nothing, so "inherit everything" is stored as
- * the absence of a policy rather than an empty one that looks like a decision. */
-function serializeApprovals(p: ApprovalPolicy): string | null {
-  const empty =
-    Object.keys(p.categories).length === 0 &&
-    p.shellAllow.length === 0 &&
-    p.shellDeny.length === 0 &&
-    p.editAllow.length === 0 &&
-    p.editDeny.length === 0;
-  return empty ? null : JSON.stringify(p);
-}
 
 const SAFETY_BADGE: Record<number, { label: string; cls: string }> = {
   0: { label: "Safe",      cls: "border-green-600/40  bg-green-600/10  text-green-500" },

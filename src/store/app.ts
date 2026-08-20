@@ -4,6 +4,7 @@ import * as api from "@/lib/tauri";
 import type { SettingsBundle } from "@/lib/settingsBundle";
 import { clearAttention, notifyWaiting } from "@/lib/notify";
 import { shade } from "@/lib/color";
+import { normalizeApprovals } from "@/lib/approvals";
 
 /**
  * Chats whose opening turn has already kicked off an auto-title, so the check
@@ -849,6 +850,22 @@ function saveBootSnapshot() {
     // Storage full or unavailable. The only cost is the launch flash we used to
     // have unconditionally, so there is nothing to report.
   }
+}
+
+/**
+ * Layer partial settings over the defaults, nested objects included.
+ *
+ * A plain spread only fills in *missing top-level keys*, which is wrong for the
+ * one field that has structure: a saved `approvals` from before `editAllow`
+ * existed replaced the default whole and left those lists `undefined`, so the
+ * Chat tab crashed on the first list editor that joined one. Every merge of
+ * saved settings goes through here so a field added to `ApprovalPolicy` can
+ * never do that again.
+ */
+function mergeAppSettings(...parts: Partial<AppSettings>[]): AppSettings {
+  const merged = Object.assign({ ...DEFAULT_APP_SETTINGS }, ...parts) as AppSettings;
+  merged.approvals = normalizeApprovals(merged.approvals);
+  return merged;
 }
 
 function applyAppSettingsToDom(settings: AppSettings) {
@@ -1835,7 +1852,7 @@ export const useApp = create<AppStore>((set, get) => ({
       const raw = await api.getSetting("app_settings");
       if (raw) {
         const parsed = JSON.parse(raw) as Partial<AppSettings> & { fontSize?: any };
-        const merged = { ...DEFAULT_APP_SETTINGS, ...parsed };
+        const merged = mergeAppSettings(parsed);
         // Migrate legacy string fontSize values
         if (typeof merged.fontSize === "string") {
           merged.fontSize = LEGACY_FONT_SIZE[merged.fontSize as string] ?? 14;
@@ -1877,7 +1894,7 @@ export const useApp = create<AppStore>((set, get) => ({
     // Only layer in-memory state on top once it genuinely reflects the load;
     // pre-load it is just DEFAULT_APP_SETTINGS and would re-clobber `saved`.
     const inMemory = get().appSettingsLoaded ? get().appSettings : {};
-    const next = { ...DEFAULT_APP_SETTINGS, ...saved, ...inMemory, ...partial };
+    const next = mergeAppSettings(saved, inMemory, partial);
     set({ appSettings: next });
     applyAppSettingsToDom(next);
     try {

@@ -1077,6 +1077,10 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [x] In-app keyboard shortcut reference — `?` (outside text fields) or the keyboard icon in the sidebar opens a shortcuts modal cataloguing every shortcut wired up in the app
 - [x] App-wide keyboard control — a central handler ([useGlobalShortcuts.ts](../src/lib/useGlobalShortcuts.ts)) driven by a single shortcut definition list ([shortcuts.ts](../src/lib/shortcuts.ts), shared with the help modal so the reference can't drift). Ctrl/Cmd+N new chat, Ctrl/Cmd+, settings, Ctrl/Cmd+B toggle sidebar, Ctrl/Cmd+L zone library, Ctrl/Cmd+Shift+P projects, Ctrl/Cmd+K focus the composer, Alt+↑/↓ prev/next chat, Ctrl/Cmd+/ or `?` the reference. Modifier shortcuts fire even mid-typing; the plain `?` is suppressed in text fields. Sidebar open/closed moved into the store (same `ui.sidebarOpen` persistence key) so a shortcut can toggle it; composer focus signalled via a store nonce
 - [ ] Clean uninstall: no orphaned files or registry entries
+- [x] **A privacy statement, written from the source rather than from the principle** — [PRIVACY.md](PRIVACY.md). A public release makes "local-first" a claim someone can hold us to, and the honest version of it turned out to have two exceptions the roadmap had never written down. Both are in the statement, and both need a decision here rather than a sentence there:
+- [ ] **The launch update check becomes opt-out.** [UpdatePrompt.tsx](../src/components/UpdatePrompt.tsx) fetches the updater manifest from `raw.githubusercontent.com` ~2.5s after every launch. It sends no identifier and stays silent on failure, which is why it has never felt like egress — but it is the one request the app makes that the user did not initiate, and "nothing leaves the machine unless you choose" is not true while it cannot be switched off. A toggle in Settings → Data, defaulted on, next to the existing check-now control
+- [ ] **State the position on API-key storage.** Provider keys sit in `multizone.db` in plain text — no encryption, no keyring dependency in the tree. That is defensible for a single-user local app and indefensible if nobody is told, so 1.0 either moves them to the OS keychain (which 1.2.x builds the machinery for anyway) or says plainly in the app, at the point of entry, that the database is as sensitive as the key. Saying it is the cheap half and ships regardless
+- [ ] **Surface it where it is read, not where it is filed.** The statement is worth nothing in `docs/` alone: link it from the README, from Settings → Data, and from first-run setup — the three places someone forms a view about what this app does with their data
 - [x] Formal pre-release test checklist — [TEST_CHECKLIST.md](TEST_CHECKLIST.md), covering build plumbing, first run, chat, zones/projects/tags, tools, knowledge, multizone, voice, export, updates, uninstall, cross-platform and performance
 
 ---
@@ -1191,5 +1195,58 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
   Deliberately *not* in scope: any access from outside the LAN (no relay, no tunnel, no account — that is cloud sync wearing a different hat), and any offline mode on the phone. If the desktop cannot be reached, the phone says so.
 
   Sized as: LAN bind + pairing + device registry on the desktop first — useful on its own, since it is also how a tablet, a second laptop or a script on the LAN reaches the app — then the transport shim, then the mobile shell. See [CONNECTIVITY.md](CONNECTIVITY.md#part-3--the-phone-as-a-second-window).
+- [ ] **The app as a moddable surface — `.zone` packages.** A zone that can already repaint the app, write a skill and register an MCP server cannot add the one thing users keep asking for: a *tool that does not exist yet*, rendered the way that tool wants to be rendered. The ask is a mod system in the Minecraft sense, with the difference that matters here — you do not download the mod, you talk it into existence with the zone that will run it, and you can talk it into being different afterwards.
+
+  **Most of the parts exist, which is the reason to take it seriously.** The gap is narrower than "make the app dynamic" suggests:
+
+  | Needs | State |
+  | --- | --- |
+  | The agent driving app state | Built — `app_control`/`app_read` forward to the in-process axum router, so the model's reach is the API's ~109 routes by construction |
+  | Runtime-registered backend tools | Built — MCP, with per-zone enablement and per-tool danger levels. A zone that wants a new tool can *write an MCP server* and register it; it does not need a new execution runtime |
+  | Arbitrary appearance | Built — `customCss` + `customCssEnabled`, validated in [theme.rs](../src-tauri/src/theme.rs) with per-field doc strings |
+  | Folder-backed packages discovered on disk | Built — [skillpacks.rs](../src-tauri/src/skillpacks.rs), read-only, capped, served through a tool |
+  | Model-authored UI in the transcript | Built — `HtmlReportBlock` renders model-written HTML in an iframe, deliberately script-free |
+  | A seam for an unknown tool's card | **0.13.0** — the shaped fallback for MCP tools is exactly where a mod-supplied renderer plugs in. Hard prerequisite |
+  | **An extension-point registry the agent can read** | **Missing** — the whole feature rests on it |
+  | **A renderer contract, and somewhere safe to run one** | **Missing** — the only genuinely new engineering |
+
+  **Three tiers of "dynamic", because they are not one feature and do not cost the same.** Nearly everything asked for lands in the first two:
+
+  1. **Configuration** — settings values, custom CSS, layout presets, background effects. *Already possible today.* The gap is that the model does not know which knobs exist or what the selectors are called, which is a registry problem, not a capability one
+  2. **Composition** — a new settings page, a panel arrangement, a split chat-and-file-tree view. A declarative manifest, schema-validated, rendered by components that already exist. High perceived power, no sandbox, no new runtime
+  3. **Code** — a custom renderer with behaviour. Needs a sandbox, and is the only tier that does
+
+  **Trust model — decided: packages are shareable, and arrive off.** A `.zone` is an artifact someone else can install, which means the security question is real rather than notional and cannot be answered with "the user watched it get written". Installing a package is inert: it lands disabled, its manifest is shown as *what it wants* rather than as a summary, and nothing in it executes, renders or registers until the user enables it. Enabling is per package and reversible, and a package that has been enabled can be disabled without being deleted — the same shape as `customCssEnabled`, for the same reason. Self-authored packages take the identical path: the zone that wrote it does not get to enable it, which keeps the "user stays in control" line intact at exactly the point where it would otherwise quietly break.
+
+  **Capability floor — both tiers get specced; only the first gets built.** The line is whether a package can *add* reach or only *compose* reach the app already gates:
+
+  | | **Tier A — compose** | **Tier B — extend** |
+  | --- | --- | --- |
+  | What a package may do | Call tools that already exist, through the existing approval and danger-level path; declare UI; declare settings; supply renderers | Open a socket, read a path outside the project, spawn a process, hold a credential |
+  | Permission surface | The tools it names, approved once at enable time. No new categories | A full permission manifest, per-capability consent, and a revocation story |
+  | Sandbox | The declarative tier needs none; the renderer tier needs the iframe below | The same, plus a broker for every reach it declares |
+  | Honest sizing | Covers, as far as we can currently tell, everything actually asked for | Where mod systems stop being a feature and become a security product |
+
+  Tier A ships as the whole feature. Tier B is written down now so the manifest has room for it — a `capabilities` block that initially accepts nothing but tool names — and is picked up only if real packages turn out to need it. If they never do, this stays a two-tier spec with one tier built, which is the good outcome rather than the incomplete one.
+
+  **The sandbox, since it is the one part with teeth.** [tauri.conf.json](../src-tauri/tauri.conf.json) sets `"csp": null`, so *any* script in the main webview has the full Tauri IPC surface — every file tool, every shell tool, every route. Mod code therefore never runs in the main webview, at any tier. The renderer tier extends the existing `HtmlReportBlock` iframe with `allow-scripts` and, critically, **without** `allow-same-origin`: those two flags together are a documented sandbox escape, and the current block sidesteps the question only by allowing no scripts at all. The frame gets a `postMessage` RPC channel whose callables are exactly what the package's manifest declared and the user approved — not `invoke`, not `fetch`. Setting a real CSP is worth doing regardless of this item and is arguably 1.0 work.
+
+  **Package format: a directory to work in, an archive to share.** `skillpacks.rs` already made this call. A zip is opaque to `git diff`, to 0.10.x checkpoints and to 0.7.x's markdown-on-disk mode, and cannot be hand-fixed when the agent gets it wrong — which is the constant case while you are talking a package into shape. So the working format is a directory, and `.zone` is a zip of it for distribution only, which is also what the Post-1.0 marketplace item would need.
+
+  **Documentation of override points is generated, not written.** The failure mode of every mod system is documentation that goes stale and agents writing against an app version that no longer exists. Two precedents in the tree already solve this: `theme.rs` declares fields with `doc:` strings that produce both the validator and the description, and `/api/routes` is a generated catalog with a drift test that fails the build when a command ships without one. Extension points get the same treatment — one Rust table generating the runtime validator, the manifest schema, and the document an agent requests before it writes anything, with a drift test. An extension point added without a doc string fails the build.
+
+  **Version breakage is where these die, and we have an unusual answer.** A package written against 0.16's DOM breaks on 0.17. The ordinary mitigations apply: a declared API version in the manifest, a compatibility check at load, and *disabled-with-a-stated-reason* rather than a white screen. The unusual one is that the agent that wrote the package can be handed the breakage and repair it — worth designing for deliberately rather than hoping for, and it means keeping a package linked to the conversation that authored it.
+
+  **Modes and project onboarding are a related ask, and belong to the mode surface item rather than this one.** The proposal — the app asks what a project is *for* (study, code, writing) and furnishes itself accordingly, with packages able to define new kinds — is right as a destination and wrong as a starting point, by this document's own principle. Designing an extension contract for modes before a single hand-built mode exists means fitting an API to zero examples. Ship the mode surface with study mode, then extract the contract from what it actually needed. Worth separating from that: "onboarding picks a project type" is a wizard over settings that already exist, and could ship at any time more or less independently of all of this.
+
+  **Sequencing, none of it pre-1.0:**
+
+  1. Extension-point registry + generated manifest schema + drift test — small, unblocks everything, reuses the routes pattern outright
+  2. Declarative renderer contract — after 0.13.0's fallback seam lands
+  3. Sandboxed renderer tier — iframe with `allow-scripts` and no `allow-same-origin`, plus the capability-scoped RPC
+  4. `.zone` packaging, the install/enable/disable lifecycle, and the compatibility gate
+  5. Tier B, only if real packages demand it
+
+  Steps 1 and 2 are genuinely near-term and useful with no mod system attached at all — step 1 makes every existing `app_control` interaction better, and step 2 is 0.13.0 finishing its own job. Do not schedule this as one release.
 - [ ] Deep research mode: multi-step sourced research using subchats; requires design session before scheduling
 - [ ] Zone snapshot/versioning: save zone config at chat creation time so editing a zone does not alter historical context

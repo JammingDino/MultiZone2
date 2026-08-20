@@ -11,6 +11,7 @@ import { VisionOverrideSelect } from "@/components/common/VisionOverrideSelect";
 import { Modal, ModalTitle } from "@/components/common/Modal";
 import { HexColorField } from "@/components/common/ColorPicker";
 import { UpdateSection } from "@/components/Settings/UpdateSection";
+import { Toggle, ToggleRow } from "@/components/common/Toggle";
 import { InstalledZones, useZoneActions } from "@/components/Zones/InstalledZones";
 import { getVersion } from "@tauri-apps/api/app";
 import { saveTextFile } from "@/lib/saveFile";
@@ -4609,28 +4610,6 @@ function PrefixList({
   );
 }
 
-function ToggleRow({
-  label, description, checked, onChange,
-}: {
-  label: React.ReactNode;
-  description?: React.ReactNode;
-  checked: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <div
-      onClick={() => onChange(!checked)}
-      className="flex cursor-pointer items-center justify-between gap-3 rounded border border-[var(--color-border)] px-3 py-2.5 hover:border-[var(--color-accent)]"
-    >
-      <div className="min-w-0">
-        <div className="text-sm">{label}</div>
-        {description && <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">{description}</div>}
-      </div>
-      <Toggle checked={checked} onChange={onChange} />
-    </div>
-  );
-}
-
 /** Integer input that validates on every keystroke: commits valid values
  *  immediately and highlights invalid ones inline rather than on save. */
 function NumberField({
@@ -4669,19 +4648,6 @@ function NumberField({
         </p>
       )}
     </div>
-  );
-}
-
-function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <button
-      onClick={(e) => { e.stopPropagation(); onChange(!checked); }}
-      className={`relative h-5 w-9 flex-shrink-0 rounded-full transition-colors ${checked ? "bg-[var(--color-accent)]" : "bg-[var(--color-border)]"}`}
-    >
-      <span
-        className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all duration-200 ${checked ? "translate-x-4" : ""}`}
-      />
-    </button>
   );
 }
 

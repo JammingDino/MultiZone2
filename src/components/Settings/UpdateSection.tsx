@@ -3,25 +3,33 @@ import { getVersion } from "@tauri-apps/api/app";
 import { Download, RefreshCw, CheckCircle2, AlertTriangle } from "lucide-react";
 import { useUpdater } from "@/lib/useUpdater";
 import { Markdown } from "@/components/Renderers/Markdown";
+import { ToggleRow } from "@/components/common/Toggle";
+import { useApp } from "@/store/app";
 
 /**
  * Update control for Settings → Data.
  *
  * Checks once on mount (silently — see `useUpdater`), so opening the section is
- * enough to learn an update exists without pressing anything.
+ * enough to learn an update exists without pressing anything — unless automatic
+ * checks are off, in which case opening a settings panel is not consent to make
+ * a network request either, and only the button does.
  */
 export function UpdateSection() {
   const u = useUpdater();
   const [currentVersion, setCurrentVersion] = useState("");
+  const settingsLoaded = useApp((s) => s.appSettingsLoaded);
+  const checkOnLaunch = useApp((s) => s.appSettings.updateCheckOnLaunch);
+  const setAppSettings = useApp((s) => s.setAppSettings);
 
   useEffect(() => {
-    void u.checkForUpdate(true);
+    if (!settingsLoaded) return;
+    if (checkOnLaunch) void u.checkForUpdate(true);
     // Read from the running binary rather than package.json, so a dev build and
     // a shipped one can't disagree about what is installed.
     getVersion().then(setCurrentVersion).catch(() => setCurrentVersion(""));
-    // Mount-only: a re-check on every render would hammer GitHub.
+    // Runs once settings are known: a re-check on every render would hammer GitHub.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [settingsLoaded]);
 
   const busy = u.stage === "checking" || u.stage === "downloading";
 
@@ -123,6 +131,13 @@ export function UpdateSection() {
             {u.stage === "checking" ? "Checking…" : "Check for updates"}
           </button>
         </div>
+
+        <ToggleRow
+          label="Check for updates automatically"
+          description="A version check shortly after launch. It sends nothing about you or this machine — GitHub sees the request, as it would any download. Off means checks happen only when you press the button above, and the app makes no network request you did not start."
+          checked={checkOnLaunch}
+          onChange={(updateCheckOnLaunch) => void setAppSettings({ updateCheckOnLaunch })}
+        />
       </div>
     </section>
   );

@@ -1156,6 +1156,20 @@ export interface AppSettings {
    * carrying to another machine.
    */
   onboardingSkipped: boolean;
+  /**
+   * Whether the app checks for a new version shortly after launch (1.0).
+   *
+   * This is the one network request MultiZone makes that the user did not
+   * initiate — a plain GET for the updater manifest, no identifier, silent on
+   * failure — and [PRIVACY.md](../../docs/PRIVACY.md) can only claim "nothing
+   * leaves the machine unless you choose" while there is a way to stop it.
+   * Defaults on, because an app that never mentions a security fix is its own
+   * problem; off means update checks happen only when the button is pressed.
+   *
+   * Machine-local: whether this install phones home is a property of this
+   * machine, not a preference worth carrying to another one.
+   */
+  updateCheckOnLaunch: boolean;
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -1207,6 +1221,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   checkpointMaxMb: 512,
   visionOverrides: {},
   onboardingSkipped: false,
+  updateCheckOnLaunch: true,
   sttProviderId: null,
   sttModel: "",
   sttLanguage: "",

@@ -54,6 +54,7 @@ const LOCAL_ONLY_SETTINGS = [
   "seededSkillsVersion",
   "libraryCuratedVersion",
   "onboardingSkipped",     // this install's own first-run state
+  "updateCheckOnLaunch",   // whether this install phones home for updates
 ] as const satisfies readonly (keyof AppSettings)[];
 
 /** A provider as exported. `apiKey` is null when keys were excluded. */

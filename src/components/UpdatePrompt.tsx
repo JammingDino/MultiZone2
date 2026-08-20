@@ -4,6 +4,7 @@ import { AlertTriangle, CheckCircle2, Download, Sparkles } from "lucide-react";
 import { Modal, ModalTitle } from "@/components/common/Modal";
 import { Markdown } from "@/components/Renderers/Markdown";
 import { useUpdater } from "@/lib/useUpdater";
+import { useApp } from "@/store/app";
 import { PRIMARY_ACTION } from "@/lib/chrome";
 
 /**
@@ -33,7 +34,9 @@ function writeSkipped(version: string) {
 /**
  * Launch-time update prompt.
  *
- * The check runs once, shortly after the window settles, and stays silent
+ * The check runs once, shortly after the window settles — unless Settings → Data
+ * has switched it off, which is the only way to stop the app making a network
+ * request nobody asked for. It stays silent
  * unless it finds something: a machine that is offline, or behind a proxy that
  * blocks GitHub, gets no dialog and no error — the user never asked for one
  * (see `useUpdater`'s `silent` flag). When an update *is* found, this is the
@@ -50,19 +53,26 @@ export function UpdatePrompt() {
   const [currentVersion, setCurrentVersion] = useState("");
   const [dismissed, setDismissed] = useState(false);
   const checked = useRef(false);
+  // Wait for the stored settings before deciding: they load asynchronously, and
+  // reading the default too early would make an install that opted out check
+  // anyway on every launch — which is the exact thing the setting exists to stop.
+  const settingsLoaded = useApp((s) => s.appSettingsLoaded);
+  const checkOnLaunch = useApp((s) => s.appSettings.updateCheckOnLaunch);
 
   useEffect(() => {
-    if (checked.current) return;
+    if (!settingsLoaded || checked.current) return;
     checked.current = true;
     getVersion().then(setCurrentVersion).catch(() => setCurrentVersion(""));
+    if (!checkOnLaunch) return;
     // Let the first frames land before reaching for the network: the boot
     // splash is still covering the window at mount, and an update found half a
     // second earlier changes nothing for anybody.
     const t = window.setTimeout(() => void u.checkForUpdate(true), 2500);
     return () => window.clearTimeout(t);
-    // Mount-only — this is the launch check, not a subscription.
+    // Runs once, when settings are known — this is the launch check, not a
+    // subscription. Toggling the setting later takes effect at the next launch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [settingsLoaded]);
 
   // Nothing found, or the user has already waved this exact version away.
   const offered = u.version;

@@ -130,46 +130,21 @@ jobs:
         with:
           node-version: 22
 
-      - name: Compute versions
+      # One script, not four inlined `node -e` blocks. The blocks updated
+      # package.json, Cargo.toml and tauri.conf.json and silently skipped
+      # Cargo.lock, so main shipped two releases with Cargo.toml and Cargo.lock
+      # disagreeing — invisible in an ordinary build, fatal under `--locked`.
+      # scripts/bump-version-core.mjs owns the list and has tests, including one
+      # that fails if the four files in this repo ever drift apart again.
+      - name: Compute and apply the version bump
         id: bump
         shell: bash
         run: |
           OLD=$(node -p "require('./package.json').version")
-          NEW=$(node -e "
-            const [maj, min, pat] = '$OLD'.split('.').map(Number);
-            console.log(maj + '.' + min + '.' + (pat + 1));
-          ")
+          NEW=$(node scripts/bump-version.mjs)
           echo "old=$OLD" >> "$GITHUB_OUTPUT"
           echo "new=$NEW" >> "$GITHUB_OUTPUT"
-          echo "Bumping $OLD → $NEW"
-
-      - name: Bump package.json and reset build flag
-        shell: bash
-        run: |
-          node -e "
-            const fs = require('fs');
-            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-            pkg.version = '${{ steps.bump.outputs.new }}';
-            pkg.releaseBuild = false;
-            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
-          "
-
-      - name: Bump src-tauri/Cargo.toml
-        shell: bash
-        run: |
-          sed -i \
-            's/^version = "${{ steps.bump.outputs.old }}"$/version = "${{ steps.bump.outputs.new }}"/' \
-            src-tauri/Cargo.toml
-
-      - name: Bump src-tauri/tauri.conf.json
-        shell: bash
-        run: |
-          node -e "
-            const fs = require('fs');
-            const cfg = JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json', 'utf8'));
-            cfg.version = '${{ steps.bump.outputs.new }}';
-            fs.writeFileSync('src-tauri/tauri.conf.json', JSON.stringify(cfg, null, 2) + '\n');
-          "
+          echo "Bumped $OLD -> $NEW"
 
       # Point the manifest's download URLs at token-authenticated asset
       # endpoints and commit it to the path the updater polls. Runs in this job
@@ -186,6 +161,6 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json updater/latest.json
+          git add package.json src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json updater/latest.json
           git commit -m "chore: bump version to ${{ steps.bump.outputs.new }} [skip ci]"
           git push origin main

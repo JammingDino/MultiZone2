@@ -13,7 +13,9 @@
 // app's own composer without restarting the server:
 //
 //   tokens=50000   how many tokens to stream
-//   delay=0        milliseconds between tokens
+//   delay=0        milliseconds between tokens. Values under ~15 cannot be
+//                  honoured on Windows (setTimeout floor) and cost far more
+//                  wall-clock than they ask for — use `pause` for a stall.
 //   pause=250      a one-off stall (ms) halfway through, for buffer behaviour
 //   fail=8000      abort the connection after this token, for recovery paths
 //   tool=1         emit a tool call before the text, for the pending-args path

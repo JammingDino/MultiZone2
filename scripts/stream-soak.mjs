@@ -137,7 +137,13 @@ const SCENARIOS = {
   // rate is where a throttle either holds or starts shedding.
   sustained: async (zone) => [
     await runOne(zone, "tokens=100000 delay=0", 100000, { label: "sustained — 100k tokens, no delay" }),
-    await runOne(zone, "tokens=20000 delay=1 pause=1500", 20000, { label: "sustained — 20k with a 1.5s mid-stream stall" }),
+    // `pause` rather than `delay`, and the reason is worth keeping: Node's
+    // setTimeout floor on Windows (~15.6ms) means a per-token delay under that
+    // cannot be honoured, so `delay=1` over 20k tokens cost minutes of harness
+    // time and read as the app shedding throughput. What this scenario is
+    // actually for is whether a stall gets mistaken for the end of a turn, and
+    // `pause` tests exactly that without the timer tax.
+    await runOne(zone, "tokens=20000 delay=0 pause=1500", 20000, { label: "sustained — 20k with a 1.5s mid-stream stall" }),
   ],
 
   // Seven at once is perspective mode's shape: the case with the most moving

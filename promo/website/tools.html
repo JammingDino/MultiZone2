@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en" data-lights="down">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Apparatus — what a zone can reach | MultiZone</title>
+<meta name="description" content="Seven search engines fused with no API key. Terminals that stay open between calls. Replay with every tool call's arguments and duration. Voice and audio files. MCP connectors. A local HTTP API that describes itself.">
+<meta name="theme-color" content="#07080b">
+<link rel="icon" href="assets/img/mark.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,400..800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Bodoni+Moda:ital,opsz,wght@1,6..96,500..700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/score.css">
+<link rel="stylesheet" href="assets/home.css">
+<link rel="stylesheet" href="assets/divisi.css">
+<link rel="stylesheet" href="assets/pages.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<canvas id="bgfx" data-effect="grid" data-density="0.55" data-opacity="0.2" aria-hidden="true"></canvas>
+
+<header class="masthead">
+  <div class="masthead__in">
+    <a class="brand" href="index.html"><img src="assets/img/mark.png" alt="" width="30" height="30"><span class="brand__name"><b>Multi</b>Zone</span></a>
+    <button class="nav-toggle" aria-expanded="false" aria-controls="navrail" aria-label="Movements">
+      <svg viewBox="0 0 20 14" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true" width="20" height="14"><path d="M0 1h20M0 7h20M0 13h20"/></svg>
+    </button>
+    <nav class="navrail" id="navrail" aria-label="Movements">
+      <a href="index.html"><span class="rehearsal">A</span> Score</a>
+      <a href="multizone.html"><span class="rehearsal">B</span> Divisi</a>
+      <a href="tools.html" aria-current="page"><span class="rehearsal">C</span> Apparatus</a>
+      <a href="appearance.html"><span class="rehearsal">D</span> Colore</a>
+      <a href="privacy.html"><span class="rehearsal">E</span> Sotto voce</a>
+      <a class="navrail__dl" href="index.html#install">Download</a>
+    </nav>
+    <button class="lights" data-lights-btn aria-pressed="false">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M8 1.2v2M8 12.8v2M1.2 8h2M12.8 8h2M3.2 3.2l1.4 1.4M11.4 11.4l1.4 1.4M12.8 3.2l-1.4 1.4M4.6 11.4l-1.4 1.4"/><circle cx="8" cy="8" r="3"/></svg>
+      <span data-lights-label>Lights down</span>
+    </button>
+  </div>
+</header>
+
+<main id="main">
+
+<section class="mvt-head">
+  <div class="shell">
+    <p class="imprint imprint--left"><span class="imprint__rule"></span> Movement III</p>
+    <div class="mvt-head__row">
+      <span class="rehearsal rehearsal--filled mvt-head__mark">C</span>
+      <div>
+        <h1 class="movement-title">Apparatus.</h1>
+        <p class="mvt-head__espress espress">— what a zone can actually reach</p>
+      </div>
+    </div>
+    <p class="lede mvt-head__lede">
+      A model that can only talk is a demo. Every tool below is enabled per zone, with its own
+      approval policy, and every one of them runs from your machine, so a scout that only reads and
+      an implementer that may edit are two different instruments, not two prompts.
+    </p>
+  </div>
+</section>
+
+<!-- ══════════════ SMART SEARCH ══════════════ -->
+<section class="movement movement--tight" data-mark id="search">
+  <div class="shell">
+    <div class="system">
+      <div class="system__margin">
+        <p class="rubric">Web</p>
+        <p class="espress espress--margin">tutti</p>
+        <p class="plate-no">bar 1</p>
+      </div>
+      <div class="system__body">
+        <h2 class="head rise">Seven engines. <em>No API key.</em></h2>
+        <p class="lede rise" style="--d:50ms">
+          <code>smart_search</code> queries seven keyless engines in parallel and merges them with
+          Reciprocal Rank Fusion, so a page several engines agree on ranks highest. If one is blocked
+          or rate-limited the others still answer, and the result <strong>tells you which engines
+          contributed and which failed</strong>, rather than quietly returning less.
+        </p>
+
+        <div class="rrf rise" style="--d:100ms" id="rrf">
+          <div class="rrf__bar">
+            <button class="ctl ctl--go" id="rrfRun" type="button">
+              <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14" aria-hidden="true"><circle cx="6.2" cy="6.2" r="4.4"/><path d="M9.6 9.6 13 13"/></svg>
+              <span id="rrfRunLabel">Run the fan-out</span>
+            </button>
+            <p class="rrf__q">smart_search <b>"tauri v2 updater signature verification"</b></p>
+          </div>
+          <div class="rrf__body">
+            <div>
+              <h3 class="claims__h">Engines <span class="claims__hsub mono">in parallel</span></h3>
+              <ul class="rrf__engines" id="rrfEngines"></ul>
+            </div>
+            <div>
+              <h3 class="claims__h">Fused ranking <span class="claims__hsub mono">RRF</span></h3>
+              <ol class="rrf__out" id="rrfOut"></ol>
+            </div>
+          </div>
+        </div>
+
+        <p class="synthetic rise" style="--d:140ms; margin-top:18px">Illustrative results, written for this page</p>
+
+        <div class="split rise" style="--d:180ms">
+          <div>
+            <h3 class="sub"><code>smart_fetch</code></h3>
+            <p class="undertext">Reads one or more pages <strong>or PDFs</strong> in full as clean markdown, boilerplate stripped, with an optional relevance query to trim a long page down to what matters.</p>
+          </div>
+          <div>
+            <h3 class="sub"><code>smart_crawl</code></h3>
+            <p class="undertext">Follows links within one site and reads several pages in a single call, visiting the most relevant first.</p>
+          </div>
+        </div>
+
+        <div class="caveat rise" style="--d:220ms; margin-top:20px">
+          <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="9" cy="9" r="7.6"/><path d="M9 5.2v4.6M9 12.4v.6"/></svg>
+          <p>
+            All three run through a browser-emulating HTTP client carrying a real Chrome TLS/HTTP-2
+            fingerprint. There is <strong>no headless browser</strong>, so a page that renders entirely
+            via JavaScript, or sits behind an interactive bot challenge — is <em>reported as such</em>
+            rather than returned blank. A tool that lies about an empty page is worse than one that
+            cannot read it.
+          </p>
+        </div>
+
+        <details class="rise" style="--d:260ms; margin-top:22px">
+          <summary class="undertext" style="cursor:pointer; color:var(--accent)">The legacy key-based providers are still there</summary>
+          <div class="table-scroll" style="margin-top:16px">
+            <table class="score-table">
+              <thead><tr><th>Provider</th><th>Requires</th><th>Notes</th></tr></thead>
+              <tbody>
+                <tr><td><code>duckduckgo</code></td><td>nothing</td><td><strong>Default.</strong> Single-engine HTML scraping — prone to anti-bot challenges. Prefer <code>smart_search</code>.</td></tr>
+                <tr><td><code>searxng</code></td><td>endpoint</td><td>Your own SearXNG instance URL.</td></tr>
+                <tr><td><code>brave</code></td><td>api_key</td><td>Brave Search API.</td></tr>
+                <tr><td><code>tavily</code></td><td>api_key</td><td>Tavily.</td></tr>
+                <tr><td><code>serper</code></td><td>api_key</td><td>Serper — Google via API.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ TERMINALS ══════════════ -->
+<section class="movement" data-mark id="terminals">
+  <div class="shell">
+    <div class="system">
+      <div class="system__margin">
+        <p class="rubric">Terminals</p>
+        <p class="espress espress--margin">sostenuto</p>
+        <p class="plate-no">bar 26</p>
+      </div>
+      <div class="system__body">
+        <h2 class="head rise">A command that finishes can't start a server.</h2>
+        <p class="lede rise" style="--d:50ms">
+          <code>run_command</code> runs something and waits for it to exit, which cannot express
+          <em>starting</em> a thing — a dev server, a REPL, a log to follow, a program that asks a
+          question part-way through. The <strong>terminal</strong> group keeps a process alive between
+          calls instead.
+        </p>
+
+        <div class="term rise" style="--d:100ms" id="term">
+          <div class="term__bar">
+            <span class="term__id">t1</span>
+            <span>dev server · inherited project directory</span>
+            <span class="term__alive" data-alive="true" id="termAlive"><i></i><span id="termAliveText">alive</span></span>
+          </div>
+          <pre class="term__out" id="termOut"></pre>
+          <div class="term__foot">
+            <button class="ctl ctl--go" id="termRun" type="button">
+              <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14" aria-hidden="true"><path d="M3 1.5 11.5 7 3 12.5z"/></svg>
+              <span id="termRunLabel">Run the sequence</span>
+            </button>
+            <span class="undertext" style="font-size:13px">Six calls, one process, output collected between them.</span>
+          </div>
+        </div>
+
+        <div class="table-scroll rise" style="--d:150ms; margin-top:30px">
+          <table class="score-table">
+            <thead><tr><th>Tool</th><th>What it does</th></tr></thead>
+            <tbody>
+              <tr><td><code>terminal_start</code></td><td>Start a process (or a bare shell) and get back a short id — <code>t1</code>. Returns immediately; the process keeps running.</td></tr>
+              <tr><td><code>terminal_write</code></td><td>Type into it: a command, an answer to a prompt, a password. Returns only the output that followed.</td></tr>
+              <tr><td><code>terminal_read</code></td><td>Read what it has printed. Pass back the <code>cursor</code> from a previous call to get only what is new.</td></tr>
+              <tr><td><code>terminal_list</code></td><td>The conversation's terminals: label, whether each is alive, how much output is waiting.</td></tr>
+              <tr><td><code>terminal_stop</code></td><td>Stop one, or all, and return the final output.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="split rise" style="--d:190ms">
+          <div>
+            <h3 class="sub">Timing is the hard part</h3>
+            <p class="undertext">Driving an interactive program is a timing problem, so every call that can wait takes <code>delay_ms</code> (wait <em>before</em> typing — start a server, send the sudo password five seconds later), <code>wait_for</code> (a regex, with <code>timeout_ms</code>, reporting whether it matched), or <code>wait_ms</code> (collect for a fixed span).</p>
+          </div>
+          <div>
+            <h3 class="sub">Nothing is lost between calls</h3>
+            <p class="undertext">Reader tasks drain stdout and stderr continuously, so output printed <em>between</em> tool calls is still there when you look. ANSI escapes are stripped and a <code>\r</code>-redrawn progress line collapses to where it landed. Terminals are visible to the whole session — a leader's dev server is one its own sub-agents can query.</p>
+          </div>
+        </div>
+
+        <div class="caveat rise" style="--d:230ms; margin-top:20px">
+          <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="9" cy="9" r="7.6"/><path d="M9 5.2v4.6M9 12.4v.6"/></svg>
+          <p>
+            <strong>stdin/stdout are pipes, not a PTY.</strong> Servers, build tools and REPLs work;
+            programs that insist on a real terminal do not. Pass <code>sudo -S</code>, expect
+            <code>ssh</code> password prompts and full-screen TUIs to fail, and stop a process with
+            <code>terminal_stop</code> rather than sending Ctrl-C. Children block-buffer on a pipe, so
+            unbuffer where it matters — <code>python -u</code>, <code>stdbuf -oL</code>;
+            <code>PYTHONUNBUFFERED</code> is set for you.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ REPLAY ══════════════ -->
+<section class="movement" data-mark id="replay">
+  <div class="shell">
+    <div class="system">
+      <div class="system__margin">
+        <p class="rubric">Replay</p>
+        <p class="espress espress--margin">da capo</p>
+        <p class="plate-no">bar 58</p>
+      </div>
+      <div class="system__body">
+        <h2 class="head rise">“Where did that number come from?”</h2>
+        <p class="lede rise" style="--d:50ms">
+          The clock icon in the chat header opens <strong>Replay</strong> — the run as it actually
+          happened, at whatever pace you read at. It is not the transcript scrolled back: it carries
+          the parts the transcript never had, like an approval you declined, a tool that failed, a zone
+          that switched mid-turn, or a plan you rewrote before approving.
+        </p>
+
+        <div class="replay rise" style="--d:100ms" id="replay">
+          <div class="replay__bar">
+            <button class="ctl ctl--go" id="replayPlay" type="button">
+              <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14" aria-hidden="true"><path d="M3 1.5 11.5 7 3 12.5z"/></svg>
+              <span id="replayPlayLabel">Play</span>
+            </button>
+            <span class="undertext mono" style="font-size:12px" id="replayClock">00:00.0 · 14:22:07</span>
+            <div class="replay__filters" id="replayFilters"></div>
+          </div>
+          <div class="replay__track">
+            <label class="vh" for="replayRange">Scrub the run</label>
+            <input class="replay__range" type="range" id="replayRange" min="0" max="0" value="0" step="1">
+          </div>
+          <ol class="replay__list" id="replayList"></ol>
+        </div>
+
+        <p class="synthetic rise" style="--d:140ms; margin-top:18px">Illustrative run, written for this page</p>
+
+        <p class="undertext rise" style="--d:180ms; margin-top:20px">
+          Each row shows elapsed time from the first event alongside the wall clock. <b>Play</b> steps
+          at a fixed cadence for skimming, the chips filter by kind, and every tool call carries its
+          arguments, its output and how long it took, which is the point. That question is answerable
+          after the fact, not only while it scrolls past.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ VOICE ══════════════ -->
+<section class="movement" data-mark id="voice">
+  <div class="shell">
+    <div class="system">
+      <div class="system__margin">
+        <p class="rubric">Voice</p>
+        <p class="espress espress--margin">parlando</p>
+      </div>
+      <div class="system__body">
+        <h2 class="head rise">Drop a two-hour recording into a text-only model.</h2>
+        <p class="lede rise" style="--d:50ms">
+          Dictation goes to a provider you configure, using the OpenAI-compatible
+          <code>/audio/transcriptions</code> endpoint — point it at a local server running Whisper and
+          your audio never leaves the machine. It behaves like typing: start a recording with text
+          selected and what you say <strong>replaces the selection</strong>.
+        </p>
+        <p class="lede rise" style="--d:80ms">
+          But the part that changes what you can do is the <strong>audio upload</strong>. Drop an MP3,
+          WAV, M4A, MP4, FLAC, OGG or WebM into any composer and it is transcribed through the same
+          provider and sent as text. <em>The model never sees audio</em>, which means any zone works,
+          including models with no audio input at all. A meeting recording you would never sit through
+          dictating in real time is one drag away from being something you can ask questions about.
+        </p>
+
+        <div class="table-scroll rise" style="--d:130ms; margin-top:26px">
+          <table class="score-table">
+            <thead><tr><th>Setting</th><th>Options</th></tr></thead>
+            <tbody>
+              <tr><td>When a transcript is ready</td><td><strong>Use it</strong> — the words go straight into the message box. <strong>Review first</strong> — the chip holds the transcript for you to read and correct, then <em>Use as message</em>.</td></tr>
+              <tr><td>How it reaches the model</td><td><strong>As my message</strong> — the transcript is the text you send. <strong>As an attachment</strong> — the model gets the full transcript as context while the message box stays yours. That is the mode for anything long: attach the meeting, then type <em>“what did I agree to?”</em></td></tr>
+              <tr><td>Timestamps and language</td><td>Asks the endpoint for <code>verbose_json</code>: duration, detected language, and <code>[0:00]</code>-stamped lines, marking any passage the model itself flagged as unclear. Not every server implements it; one that doesn't still returns a plain transcript.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="caveat rise" style="--d:170ms; margin-top:20px">
+          <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="9" cy="9" r="7.6"/><path d="M9 5.2v4.6M9 12.4v.6"/></svg>
+          <p>
+            <strong>There are no speaker labels.</strong> OpenAI's transcription endpoint does not
+            diarize, and a guess at who was talking, presented as data, is worse than not offering it.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ MCP + API ══════════════ -->
+<section class="movement" data-mark id="api">
+  <div class="shell">
+    <div class="system">
+      <div class="system__margin">
+        <p class="rubric">Connectors<br>&amp; API</p>
+        <p class="espress espress--margin">attacca</p>
+        <p class="plate-no">bar 92</p>
+      </div>
+      <div class="system__body">
+        <h2 class="head rise">The app can be driven, including by the model.</h2>
+
+        <div class="trio rise" style="--d:60ms">
+          <article>
+            <svg class="trio__ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/><circle cx="8" cy="7" r="1.8" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.8" fill="currentColor" stroke="none"/><circle cx="11" cy="17" r="1.8" fill="currentColor" stroke="none"/></svg>
+            <h3 class="sub">MCP connectors, self-starting</h3>
+            <p>A catalog entry carries everything except the part only you have. Installing one writes the server and <em>stops</em> — nothing is launched until you press Connect. From the next launch, every enabled server connects in the background, so its tool list is current before the first message.</p>
+          </article>
+          <article>
+            <svg class="trio__ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.2M12 15.6v.6"/></svg>
+            <h3 class="sub">Diagnose, in failure order</h3>
+            <p>Is the server enabled, is there a command, is that program on the PATH the app inherited, are the required values filled in, and only then the handshake. It reports the first false one. A stdio server's own stderr is captured, so “the command ran, the server exited, <code>GOOGLE_CREDENTIALS_PATH</code> is not set” replaces “failed to connect”.</p>
+          </article>
+          <article>
+            <svg class="trio__ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M9 4 5 12l4 8M15 4l4 8-4 8"/></svg>
+            <h3 class="sub">An API that describes itself</h3>
+            <p>Bound to <code>127.0.0.1</code> only, bearer token required. <code>GET /api/routes</code> lists every route this build serves. A test pairs every Tauri command with either a route or an explicit “GUI-only” reason, so a new capability cannot ship API-invisible without failing the build.</p>
+          </article>
+        </div>
+
+        <pre class="listing rise" style="--d:110ms"><span class="c"># two routes answer without a token, because a caller working out why</span>
+<span class="c"># nothing else responds should not have to authenticate to find out why</span>
+curl http://127.0.0.1:8765<span class="s">/api/health</span>
+<span class="c">#   enabled · bound · answering · tokenPresent · tokenAccepted</span>
+<span class="c">#   five separate questions, five separate answers</span>
+
+curl http://127.0.0.1:8765<span class="s">/api/routes</span> | jq -r <span class="s">'.routes[] | "\(.method)\t\(.path)"'</span></pre>
+
+        <div class="split rise" style="--d:150ms">
+          <div>
+            <h3 class="sub"><code>app_read</code></h3>
+            <p class="undertext"><code>GET</code> any API path. The model starts at <code>/api/routes</code> — that is its catalog of what it can do. “Why can't you see my email?” becomes answerable.</p>
+          </div>
+          <div>
+            <h3 class="sub"><code>app_control</code></h3>
+            <p class="undertext"><code>POST</code> / <code>PUT</code> / <code>PATCH</code> / <code>DELETE</code>. <strong>Every call goes through an approval prompt.</strong> “Switch to dark mode”, “make me a zone for code review”, “file this chat under the Rewrite project” become things the assistant does rather than describes.</p>
+          </div>
+        </div>
+
+        <div class="caveat rise" style="--d:190ms; margin-top:20px">
+          <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="9" cy="9" r="7.6"/><path d="M9 5.2v4.6M9 12.4v.6"/></svg>
+          <p>
+            Two routes are <strong>refused from inside a turn</strong>: sending or regenerating a
+            message (a turn calling itself — that is what the subchat tools are for), and answering a
+            tool approval (the model granting itself permission). Silently adding a connector that
+            launches a process is exactly what an injected instruction would ask for, so installing one
+            goes through <code>app_control</code> and therefore through you.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<nav class="attacca" aria-label="Next movement">
+  <div class="shell">
+    <a href="appearance.html">
+      <span class="attacca__label">Attacca — next movement</span>
+      <span class="attacca__title"><span class="rehearsal">D</span> Colore <i class="espress">— the instrument's finish</i></span>
+      <span class="attacca__desc">Thirteen cursor-reactive backgrounds, eight of them running live with the app's own four sliders. Palette, fonts, bloom, and a custom stylesheet with its own switch.</span>
+    </a>
+  </div>
+</nav>
+
+</main>
+
+<footer class="colophon">
+  <div class="shell">
+    <div class="colophon__grid">
+      <div>
+        <a class="brand" href="index.html"><img src="assets/img/mark.png" alt="" width="30" height="30"><span class="brand__name"><b>Multi</b>Zone</span></a>
+        <p class="colophon__blurb">A desktop LLM client where every model is a named zone, several answer at once, and one can be asked to resolve the rest.</p>
+      </div>
+      <div><h4>Movements</h4><ul>
+        <li><a href="index.html">A · Score</a></li>
+        <li><a href="multizone.html">B · Divisi</a></li>
+        <li><a href="appearance.html">D · Colore</a></li>
+        <li><a href="privacy.html">E · Sotto voce</a></li>
+      </ul></div>
+      <div><h4>On this page</h4><ul>
+        <li><a href="#search">Web tools</a></li>
+        <li><a href="#terminals">Terminals</a></li>
+        <li><a href="#replay">Replay</a></li>
+        <li><a href="#voice">Voice &amp; audio</a></li>
+        <li><a href="#api">Connectors &amp; API</a></li>
+      </ul></div>
+      <div><h4>Source</h4><ul>
+        <li><a href="https://github.com/JammingDino/MultiZone2">Repository</a></li>
+        <li><a href="https://github.com/JammingDino/MultiZone2/releases">Releases</a></li>
+        <li><a href="privacy.html#statement">Privacy statement</a></li>
+      </ul></div>
+    </div>
+    <div class="colophon__base">
+      <span class="plate-no">M.Z. 0·15·7</span>
+      <span class="colophon__note">© <span data-year>2026</span> MultiZone.</span>
+    </div>
+  </div>
+</footer>
+
+<script src="assets/score.js"></script>
+<script src="assets/effects.js"></script>
+<script src="assets/apparatus.js"></script>
+</body>
+</html>

@@ -1,0 +1,417 @@
+<!doctype html>
+<!--
+  ============================================================================
+  DIRECTION CONTRACT — MultiZone promotional site
+  ----------------------------------------------------------------------------
+  THESIS: A full score is the only notation built to show independent voices
+    sounding at the same instant. That is perspective mode. This page refuses
+    the dev-tool template: no bento grid, no floating browser chrome, no
+    static screenshot standing in for the product working.
+  OWN-WORLD: The app's own register, turned up. Its exact dark palette and
+    #4f9cf9 accent, its bloom, its live cursor-reactive background effect, its
+    markdown rendering — arranged as a score: staves, barlines, braces,
+    rehearsal marks A-E for the movements, dynamics for temperature. One ink
+    per model. Bricolage Grotesque display over Inter, the app's own UI face.
+  STORY: You already pay for three model subscriptions and switch tabs between
+    them. Here they answer on one page, in one thread, and when you want one
+    answer, a leader briefs them against each other and resolves the panel.
+  FIRST VIEWPORT: Compact centred title page over a live particle field, then
+    the full-bleed app window: six zones streaming real app-formatted markdown
+    to one message, wider than the page can hold.
+  FORM: Grounded candidate 5, the conductor's full score, staged as parallel
+    streams merging. Seed key 5ad5f3ea, direction scope, persuade.
+  ============================================================================
+-->
+<html lang="en" data-lights="down">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MultiZone — ask every model at once, then have one resolve them</title>
+<meta name="description" content="A Windows desktop LLM client where every model is a named zone. Send one prompt to all of them and read the answers side by side, or let a Response Leader brief them against each other and resolve the panel into one answer. Local, no account, Apache-2.0.">
+<meta name="theme-color" content="#07080b">
+<link rel="icon" href="assets/img/mark.png">
+<meta property="og:title" content="MultiZone — ask every model at once">
+<meta property="og:description" content="Every model is a named zone. One prompt fans out to all of them; a Response Leader can brief them against each other and resolve the panel into one answer. Runs entirely on your machine.">
+<meta property="og:image" content="assets/img/app-dark.png">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,400..800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Bodoni+Moda:ital,opsz,wght@1,6..96,500..700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/score.css">
+<link rel="stylesheet" href="assets/stream.css">
+<link rel="stylesheet" href="assets/home.css">
+</head>
+<body>
+<a class="skip" href="#titlepage">Skip to content</a>
+<canvas id="bgfx" data-effect="particles" aria-hidden="true"></canvas>
+
+<header class="masthead">
+  <div class="masthead__in">
+    <a class="brand" href="index.html">
+      <img src="assets/img/mark.png" alt="" width="30" height="30">
+      <span class="brand__name"><b>Multi</b>Zone</span>
+    </a>
+    <button class="nav-toggle" aria-expanded="false" aria-controls="navrail" aria-label="Movements">
+      <svg viewBox="0 0 20 14" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true" width="20" height="14"><path d="M0 1h20M0 7h20M0 13h20"/></svg>
+    </button>
+    <nav class="navrail" id="navrail" aria-label="Movements">
+      <a href="index.html" aria-current="page"><span class="rehearsal">A</span> Score</a>
+      <a href="multizone.html"><span class="rehearsal">B</span> Divisi</a>
+      <a href="tools.html"><span class="rehearsal">C</span> Apparatus</a>
+      <a href="appearance.html"><span class="rehearsal">D</span> Colore</a>
+      <a href="privacy.html"><span class="rehearsal">E</span> Sotto voce</a>
+      <a class="navrail__dl" href="#install">Download</a>
+    </nav>
+    <button class="lights" data-lights-btn aria-pressed="false">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">
+        <path d="M8 1.2v2M8 12.8v2M1.2 8h2M12.8 8h2M3.2 3.2l1.4 1.4M11.4 11.4l1.4 1.4M12.8 3.2l-1.4 1.4M4.6 11.4l-1.4 1.4"/><circle cx="8" cy="8" r="3"/>
+      </svg>
+      <span data-lights-label>Lights down</span>
+    </button>
+  </div>
+</header>
+
+<main id="main">
+
+<!-- ══════════════ A — TITLE PAGE ══════════════ -->
+<section class="titlepage" id="titlepage">
+  <div class="shell">
+    <p class="imprint">
+      <span class="imprint__rule"></span>
+      MultiZone <span class="imprint__dot">·</span> for any number of zones and one conductor
+      <span class="imprint__rule"></span>
+    </p>
+
+    <h1 class="movement-title titlepage__h1">
+      Ask every model at once.<br>
+      Then have one <em>resolve them</em>.
+    </h1>
+
+    <p class="titlepage__lede">
+      Every model you configure is a named <strong>zone</strong>. Add as many as you like to one
+      conversation, and every message fans out to all of them at once — one shared thread,
+      independent replies, side by side. It runs on your machine, talks straight to your
+      providers, and has no account to make.
+    </p>
+
+    <div class="titlepage__actions">
+      <a class="btn btn--solid" href="#install">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" width="16" height="16" aria-hidden="true"><path d="M8 1v9m0 0L4.5 6.5M8 10l3.5-3.5M1.5 12.5v1a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-1"/></svg>
+        Download for Windows
+      </a>
+      <a class="btn btn--quiet" href="#band">Watch six models answer ↓</a>
+    </div>
+
+    <ul class="titlepage__meta">
+      <li><span class="mono">v0.15.7</span> — pre-1.0, shipping</li>
+      <li>Windows 10 / 11</li>
+      <li>Apache-2.0</li>
+      <li>No account, no telemetry</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ══════════════ THE BAND — one message, six zones ══════════════ -->
+<section class="band" id="band" data-mark>
+  <div class="band__head">
+    <div>
+      <h2 class="band__title">One message. <em>Six zones.</em> One thread.</h2>
+      <p class="band__sub">
+        Not a screenshot — the replies below render exactly the way MultiZone renders them, streaming
+        markdown as it arrives: headings with their rule, real tables, inline code. Six models
+        answering at once, and answering in six different shapes.
+      </p>
+    </div>
+    <div class="band__ctl">
+      <button class="ctl ctl--go" id="bandRun" type="button">
+        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14" aria-hidden="true"><path d="M3 1.5 11.5 7 3 12.5z"/></svg>
+        <span id="bandRunLabel">Play from the top</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="win">
+    <div class="win__bar">
+      <span class="win__title">Storage for the desktop build</span>
+      <span class="win__spacer"></span>
+      <span class="win__chips" id="winChips"></span>
+      <span class="win__count">
+        <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" width="12" height="12" aria-hidden="true"><path d="M2 2v10M7 2v10M12 2v10"/></svg>
+        6 perspectives
+      </span>
+    </div>
+
+    <div class="win__you">
+      <p class="win__bubble" id="bandQuestion">Postgres or SQLite for a desktop app that has to sync between machines?</p>
+      <span class="win__avatar">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="5.4" r="2.7"/><path d="M2.6 14a5.4 5.4 0 0 1 10.8 0"/></svg>
+      </span>
+    </div>
+
+    <div class="strip" id="strip" tabindex="0" role="region" aria-label="Six zones answering the same message"></div>
+  </div>
+
+  <div class="band__foot">
+    <span class="band__hint">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 3 2 8l4 5M10 3l4 5-4 5"/></svg>
+      Scroll the panel sideways — there is more of it than there is page.
+    </span>
+    <span class="synthetic">Synthetic transcripts, written for this page</span>
+  </div>
+</section>
+
+<!-- ══════════════ THE RESOLVE ══════════════ -->
+<section class="movement" id="resolve" data-mark>
+  <div class="shell">
+    <div class="system">
+      <div class="system__margin">
+        <span class="rehearsal rehearsal--filled">A</span>
+        <p class="rubric">Tutti</p>
+        <p class="espress espress--margin">stringendo</p>
+      </div>
+      <div class="system__body">
+        <h2 class="head rise">Six answers is sometimes five too many.</h2>
+        <p class="lede rise" style="--d:50ms">
+          Perspective mode shows you every model's answer. <strong>Multizone mode</strong> resolves them
+          into one. A zone flagged as a <em>Response Leader</em> doesn't answer from its own knowledge —
+          it reads the panel, cross-examines it, and writes what they agree on, what they don't, and
+          the thing that actually decides it.
+        </p>
+
+        <div class="resolve rise" style="--d:100ms">
+          <div class="resolve__bar">
+            <button class="ctl ctl--go" id="resolveRun" type="button">
+              <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14" aria-hidden="true"><path d="M1 2.5h12M1 7h12M1 11.5h12" opacity=".4"/><path d="M3.5 2.5 7 7l-3.5 4.5"/></svg>
+              <span id="resolveLabel">Resolve the six into one</span>
+            </button>
+            <span class="resolve__from">
+              <span class="chip" style="color:var(--v-claude)"><i class="chip__dot"></i>Claude</span>
+              <span class="chip" style="color:var(--v-gpt)"><i class="chip__dot"></i>GPT</span>
+              <span class="chip" style="color:var(--v-gemini)"><i class="chip__dot"></i>Gemini</span>
+              <span class="chip" style="color:var(--v-deepseek)"><i class="chip__dot"></i>DeepSeek</span>
+              <span class="chip" style="color:var(--v-kimi)"><i class="chip__dot"></i>Kimi</span>
+              <span class="chip" style="color:var(--v-glm)"><i class="chip__dot"></i>GLM</span>
+            </span>
+          </div>
+
+          <article class="voice resolve__card" data-v="lead">
+            <div class="resolve__head">
+              <span class="zicon">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 8h10M8 3v10"/></svg>
+              </span>
+              <span class="resolve__name">Response Leader</span>
+              <span class="resolve__meta mono">multizone mode · reading 6 zones</span>
+            </div>
+            <div class="mdx resolve__body" id="resolveBody">
+              <p class="resolve__idle">Waiting. The leader has not answered yet — it reads the panel first.</p>
+            </div>
+          </article>
+        </div>
+
+        <p class="undertext rise" style="--d:140ms; margin-top:20px">
+          On a real run the leader goes further: it spawns the panel itself, briefs each member on a
+          deliberately <em>opposing</em> angle rather than forwarding your message, and cross-examines
+          them against each other before writing a word.
+          <a class="link" href="multizone.html">See how that works →</a>
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ WHAT A ZONE IS ══════════════ -->
+<section class="movement" data-mark id="zone">
+  <div class="shell">
+    <div class="system">
+      <div class="system__margin">
+        <p class="rubric">The zone</p>
+        <p class="espress espress--margin">definition</p>
+      </div>
+      <div class="system__body">
+        <h2 class="head rise">A zone is an instrument, not a dropdown.</h2>
+        <p class="lede rise" style="--d:50ms">
+          Every other client asks you to pick a model. A zone carries five things at once, which is
+          why two zones on the same model are two different players.
+        </p>
+
+        <ol class="anatomy rise" style="--d:100ms">
+          <li>
+            <span class="anatomy__n">01</span>
+            <h3 class="sub">Provider</h3>
+            <p>Any OpenAI-compatible endpoint. A frontier API, a self-hosted server, LM Studio on your own GPU. You supply the URL and the key.</p>
+          </li>
+          <li>
+            <span class="anatomy__n">02</span>
+            <h3 class="sub">Model</h3>
+            <p>Whatever that provider serves. Nothing is bundled and nothing is proxied — MultiZone talks to the provider directly.</p>
+          </li>
+          <li>
+            <span class="anatomy__n">03</span>
+            <h3 class="sub">System prompt</h3>
+            <p>The part that makes two zones on one model genuinely different players — a reviewer, a scout, a devil's advocate.</p>
+          </li>
+          <li>
+            <span class="anatomy__n">04</span>
+            <h3 class="sub">Temperature</h3>
+            <p>The dynamic mark. The shipped Code Team is seven zones on <em>one</em> model at seven temperatures: <span class="dyn">pp</span> 0.15 is careful, <span class="dyn">ff</span> 0.85 is inventive.</p>
+          </li>
+          <li>
+            <span class="anatomy__n">05</span>
+            <h3 class="sub">Tools &amp; permissions</h3>
+            <p>Web search, file reads, shell, terminals, MCP servers — enabled per zone, with its own approval policy. A scout that only reads and an implementer that may edit stop being the same policy.</p>
+          </li>
+        </ol>
+
+        <div class="ledger rise" style="--d:150ms">
+          <p class="ledger__lead">
+            Which is why <strong>seven zones on one model</strong> is a real answer and not a trick. The
+            value comes from independent attempts and adversarial review, not from a bigger model.
+          </p>
+          <div class="ledger__row">
+            <span class="chip" style="color:var(--v-claude)"><i class="chip__dot"></i>Careful <b class="mono">0.15</b></span>
+            <span class="chip" style="color:var(--v-deepseek)"><i class="chip__dot"></i>Scout <b class="mono">0.30</b></span>
+            <span class="chip" style="color:var(--v-glm)"><i class="chip__dot"></i>Test author <b class="mono">0.40</b></span>
+            <span class="chip" style="color:var(--v-kimi)"><i class="chip__dot"></i>Reviewer <b class="mono">0.55</b></span>
+            <span class="chip" style="color:var(--v-gpt)"><i class="chip__dot"></i>Inventive <b class="mono">0.85</b></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ CONTENTS ══════════════ -->
+<section class="movement movement--contents" data-mark id="contents">
+  <div class="shell">
+    <p class="contents__over">Contents</p>
+    <h2 class="movement-title contents__h2">In <em>five</em> movements.</h2>
+
+    <ol class="contents__list">
+      <li class="contents__item rise">
+        <a href="multizone.html">
+          <span class="rehearsal">B</span>
+          <span class="contents__body">
+            <span class="contents__title">Divisi <i class="espress">— the Response Leader</i></span>
+            <span class="contents__desc">A leader that spawns a panel, briefs each member on an opposing angle, cross-examines them, and resolves. Plus <code>claim_files</code>: sub-agents editing one codebase at the same time without trampling each other.</span>
+          </span>
+          <span class="contents__arrow" aria-hidden="true">→</span>
+        </a>
+      </li>
+      <li class="contents__item rise" style="--d:70ms">
+        <a href="tools.html">
+          <span class="rehearsal">C</span>
+          <span class="contents__body">
+            <span class="contents__title">Apparatus <i class="espress">— what a zone can reach</i></span>
+            <span class="contents__desc">Seven search engines fused with no API key. Terminals that stay open between calls. Replay. Voice and audio files. MCP connectors. A local HTTP API that describes itself.</span>
+          </span>
+          <span class="contents__arrow" aria-hidden="true">→</span>
+        </a>
+      </li>
+      <li class="contents__item rise" style="--d:140ms">
+        <a href="appearance.html">
+          <span class="rehearsal">D</span>
+          <span class="contents__body">
+            <span class="contents__title">Colore <i class="espress">— the instrument's finish</i></span>
+            <span class="contents__desc">Thirteen cursor-reactive backgrounds, eight of them running live on that page with the app's own four sliders. Palette, fonts, bloom, and a custom stylesheet with its own on/off switch.</span>
+          </span>
+          <span class="contents__arrow" aria-hidden="true">→</span>
+        </a>
+      </li>
+      <li class="contents__item rise" style="--d:210ms">
+        <a href="privacy.html">
+          <span class="rehearsal">E</span>
+          <span class="contents__body">
+            <span class="contents__title">Sotto voce <i class="espress">— and the honest limits</i></span>
+            <span class="contents__desc">No account, no telemetry, no server. One SQLite file. Also: what does not work yet, stated plainly, including the API keys stored in plain text.</span>
+          </span>
+          <span class="contents__arrow" aria-hidden="true">→</span>
+        </a>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<!-- ══════════════ INSTALL ══════════════ -->
+<section class="movement movement--close" data-mark id="install">
+  <div class="shell">
+    <div class="close">
+      <div class="close__main">
+        <p class="imprint imprint--left"><span class="imprint__rule"></span> Fine</p>
+        <h2 class="movement-title">Bring the whole section in.</h2>
+        <p class="lede">
+          Download the MSI or NSIS installer and run it. Windows 10 and 11 already ship the WebView2
+          runtime MultiZone needs, so there is nothing else to install. Then open Settings, add one
+          provider, and create your first zone, or install a curated one from the library in a
+          single action.
+        </p>
+        <div class="close__actions">
+          <a class="btn btn--solid" href="https://github.com/JammingDino/MultiZone2/releases">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" width="16" height="16" aria-hidden="true"><path d="M8 1v9m0 0L4.5 6.5M8 10l3.5-3.5M1.5 12.5v1a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1v-1"/></svg>
+            Get the latest release
+          </a>
+          <a class="btn btn--quiet" href="https://github.com/JammingDino/MultiZone2">
+            <svg viewBox="0 0 16 16" fill="currentColor" width="16" height="16" aria-hidden="true"><path d="M8 .2a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38l-.01-1.34c-2.23.48-2.7-1.07-2.7-1.07-.36-.93-.89-1.18-.89-1.18-.73-.5.06-.49.06-.49.8.06 1.23.83 1.23.83.72 1.23 1.88.87 2.34.67.07-.52.28-.87.5-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.03 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48l-.01 2.2c0 .21.14.46.55.38A8 8 0 0 0 8 .2Z"/></svg>
+            Source on GitHub
+          </a>
+        </div>
+        <p class="close__note">Free and Apache-2.0. There is no paid tier, no sign-up, and nothing to activate.</p>
+      </div>
+
+      <aside class="close__side">
+        <h3 class="sub">Before you send the first message</h3>
+        <ol class="steps">
+          <li><b>Add a provider.</b> Settings → any OpenAI-compatible endpoint plus a key.</li>
+          <li><b>Create a zone</b> pointing at it, or install one from the curated library.</li>
+          <li><b>Add perspectives.</b> Everything after that fans out to all of them.</li>
+        </ol>
+        <div class="caveat">
+          <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="9" cy="9" r="7.6"/><path d="M9 5.2v4.6M9 12.4v.6"/></svg>
+          <p><strong>Windows only, and pre-1.0.</strong> There is no macOS or Linux build today. Version 0.15.7 ships and is used daily, but it has not reached 1.0 and the release notes will tell you what changed under you.</p>
+        </div>
+      </aside>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="colophon">
+  <div class="shell">
+    <div class="colophon__grid">
+      <div>
+        <a class="brand" href="index.html"><img src="assets/img/mark.png" alt="" width="30" height="30"><span class="brand__name"><b>Multi</b>Zone</span></a>
+        <p class="colophon__blurb">A desktop LLM client where every model is a named zone, several answer at once, and one can be asked to resolve the rest. Everything runs on your machine.</p>
+      </div>
+      <div><h4>Movements</h4><ul>
+        <li><a href="multizone.html">B · Divisi</a></li>
+        <li><a href="tools.html">C · Apparatus</a></li>
+        <li><a href="appearance.html">D · Colore</a></li>
+        <li><a href="privacy.html">E · Sotto voce</a></li>
+      </ul></div>
+      <div><h4>On this page</h4><ul>
+        <li><a href="#band">Six zones, one thread</a></li>
+        <li><a href="#resolve">The resolve</a></li>
+        <li><a href="#zone">What a zone is</a></li>
+        <li><a href="#install">Install</a></li>
+      </ul></div>
+      <div><h4>Source</h4><ul>
+        <li><a href="https://github.com/JammingDino/MultiZone2">Repository</a></li>
+        <li><a href="https://github.com/JammingDino/MultiZone2/releases">Releases</a></li>
+        <li><a href="privacy.html#statement">Privacy statement</a></li>
+        <li><a href="https://github.com/JammingDino/MultiZone2/blob/main/LICENSE">Apache-2.0</a></li>
+      </ul></div>
+    </div>
+    <div class="colophon__base">
+      <span class="plate-no">M.Z. 0·15·7</span>
+      <span class="colophon__note">© <span data-year>2026</span> MultiZone.</span>
+      <span class="colophon__note">Model names belong to their respective developers.</span>
+    </div>
+  </div>
+</footer>
+
+<script src="assets/score.js"></script>
+<script src="assets/effects.js"></script>
+<script src="assets/appstream.js"></script>
+<script src="assets/resolve.js"></script>
+</body>
+</html>

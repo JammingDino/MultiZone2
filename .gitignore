@@ -31,3 +31,6 @@ artifacts/
 # Local credentials for cache benchmarking — never commit
 .env.cachetest
 .env.local
+
+# The promotional website is built and deployed separately from the app.
+promo/website/

@@ -141,7 +141,7 @@ Worth noting this is a differentiator, not just a saving: no competitor in this 
 
 **Session replay and event log (Reasonix `replay`, `events`).** Everything needed is already in SQLite; none of it is exposed as a timeline. Cheap relative to its value for a multi-agent product, where "what did it actually do" is the hardest question to answer. Folded into **0.12.2**.
 
-**Data charts (AIRouterDesktop, Claude).** `render_graph` draws diagrams and plots functions but cannot draw data, so models fall back to Mermaid approximations. Both comparisons make in-chat charting look like table stakes. Scheduled as **1.1.0**, after 1.0.
+**Data charts (AIRouterDesktop, Claude).** `render_graph` draws diagrams and plots functions but cannot draw data, so models fall back to Mermaid approximations. Both comparisons make in-chat charting look like table stakes. Scheduled as **0.16.0**, before 1.0.
 
 **Whole-file writes vs. an edit engine (Cursor, Antigravity).** They apply diff hunks validated against the file as it currently is; we rewrite a whole file from whatever the model remembers of it. Structural, and correctly scoped with the code interface in the post-1.0 backlog rather than pulled forward on its own.
 

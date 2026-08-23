@@ -1060,6 +1060,26 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## 0.16.x — In-chat rendering & tools
+
+*`render_graph` covers Mermaid and function plots. What it does not cover is data — the case where a model has numbers and wants to show them. AIRouterDesktop and Claude both make chart rendering an obvious in-chat capability; ours is a diagram tool that happens to plot functions.*
+
+### 0.16.0 — Charts from data
+
+- [ ] A charting renderer taking a data spec (series, labels, axes, chart type) rather than a diagram source: bar, line, area, scatter, pie, stacked variants
+- [ ] Theme-aware and accessible by construction — the palette comes from the active app theme, works in light and dark, and does not rely on colour alone to distinguish series
+- [ ] The model calls it with data it already has (a query result, a table it just read, numbers from a document) instead of hand-writing SVG or a Mermaid approximation
+- [ ] Charts survive export: PDF and Markdown export render them rather than dropping to a placeholder
+- [ ] A table in a model's markdown answer offers "chart this" — the common case is the model already produced the numbers and only the presentation is missing
+
+### 0.16.1 — Richer in-chat artifacts
+
+- [ ] Interactive tables: sort, filter, and copy from a rendered markdown table without leaving the chat
+- [ ] Inline results are addressable — a chart or table can be referenced by a later turn rather than re-derived
+- [ ] Audit what the existing renderers (Mermaid, mathplot, HTML report) cost during streaming, now that block-level parsing (0.9.16) has changed when they re-render
+
+---
+
 ## 1.0.0 — Hardening & Public Release
 
 *How each open item below can actually be closed — including the three that a manual pass cannot honestly close at all — is worked through in [TEST_STRATEGY.md](TEST_STRATEGY.md). Summary: build the mock streaming provider first (it turns "no dropped tokens" from an unfalsifiable claim into a diff, and needs no provider, key or network), run `npm run build` and `cargo test --lib` on every change (37 files of Rust tests exist and nothing ran them; this is now a pair of git hooks rather than a CI job), and test the updater against a local two-build loop rather than the release pipeline, where a build is a publish.*
@@ -1084,26 +1104,6 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 - [x] **State the position on API-key storage** — stated, not moved. Keys remain in `multizone.db` in plain text; the app says so under the key input as it is typed, in Settings → Data, in the README and in the statement. The keychain move stays with 1.2.x, which builds that machinery for OAuth refresh tokens anyway, and doing it in the week before a first release would mean writing a migration for the one table nobody can afford to lose. Original wording: Provider keys sit in `multizone.db` in plain text — no encryption, no keyring dependency in the tree. That is defensible for a single-user local app and indefensible if nobody is told, so 1.0 either moves them to the OS keychain (which 1.2.x builds the machinery for anyway) or says plainly in the app, at the point of entry, that the database is as sensitive as the key. Saying it is the cheap half and ships regardless
 - [x] **Surface it where it is read, not where it is filed** — the statement is bundled into the binary and rendered in-app from the same file, so it reads with no network and cannot drift from `docs/`. Settings → Data, first-run setup, and the README. Original wording: The statement is worth nothing in `docs/` alone: link it from the README, from Settings → Data, and from first-run setup — the three places someone forms a view about what this app does with their data
 - [x] Formal pre-release test checklist — [TEST_CHECKLIST.md](TEST_CHECKLIST.md), covering build plumbing, first run, chat, zones/projects/tags, tools, knowledge, multizone, voice, export, updates, uninstall, cross-platform and performance
-
----
-
-## 1.1.x — In-chat rendering & tools
-
-*`render_graph` covers Mermaid and function plots. What it does not cover is data — the case where a model has numbers and wants to show them. AIRouterDesktop and Claude both make chart rendering an obvious in-chat capability; ours is a diagram tool that happens to plot functions.*
-
-### 1.1.0 — Charts from data
-
-- [ ] A charting renderer taking a data spec (series, labels, axes, chart type) rather than a diagram source: bar, line, area, scatter, pie, stacked variants
-- [ ] Theme-aware and accessible by construction — the palette comes from the active app theme, works in light and dark, and does not rely on colour alone to distinguish series
-- [ ] The model calls it with data it already has (a query result, a table it just read, numbers from a document) instead of hand-writing SVG or a Mermaid approximation
-- [ ] Charts survive export: PDF and Markdown export render them rather than dropping to a placeholder
-- [ ] A table in a model's markdown answer offers "chart this" — the common case is the model already produced the numbers and only the presentation is missing
-
-### 1.1.1 — Richer in-chat artifacts
-
-- [ ] Interactive tables: sort, filter, and copy from a rendered markdown table without leaving the chat
-- [ ] Inline results are addressable — a chart or table can be referenced by a later turn rather than re-derived
-- [ ] Audit what the existing renderers (Mermaid, mathplot, HTML report) cost during streaming, now that block-level parsing (0.9.16) has changed when they re-render
 
 ---
 
@@ -1169,7 +1169,7 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
   | `make_report` (study guide / briefing / FAQ / timeline) | Markdown + `present_file` | **All of it.** Four artifacts that differ only by their skill |
   | `make_flashcards` | New — a card deck with flip and self-rating | Data model is trivial; the renderer is small; the *scheduling* behind it is the real work |
   | `make_quiz` | New — question list with answer checking | Grading must cite the passage, so it leans on the same retrieval as everything else |
-  | `make_data_table` | New — but **1.1.1 already schedules interactive tables** (sort, filter, copy). Same renderer, different producer: here it extracts rows from unstructured sources | Converges with 1.1.x; build once |
+  | `make_data_table` | New — but **0.16.1 already schedules interactive tables** (sort, filter, copy). Same renderer, different producer: here it extracts rows from unstructured sources | Converges with 0.16.x; build once |
   | `make_slide_deck` | New — HTML slides | `HtmlReportBlock` renders and presents arbitrary HTML today, so this is a template and a print stylesheet |
   | `make_infographic` | HTML report | Same renderer again. This is a *design* problem, not an engineering one — an infographic nobody would print is worse than the table it replaced |
   | `make_audio_overview` | Existing audio playback | TTS ships; the work is a two-voice script and turn-taking, not synthesis |

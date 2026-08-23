@@ -650,9 +650,9 @@ overview is a script problem rather than a synthesis one.
 
 Two things fell out of that pass worth recording:
 
-- **The data table converges with 1.1.1**, which already schedules interactive
+- **The data table converges with 0.16.1**, which already schedules interactive
   tables. Same renderer, different producer — study extracts rows from
-  unstructured sources, 1.1.x sorts and filters them. Build once.
+  unstructured sources, 0.16.x sorts and filters them. Build once.
 - **Video overview** was dismissed in the first pass as a production pipeline.
   That was lazy: it is a slide deck plus an audio overview plus a recorder. If
   the first two land it is a capture step. Still last and still lowest value, but

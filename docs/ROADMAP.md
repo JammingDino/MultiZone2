@@ -38,8 +38,8 @@ Semantic versioning. Each release is tagged `vMAJOR.MINOR.PATCH`.
 | **0.13.x** | Tool visuals — a look for every tool, raw call one click away | Planned |
 | **0.14.x** | The agent floor — edit reliability, runaway guardrails, retrieval, spend | Planned |
 | **0.15.x** | Smaller lifts — chat search, palette, MCP resources, saved runs | Planned |
+| **0.16.x** | In-chat rendering — charts from data, richer artifacts | In progress |
 | **1.0.0** | Hardening & Public Release | Planned |
-| **1.1.x** | In-chat rendering — charts from data, richer artifacts | Planned |
 | **1.2.x** | Signed-in connectors — OAuth, keychain, per-scope consent | Planned |
 | **Post-1.0** | Code interface + edit engine, study mode, shared mode surface, moddable app surface, Diffusion LLM, Mobile | Backlog |
 
@@ -179,6 +179,14 @@ The remainder of the comparison: cross-chat search, a command palette, fork scop
 
 ---
 
+### 0.16.x — In-chat rendering
+
+`render_graph` draws diagrams and plots functions. It cannot draw *data* — the case where a model has numbers and wants to show them — so models fall back to Mermaid approximations or hand-written SVG, and the app looks thinner in chat than tools with a fraction of its capability. A charting renderer takes a data spec rather than a diagram source, themed from the active app theme so it reads correctly in light and dark and never distinguishes series by colour alone. Tables the model has already produced offer to become charts, because the common case is that the numbers exist and only the presentation is missing. Charts survive export rather than degrading to a placeholder.
+
+**Done when:** a model that has numbers can show them, in any of the ordinary chart types, without writing markup by hand — and the result is still there in the exported PDF.
+
+---
+
 ### 1.0.0 — Hardening & Public Release
 
 Performance audit (startup time, large chat scroll, streaming), installer polish, auto-updater integration, cross-platform smoke tests (Windows, macOS, Linux), and a REQUIREMENTS.md written for onboarding contributors. No new features — this is a quality and release-infrastructure milestone.
@@ -186,14 +194,6 @@ Performance audit (startup time, large chat scroll, streaming), installer polish
 It also closes the gap between the first principle and the shipped binary. [PRIVACY.md](PRIVACY.md) states, from the source rather than from the intent, exactly what is stored and what leaves the machine — and writing it found the two places the principle was overstated. The app checks for an update ~2.5 seconds after every launch with no way to stop it, and provider API keys sit in the SQLite file in plain text. Neither is alarming on a single-user local install; both are things a public release has to say out loud, or fix. The check becomes opt-out, the keys get either the OS keychain or a plain warning at the point of entry, and the statement is linked from the README, first-run setup and Settings → Data rather than filed in `docs/`.
 
 **Done when:** a new user can install, run, and use the app end to end without opening a terminal; all 0.1.x–0.12.x test checklists pass; no P0/P1 issues are open; and the privacy statement is accurate against the tree, with the update check switchable off and the key-storage position stated in the app.
-
----
-
-### 1.1.x — In-chat rendering
-
-`render_graph` draws diagrams and plots functions. It cannot draw *data* — the case where a model has numbers and wants to show them — so models fall back to Mermaid approximations or hand-written SVG, and the app looks thinner in chat than tools with a fraction of its capability. A charting renderer takes a data spec rather than a diagram source, themed from the active app theme so it reads correctly in light and dark and never distinguishes series by colour alone. Tables the model has already produced offer to become charts, because the common case is that the numbers exist and only the presentation is missing. Charts survive export rather than degrading to a placeholder.
-
-**Done when:** a model that has numbers can show them, in any of the ordinary chart types, without writing markup by hand — and the result is still there in the exported PDF.
 
 ---
 

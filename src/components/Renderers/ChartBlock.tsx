@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Copy, Check, Table2, BarChart3 } from "lucide-react";
+import { Copy, Check, Table2, BarChart3, Quote } from "lucide-react";
 import {
   type ChartData,
   type ChartTheme,
@@ -8,6 +8,7 @@ import {
   renderChartSvg,
 } from "@/lib/chart";
 import { CHROME_QUIET } from "@/lib/chrome";
+import { useApp } from "@/store/app";
 
 /**
  * The active chart palette, kept current.
@@ -63,8 +64,35 @@ function chartAsTable(data: ChartData): { headers: string[]; rows: string[][] } 
   return { headers, rows };
 }
 
+/**
+ * The chart as the ```chart fence that produces it (0.16.1).
+ *
+ * "Addressable" here means the next turn works from the numbers rather than
+ * re-deriving them, so the reference *is* the data — the same JSON the tool
+ * takes, which this app renders back as a chart and any model reads as a table
+ * of numbers with a title on it.
+ */
+function chartReference(data: ChartData): string {
+  const spec = {
+    type: data.type,
+    title: data.title,
+    labels: data.labels,
+    stacked: data.stacked || undefined,
+    horizontal: data.horizontal || undefined,
+    unit: data.unit,
+    series: data.series.map((s) => ({ name: s.name, values: s.values, points: s.points })),
+  };
+  const what = data.title ? `the chart “${data.title}”` : "this chart";
+  return `About ${what}:
+
+\`\`\`chart
+${JSON.stringify(spec, null, 2)}
+\`\`\``;
+}
+
 export function ChartBlock({ data, caption }: { data: ChartData; caption?: string }) {
   const theme = useChartTheme();
+  const setComposerDraft = useApp((s) => s.setComposerDraft);
   const [ref, width] = useMeasuredWidth(600);
   const [showData, setShowData] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -118,6 +146,13 @@ export function ChartBlock({ data, caption }: { data: ChartData; caption?: strin
         >
           {showData ? <BarChart3 size={12} /> : <Table2 size={12} />}
           {showData ? "hide data" : "data"}
+        </button>
+        <button
+          onClick={() => setComposerDraft(chartReference(data), "append")}
+          title="Put this chart's data in the composer, so the next turn works from it"
+          className={`flex items-center gap-1 rounded px-1.5 py-0.5 ${CHROME_QUIET}`}
+        >
+          <Quote size={12} /> ask about this
         </button>
         <button onClick={onCopy} className={`flex items-center gap-1 rounded px-1.5 py-0.5 ${CHROME_QUIET}`}>
           {copied ? <Check size={12} /> : <Copy size={12} />}

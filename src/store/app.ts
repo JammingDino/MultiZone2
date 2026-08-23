@@ -621,8 +621,14 @@ interface AppStore {
    * staged twice (0.15.4). Staged rather than sent: a saved run is kept because
    * it worked once, and seeing the filled-in prompt is how you tell it still does.
    */
-  composerDraft: { text: string; nonce: number };
-  setComposerDraft: (text: string) => void;
+  composerDraft: { text: string; nonce: number; mode: "replace" | "append" };
+  /**
+   * `append` adds to whatever is already typed instead of replacing it —
+   * referencing a chart or a table (0.16.1) is something you do *while*
+   * writing the question about it, so replacing the question would be exactly
+   * the wrong move.
+   */
+  setComposerDraft: (text: string, mode?: "replace" | "append") => void;
   /** Command palette (0.15.1) — one keystroke to anything with a name. */
   commandPaletteOpen: boolean;
   /**
@@ -2036,8 +2042,9 @@ export const useApp = create<AppStore>((set, get) => ({
     set({ sidebarOpen: next });
   },
   focusComposer: () => set((s) => ({ focusComposerNonce: s.focusComposerNonce + 1 })),
-  composerDraft: { text: "", nonce: 0 },
-  setComposerDraft: (text) => set((s) => ({ composerDraft: { text, nonce: s.composerDraft.nonce + 1 } })),
+  composerDraft: { text: "", nonce: 0, mode: "replace" },
+  setComposerDraft: (text, mode = "replace") =>
+    set((s) => ({ composerDraft: { text, mode, nonce: s.composerDraft.nonce + 1 } })),
   async refreshSavedRuns() {
     set({ savedRuns: await api.listSavedRuns() });
   },

@@ -1,9 +1,10 @@
 import { Children, cloneElement, isValidElement, useMemo, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
-import { ArrowDown, ArrowUp, BarChart3, Check, Copy, Search, X } from "lucide-react";
+import { ArrowDown, ArrowUp, BarChart3, Check, Copy, Quote, Search, X } from "lucide-react";
 import { ChartBlock } from "./ChartBlock";
 import { type ChartData, type ChartType, toChartData } from "@/lib/chart";
 import { CHROME_QUIET } from "@/lib/chrome";
+import { useApp } from "@/store/app";
 
 /**
  * Interactive tables (0.16.1) and "chart this" (0.16.0).
@@ -154,6 +155,32 @@ export function chartFromTable(matrix: Matrix, type: ChartType): ChartData | nul
   });
 }
 
+/**
+ * The rows on screen, as the Markdown table they came from (0.16.1).
+ *
+ * Written back out rather than pointed at, because the next turn has to be able
+ * to work from the numbers without re-deriving them — and because what is worth
+ * asking about is usually the *filtered, sorted* view, which exists nowhere in
+ * the transcript.
+ */
+const REFERENCE_ROW_CAP = 60;
+
+function tableReference(matrix: Matrix, order: number[]): string {
+  const shown = order.slice(0, REFERENCE_ROW_CAP);
+  // A pipe inside a cell would end the column early when this is read back.
+  const cell = (v: string) => v.replace(/\|/g, "\\|").replace(/\n/g, " ");
+  const lines = [
+    `| ${matrix.headers.map(cell).join(" | ")} |`,
+    `| ${matrix.headers.map(() => "---").join(" | ")} |`,
+    ...shown.map((i) => `| ${matrix.rows[i].map(cell).join(" | ")} |`),
+  ];
+  const trimmed =
+    order.length > shown.length
+      ? `\n\n_(first ${shown.length} of ${order.length} rows)_`
+      : "";
+  return `About this table:\n\n${lines.join("\n")}${trimmed}`;
+}
+
 // ─── The component ───────────────────────────────────────────────────────────
 
 type SortDir = "asc" | "desc";
@@ -177,6 +204,7 @@ export function MarkdownTable({ node, children, ...rest }: any) {
   const [filter, setFilter] = useState("");
   const [chartType, setChartType] = useState<ChartType | null>(null);
   const [copied, setCopied] = useState(false);
+  const setComposerDraft = useApp((s) => s.setComposerDraft);
 
   const thead = findTag(children, "thead");
   const tbody = findTag(children, "tbody");
@@ -294,6 +322,13 @@ export function MarkdownTable({ node, children, ...rest }: any) {
             )}
           </div>
         )}
+        <button
+          onClick={() => setComposerDraft(tableReference(matrix, order), "append")}
+          title="Put these rows in the composer, so the next turn works from them"
+          className={`flex items-center gap-1 rounded px-1.5 py-0.5 ${CHROME_QUIET}`}
+        >
+          <Quote size={11} /> ask about this
+        </button>
         <button onClick={onCopy} className={`flex items-center gap-1 rounded px-1.5 py-0.5 ${CHROME_QUIET}`}>
           {copied ? <Check size={11} /> : <Copy size={11} />}
           {copied ? "copied" : "copy"}

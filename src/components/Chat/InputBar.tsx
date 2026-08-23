@@ -63,7 +63,11 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
   useEffect(() => {
     if (composerDraft.nonce === seenDraftNonce.current) return;
     seenDraftNonce.current = composerDraft.nonce;
-    setText(composerDraft.text);
+    setText((cur) =>
+      composerDraft.mode === "append" && cur.trim() !== ""
+        ? `${cur.replace(/\s+$/, "")}\n\n${composerDraft.text}`
+        : composerDraft.text,
+    );
     taRef.current?.focus();
   }, [composerDraft]);
 

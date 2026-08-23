@@ -5,6 +5,7 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import type { Components } from "react-markdown";
 import { CodeBlock } from "./CodeBlock";
+import { MarkdownTable } from "./DataTable";
 import type { Citation } from "@/lib/citations";
 import { citationPlugin } from "@/lib/remarkCitations";
 import { normalizeMath } from "@/lib/normalizeMath";
@@ -49,13 +50,10 @@ const MD_COMPONENTS: Components = {
       />
     );
   },
-  table(props) {
-    return (
-      <div className="my-2 overflow-x-auto">
-        <table {...props} />
-      </div>
-    );
-  },
+  // Sortable, filterable, copyable, and one click from being a chart (0.16.x).
+  // Falls back to the plain table for anything that is not the shape GFM
+  // produces.
+  table: MarkdownTable,
 };
 
 const REMARK_PLUGINS = [remarkGfm, remarkMath];

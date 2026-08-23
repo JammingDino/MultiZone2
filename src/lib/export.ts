@@ -46,6 +46,7 @@ import {
 import { toPlanData } from "@/components/Renderers/PlanBlock";
 import { renderMermaidSvg } from "@/components/Renderers/MermaidBlock";
 import { renderPlotSvg, toMathPlotData } from "@/components/Renderers/MathPlotBlock";
+import { renderChartSvg, toChartData, type ChartTheme } from "@/lib/chart";
 
 /**
  * Chat export (0.7.1). Two formats off the same resolved snapshot:
@@ -152,6 +153,8 @@ interface RenderedMessage {
   zoneLabel: string | null;
   accent: string | null;
   text: string;
+  /** `render_chart` arguments from this turn, written out as ```chart fences. */
+  charts: unknown[];
   imageCount: number;
   /** Files attached to the turn, recovered from its hidden parts. */
   attachments: FileAttachment[];
@@ -271,6 +274,35 @@ function visibleText(m: Message): string {
   }
 }
 
+/**
+ * The `render_chart` calls in a turn, as their argument objects.
+ *
+ * The Markdown export is prose only — every other tool visual is a thing the
+ * PDF draws and the Markdown drops. A chart is the exception worth making
+ * because its content *is* data: written back out as a ```chart fence it stays
+ * a chart when this app re-reads the file, reads as the numbers it is in any
+ * other Markdown viewer, and is a placeholder in neither.
+ */
+function chartsIn(m: Message): unknown[] {
+  if (m.role !== "assistant") return [];
+  try {
+    const calls = JSON.parse(m.toolCalls ?? "[]");
+    if (!Array.isArray(calls)) return [];
+    return calls
+      .filter((c: any) => c?.function?.name === "render_chart")
+      .map((c: any) => {
+        try {
+          return JSON.parse(c.function.arguments ?? "");
+        } catch {
+          return null;
+        }
+      })
+      .filter((a: unknown) => toChartData(a) !== null);
+  } catch {
+    return [];
+  }
+}
+
 function imageCount(m: Message): number {
   try {
     const parts = JSON.parse(m.content) as ContentPart[];
@@ -338,7 +370,9 @@ function renderMessages(
     const subchats = (spawns.get(m.id) ?? [])
       .map((id) => index.take(id))
       .filter((s): s is ExportSubchat => s !== null);
-    if (!text && images === 0 && attachments.length === 0 && subchats.length === 0) continue;
+    const charts = chartsIn(m);
+    if (!text && images === 0 && attachments.length === 0 && subchats.length === 0 && charts.length === 0)
+      continue;
 
     let zoneLabel: string | null = null;
     let accent: string | null = null;
@@ -357,6 +391,7 @@ function renderMessages(
       zoneLabel,
       accent,
       text,
+      charts,
       imageCount: images,
       attachments,
       subchats,
@@ -527,6 +562,9 @@ function conversationMarkdown(
         "",
       );
     }
+    for (const chart of m.charts) {
+      body.push("```chart", JSON.stringify(chart, null, 2), "```", "");
+    }
     if (m.imageCount > 0) {
       body.push(`_${m.imageCount} image${m.imageCount === 1 ? "" : "s"} attached_`, "");
     }
@@ -584,6 +622,14 @@ const PALETTE = {
 /** Fixed layout width (px) for the print document; the page height is sized to
  *  the full content so the PDF is one continuous page with no breaks. */
 const PAGE_WIDTH = 820;
+
+/** Charts are drawn at the width of the tool card that holds them. */
+const CHART_EXPORT_WIDTH = 600;
+
+/** The export's palette, in the shape the chart renderer wants. */
+function exportChartTheme(p: Palette, accent: string, mode: "dark" | "light"): ChartTheme {
+  return { mode, bg: p.bg, panel: p.panel, border: p.border, text: p.text, muted: p.muted, accent };
+}
 
 function escapeHtml(s: string): string {
   return s
@@ -660,6 +706,7 @@ function visualKey(item: TraceToolItem): string {
 async function renderVisuals(
   units: TraceUnit[],
   subchats: ExportSubchat[] = [],
+  chartTheme: ChartTheme = exportChartTheme(PALETTE.dark, "#4f9cf9", "dark"),
 ): Promise<VisualCache> {
   const cache: VisualCache = new Map();
   const jobs: Promise<void>[] = [];
@@ -691,6 +738,19 @@ async function renderVisuals(
         if (!plot) continue;
         const svg = renderPlotSvg(plot);
         if (svg) cache.set(key, svg);
+      } else if (name === "render_chart") {
+        // Charts are strings all the way down, so the export draws them itself
+        // rather than lifting them out of the live document — which is what
+        // lets a chart survive into a PDF printed at a width the chat never had.
+        const chart = toChartData(item.args ?? body);
+        if (!chart) continue;
+        cache.set(
+          key,
+          renderChartSvg(chart, chartTheme, {
+            width: CHART_EXPORT_WIDTH,
+            idPrefix: `mzx${cache.size}`,
+          }),
+        );
       }
     }
   }
@@ -822,6 +882,7 @@ const NO_PREVIEW = new Set([
   "update_plan",
   "draw_diagram",
   "plot_function",
+  "render_chart",
   "present_file",
   ...SEARCH_TOOLS,
 ]);
@@ -911,11 +972,12 @@ function renderToolCard(
     visual = renderPlanVisual(body, accent, p);
   } else if (name === "present_file") {
     visual = renderFileVisual(body, accent);
-  } else if (name === "draw_diagram" || name === "plot_function") {
+  } else if (name === "draw_diagram" || name === "plot_function" || name === "render_chart") {
     const svg = visuals.get(key);
     const caption = typeof body?.caption === "string" ? body.caption : null;
+    const cls = name === "draw_diagram" ? "diagram" : name === "render_chart" ? "chart" : "plot";
     visual = svg
-      ? `<div class="${name === "draw_diagram" ? "diagram" : "plot"}">${svg}</div>${
+      ? `<div class="${cls}">${svg}</div>${
           caption ? `<div class="caption">${escapeHtml(caption)}</div>` : ""
         }`
       : renderPreview(item);
@@ -1307,7 +1369,9 @@ export async function buildChatPrintHtml(
   const ctx = chatContextEstimate(data.messages);
   // Nothing a tool drew is shown in text-only mode, so nothing needs rendering.
   const visuals =
-    options.detail === "text" ? new Map() : await renderVisuals(units, data.subchats);
+    options.detail === "text"
+      ? new Map()
+      : await renderVisuals(units, data.subchats, exportChartTheme(p, accent, theme.mode));
 
   const index = new SubchatIndex(data.subchats);
   const look = { accent, p };
@@ -1489,6 +1553,8 @@ export async function buildChatPrintHtml(
   .hitmore { color: ${p.muted}; font-style: italic; font-size: 9px; }
 
   /* ── Diagrams & plots ── */
+  .chart { margin-top: 8px; padding: 8px 4px; }
+  .chart svg { max-width: 100%; height: auto; display: block; margin: 0 auto; }
   .diagram, .plot { margin-top: 8px; padding: 8px; border: 1px solid ${p.border};
     border-radius: 8px; background: ${p.bg}; text-align: center; }
   .diagram svg, .plot svg { max-width: 100%; height: auto; background: transparent !important; }

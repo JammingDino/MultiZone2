@@ -4,6 +4,8 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark, oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { MermaidBlock } from "./MermaidBlock";
 import { MathPlotBlock } from "./MathPlotBlock";
+import { ChartBlock } from "./ChartBlock";
+import { toChartData, type ChartData } from "@/lib/chart";
 import { CHROME_QUIET } from "@/lib/chrome";
 
 interface Props {
@@ -32,6 +34,14 @@ function useIsLightMode() {
 export function CodeBlock({ language, code }: Props) {
   if (language === "mermaid") return <MermaidBlock source={code} />;
   if (language === "mathplot") return <MathPlotBlock spec={code} />;
+  // A ```chart fence holding the same JSON `render_chart` takes. Models that
+  // reach for a fence rather than the tool — and answers replayed from a
+  // provider that dropped the tool call — still get a chart. Anything that is
+  // not chartable falls through to being shown as the JSON it is.
+  if (language === "chart") {
+    const data = parseChartFence(code);
+    if (data) return <ChartBlock data={data} />;
+  }
   return <RawCode language={language} code={code} />;
 }
 
@@ -76,4 +86,13 @@ function RawCode({ language, code }: Props) {
       </SyntaxHighlighter>
     </div>
   );
+}
+
+/** A ```chart fence's body, if it is JSON describing a chart. */
+function parseChartFence(code: string): ChartData | null {
+  try {
+    return toChartData(JSON.parse(code));
+  } catch {
+    return null;
+  }
 }

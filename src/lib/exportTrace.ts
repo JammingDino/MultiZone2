@@ -256,7 +256,13 @@ function applyResult(item: TraceToolItem, m: Message): void {
 /** Tools whose result is an artefact the user asked for, so it survives
  *  condensing. Mirrors `VISUAL_TOOLS` in lib/stepSummary.ts, which does the same
  *  job for the chat's activity rail. */
-const VISUAL_TOOLS = new Set(["update_plan", "draw_diagram", "plot_function", "present_file"]);
+const VISUAL_TOOLS = new Set([
+  "update_plan",
+  "draw_diagram",
+  "plot_function",
+  "render_chart",
+  "present_file",
+]);
 
 /**
  * A stretch of consecutive thinking/tool steps, collapsed into one unit — the
@@ -398,6 +404,7 @@ const LABELS: Record<string, { label: string; icon: ToolIcon }> = {
   update_plan: { label: "Plan", icon: "checklist" },
   draw_diagram: { label: "Diagram", icon: "diagram" },
   plot_function: { label: "Plot", icon: "chart" },
+  render_chart: { label: "Chart", icon: "chart" },
   search_local_files: { label: "Knowledge search", icon: "database" },
   save_memory: { label: "Saved memory", icon: "brain" },
   read_memory: { label: "Read memory", icon: "brain" },
@@ -551,6 +558,12 @@ export function describeTool(item: TraceToolItem): ToolDescription {
       desc.subject = str(args?.caption) ?? (first ? truncate(first, 60) : null);
       break;
     }
+    case "render_chart": {
+      const series = Array.isArray(args?.series) ? (args!.series as unknown[]) : [];
+      const names = series.map((x) => str(asRecord(x)?.name)).filter(Boolean) as string[];
+      desc.subject = str(args?.title) ?? (names.length ? names.join(", ") : str(args?.type));
+      break;
+    }
     case "plot_function": {
       const fns = Array.isArray(args?.functions) ? (args!.functions as unknown[]) : [];
       const exprs = fns
@@ -650,6 +663,10 @@ function describeOutcome(
       return str(body.filename) ?? null;
     case "draw_diagram":
       return null;
+    case "render_chart":
+      // The chart itself is drawn just below; the only thing worth saying in
+      // words is the one case the renderer quietly papered over.
+      return str(body.note) ?? null;
     case "http_request": {
       const status = typeof body.status === "number" ? body.status : null;
       return status !== null ? `HTTP ${status}` : null;

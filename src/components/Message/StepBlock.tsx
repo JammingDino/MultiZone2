@@ -15,6 +15,8 @@ import type { Step, ToolStep, ThinkingStep } from "@/lib/grouping";
 import { analyzeToolStep } from "@/lib/stepSummary";
 import { useThrottledStreaming } from "@/lib/useThrottledStreaming";
 import { MathPlotBlock, toMathPlotData } from "@/components/Renderers/MathPlotBlock";
+import { ChartBlock } from "@/components/Renderers/ChartBlock";
+import { toChartData } from "@/lib/chart";
 import { MermaidBlock, type MermaidAutoFix } from "@/components/Renderers/MermaidBlock";
 import { HtmlReportBlock } from "@/components/Renderers/HtmlReportBlock";
 import { SavedFileChip } from "@/components/Renderers/SavedFileChip";
@@ -461,6 +463,12 @@ function renderToolOutput(
         )}
       </>
     );
+  }
+  if (name === "render_chart") {
+    const data = toChartData(args ?? parsed);
+    if (!data) return null;
+    const caption = typeof parsed.caption === "string" ? parsed.caption : undefined;
+    return <ChartBlock data={data} caption={caption} />;
   }
   if (name === "update_plan") {
     const data = toPlanData(parsed);

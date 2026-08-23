@@ -1500,7 +1500,7 @@ export const ALL_TOOLS: ToolInfo[] = [
   { id: "switch_zone",  label: "Switch zone",             category: "Agents", safety: 1, description: "List your zones and switch this chat to a better-suited one mid-conversation." },
 
   // System
-  { id: "render_graph", label: "Draw a chart or diagram",  category: "System", safety: 0, description: "Render a diagram or plot a maths function inline in the chat." },
+  { id: "render_graph", label: "Draw a chart or diagram",  category: "System", safety: 0, description: "Chart data, render a diagram, or plot a maths function inline in the chat." },
   { id: "date_time",    label: "Check the date & time",    category: "System", safety: 0, description: "Look up the current date and time." },
   { id: "manage_tags",  label: "Tag this chat",            category: "System", safety: 0, description: "Create tags and apply them to this chat so it is easier to find later." },
   { id: "code_exec",    label: "Run code",                 category: "System", safety: 2, description: "Run a code snippet in a sandboxed subprocess (Python, Node, Bash, PowerShell)." },

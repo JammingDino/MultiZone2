@@ -378,7 +378,7 @@ pub fn safe_tool_ids() -> Vec<&'static str> {
 pub fn tool_safety_by_name(name: &str) -> u8 {
     match name {
         "get_current_datetime" | "ask_user" | "tag_chat"
-        | "plot_function" | "draw_diagram"
+        | "plot_function" | "draw_diagram" | "render_chart"
         | "save_memory" | "read_memory" | "delete_memory"
         // Reading a subchat, listing the ones a chat already has, and waiting on
         // background subagents are all reads of work the user already approved
@@ -579,6 +579,7 @@ async fn dispatch_inner(
         "edit_file" => filesystem::edit_file(args, zone_config, project_dir).await,
         "present_file" => filesystem::present_file(args, project_dir).await,
         "plot_function" => render_graph::plot(args).await,
+        "render_chart" => render_graph::chart(args).await,
         "draw_diagram" => render_graph::draw(args).await,
         "ask_user" => ask_user::run(args).await,
         "tag_chat" => tags::run(args, db, chat_id).await,
@@ -698,7 +699,16 @@ mod tests {
         // the surface. The ceiling is raised for the new capabilities and no
         // further — under a kilobyte of slack, which is a rounding error against
         // one tool, not room to grow the descriptions.
-        const BUDGET_BYTES: usize = 39_000;
+        //
+        // 0.16.0 adds `render_chart` to the `render_graph` group, taking it to
+        // 40,727. Its first draft was 3,590 bytes on its own — the largest
+        // single function on the surface, which is exactly what this test is for
+        // — because the schema explained when to use each chart type twice, once
+        // in the description and once per enum value. Trimmed to 1,464 (the
+        // group to 2,201, third-largest), which is a charting schema priced like
+        // the rest of the surface rather than like a style guide. Same slack as
+        // before, and the same reason for it.
+        const BUDGET_BYTES: usize = 41_000;
 
         let ctx = ToolContext {
             project_dir: Some(r"C:\Users\me\project".to_string()),

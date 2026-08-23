@@ -63,6 +63,63 @@ pub fn definitions(ctx: &ToolContext) -> Vec<Tool> {
         Tool {
             tool_type: "function".into(),
             function: ToolFunction {
+                name: "render_chart".into(),
+                description: CHART_DESCRIPTION.into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "type": {
+                            "type": "string",
+                            "enum": ["bar", "line", "area", "scatter", "pie"],
+                            "description": "bar compares categories; line and area show a trend; scatter relates two numbers; pie shows parts of one whole"
+                        },
+                        "title": { "type": "string" },
+                        "labels": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "The categories, in order — x-axis ticks, or pie slice names"
+                        },
+                        "series": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": { "type": "string", "description": "The quantity, for the legend" },
+                                    "values": {
+                                        "type": "array",
+                                        "items": { "type": ["number", "null"] },
+                                        "description": "One per label, same order. null is drawn as a gap, not a zero"
+                                    },
+                                    "points": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": { "x": { "type": "number" }, "y": { "type": "number" } },
+                                            "required": ["x", "y"]
+                                        },
+                                        "description": "Scatter only, instead of values"
+                                    },
+                                    "color": { "type": "string", "description": "Hex. Omit unless asked" }
+                                },
+                                "required": ["name"]
+                            },
+                            "minItems": 1,
+                            "description": "One per quantity; several share one set of labels"
+                        },
+                        "stacked": { "type": "boolean", "description": "Bar/area: stack into a total" },
+                        "horizontal": { "type": "boolean", "description": "Bar: categories down the side" },
+                        "x_label": { "type": "string" },
+                        "y_label": { "type": "string" },
+                        "unit": { "type": "string", "description": "Suffix on printed values, e.g. \"%\", \" ms\"" },
+                        "caption": { "type": "string" }
+                    },
+                    "required": ["type", "series"]
+                }),
+            },
+        },
+        Tool {
+            tool_type: "function".into(),
+            function: ToolFunction {
                 name: "draw_diagram".into(),
                 description: build_draw_diagram_description(ctx),
                 parameters: json!({
@@ -80,6 +137,23 @@ pub fn definitions(ctx: &ToolContext) -> Vec<Tool> {
         },
     ]
 }
+
+/// Nothing here varies with the theme, deliberately: the chart's palette is
+/// resolved by the renderer from the colours actually on screen, so the model
+/// is told to leave colour alone rather than being handed a palette to reason
+/// about. That is also what keeps a chart correct after the user switches mode
+/// with the answer still on screen.
+const CHART_DESCRIPTION: &str = concat!(
+    "Draw a chart of data inline in the chat — bar, line, area, scatter or pie. ",
+    "Use it whenever you have numbers worth showing: a query result, a table you just read, figures from a document. ",
+    "Prefer it over writing SVG and over approximating a chart in a Mermaid diagram; ",
+    "`plot_function` plots equations, this plots data.\n",
+    "Give the numbers, not a drawing. The renderer takes its palette from the user's active theme, ",
+    "and separates series by dash pattern, marker shape and fill texture as well as by colour, so leave `color` alone.\n",
+    "Use `horizontal` when bar labels are long or numerous, `stacked` for parts of a total, ",
+    "and a horizontal bar chart rather than a pie past about six slices. ",
+    "Say in words what the chart shows as well as drawing it.",
+);
 
 fn build_draw_diagram_description(ctx: &ToolContext) -> String {
     let t = &ctx.theme;
@@ -119,6 +193,72 @@ pub async fn plot(args: &Value) -> AppResult<String> {
         "y_label": args.get("y_label"),
         "functions": args.get("functions"),
         "caption": args.get("caption"),
+    })
+    .to_string())
+}
+
+/// Like `plot` and `draw`, this validates and echoes: the drawing happens in the
+/// frontend, which is the only place that knows the theme and the width. What it
+/// does do is refuse the two shapes that render as an empty frame, because a
+/// model reads a blank chart as the tool being broken rather than as its own
+/// arguments being wrong.
+pub async fn chart(args: &Value) -> AppResult<String> {
+    let series = args.get("series").and_then(|v| v.as_array());
+    let Some(series) = series else {
+        return Ok(json!({
+            "error": "render_chart requires a `series` array, each entry with a `name` and either `values` or `points`"
+        })
+        .to_string());
+    };
+    if series.is_empty() {
+        return Ok(json!({ "error": "render_chart requires at least one series" }).to_string());
+    }
+
+    let has_numbers = series.iter().any(|s| {
+        let values = s.get("values").and_then(|v| v.as_array());
+        let points = s.get("points").and_then(|v| v.as_array());
+        values.is_some_and(|v| v.iter().any(|n| n.is_number()))
+            || points.is_some_and(|p| !p.is_empty())
+    });
+    if !has_numbers {
+        return Ok(json!({
+            "error": "render_chart found no numbers: every series needs `values` (one number per label) or, for a scatter, `points`"
+        })
+        .to_string());
+    }
+
+    // A model that gives fewer labels than values gets numbered categories from
+    // the renderer rather than a truncated chart, so the mismatch is worth
+    // naming without being worth refusing.
+    let label_count = args
+        .get("labels")
+        .and_then(|v| v.as_array())
+        .map(|l| l.len())
+        .unwrap_or(0);
+    let longest = series
+        .iter()
+        .filter_map(|s| s.get("values").and_then(|v| v.as_array()).map(|v| v.len()))
+        .max()
+        .unwrap_or(0);
+    let note = (label_count > 0 && label_count < longest).then(|| {
+        format!(
+            "{label_count} labels for {longest} values — the extra points were numbered"
+        )
+    });
+
+    Ok(json!({
+        "rendered": "render_chart",
+        "type": args.get("type").and_then(|v| v.as_str()).unwrap_or("bar"),
+        "title": args.get("title"),
+        "labels": args.get("labels"),
+        "series": args.get("series"),
+        "stacked": args.get("stacked"),
+        "horizontal": args.get("horizontal"),
+        "x_label": args.get("x_label"),
+        "y_label": args.get("y_label"),
+        "unit": args.get("unit"),
+        "caption": args.get("caption"),
+        "note": note,
     })
     .to_string())
 }

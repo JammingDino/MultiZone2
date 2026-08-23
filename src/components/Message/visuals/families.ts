@@ -91,6 +91,7 @@ export const FAMILY: Record<string, Family> = {
   enter_plan_mode: "state",
   // 14 · the renderers that already existed
   plot_function: "existing",
+  render_chart: "existing",
   draw_diagram: "existing",
   update_plan: "existing",
   exit_plan_mode: "existing",

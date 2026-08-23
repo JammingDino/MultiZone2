@@ -13,6 +13,7 @@ export type StepStatus = "pending" | "running" | "done" | "error" | "warning";
 /** Tools whose result renders as a visual the user actually asked for. */
 const VISUAL_TOOLS = new Set([
   "plot_function",
+  "render_chart",
   "update_plan",
   "present_file",
   "draw_diagram",
@@ -39,6 +40,7 @@ const TOOL_LABELS: Record<string, string> = {
   delete_file: "Deleting file",
   delete_memory: "Forgetting",
   draw_diagram: "Drawing diagram",
+  render_chart: "Drawing chart",
   edit_file: "Editing file",
   execute_code: "Running code",
   extract_url: "Reading page",

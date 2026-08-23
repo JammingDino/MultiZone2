@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import functionPlot from "function-plot";
+import { useSettledValue } from "@/lib/useSettledValue";
 
 function useIsLightMode() {
   const [light, setLight] = useState(() =>
@@ -34,8 +35,13 @@ interface DataProps {
 }
 
 export function MathPlotBlock(props: SpecProps | DataProps) {
+  // The legacy fenced form streams in a character at a time, and function-plot
+  // is not cheap enough to run per token — see `useSettledValue` (0.16.1). A
+  // `data` prop comes from a completed tool call and is passed straight
+  // through, so nothing about the tool path changes.
+  const settledSpec = useSettledValue("data" in props ? "" : props.spec);
   const parsed: MathPlotData | { error: string } =
-    "data" in props ? props.data : parseSpec(props.spec);
+    "data" in props ? props.data : parseSpec(settledSpec);
   const ref = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   const isError = "error" in parsed;

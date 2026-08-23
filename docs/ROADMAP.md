@@ -38,7 +38,7 @@ Semantic versioning. Each release is tagged `vMAJOR.MINOR.PATCH`.
 | **0.13.x** | Tool visuals — a look for every tool, raw call one click away | Planned |
 | **0.14.x** | The agent floor — edit reliability, runaway guardrails, retrieval, spend | Planned |
 | **0.15.x** | Smaller lifts — chat search, palette, MCP resources, saved runs | Planned |
-| **0.16.x** | In-chat rendering — charts from data, richer artifacts | In progress |
+| **0.16.x** | In-chat rendering — charts from data, richer artifacts | Built — runtime testing open |
 | **1.0.0** | Hardening & Public Release | Planned |
 | **1.2.x** | Signed-in connectors — OAuth, keychain, per-scope consent | Planned |
 | **Post-1.0** | Code interface + edit engine, study mode, shared mode surface, moddable app surface, Diffusion LLM, Mobile | Backlog |

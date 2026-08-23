@@ -6,6 +6,7 @@ import {
   ChevronsUpDown, ChevronsDownUp, Maximize2, Minimize2,
 } from "lucide-react";
 import { useApp } from "@/store/app";
+import { useSettledValue } from "@/lib/useSettledValue";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 import * as api from "@/lib/tauri";
 import { CHROME_QUIET } from "@/lib/chrome";
@@ -167,7 +168,10 @@ export function MermaidBlock({
   // still offers to retry: the old one-attempt guard existed because repairs
   // fired on their own and could loop, which they no longer do.
   const [repairFailed, setRepairFailed] = useState(false);
-  const cleanSource = repaired ?? originalSource;
+  // Held back until the source stops changing: while a diagram streams in, an
+  // unclosed fence is already a code block, so every intermediate length would
+  // otherwise be handed to `mermaid.render` and fail to parse (0.16.1).
+  const cleanSource = useSettledValue(repaired ?? originalSource);
   // Held in a ref so a fresh object identity from the parent doesn't re-run the
   // render effect on every re-render.
   const autoFixRef = useRef(autoFix);

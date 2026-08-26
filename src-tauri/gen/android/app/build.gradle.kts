@@ -13,6 +13,22 @@ val tauriProperties = Properties().apply {
     }
 }
 
+// Release signing (0.17.3). Android identifies an app by its signature, so an
+// installable release build needs a real key — and the key must be the *same*
+// key every time, or an update cannot be installed over the app it replaces.
+//
+// Read from `gen/android/keystore.properties`, which is gitignored and written
+// by the release workflow from repository secrets. Absent, this is simply not
+// configured and `assembleDebug` works exactly as before: a developer who has
+// never seen a keystore should not have to make one to run the app on a phone.
+val keystoreProperties = Properties().apply {
+    val propFile = rootProject.file("keystore.properties")
+    if (propFile.exists()) {
+        propFile.inputStream().use { load(it) }
+    }
+}
+val hasReleaseKey = keystoreProperties.getProperty("storeFile") != null
+
 android {
     compileSdk = 36
     namespace = "com.multizone.desktop"
@@ -23,6 +39,16 @@ android {
         targetSdk = 36
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+    }
+    signingConfigs {
+        if (hasReleaseKey) {
+            create("release") {
+                storeFile = file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("password")
+            }
+        }
     }
     buildTypes {
         getByName("debug") {
@@ -37,6 +63,7 @@ android {
             }
         }
         getByName("release") {
+            if (hasReleaseKey) signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = true
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }

@@ -251,7 +251,7 @@ export function CommandPalette() {
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-start justify-center bg-black/40 pt-[12vh] backdrop-blur-[2px]"
+      className="mz-safe-overlay fixed inset-0 z-[60] flex items-start justify-center bg-black/40 pt-[12vh] backdrop-blur-[2px]"
       onMouseDown={close}
     >
       <div

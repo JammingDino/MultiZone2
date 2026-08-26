@@ -25,6 +25,7 @@ import {
   X,
 } from "lucide-react";
 import * as api from "@/lib/tauri";
+import { isRemote } from "@/lib/remote/transport";
 import { useApp } from "@/store/app";
 import { Toggle, ToggleRow } from "@/components/common/Toggle";
 import type { PairedDevice, PairingView, RemoteStatus } from "@/lib/types";
@@ -44,6 +45,14 @@ export interface RemoteAccessProps {
 
 export function RemoteAccess({ apply, busy }: RemoteAccessProps) {
   const appSettings = useApp((s) => s.appSettings);
+  // Everything that rebinds the socket is refused from a remote, on purpose —
+  // `apply_api_settings` "rebinds the server the request arrived on", and
+  // `generate_api_token` will not mint a credential over a channel that already
+  // has one. Both are right. What was wrong was letting a phone tap the switch
+  // and then explaining, in a red box quoting a command name, why it could not.
+  // The reads and the device management stay live: revoking a lost phone from
+  // another phone is exactly the case per-device tokens exist for.
+  const readOnly = isRemote();
   const [status, setStatus] = useState<RemoteStatus | null>(null);
   const [devices, setDevices] = useState<PairedDevice[]>([]);
   const [pairing, setPairing] = useState<PairingView | null>(null);
@@ -97,16 +106,26 @@ export function RemoteAccess({ apply, busy }: RemoteAccessProps) {
           is stored there.
         </p>
 
+        {readOnly && (
+          <p className="mb-3 rounded border border-[var(--color-border)] px-3 py-2.5 text-xs text-[var(--color-text-muted)]">
+            You are looking at this from a paired device. Turning remote access on or off rebinds
+            the connection you are reading this over, so it can only be changed on the computer
+            itself. Everything below still works from here.
+          </p>
+        )}
+
         <ToggleRow
           label="Reachable from this network"
           description={
-            canGoLan
-              ? "The app listens on a network address instead of only this machine."
-              : "This machine has no network address right now, so nothing could reach it."
+            !canGoLan
+              ? "This machine has no network address right now, so nothing could reach it."
+              : readOnly
+                ? "Change this on the computer itself."
+                : "The app listens on a network address instead of only this machine."
           }
           checked={lanOn}
           onChange={(v) => {
-            if (!canGoLan && v) return;
+            if (readOnly || (!canGoLan && v)) return;
             setError(null);
             // Built conditionally rather than passing `apiEnabled: undefined`
             // to mean "leave it alone". Spreading an explicit `undefined` over
@@ -151,12 +170,13 @@ export function RemoteAccess({ apply, busy }: RemoteAccessProps) {
           </div>
         )}
 
-        {lanOn && status && status.interfaces.length > 1 && (
+        {lanOn && !readOnly && status && status.interfaces.length > 1 && (
           <div className="mt-3">
             <label className="mb-1 block text-xs text-[var(--color-text-muted)]">
               Which network
             </label>
             <select
+              disabled={readOnly}
               value={appSettings.apiBindAddress || ""}
               onChange={(e) => {
                 setError(null);
@@ -184,6 +204,7 @@ export function RemoteAccess({ apply, busy }: RemoteAccessProps) {
               description="mDNS, so a device can find this machine without being told its address."
               checked={appSettings.apiDiscovery}
               onChange={(v) => {
+                if (readOnly) return;
                 setError(null);
                 void apply({ apiDiscovery: v }).then(refresh);
               }}

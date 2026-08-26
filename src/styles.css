@@ -995,3 +995,24 @@ body,
   }
 }
 
+/*
+ * Safe areas apply to fixed overlays too (0.17.4).
+ *
+ * The body padding above keeps normal flow clear of the notch, and a
+ * `position: fixed` overlay ignores it entirely — it is positioned against the
+ * viewport, not against the body's padding box. Full-bleed Settings on a phone
+ * therefore drew its own header underneath the status bar clock, which is what
+ * the first handset screenshot showed.
+ *
+ * Padding rather than insets, so a panel sized `h-full` resolves against the
+ * padded box and still fits.
+ */
+@media (max-width: 767px) {
+  .mz-safe-overlay {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+}
+

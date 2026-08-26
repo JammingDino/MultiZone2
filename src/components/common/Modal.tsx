@@ -58,7 +58,7 @@ export function Modal({
 
   return (
     <div
-      className="mz-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      className="mz-overlay mz-safe-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60"
       onClick={onClose}
     >
       <div

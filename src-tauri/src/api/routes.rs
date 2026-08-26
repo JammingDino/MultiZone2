@@ -28,7 +28,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 /// One route, as `GET /api/routes` reports it.
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -52,7 +52,7 @@ const fn open(method: &'static str, path: &'static str, description: &'static st
 
 /// Bumped whenever a route is added, removed or changes shape, so a caller can
 /// tell "the app is older than my script" from "my script is wrong".
-pub const ROUTE_SET_VERSION: u32 = 5;
+pub const ROUTE_SET_VERSION: u32 = 6;
 
 pub const ROUTES: &[RouteDef] = &[
     // Discovery — deliberately unauthenticated. A caller debugging a broken
@@ -60,6 +60,7 @@ pub const ROUTES: &[RouteDef] = &[
     // thing that is wrong.
     open("GET", "/api/health", "Whether the API is enabled, bound, answering, and whether your token was accepted"),
     open("GET", "/api/routes", "Every route this build serves, with a one-line description"),
+    open("POST", "/api/pair", "Redeem a pairing code shown on the desktop for a per-device token ({code, name?, platform?})"),
 
     // Providers & zones
     r("GET", "/api/providers", "Configured model providers"),
@@ -201,6 +202,17 @@ pub const ROUTES: &[RouteDef] = &[
     r("GET", "/api/settings/:key", "Read one settings row"),
     r("PUT", "/api/settings/:key", "Write one settings row"),
     r("PATCH", "/api/settings/:key", "Merge fields into a JSON settings row (e.g. {\"mode\":\"dark\"} on `theme`)"),
+    // Remote access (0.17.0)
+    r("GET", "/api/remote", "Whether the app is reachable from the network, on which address, and whether it is being advertised"),
+    r("GET", "/api/network-interfaces", "The addresses this machine could bind"),
+    r("GET", "/api/devices", "Every paired device, live and revoked"),
+    r("DELETE", "/api/devices/:id", "Revoke a device (?forget=true drops an already-revoked one from the list)"),
+    r("POST", "/api/devices/:id", "Rename a device ({name})"),
+    r("GET", "/api/pairing", "The pairing code on screen, its QR link, and recent attempts"),
+    r("POST", "/api/pairing", "Show a pairing code"),
+    r("DELETE", "/api/pairing", "Take the pairing code off screen"),
+    r("GET", "/api/approvals", "Every tool call waiting on a human, with what it would do and how long is left"),
+
     r("GET", "/api/theme", "The appearance settings in force, with every field's type, range, default and meaning — and the CSS variables custom CSS should target"),
     r("PATCH", "/api/theme", "Change appearance: mode, accent, the palette colours (background · panels · hover · borders · text · muted text), background effect, glass, bloom, and custom CSS. Validated, and says what is wrong with a patch it rejects"),
     r("POST", "/api/mirror", "Re-write every chat to the markdown mirror folder"),
@@ -399,6 +411,20 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("voice::delete_cloned_voice", GuiOnly("removes a voice from a picker in Settings")),
     ("voice::transcribe_audio_file", GuiOnly("transcribes a file chosen in a native file dialog")),
     ("voice::transcribe_audio_upload", GuiOnly("transcribes bytes the window already holds as a composer attachment")),
+    // Remote access (0.17.0). The pairing *redemption* has no command of its
+    // own — a device with no token cannot call a Tauri command, so `POST
+    // /api/pair` is the only way in and there is nothing here to pair it with.
+    ("remote::remote_status", Route("GET /api/remote")),
+    ("remote::list_network_interfaces", Route("GET /api/network-interfaces")),
+    ("remote::list_paired_devices", Route("GET /api/devices")),
+    ("remote::revoke_paired_device", Route("DELETE /api/devices/:id")),
+    ("remote::forget_paired_device", Route("DELETE /api/devices/:id")),
+    ("remote::rename_paired_device", Route("POST /api/devices/:id")),
+    ("remote::pairing_status", Route("GET /api/pairing")),
+    ("remote::open_pairing", Route("POST /api/pairing")),
+    ("remote::close_pairing", Route("DELETE /api/pairing")),
+    ("messages::pending_approvals", Route("GET /api/approvals")),
+
 ];
 
 // ─── Handlers ─────────────────────────────────────────────────────────────────
@@ -1531,6 +1557,142 @@ pub async fn regenerate_participant(
     )
     .await?;
     Ok(NO_CONTENT)
+}
+
+// ── Remote access (0.17.0) ───────────────────────────────────────────────────
+//
+// The desktop half of "a phone as a second window": which address the API is
+// bound to, which devices hold a token, and how a new one gets one. All of it
+// is on the API rather than only in Settings for the reason the drift test
+// exists — if it is worth doing on the phone it is a route, and the phone's
+// pairing screen and device list are the first callers.
+
+pub async fn remote_status(State(st): State<ApiState>) -> ApiResult<Response> {
+    Ok(Json(commands::remote::remote_status(app_state(&st)).await?).into_response())
+}
+
+pub async fn network_interfaces() -> impl IntoResponse {
+    Json(commands::remote::list_network_interfaces())
+}
+
+/// Every paired device, with the caller's own entry marked.
+///
+/// The `self` flag is the reason the auth layer bothers to record *which*
+/// credential a request presented. Without it the device list on a phone is a
+/// list of similar-looking names with a revoke button next to each, and the one
+/// that signs you out is indistinguishable from the four that do not.
+pub async fn list_devices(
+    State(st): State<ApiState>,
+    caller: Option<axum::Extension<crate::remote::DeviceAuth>>,
+) -> ApiResult<Response> {
+    let devices = commands::remote::list_paired_devices(app_state(&st)).await?;
+    let me = caller.as_ref().and_then(|c| c.0.device_id()).map(str::to_string);
+    let annotated: Vec<Value> = devices
+        .into_iter()
+        .map(|d| {
+            let is_self = me.as_deref() == Some(d.id.as_str());
+            let mut v = serde_json::to_value(d).unwrap_or(Value::Null);
+            if let Some(obj) = v.as_object_mut() {
+                obj.insert("self".into(), Value::Bool(is_self));
+            }
+            v
+        })
+        .collect();
+    Ok(Json(annotated).into_response())
+}
+
+/// Revoke a device — or, with `?forget=true`, drop an already-revoked one from
+/// the list.
+///
+/// One route rather than two because they are one thought with two strengths,
+/// and the weaker one refuses to stand in for the stronger: forgetting a device
+/// that still holds a working token is rejected in
+/// [`crate::remote::devices::forget`] rather than silently doing half of it.
+pub async fn revoke_device(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> ApiResult<Response> {
+    if q.get("forget").is_some_and(|v| v == "true") {
+        commands::remote::forget_paired_device(app_state(&st), id).await?;
+        return Ok(NO_CONTENT.into_response());
+    }
+    Ok(Json(commands::remote::revoke_paired_device(app_state(&st), id).await?).into_response())
+}
+
+pub async fn rename_device(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> ApiResult<Response> {
+    let name = required(&body, "name")?;
+    Ok(Json(commands::remote::rename_paired_device(app_state(&st), id, name).await?)
+        .into_response())
+}
+
+pub async fn pairing_status(State(st): State<ApiState>) -> ApiResult<Response> {
+    Ok(Json(commands::remote::pairing_status(app_state(&st)).await?).into_response())
+}
+
+/// Show a pairing code.
+///
+/// Reachable with a token, which means a paired device can enrol another one.
+/// That is deliberate and is not a hole: a caller who already holds a working
+/// token can drive every other route on this surface, so refusing this one
+/// would buy nothing and cost the case it is actually for — pairing a second
+/// device from the first, without walking back to the desk.
+pub async fn open_pairing(State(st): State<ApiState>) -> ApiResult<Response> {
+    Ok(Json(commands::remote::open_pairing(app_state(&st)).await?).into_response())
+}
+
+pub async fn close_pairing(State(st): State<ApiState>) -> ApiResult<Response> {
+    Ok(Json(commands::remote::close_pairing(app_state(&st)).await?).into_response())
+}
+
+/// Every tool call currently waiting on a human.
+///
+/// The route that makes an unattended run reasonable. Answering is
+/// `POST /api/chats/:id/approval`, which already existed — what was missing was
+/// any way to find out that something was waiting, which from a phone is the
+/// difference between a run you left alone and a run that quietly denied itself
+/// five minutes after you walked away.
+pub async fn pending_approvals(State(st): State<ApiState>) -> ApiResult<Response> {
+    Ok(Json(commands::messages::pending_approvals(app_state(&st)).await?).into_response())
+}
+
+/// Redeem a pairing code for a per-device token. The only unauthenticated write
+/// on this surface.
+///
+/// Everything that keeps it safe lives in [`crate::remote::pairing`] rather than
+/// here: there is no window unless the user opened one on the desktop, the code
+/// is single-use, it expires on its own, and five wrong answers burn it. This
+/// handler's only jobs are to name the device and to record where the attempt
+/// came from.
+pub async fn pair(
+    State(st): State<ApiState>,
+    connect: Option<axum::extract::ConnectInfo<std::net::SocketAddr>>,
+    Json(body): Json<Value>,
+) -> ApiResult<Response> {
+    let code = required(&body, "code")?;
+    let name = s(&body, "name").unwrap_or_default();
+    let platform = s(&body, "platform").unwrap_or_default();
+    let address = connect.map(|ci| ci.0.ip().to_string());
+
+    let grant = crate::remote::pairing::redeem(
+        &st.db,
+        crate::remote::pairing::PairingRequest {
+            code: &code,
+            device_name: &name,
+            platform: &platform,
+            address: address.as_deref(),
+        },
+    )
+    .await?;
+
+    // The device list changed, and the desktop's pairing dialog is the one
+    // window most likely to be open at this exact moment.
+    let _ = st.app.emit("devices-changed", json!({ "deviceId": grant.device_id }));
+    Ok(Json(grant).into_response())
 }
 
 #[cfg(test)]

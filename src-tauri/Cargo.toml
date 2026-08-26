@@ -1,6 +1,6 @@
 [package]
 name = "multizone"
-version = "0.16.1"
+version = "0.17.0"
 description = "MultiZone — LLM interface"
 authors = ["MultiZone"]
 edition = "2021"
@@ -113,6 +113,16 @@ tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 similar = { version = "3.1.2", default-features = false, features = ["text"] }
 tauri-plugin-notification = "2.3.3"
+
+# Remote access (0.17.0) — a phone as a second window onto this desktop.
+# `if-addrs` enumerates the machine's addresses so the LAN bind is a choice
+# between real interfaces rather than a blanket `0.0.0.0`; `mdns-sd` advertises
+# the desktop so nobody has to type the address that choice produced. `rand`
+# generates the six-digit pairing code (already in the tree via several deps;
+# this only makes it direct). Token hashing reuses the `sha2` above.
+if-addrs = "0.13"
+mdns-sd = "0.13"
+rand = "0.9"
 
 [dev-dependencies]
 # Checkpoint tests write real files and restore them — the behaviour under test

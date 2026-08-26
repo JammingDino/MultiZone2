@@ -49,7 +49,7 @@ pub(crate) struct ApiState {
     pub(crate) db: SqlitePool,
     pub(crate) http: reqwest::Client,
     pub(crate) active_streams: Arc<RwLock<HashMap<String, Arc<AtomicBool>>>>,
-    pub(crate) tool_approvals: Arc<tokio::sync::Mutex<HashMap<String, oneshot::Sender<crate::commands::messages::ApprovalAnswer>>>>,
+    pub(crate) tool_approvals: crate::commands::messages::ApprovalGate,
     pub(crate) app: AppHandle,
     pub(crate) token: String,
 }
@@ -80,26 +80,40 @@ impl ApiHandle {
     }
 }
 
-/// Bind to `127.0.0.1:port` and spawn the server. Returns once the socket is
-/// bound so the caller learns of bind errors (e.g. port in use) synchronously.
+/// Bind `address:port` and spawn the server. Returns once the socket is bound
+/// so the caller learns of bind errors (e.g. port in use) synchronously.
+///
+/// `address` became a parameter in 0.17.0. It is a concrete interface and never
+/// `0.0.0.0`: "put the app on the network" is a decision about *which* network,
+/// and a wildcard bind answers that question in the widest possible way on
+/// behalf of somebody who was not asked. [`commands::api::resolve_bind_address`]
+/// is where the choice is made and where it refuses.
 pub async fn start(
     app: AppHandle,
     db: SqlitePool,
     http: reqwest::Client,
     active_streams: Arc<RwLock<HashMap<String, Arc<AtomicBool>>>>,
-    tool_approvals: Arc<tokio::sync::Mutex<HashMap<String, oneshot::Sender<crate::commands::messages::ApprovalAnswer>>>>,
+    tool_approvals: crate::commands::messages::ApprovalGate,
+    address: std::net::Ipv4Addr,
     port: u16,
     token: String,
 ) -> crate::error::AppResult<ApiHandle> {
     let state = ApiState { db, http, active_streams, tool_approvals, app, token };
     let router = build_router(state);
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let addr = SocketAddr::from((address, port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
 
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
     tokio::spawn(async move {
-        let server = axum::serve(listener, router).with_graceful_shutdown(async move {
+        // `into_make_service_with_connect_info` rather than the plain service:
+        // the auth layer records which address a device was last seen from, and
+        // the pairing attempt log is worth very little without one.
+        let server = axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .with_graceful_shutdown(async move {
             let _ = shutdown_rx.await;
         });
         if let Err(e) = server.await {
@@ -107,7 +121,11 @@ pub async fn start(
         }
     });
 
-    tracing::info!("API server listening on http://{addr}");
+    if address.is_loopback() {
+        tracing::info!("API server listening on http://{addr}");
+    } else {
+        tracing::warn!("API server listening on http://{addr} — reachable from the local network");
+    }
     Ok(ApiHandle { port, shutdown: Some(shutdown_tx) })
 }
 
@@ -309,6 +327,13 @@ fn build_router(state: ApiState) -> Router {
             get(h::get_setting).put(h::set_setting).patch(h::patch_setting),
         )
         .route("/api/theme", get(h::get_theme).patch(h::patch_theme))
+        // Remote access (0.17.0)
+        .route("/api/remote", get(h::remote_status))
+        .route("/api/network-interfaces", get(h::network_interfaces))
+        .route("/api/devices", get(h::list_devices))
+        .route("/api/devices/:id", axum::routing::delete(h::revoke_device).post(h::rename_device))
+        .route("/api/pairing", get(h::pairing_status).post(h::open_pairing).delete(h::close_pairing))
+        .route("/api/approvals", get(h::pending_approvals))
         .route("/api/mirror", post(h::mirror_all))
         .route("/api/mirror/import", post(h::import_markdown))
         .route_layer(middleware::from_fn_with_state(state.clone(), auth_mw));
@@ -319,6 +344,12 @@ fn build_router(state: ApiState) -> Router {
         // out that its token is the thing that is wrong.
         .route("/api/health", get(health))
         .route("/api/routes", get(routes::routes))
+        // Pairing is the *only* unauthenticated write on the surface, and it
+        // has to be: a device with no token is exactly what it is for. What
+        // keeps that honest is on the other side — see `remote::pairing`. There
+        // is no window unless the user opened one on the desktop, the code is
+        // single-use, it expires, and five wrong answers burn it.
+        .route("/api/pair", post(h::pair))
         .merge(protected)
         .layer(middleware::from_fn_with_state(state.clone(), notify_gui_mw))
         .layer(CorsLayer::permissive())
@@ -356,23 +387,64 @@ async fn notify_gui_mw(
 
 // ─── Auth ───────────────────────────────────────────────────────────────────
 
-async fn auth_mw(
-    State(st): State<ApiState>,
-    req: axum::extract::Request,
-    next: Next,
-) -> Response {
-    let ok = req
-        .headers()
+/// The bearer token a request presented, if any.
+fn bearer(req: &axum::extract::Request) -> Option<&str> {
+    req.headers()
         .get(AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
-        .map(|v| v == format!("Bearer {}", st.token))
-        .unwrap_or(false);
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+}
 
-    if ok {
-        next.run(req).await
-    } else {
-        (StatusCode::UNAUTHORIZED, Json(json!({ "error": "unauthorized" }))).into_response()
+/// The address this request came from, when the server knows one.
+///
+/// `None` for the in-process call the `app_control` tool makes, which has no
+/// socket — so every use of this is "record it if we have it" rather than a
+/// check that would reject the app's own tool for not having an IP.
+fn peer_address(req: &axum::extract::Request) -> Option<String> {
+    req.extensions()
+        .get::<axum::extract::ConnectInfo<SocketAddr>>()
+        .map(|ci| ci.0.ip().to_string())
+}
+
+/// Two credentials now, not one (0.17.0).
+///
+/// The static token from Settings still works and still means what it meant: a
+/// script on this machine, or the in-process router call. A *device* token is
+/// the one pairing mints, belongs to exactly one phone or tablet, and can be
+/// revoked on its own — which is the entire reason it exists.
+///
+/// Whichever it was goes into the request extensions, so a handler that cares
+/// can ask rather than guess.
+async fn auth_mw(
+    State(st): State<ApiState>,
+    mut req: axum::extract::Request,
+    next: Next,
+) -> Response {
+    let Some(token) = bearer(&req) else {
+        return unauthorized();
+    };
+    // Compared before the database is touched: the static token is the common
+    // case and is not worth a query.
+    if token == st.token {
+        req.extensions_mut().insert(crate::remote::DeviceAuth::Static);
+        return next.run(req).await;
     }
+
+    let token = token.to_string();
+    let Some(device) = crate::remote::devices::authenticate(&st.db, &token).await else {
+        return unauthorized();
+    };
+    let address = peer_address(&req);
+    crate::remote::devices::touch(&st.db, &device, address.as_deref()).await;
+    req.extensions_mut()
+        .insert(crate::remote::DeviceAuth::Device(Box::new(device)));
+    next.run(req).await
+}
+
+fn unauthorized() -> Response {
+    (StatusCode::UNAUTHORIZED, Json(json!({ "error": "unauthorized" }))).into_response()
 }
 
 // ─── Error mapping ────────────────────────────────────────────────────────────
@@ -416,12 +488,19 @@ pub(crate) type ApiResult<T> = Result<T, ApiError>;
 ///   requiring auth, because "is my token wrong" is exactly the question you
 ///   cannot ask through a door your token has to open.
 async fn health(State(st): State<ApiState>, req: axum::extract::Request) -> impl IntoResponse {
-    let token_accepted = req
-        .headers()
-        .get(AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .map(|v| v == format!("Bearer {}", st.token))
-        .unwrap_or(false);
+    // Answers for a device token too, and says which kind it was: a phone whose
+    // pairing has been revoked otherwise gets a bare 401 from every route and
+    // no way to tell "revoked" from "the desktop moved" — which is exactly the
+    // distinction this endpoint exists to draw.
+    let presented = bearer(&req).map(str::to_string);
+    let (token_accepted, token_kind) = match presented {
+        Some(t) if t == st.token => (true, "static"),
+        Some(t) => match crate::remote::devices::authenticate(&st.db, &t).await {
+            Some(_) => (true, "device"),
+            None => (false, "unknown"),
+        },
+        None => (false, "none"),
+    };
 
     let raw: Option<String> =
         sqlx::query_scalar("SELECT value FROM settings WHERE key = 'app_settings'")
@@ -446,8 +525,12 @@ async fn health(State(st): State<ApiState>, req: axum::extract::Request) -> impl
         "bindError": bind.as_ref().and_then(|b| b.error.clone()),
         "port": bind.as_ref().map(|b| b.port),
         "answering": true,
+        "address": bind.as_ref().map(|b| b.address.clone()),
+        "lan": bind.as_ref().map(|b| b.address != crate::commands::api::LOOPBACK).unwrap_or(false),
         "tokenPresent": !st.token.trim().is_empty(),
         "tokenAccepted": token_accepted,
+        "tokenKind": token_kind,
+        "pairingOpen": crate::remote::pairing::status().is_some(),
     }))
 }
 

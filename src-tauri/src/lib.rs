@@ -11,6 +11,7 @@ mod llm;
 mod mcp;
 mod ocr;
 mod plans;
+mod remote;
 mod repomap;
 mod runs;
 mod search;
@@ -336,6 +337,16 @@ pub fn run() {
             commands::api::apply_api_settings,
             commands::api::generate_api_token,
             commands::api::api_bind_state,
+            commands::remote::remote_status,
+            commands::remote::list_network_interfaces,
+            commands::remote::list_paired_devices,
+            commands::remote::revoke_paired_device,
+            commands::remote::forget_paired_device,
+            commands::remote::rename_paired_device,
+            commands::remote::pairing_status,
+            commands::remote::open_pairing,
+            commands::remote::close_pairing,
+            commands::messages::pending_approvals,
             commands::voice::list_voice_input_devices,
             commands::voice::start_dictation,
             commands::voice::stop_dictation,

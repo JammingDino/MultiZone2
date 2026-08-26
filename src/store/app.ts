@@ -455,6 +455,9 @@ interface AppStore {
   rewindForward: (chatId: string, force?: boolean) => Promise<RestoreReport | null>;
   /** Current visual theme. Persisted via the backend settings table. */
   theme: ThemePrefs;
+  /** Whether `theme` reflects what is stored rather than the defaults. Writes
+   *  are whole-object, so one before the read lands is an erase. */
+  themeLoaded: boolean;
   setTheme: (theme: Partial<ThemePrefs>) => Promise<void>;
   loadThemeFromBackend: () => Promise<void>;
 
@@ -1066,6 +1069,7 @@ export const useApp = create<AppStore>((set, get) => ({
   checkpointsByChat: {},
   rewindByChat: {},
   theme: DEFAULT_THEME,
+  themeLoaded: false,
   appSettings: DEFAULT_APP_SETTINGS,
   appSettingsLoaded: false,
 
@@ -1866,6 +1870,11 @@ export const useApp = create<AppStore>((set, get) => ({
     await api.respondToolApproval(chatId, zoneId ?? null, approved, hunks);
   },
   async setTheme(partial) {
+    // Same rule as `setAppSettings`: a theme write is a whole-object write, so
+    // doing one before the saved theme has been read replaces it with defaults.
+    if (!get().themeLoaded) {
+      throw new Error("the saved theme has not been read yet, so nothing was changed");
+    }
     const next = { ...get().theme, ...partial };
     set({ theme: next });
     applyThemeToDom(next);
@@ -1881,11 +1890,16 @@ export const useApp = create<AppStore>((set, get) => ({
       if (raw) {
         const parsed = JSON.parse(raw) as ThemePrefs;
         const merged = { ...DEFAULT_THEME, ...parsed };
-        set({ theme: merged });
+        set({ theme: merged, themeLoaded: true });
         applyThemeToDom(merged);
         return;
       }
+      // No row yet — the defaults on screen are the truth, and writing them is
+      // safe from here on.
+      set({ themeLoaded: true });
     } catch (e) {
+      // Left *unloaded* on purpose: a read that failed says nothing about what
+      // is stored, and `setTheme` refuses rather than overwriting it blind.
       console.warn("failed to load theme", e);
     }
     applyThemeToDom(DEFAULT_THEME);
@@ -1913,10 +1927,14 @@ export const useApp = create<AppStore>((set, get) => ({
         // otherwise keep sizing the interface until the first settings write.
         applyAppSettingsToDom(DEFAULT_APP_SETTINGS);
       }
-    } catch (e) {
-      console.warn("failed to load app settings", e);
-    } finally {
       set({ appSettingsLoaded: true });
+    } catch (e) {
+      // Left unloaded on purpose (0.17.5). `appSettingsLoaded` is read as "it
+      // is safe to write" — by the seeding passes in App as well as by
+      // `setAppSettings` — and a read that failed says nothing about what is
+      // stored. Marking it loaded after a failure is how defaults get written
+      // over a real settings row.
+      console.warn("failed to load app settings", e);
     }
   },
   async setAppSettings(partial) {
@@ -1931,6 +1949,22 @@ export const useApp = create<AppStore>((set, get) => ({
       const raw = await api.getSetting("app_settings");
       if (raw) saved = JSON.parse(raw) as Partial<AppSettings>;
     } catch (e) {
+      // A failed re-read used to fall back to in-memory state unconditionally,
+      // which is only safe once the load has actually happened. Before that,
+      // in-memory state *is* DEFAULT_APP_SETTINGS, and writing it back is not a
+      // no-op — it is an erase. That is how a phone whose settings read was
+      // failing (0.17.5, an envelope the transport did not unwrap) wiped
+      // dictation, appearance and every smaller preference off the desktop.
+      //
+      // So: refuse. There is nothing safe to merge against, and a preference
+      // that did not save is a far smaller problem than a preference file
+      // replaced by its defaults.
+      if (!get().appSettingsLoaded) {
+        throw new Error(
+          "settings could not be read back, so nothing was changed — " +
+            (e instanceof Error ? e.message : String(e)),
+        );
+      }
       console.warn("failed to re-read app settings before write", e);
       saved = get().appSettings;
     }

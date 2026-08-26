@@ -228,6 +228,18 @@ pub const ROUTES: &[RouteDef] = &[
 #[allow(dead_code)] // Read by the drift test, and by anyone deciding where a new command belongs.
 pub enum Coverage {
     /// Reachable at this `METHOD /path`, which must appear in [`ROUTES`].
+    ///
+    /// A trailing `-> field` says the route answers with the command's value
+    /// **wrapped in a one-key object** — `GET /api/settings/:key` returns
+    /// `{"key":…,"value":…}` where the command returns the string itself.
+    ///
+    /// That difference is not cosmetic and it is not theoretical. Until 0.17.5
+    /// nothing wrote it down, so the remote transport handed the envelope
+    /// straight to `JSON.parse`, every settings read on a phone threw, and the
+    /// store fell back to its defaults — then wrote those defaults back over the
+    /// desktop's saved settings on the next change. The envelope is worth
+    /// keeping for anyone reading the API by hand; what was missing was saying
+    /// so somewhere both halves can read.
     Route(&'static str),
     /// Deliberately not exposed, and why. A reason rather than a flag, because
     /// "we didn't get to it" and "this cannot mean anything remotely" are
@@ -236,6 +248,21 @@ pub enum Coverage {
 }
 
 use Coverage::{GuiOnly, Route};
+
+/// Split a `Route` spec into the route itself and the field the response wraps
+/// the value in, if any.
+///
+/// `"GET /api/settings/:key -> value"` is `("GET /api/settings/:key",
+/// Some("value"))`. Both the `every_claimed_route_exists` test and
+/// `scripts/gen-route-map.mjs` read specs through the same split, so the
+/// annotation cannot drift from the route it annotates.
+#[allow(dead_code)]
+pub fn route_spec(spec: &str) -> (&str, Option<&str>) {
+    match spec.split_once(" -> ") {
+        Some((route, field)) => (route.trim(), Some(field.trim())),
+        None => (spec.trim(), None),
+    }
+}
 
 /// Every Tauri command, paired with its route or its exemption.
 ///
@@ -273,7 +300,7 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("chats::delete_chat", Route("DELETE /api/chats/:id")),
     ("chats::get_messages", Route("GET /api/chats/:id/messages")),
     ("chats::rename_chat", Route("POST /api/chats/:id/title")),
-    ("chats::generate_title", Route("POST /api/chats/:id/generate-title")),
+    ("chats::generate_title", Route("POST /api/chats/:id/generate-title -> title")),
     ("chats::set_chat_zone", Route("POST /api/chats/:id/zone")),
     ("chats::set_chat_smart", Route("POST /api/chats/:id/smart")),
     ("messages::set_chat_spend_limit", Route("POST /api/chats/:id/spend-limit")),
@@ -314,7 +341,7 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("messages::update_message", Route("PATCH /api/chats/:id/messages/:messageId")),
     ("messages::list_tool_functions", Route("GET /api/tools")),
     ("pending::queue_chat_message", Route("POST /api/chats/:id/queue")),
-    ("pending::cancel_pending_message", Route("DELETE /api/chats/:id/queue/:messageId")),
+    ("pending::cancel_pending_message", Route("DELETE /api/chats/:id/queue/:messageId -> removed")),
     ("diagram::fix_diagram", Route("POST /api/chats/:id/fix-diagram")),
 
     ("checkpoints::list_checkpoints", Route("GET /api/chats/:id/checkpoints")),
@@ -337,7 +364,7 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("skills::delete_skill", Route("DELETE /api/skills/:id")),
     ("skills::set_skill_enabled", Route("POST /api/skills/:id/enabled")),
     ("skills::list_skill_packs", Route("GET /api/skill-packs")),
-    ("skills::skill_packs_root", Route("GET /api/skill-packs/root")),
+    ("skills::skill_packs_root", Route("GET /api/skill-packs/root -> root")),
     ("memory::list_memories", Route("GET /api/memories")),
     ("memory::upsert_memory", Route("POST /api/memories")),
     ("memory::delete_memory", Route("DELETE /api/memories/:id")),
@@ -346,9 +373,9 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("mcp::delete_mcp_server", Route("DELETE /api/mcp/servers/:id")),
     ("mcp::connect_mcp_server", Route("POST /api/mcp/servers/:id/connect")),
     ("mcp::list_mcp_resources", Route("GET /api/mcp/servers/:id/resources")),
-    ("mcp::read_mcp_resource", Route("POST /api/mcp/servers/:id/resources/read")),
+    ("mcp::read_mcp_resource", Route("POST /api/mcp/servers/:id/resources/read -> text")),
     ("mcp::list_mcp_prompts", Route("GET /api/mcp/servers/:id/prompts")),
-    ("mcp::get_mcp_prompt", Route("POST /api/mcp/servers/:id/prompts/get")),
+    ("mcp::get_mcp_prompt", Route("POST /api/mcp/servers/:id/prompts/get -> text")),
     ("mcp::disconnect_mcp_server", Route("POST /api/mcp/servers/:id/disconnect")),
     ("mcp::set_mcp_tool_danger", Route("POST /api/mcp/tools/:toolId/danger")),
     ("connectors::list_connectors", Route("GET /api/connectors")),
@@ -376,9 +403,9 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("usage::lifetime_token_usage", Route("GET /api/usage")),
     ("usage::session_context_usage", Route("GET /api/chats/:id/usage")),
     ("settings::get_db_stats", Route("GET /api/stats")),
-    ("settings::get_setting", Route("GET /api/settings/:key")),
+    ("settings::get_setting", Route("GET /api/settings/:key -> value")),
     ("settings::set_setting", Route("PUT /api/settings/:key")),
-    ("mirror::mirror_all_chats", Route("POST /api/mirror")),
+    ("mirror::mirror_all_chats", Route("POST /api/mirror -> mirrored")),
     ("mirror::import_chat_from_markdown", Route("POST /api/mirror/import")),
 
     // ── Deliberately GUI-only ────────────────────────────────────────────────
@@ -1782,7 +1809,7 @@ pub async fn transcribe_upload(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
 
     /// `ROUTES` is what `GET /api/routes` serves and what `COVERAGE` points at,
     /// so a duplicate entry would make both ambiguous.
@@ -1806,11 +1833,22 @@ mod tests {
         let known: HashSet<String> =
             ROUTES.iter().map(|d| format!("{} {}", d.method, d.path)).collect();
         for (command, coverage) in COVERAGE {
-            if let Route(path) = coverage {
+            if let Route(spec) = coverage {
+                let (path, unwrap) = route_spec(spec);
                 assert!(
-                    known.contains(*path),
+                    known.contains(path),
                     "{command} claims `{path}`, which is not in ROUTES",
                 );
+                // An unwrap field becomes a JSON key in the generated map and a
+                // property lookup in the transport, so anything that is not a
+                // plain identifier is a typo that would silently unwrap nothing.
+                if let Some(field) = unwrap {
+                    assert!(
+                        !field.is_empty()
+                            && field.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
+                        "{command} unwraps `{field}`, which is not a plain field name",
+                    );
+                }
             }
         }
     }
@@ -1873,6 +1911,104 @@ mod tests {
         let stale: Vec<&str> =
             COVERAGE.iter().map(|(n, _)| *n).filter(|n| !live.contains(n)).collect();
         assert!(stale.is_empty(), "COVERAGE names commands that no longer exist: {stale:?}");
+    }
+
+    /// **The response-shape drift test (0.17.5).**
+    ///
+    /// A route can name the right command, take the right arguments, and still
+    /// hand back something the caller cannot use. `GET /api/settings/:key`
+    /// answers `{"key":…,"value":…}` where the command returns the value
+    /// itself, and for four releases nothing said so: the remote transport
+    /// parsed the envelope as if it were the setting, every settings read from
+    /// a phone threw, and the store quietly fell back to its defaults — then
+    /// persisted those defaults over the desktop's real settings on the next
+    /// write. Appearance, dictation and a dozen smaller preferences were
+    /// erased by a shape mismatch no test had an opinion about.
+    ///
+    /// So this reads the handlers themselves. Any handler that returns a
+    /// one-key `json!({ "k": … })` envelope, and is wired to a route some
+    /// command claims, must carry `-> k` on that claim.
+    #[test]
+    fn one_key_envelopes_are_all_declared() {
+        let source = include_str!("routes.rs");
+        let router = include_str!("mod.rs");
+
+        // handler name → the keys of the object literal it answers with
+        let mut envelope: HashMap<&str, Vec<&str>> = HashMap::new();
+        let mut current: Option<&str> = None;
+        for line in source.lines() {
+            if let Some(rest) = line.strip_prefix("pub async fn ") {
+                current = rest.split('(').next();
+            }
+            let Some(handler) = current else { continue };
+            // Only the single-line form. A `json!` spread over several lines is
+            // a record being composed, not a value with a wrapper round it.
+            if !line.contains("json!({") || !line.contains("into_response()") {
+                continue;
+            }
+            let literal = &line[line.find("json!({").unwrap()..];
+            let keys: Vec<&str> = literal
+                .match_indices("\": ")
+                .filter_map(|(at, _)| {
+                    let before = &literal[..at];
+                    let open = before.rfind('"')?;
+                    Some(&before[open + 1..])
+                })
+                .collect();
+            if keys.is_empty() {
+                continue;
+            }
+            envelope.insert(handler, keys);
+        }
+        assert!(
+            envelope.contains_key("get_setting"),
+            "the envelope scanner found nothing where it is known to apply —              has routes.rs changed shape?",
+        );
+
+
+        // handler name → every `METHOD /path` it is mounted at
+        let mut mounted: HashMap<&str, Vec<String>> = HashMap::new();
+        for chunk in router.split(".route(").skip(1) {
+            let Some(open) = chunk.find('"') else { continue };
+            let Some(len) = chunk[open + 1..].find('"') else { continue };
+            let path = &chunk[open + 1..open + 1 + len];
+            let rest = &chunk[open + 1 + len..];
+            for method in ["get", "post", "put", "patch", "delete"] {
+                let needle = format!("{method}(h::");
+                let mut from = 0;
+                while let Some(at) = rest[from..].find(&needle) {
+                    let start = from + at + needle.len();
+                    let end = start
+                        + rest[start..]
+                            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                            .unwrap_or(0);
+                    mounted
+                        .entry(&rest[start..end])
+                        .or_default()
+                        .push(format!("{} {path}", method.to_uppercase()));
+                    from = end;
+                }
+            }
+        }
+
+        for (command, coverage) in COVERAGE {
+            let Route(spec) = coverage else { continue };
+            let (route, declared) = route_spec(spec);
+            for (handler, keys) in &envelope {
+                if !mounted.get(handler).is_some_and(|at| at.iter().any(|r| r == route)) {
+                    continue;
+                }
+                let Some(field) = declared else {
+                    panic!(
+                        "{command} is served by `{handler}`, which answers an object                          with the keys {keys:?} rather than the command's own value.                          Say which key holds it: `Route(\"{route} -> <key>\")`.",
+                    );
+                };
+                assert!(
+                    keys.contains(&field),
+                    "{command} unwraps `{field}`, which `{handler}` does not answer                      with — it has {keys:?}",
+                );
+            }
+        }
     }
 
     /// Every exemption gives a reason, and every route a description. Both are

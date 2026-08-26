@@ -13,6 +13,7 @@ import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import { HexColorField } from "@/components/common/ColorPicker";
 import { UpdateSection } from "@/components/Settings/UpdateSection";
 import { RemoteAccess } from "@/components/Settings/RemoteAccess";
+import { isRemote } from "@/lib/remote/transport";
 import { Toggle, ToggleRow } from "@/components/common/Toggle";
 import { PrivacyStatementLink } from "@/components/common/PrivacyStatement";
 import { InstalledZones, useZoneActions } from "@/components/Zones/InstalledZones";
@@ -50,6 +51,29 @@ function isTab(v: string | null): v is Tab {
   return !!v && (TAB_IDS as string[]).includes(v);
 }
 
+/**
+ * Settings that cannot be saved say so, once, at the top.
+ *
+ * Both loads are all-or-nothing: the store holds a whole settings object and a
+ * whole theme, and writes replace them. When a read has failed — an unreachable
+ * desktop, a transport that could not make sense of the answer — the store
+ * refuses to write rather than persisting its defaults over whatever is really
+ * stored. That refusal is right and completely invisible, so it gets a line.
+ */
+function UnsavableWarning() {
+  const settingsLoaded = useApp((s) => s.appSettingsLoaded);
+  const themeLoaded = useApp((s) => s.themeLoaded);
+  if (settingsLoaded && themeLoaded) return null;
+  return (
+    <div className="shrink-0 border-b border-[var(--color-danger)]/40 bg-[var(--color-danger)]/10 px-4 py-2 text-xs">
+      Your saved settings could not be read
+      {settingsLoaded !== themeLoaded ? " in full" : ""}, so changes here will not
+      stick — nothing is written over what is stored until the read succeeds. If
+      this is a phone, check that it can still reach your computer.
+    </div>
+  );
+}
+
 export function SettingsModal() {
   const closeSettings = useApp((s) => s.closeSettings);
   // Something outside Settings can say which tab to land on — the zone
@@ -60,6 +84,7 @@ export function SettingsModal() {
 
   return (
     <Modal onClose={closeSettings} header={<ModalTitle>Settings</ModalTitle>}>
+      <UnsavableWarning />
       <style>{`.input { width: 100%; border: 1px solid var(--color-border); border-radius: 4px; padding: 8px 12px; background: var(--color-panel); font-size: 13px; outline: none; } .input:focus { border-color: var(--color-accent); }`}</style>
         {/* A left rail of tabs is 176px the phone does not have (0.17.3). On a
             narrow screen the same buttons become one horizontally scrolling
@@ -488,7 +513,7 @@ function AppearanceTab() {
         {/* Two columns rather than three: each cell now carries an editable hex
             alongside its swatch, and a colour you can read is worth more than a
             grid one row shorter. */}
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 narrow:grid-cols-1 gap-2">
           {(Object.keys(THEME_COLOR_KEYS) as ThemeColorKey[]).map((key) => {
             const value = overrides[key] ?? base[key];
             const custom = !!overrides[key];
@@ -529,7 +554,7 @@ function AppearanceTab() {
 
       <section>
         <h3 className="mb-2 text-sm font-medium">Typography</h3>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-2 narrow:grid-cols-1 gap-4">
           <div>
             <div className="mb-1 text-xs text-[var(--color-text-muted)]">Font</div>
             <select
@@ -670,7 +695,7 @@ function AppearanceTab() {
 
       <section>
         <h3 className="mb-2 text-sm font-medium">Background effect</h3>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-2 narrow:grid-cols-1 gap-4">
           <div>
             <div className="mb-1 text-xs text-[var(--color-text-muted)]">Effect</div>
             <select
@@ -1464,18 +1489,32 @@ function VoiceTab() {
 
       <section>
         <h3 className="mb-1 text-sm font-medium">Input device</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Microphone used for dictation.
-        </p>
-        <SettingSelect
-          value={appSettings.sttInputDevice ?? ""}
-          onChange={(v) => setAppSettings({ sttInputDevice: v || null })}
-        >
-          <option value="">System default</option>
-          {voiceInputDevices.map((d) => (
-            <option key={d.name} value={d.name}>{d.name}</option>
-          ))}
-        </SettingSelect>
+        {isRemote() ? (
+          /* The list is the *desktop's* microphones, and a phone does not use
+             them: it records here and sends the audio over for your computer to
+             transcribe with the provider above. Offering the choice anyway
+             would be a picker that changes nothing. */
+          <p className="text-xs text-[var(--color-text-muted)]">
+            This device records with its own microphone and sends the audio to your computer to
+            transcribe — the provider and model above are the ones it uses. There is no live
+            preview while you speak; the transcript arrives when you stop.
+          </p>
+        ) : (
+          <>
+            <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+              Microphone used for dictation.
+            </p>
+            <SettingSelect
+              value={appSettings.sttInputDevice ?? ""}
+              onChange={(v) => setAppSettings({ sttInputDevice: v || null })}
+            >
+              <option value="">System default</option>
+              {voiceInputDevices.map((d) => (
+                <option key={d.name} value={d.name}>{d.name}</option>
+              ))}
+            </SettingSelect>
+          </>
+        )}
       </section>
 
       <section>
@@ -3387,7 +3426,7 @@ function KnowledgeTab() {
       {/* Default embedding provider + model */}
       <section>
         <div className="mb-1.5 text-xs font-medium">Default embedding model</div>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 narrow:grid-cols-1 gap-2">
           <label className="block">
             <div className="mb-1 text-[11px] text-[var(--color-text-muted)]">Provider</div>
             <select value={providerId ?? ""} onChange={(e) => setProviderId(e.target.value || null)} className="input">
@@ -4647,7 +4686,7 @@ function OptionCards<T extends string | number>({
   align?: "left" | "center";
 }) {
   return (
-    <div className={layout === "row" ? "flex gap-2" : "flex flex-col gap-2"}>
+    <div className={layout === "row" ? "flex flex-wrap gap-2" : "flex flex-col gap-2"}>
       {options.map(([val, label, description]) => (
         <button
           key={val}

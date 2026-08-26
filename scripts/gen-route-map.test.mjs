@@ -65,3 +65,33 @@ test("the coverage table is parsed, not merely matched", () => {
   assert.deepEqual(chat, { command: "list_chats", method: "GET", path: "/api/chats" });
   assert.ok(guiOnly.some((g) => g.command === "start_dictation"));
 });
+
+// The `-> field` annotation (0.17.5). A route that wraps the command's value in
+// a one-key object has to say so, or the transport hands the envelope to the
+// caller — which is how every settings read from a phone came back as
+// `{key, value}`, threw in `JSON.parse`, and left the store on its defaults.
+test("the unwrap annotation is parsed off the route, not into the path", () => {
+  const { routed } = parseCoverage(source);
+  const setting = routed.find((r) => r.command === "get_setting");
+  assert.deepEqual(setting, {
+    command: "get_setting",
+    method: "GET",
+    path: "/api/settings/:key",
+    unwrap: "value",
+  });
+  // And an unannotated route carries no key at all, so the transport's check is
+  // a plain absence rather than a sentinel.
+  assert.ok(!("unwrap" in routed.find((r) => r.command === "list_chats")));
+});
+
+// Every declared field is a plain identifier: it becomes a property lookup, and
+// a stray arrow or space would silently unwrap nothing.
+test("declared unwrap fields are plain field names", () => {
+  const { routed } = parseCoverage(source);
+  const annotated = routed.filter((r) => r.unwrap);
+  assert.ok(annotated.length > 0, "some routes wrap their value");
+  for (const r of annotated) {
+    assert.match(r.unwrap, /^[a-zA-Z_][a-zA-Z0-9_]*$/, `${r.command} unwraps "${r.unwrap}"`);
+    assert.ok(!r.path.includes(">"), `${r.command} kept the annotation in its path`);
+  }
+});

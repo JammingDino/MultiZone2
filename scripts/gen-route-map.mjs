@@ -53,8 +53,17 @@ export function parseCoverage(source) {
       guiOnly.push({ command, reason: value });
       continue;
     }
-    const space = value.indexOf(" ");
-    routed.push({ command, method: value.slice(0, space), path: value.slice(space + 1) });
+    // `METHOD /path` or `METHOD /path -> field`. The trailing field says the
+    // route answers with the value wrapped in a one-key object; see the
+    // `Coverage::Route` doc comment for the release that got away without it.
+    const [route, unwrap] = value.split(" -> ");
+    const space = route.indexOf(" ");
+    routed.push({
+      command,
+      method: route.slice(0, space),
+      path: route.slice(space + 1).trim(),
+      ...(unwrap ? { unwrap: unwrap.trim() } : {}),
+    });
   }
 
   if (routed.length < 80) {
@@ -97,11 +106,19 @@ export function render({ routed, guiOnly }) {
   lines.push("  method: string;");
   lines.push("  /** With `:param` placeholders, filled from the call's arguments. */");
   lines.push("  path: string;");
+  lines.push("  /**");
+  lines.push("   * The route answers `{ [unwrap]: value }` where the command returns the");
+  lines.push("   * value itself, so the transport reads this key back out.");
+  lines.push("   */");
+  lines.push("  unwrap?: string;");
   lines.push("}");
   lines.push("");
   lines.push("export const ROUTE_MAP: Record<string, RouteBinding> = {");
   for (const r of byCommand) {
-    lines.push(`  ${r.command}: { method: ${JSON.stringify(r.method)}, path: ${JSON.stringify(r.path)} },`);
+    const unwrap = r.unwrap ? `, unwrap: ${JSON.stringify(r.unwrap)}` : "";
+    lines.push(
+      `  ${r.command}: { method: ${JSON.stringify(r.method)}, path: ${JSON.stringify(r.path)}${unwrap} },`,
+    );
   }
   lines.push("};");
   lines.push("");

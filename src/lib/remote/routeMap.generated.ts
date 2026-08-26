@@ -10,6 +10,11 @@ export interface RouteBinding {
   method: string;
   /** With `:param` placeholders, filled from the call's arguments. */
   path: string;
+  /**
+   * The route answers `{ [unwrap]: value }` where the command returns the
+   * value itself, so the transport reads this key back out.
+   */
+  unwrap?: string;
 }
 
 export const ROUTE_MAP: Record<string, RouteBinding> = {
@@ -20,7 +25,7 @@ export const ROUTE_MAP: Record<string, RouteBinding> = {
   approve_plan: { method: "POST", path: "/api/plans/:id/approve" },
   arm_pairing: { method: "POST", path: "/api/pairing/arm" },
   branch_chat: { method: "POST", path: "/api/chats/:id/branch" },
-  cancel_pending_message: { method: "DELETE", path: "/api/chats/:id/queue/:messageId" },
+  cancel_pending_message: { method: "DELETE", path: "/api/chats/:id/queue/:messageId", unwrap: "removed" },
   cancel_stream: { method: "POST", path: "/api/chats/:id/cancel" },
   checkpoint_usage: { method: "GET", path: "/api/checkpoints/usage" },
   checkpoints_since_message: { method: "GET", path: "/api/chats/:id/checkpoints/since/:messageId" },
@@ -49,7 +54,7 @@ export const ROUTE_MAP: Record<string, RouteBinding> = {
   fetch_models: { method: "GET", path: "/api/providers/:id/models" },
   fix_diagram: { method: "POST", path: "/api/chats/:id/fix-diagram" },
   forget_paired_device: { method: "DELETE", path: "/api/devices/:id" },
-  generate_title: { method: "POST", path: "/api/chats/:id/generate-title" },
+  generate_title: { method: "POST", path: "/api/chats/:id/generate-title", unwrap: "title" },
   get_all_chat_tags: { method: "GET", path: "/api/chat-tags" },
   get_chat_subagents: { method: "GET", path: "/api/chats/:id/subagents" },
   get_chat_tags: { method: "GET", path: "/api/chats/:id/tags" },
@@ -57,9 +62,9 @@ export const ROUTE_MAP: Record<string, RouteBinding> = {
   get_db_stats: { method: "GET", path: "/api/stats" },
   get_global_kb: { method: "GET", path: "/api/knowledge" },
   get_knowledge_status: { method: "GET", path: "/api/projects/:id/knowledge" },
-  get_mcp_prompt: { method: "POST", path: "/api/mcp/servers/:id/prompts/get" },
+  get_mcp_prompt: { method: "POST", path: "/api/mcp/servers/:id/prompts/get", unwrap: "text" },
   get_messages: { method: "GET", path: "/api/chats/:id/messages" },
-  get_setting: { method: "GET", path: "/api/settings/:key" },
+  get_setting: { method: "GET", path: "/api/settings/:key", unwrap: "value" },
   get_subchat_tree: { method: "GET", path: "/api/chats/:id/subchats" },
   get_tool_usage: { method: "GET", path: "/api/tool-usage" },
   import_chat_from_markdown: { method: "POST", path: "/api/mirror/import" },
@@ -91,7 +96,7 @@ export const ROUTE_MAP: Record<string, RouteBinding> = {
   list_tags: { method: "GET", path: "/api/tags" },
   list_tool_functions: { method: "GET", path: "/api/tools" },
   list_zones: { method: "GET", path: "/api/zones" },
-  mirror_all_chats: { method: "POST", path: "/api/mirror" },
+  mirror_all_chats: { method: "POST", path: "/api/mirror", unwrap: "mirrored" },
   open_pairing: { method: "POST", path: "/api/pairing" },
   pairing_status: { method: "GET", path: "/api/pairing" },
   pending_approvals: { method: "GET", path: "/api/approvals" },
@@ -99,7 +104,7 @@ export const ROUTE_MAP: Record<string, RouteBinding> = {
   plan_tree: { method: "GET", path: "/api/chats/:id/plan-tree" },
   prune_checkpoints: { method: "POST", path: "/api/checkpoints/prune" },
   queue_chat_message: { method: "POST", path: "/api/chats/:id/queue" },
-  read_mcp_resource: { method: "POST", path: "/api/mcp/servers/:id/resources/read" },
+  read_mcp_resource: { method: "POST", path: "/api/mcp/servers/:id/resources/read", unwrap: "text" },
   regenerate_participant: { method: "POST", path: "/api/chats/:id/regenerate-participant" },
   regenerate_response: { method: "POST", path: "/api/chats/:id/regenerate" },
   reject_plan: { method: "POST", path: "/api/plans/:id/reject" },
@@ -138,7 +143,7 @@ export const ROUTE_MAP: Record<string, RouteBinding> = {
   set_project_kb_default: { method: "POST", path: "/api/projects/:id/knowledge/default" },
   set_setting: { method: "PUT", path: "/api/settings/:key" },
   set_skill_enabled: { method: "POST", path: "/api/skills/:id/enabled" },
-  skill_packs_root: { method: "GET", path: "/api/skill-packs/root" },
+  skill_packs_root: { method: "GET", path: "/api/skill-packs/root", unwrap: "root" },
   transcribe_audio_upload: { method: "POST", path: "/api/transcribe" },
   update_message: { method: "PATCH", path: "/api/chats/:id/messages/:messageId" },
   update_plan_steps: { method: "POST", path: "/api/plans/:id/steps" },

@@ -1,6 +1,7 @@
 import { X } from "lucide-react";
 import type { ReactNode } from "react";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
+import { useBackDismiss } from "@/lib/useBackDismiss";
 import { CHROME_QUIET } from "@/lib/chrome";
 
 /**
@@ -55,6 +56,10 @@ export function Modal({
   // Escape closes the modal — or, if a popover inside it is open, that popover
   // first (see useDismissOnEscape).
   useDismissOnEscape(true, onClose);
+  // And the phone's back gesture does the same thing, for the same layer. Every
+  // modal in the app goes through this component, so this one line is what
+  // makes back work in Settings, the zone editor and the rest of them.
+  useBackDismiss(true, onClose);
 
   return (
     <div

@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useApp } from "@/store/app";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
+import { useBackDismiss } from "@/lib/useBackDismiss";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import * as api from "@/lib/tauri";
 
@@ -92,6 +93,7 @@ export function CommandPalette() {
   const activeChatId = useApp((s) => s.activeChatId);
 
   useDismissOnEscape(open, close);
+  useBackDismiss(open, close);
 
   // A palette always opens empty — it is a fresh question every time, and a
   // stale query is one the user has to clear before they can start.

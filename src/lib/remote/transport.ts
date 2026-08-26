@@ -36,6 +36,7 @@ import {
   normalizeBaseUrl,
   parsePairingLink,
   STREAMING,
+  unwrapValue,
 } from "./mapping";
 import {
   activate,
@@ -130,6 +131,26 @@ export function retryNow() {
   if (!session) return;
   closeEventStream();
   ensureEventStream();
+}
+
+/**
+ * Reconnect on the two signals that mean "the situation just changed".
+ *
+ * A phone spends most of its life with the screen off, and the backoff is
+ * measured from the last failure, not from the moment somebody picked it up.
+ * Without this, unlocking the phone showed a stale screen and a spinner until a
+ * timer that had been running while it was in a pocket happened to come round
+ * — which is exactly the "sits there reconnecting for ages" the retry button
+ * was added to work around. It should not need a button.
+ */
+if (typeof window !== "undefined") {
+  const wake = () => {
+    if (!session || connectionState === "live") return;
+    if (document.visibilityState === "hidden") return;
+    retryNow();
+  };
+  window.addEventListener("online", wake);
+  document.addEventListener("visibilitychange", wake);
 }
 
 // ─── Pairing ─────────────────────────────────────────────────────────────────
@@ -259,8 +280,9 @@ export async function invoke<T>(command: string, args: Record<string, any> = {})
 
   const parsed = await readBody(res);
   if (!res.ok) throw new Error(errorMessage(parsed, res.status));
-  return parsed as T;
+  return unwrapValue(binding, parsed) as T;
 }
+
 
 async function readBody(res: Response): Promise<unknown> {
   if (res.status === 204) return undefined;
@@ -338,7 +360,13 @@ function closeEventStream() {
   streamController?.abort();
   streamController = null;
   streamStarted = false;
-  handlers.clear();
+  // Deliberately *not* clearing `handlers` (0.17.5). Until this release it did,
+  // which was a quiet disaster: `listen` is called once from a React effect that
+  // does not re-run when a connection is retried or switched, so dropping the
+  // registrations left the app permanently deaf to a stream it had successfully
+  // reconnected. Tapping "Try again" made the phone stop updating for good.
+  // Listeners belong to the components that registered them and outlive any one
+  // connection; only the socket is torn down here.
   setConnectionState("connecting");
 }
 
@@ -356,20 +384,36 @@ function ensureEventStream() {
   void runEventStream();
 }
 
+/**
+ * How long to wait for the desktop to answer before calling it unreachable.
+ *
+ * A phone on Wi-Fi with no route to the address does not get a refusal, it gets
+ * silence, and the platform's own TCP timeout is over a minute. That minute was
+ * spent showing "Reconnecting…", which is indistinguishable from a hang. Eight
+ * seconds is far longer than any answer on a LAN and short enough that the
+ * banner can say something true while the person is still holding the phone.
+ */
+const CONNECT_TIMEOUT_MS = 8000;
+
 async function runEventStream() {
   // Backs off on repeated failure — a desktop that is asleep is the expected
-  // case, not an error to hammer at. Capped, so waking it up is noticed within
-  // half a minute rather than whenever the backoff happens to come round.
+  // case, not an error to hammer at. The cap is ten seconds rather than thirty:
+  // the common reason a phone is retrying is that its owner is walking towards
+  // the machine, and `wake()` above covers the pocket case.
   let delay = 1000;
 
   while (streamStarted && session) {
     const controller = new AbortController();
     streamController = controller;
+    // Only the *connect* is deadlined. Once the headers are in, the stream is
+    // meant to stay open for hours with nothing but keep-alives on it.
+    const deadline = setTimeout(() => controller.abort(), CONNECT_TIMEOUT_MS);
     try {
       const res = await fetch(`${session.baseUrl}/api/events`, {
         headers: { Authorization: `Bearer ${session.token}`, Accept: "text/event-stream" },
         signal: controller.signal,
       });
+      clearTimeout(deadline);
       if (res.status === 401) {
         // Revoked, or the desktop's database was replaced. Either way this
         // device is not paired any more, and retrying forever would show a
@@ -393,11 +437,13 @@ async function runEventStream() {
       // Includes the ordinary case of the connection being closed by a router,
       // a sleeping laptop, or a Wi-Fi handover.
       setConnectionState("offline");
+    } finally {
+      clearTimeout(deadline);
     }
 
     if (!streamStarted) return;
     await sleep(delay);
-    delay = Math.min(delay * 2, 30_000);
+    delay = Math.min(delay * 2, 10_000);
   }
 }
 

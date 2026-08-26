@@ -18,6 +18,7 @@ import {
   normalizeBaseUrl,
   parsePairingLink,
   singularId,
+  unwrapValue,
 } from "../src/lib/remote/mapping.ts";
 import { ROUTE_MAP, GUI_ONLY } from "../src/lib/remote/routeMap.generated.ts";
 
@@ -229,4 +230,38 @@ test("an error reads the way a Tauri command's would", () => {
   assert.equal(errorMessage({ error: "no chat abc" }, 404), "no chat abc");
   assert.match(errorMessage(undefined, 401), /no longer paired/);
   assert.equal(errorMessage(undefined, 500), "The desktop answered 500.");
+});
+
+// ─── unwrapValue ─────────────────────────────────────────────────────────────
+//
+// The bug this exists to prevent, stated as tests. `GET /api/settings/:key`
+// answers `{"key":"app_settings","value":"{…}"}` where the command returns the
+// string; until 0.17.5 the transport passed the envelope through, `JSON.parse`
+// threw on it, and the store silently fell back to defaults — and then wrote
+// those defaults over the desktop's real settings.
+
+test("an annotated route hands back the value, not the envelope", () => {
+  const binding = { method: "GET", path: "/api/settings/:key", unwrap: "value" };
+  assert.equal(unwrapValue(binding, { key: "theme", value: '{"mode":"dark"}' }), '{"mode":"dark"}');
+});
+
+test("an unset setting unwraps to null rather than to the envelope", () => {
+  // `{"value": null}` is a real answer — the row does not exist — and has to be
+  // distinguishable from "this route does not wrap anything".
+  const binding = { method: "GET", path: "/api/settings/:key", unwrap: "value" };
+  assert.equal(unwrapValue(binding, { key: "theme", value: null }), null);
+});
+
+test("a route with no annotation is passed through untouched", () => {
+  const body = { id: "c1", title: "hello" };
+  assert.equal(unwrapValue({ method: "GET", path: "/api/chats/:id" }, body), body);
+});
+
+test("an answer that is not an object survives an annotation", () => {
+  // Defensive: a route that changes shape should not turn its answer into
+  // `undefined` on the way through.
+  const binding = { method: "POST", path: "/api/mirror", unwrap: "mirrored" };
+  assert.equal(unwrapValue(binding, 7), 7);
+  assert.equal(unwrapValue(binding, null), null);
+  assert.deepEqual(unwrapValue(binding, { other: 1 }), { other: 1 });
 });

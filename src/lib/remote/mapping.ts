@@ -18,6 +18,9 @@
 export interface RouteBinding {
   method: string;
   path: string;
+  /** The route answers `{ [unwrap]: value }` where the command returns the
+   *  value itself. Declared in `COVERAGE`; see `unwrapValue`. */
+  unwrap?: string;
 }
 
 /** Commands whose route answers with a stream rather than a value. */
@@ -196,4 +199,30 @@ export function buildRequest(
     return { method, url: url.toString(), body: JSON.stringify(leftovers) };
   }
   return { method, url: url.toString(), body: JSON.stringify(leftovers) };
+}
+
+/**
+ * Take the value back out of a one-key envelope.
+ *
+ * Some routes answer `{"key":…,"value":…}` where the command returns the value
+ * itself — good for a person reading the API by hand, wrong for a drop-in
+ * `invoke`. Which routes, and under which key, is declared in `COVERAGE` and
+ * generated into the map, so this is a lookup rather than a list of special
+ * cases; a Rust test fails the build if a handler wraps something and does not
+ * say so.
+ *
+ * Worth the paragraph because of what it cost. `get_setting` was unwrapped by
+ * nobody until 0.17.5: `JSON.parse` was handed `[object Object]`, threw, and
+ * the store fell back to defaults — then wrote those defaults back over the
+ * desktop's saved settings the next time anything changed. A shape mismatch in
+ * one route erased appearance, dictation and every smaller preference.
+ */
+export function unwrapValue(binding: RouteBinding, parsed: unknown): unknown {
+  const key = binding.unwrap;
+  if (!key || parsed === null || typeof parsed !== "object") return parsed;
+  // `in` rather than a truthiness check: `{"value": null}` means the setting is
+  // unset, and that is a real answer the caller has to be allowed to see.
+  return key in (parsed as Record<string, unknown>)
+    ? (parsed as Record<string, unknown>)[key]
+    : parsed;
 }

@@ -25,7 +25,7 @@ import {
   X,
 } from "lucide-react";
 import * as api from "@/lib/tauri";
-import { isRemote } from "@/lib/remote/transport";
+import { currentSession, disconnect, isRemote } from "@/lib/remote/transport";
 import { useApp } from "@/store/app";
 import { Toggle, ToggleRow } from "@/components/common/Toggle";
 import type { PairedDevice, PairingView, RemoteStatus } from "@/lib/types";
@@ -41,6 +41,44 @@ export interface RemoteAccessProps {
     apiDiscovery?: boolean;
   }) => Promise<void>;
   busy: boolean;
+}
+
+/**
+ * The way back to the list of computers (0.17.5).
+ *
+ * Pairing was a one-way door: the connection screen was what a phone showed
+ * *until* it had a computer, and once it had one there was no route back to it
+ * short of clearing the app's data. That is fine right up until the laptop you
+ * paired with is not the one you want, or the address it is saved under has
+ * changed — and then the app has no answer at all.
+ *
+ * It lives here, at the top of the panel named after the thing it undoes, and
+ * it is careful to say that switching keeps the pairing: "disconnect" reads
+ * like a revocation, and this is nothing of the sort. Revoking is the button
+ * further down the same screen, which is the one that needs the confirmation.
+ */
+function ThisConnection() {
+  const session = currentSession();
+  if (!session) return null;
+  return (
+    <section className="mb-5 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+      <h3 className="mb-1 text-sm font-medium">This connection</h3>
+      <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+        Paired with <span className="font-mono">{session.baseUrl}</span> as{" "}
+        <span className="text-[var(--color-text)]">{session.deviceName}</span>.
+      </p>
+      <button
+        onClick={() => disconnect()}
+        className="mz-tap rounded border border-[var(--color-border)] px-3 py-1.5 text-xs"
+      >
+        Switch computer
+      </button>
+      <p className="mt-1.5 text-[11px] text-[var(--color-text-muted)]">
+        Goes back to your saved computers. This device stays paired with all of them — nothing is
+        revoked and no code is needed to come back.
+      </p>
+    </section>
+  );
 }
 
 export function RemoteAccess({ apply, busy }: RemoteAccessProps) {
@@ -98,6 +136,7 @@ export function RemoteAccess({ apply, busy }: RemoteAccessProps) {
 
   return (
     <>
+      {readOnly && <ThisConnection />}
       <section>
         <h3 className="mb-1 text-sm font-medium">Remote access</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">

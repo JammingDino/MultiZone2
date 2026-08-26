@@ -25,6 +25,7 @@ import { seedDefaultSkills, SKILL_SEED_VERSION } from "./lib/defaultSkills";
 import { resolveBaseProvider } from "./lib/baseZone";
 import * as api from "./lib/tauri";
 import { installPerfHandle, mark, markInteractive } from "./lib/perf";
+import { useBackDismiss } from "./lib/useBackDismiss";
 
 /**
  * The sidebar, positioned for the window it is in.
@@ -38,6 +39,10 @@ function SidebarSlot() {
   const narrow = useIsNarrow();
   const sidebarOpen = useApp((s) => s.sidebarOpen);
   const setSidebarOpen = useApp((s) => s.setSidebarOpen);
+
+  // Back closes the drawer before it does anything else — the same expectation
+  // as tapping the backdrop, on the control people reach for first.
+  useBackDismiss(narrow && sidebarOpen, () => setSidebarOpen(false));
 
   if (!narrow || !sidebarOpen) return <Sidebar />;
 

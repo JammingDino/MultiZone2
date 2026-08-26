@@ -1,6 +1,7 @@
 import { X } from "lucide-react";
 import type { ReactNode } from "react";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
+import { useBackDismiss } from "@/lib/useBackDismiss";
 import { CHROME_QUIET } from "@/lib/chrome";
 
 /**
@@ -10,6 +11,17 @@ import { CHROME_QUIET } from "@/lib/chrome";
  * be written at individually, so nothing reflows into less room than it had.
  */
 const WORKSPACE_SIZE = "h-[700px] w-[980px]";
+
+/**
+ * On a phone the workspace size is not a size, it is the screen (0.17.3).
+ *
+ * A 980×700 panel inside a 360×800 viewport was clamped to `max-w-[96vw]` and
+ * then had its contents laid out for the width it asked for, so every panel
+ * scrolled sideways under a floating rounded card. Full-bleed, square corners,
+ * no backdrop gap: the modal *is* the screen, which is also what a phone user
+ * expects a settings screen to be.
+ */
+const MOBILE_SIZE = "narrow:h-full narrow:max-h-full narrow:w-full narrow:max-w-full narrow:rounded-none narrow:border-0";
 
 /**
  * Shared modal shell (0.7.3 consistency pass). Standardises the overlay, panel
@@ -44,14 +56,18 @@ export function Modal({
   // Escape closes the modal — or, if a popover inside it is open, that popover
   // first (see useDismissOnEscape).
   useDismissOnEscape(true, onClose);
+  // And the phone's back gesture does the same thing, for the same layer. Every
+  // modal in the app goes through this component, so this one line is what
+  // makes back work in Settings, the zone editor and the rest of them.
+  useBackDismiss(true, onClose);
 
   return (
     <div
-      className="mz-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      className="mz-overlay mz-safe-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60"
       onClick={onClose}
     >
       <div
-        className={`flex max-h-[94vh] max-w-[96vw] flex-col rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] shadow-2xl ${size === "workspace" ? WORKSPACE_SIZE : ""} ${className}`}
+        className={`flex max-h-[94vh] max-w-[96vw] flex-col rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] shadow-2xl ${MOBILE_SIZE} ${size === "workspace" ? WORKSPACE_SIZE : ""} ${className}`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border)] px-5">

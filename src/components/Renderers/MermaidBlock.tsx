@@ -663,7 +663,7 @@ function MermaidViewport({ svg }: { svg: string }) {
       {fullscreen &&
         createPortal(
           <div
-            className="fixed inset-0 z-50 flex bg-black/70 p-4 backdrop-blur-sm"
+            className="mz-safe-overlay fixed inset-0 z-50 flex bg-black/70 p-4 backdrop-blur-sm"
             onClick={(e) => {
               // Click the backdrop to leave; a click that lands on the frame
               // (including a pan that ends outside it) does not.

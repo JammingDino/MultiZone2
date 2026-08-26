@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { X, Plus, Trash2, RefreshCw, Server, Palette, MessageSquare, Database, AlertTriangle, Loader2, Folder, FolderOpen, Globe, Copy, Check, Brain, Sparkles, FileUp, FileDown, Plug, Wifi, WifiOff, Library, Layers, ChevronDown, ChevronRight, Mic, Volume2, AudioLines, Stethoscope, ExternalLink, Download, Search } from "lucide-react";
+import { X, Plus, Trash2, RefreshCw, Server, Smartphone, Palette, MessageSquare, Database, AlertTriangle, Loader2, Folder, FolderOpen, Globe, Copy, Check, Brain, Sparkles, FileUp, FileDown, Plug, Wifi, WifiOff, Library, Layers, ChevronDown, ChevronRight, Mic, Volume2, AudioLines, Stethoscope, ExternalLink, Download, Search } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useApp } from "@/store/app";
 import type { BackgroundEffect, GlassStyle, ThemeColorKey } from "@/store/app";
@@ -12,6 +12,8 @@ import { Modal, ModalTitle } from "@/components/common/Modal";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import { HexColorField } from "@/components/common/ColorPicker";
 import { UpdateSection } from "@/components/Settings/UpdateSection";
+import { RemoteAccess } from "@/components/Settings/RemoteAccess";
+import { isRemote } from "@/lib/remote/transport";
 import { Toggle, ToggleRow } from "@/components/common/Toggle";
 import { PrivacyStatementLink } from "@/components/common/PrivacyStatement";
 import { InstalledZones, useZoneActions } from "@/components/Zones/InstalledZones";
@@ -33,20 +35,43 @@ import type { ApiBindState, ApprovalCategory, ApprovalPolicy, CheckpointUsage, C
 import { formatBytes, formatCount, formatTokens } from "@/lib/format";
 import { PRIMARY_ACTION } from "@/lib/chrome";
 
-type Tab = "providers" | "zones" | "appearance" | "chat" | "voice" | "speech" | "skills" | "mcp" | "knowledge" | "memory" | "api" | "data";
+type Tab = "providers" | "zones" | "appearance" | "chat" | "voice" | "speech" | "skills" | "mcp" | "knowledge" | "memory" | "remote" | "api" | "data";
 
-const TAB_IDS: Tab[] = ["providers", "zones", "appearance", "chat", "voice", "speech", "skills", "mcp", "knowledge", "memory", "api", "data"];
+const TAB_IDS: Tab[] = ["providers", "zones", "appearance", "chat", "voice", "speech", "skills", "mcp", "knowledge", "memory", "remote", "api", "data"];
 
 /** The nav label for each tab, reused when a tab fails to render so the message
  * names the screen the user actually clicked. */
 const TAB_LABELS: Record<Tab, string> = {
   providers: "Providers", zones: "Zones", appearance: "Appearance", chat: "Chat",
   voice: "Dictation", speech: "Speech", skills: "Skills", mcp: "MCP",
-  knowledge: "Knowledge", memory: "Memory", api: "API", data: "Data",
+  knowledge: "Knowledge", memory: "Memory", remote: "Phone & remote", api: "API", data: "Data",
 };
 
 function isTab(v: string | null): v is Tab {
   return !!v && (TAB_IDS as string[]).includes(v);
+}
+
+/**
+ * Settings that cannot be saved say so, once, at the top.
+ *
+ * Both loads are all-or-nothing: the store holds a whole settings object and a
+ * whole theme, and writes replace them. When a read has failed — an unreachable
+ * desktop, a transport that could not make sense of the answer — the store
+ * refuses to write rather than persisting its defaults over whatever is really
+ * stored. That refusal is right and completely invisible, so it gets a line.
+ */
+function UnsavableWarning() {
+  const settingsLoaded = useApp((s) => s.appSettingsLoaded);
+  const themeLoaded = useApp((s) => s.themeLoaded);
+  if (settingsLoaded && themeLoaded) return null;
+  return (
+    <div className="shrink-0 border-b border-[var(--color-danger)]/40 bg-[var(--color-danger)]/10 px-4 py-2 text-xs">
+      Your saved settings could not be read
+      {settingsLoaded !== themeLoaded ? " in full" : ""}, so changes here will not
+      stick — nothing is written over what is stored until the read succeeds. If
+      this is a phone, check that it can still reach your computer.
+    </div>
+  );
 }
 
 export function SettingsModal() {
@@ -59,9 +84,15 @@ export function SettingsModal() {
 
   return (
     <Modal onClose={closeSettings} header={<ModalTitle>Settings</ModalTitle>}>
+      <UnsavableWarning />
       <style>{`.input { width: 100%; border: 1px solid var(--color-border); border-radius: 4px; padding: 8px 12px; background: var(--color-panel); font-size: 13px; outline: none; } .input:focus { border-color: var(--color-accent); }`}</style>
-        <div className="flex flex-1 overflow-hidden">
-          <nav className="flex w-44 flex-col gap-0.5 overflow-y-auto border-r border-[var(--color-border)] p-2 text-sm">
+        {/* A left rail of tabs is 176px the phone does not have (0.17.3). On a
+            narrow screen the same buttons become one horizontally scrolling
+            strip along the top — the tab list is the one part of Settings that
+            has to stay reachable from every panel, and a strip keeps it visible
+            without a second navigation concept to learn. */}
+        <div className="flex flex-1 overflow-hidden narrow:flex-col">
+          <nav className="flex w-44 flex-col gap-0.5 overflow-y-auto border-r border-[var(--color-border)] p-2 text-sm narrow:w-full narrow:flex-none narrow:flex-row narrow:overflow-x-auto narrow:overflow-y-hidden narrow:border-r-0 narrow:border-b">
             <NavGroup label="Models" />
             <TabButton active={tab === "providers"} icon={<Server size={14} />} label="Providers" onClick={() => setTab("providers")} />
             <TabButton active={tab === "zones"} icon={<Layers size={14} />} label="Zones" onClick={() => setTab("zones")} />
@@ -79,6 +110,12 @@ export function SettingsModal() {
             <TabButton active={tab === "mcp"} icon={<Plug size={14} />} label="MCP" onClick={() => setTab("mcp")} />
 
             <NavGroup label="System" />
+            {/* Above API, and its own tab (0.17.3). It was a section inside the
+                API panel, which is where it was *built* rather than where
+                anybody would look for it: someone connecting a phone is not
+                thinking about REST, and the two have different audiences even
+                though they share a socket. */}
+            <TabButton active={tab === "remote"} icon={<Smartphone size={14} />} label="Phone & remote" onClick={() => setTab("remote")} />
             <TabButton active={tab === "api"} icon={<Globe size={14} />} label="API" onClick={() => setTab("api")} />
             <TabButton active={tab === "data"} icon={<Database size={14} />} label="Data" onClick={() => setTab("data")} />
           </nav>
@@ -97,6 +134,7 @@ export function SettingsModal() {
                 {tab === "mcp" && <McpTab />}
                 {tab === "knowledge" && <KnowledgeTab />}
                 {tab === "memory" && <MemoryTab />}
+                {tab === "remote" && <RemoteTab />}
                 {tab === "api" && <ApiTab />}
                 {tab === "data" && <DataTab />}
               </div>
@@ -107,9 +145,11 @@ export function SettingsModal() {
   );
 }
 
+/** A heading in the tab rail. Hidden when the rail becomes a horizontal strip:
+ *  a group label in a scrolling row of tabs reads as another tab. */
 function NavGroup({ label }: { label: string }) {
   return (
-    <div className="mt-3 px-2 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)] first:mt-0">
+    <div className="mt-3 px-2 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)] first:mt-0 narrow:hidden">
       {label}
     </div>
   );
@@ -119,7 +159,7 @@ function TabButton({ active, icon, label, onClick }: { active: boolean; icon: Re
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-2 rounded px-2 py-1.5 text-left ${
+      className={`flex items-center gap-2 rounded px-2 py-1.5 text-left narrow:shrink-0 narrow:whitespace-nowrap narrow:px-3 narrow:py-2 ${
         active ? "bg-[var(--color-panel-hover)] text-[var(--color-text)]" : "text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
       }`}
     >
@@ -473,7 +513,7 @@ function AppearanceTab() {
         {/* Two columns rather than three: each cell now carries an editable hex
             alongside its swatch, and a colour you can read is worth more than a
             grid one row shorter. */}
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 narrow:grid-cols-1 gap-2">
           {(Object.keys(THEME_COLOR_KEYS) as ThemeColorKey[]).map((key) => {
             const value = overrides[key] ?? base[key];
             const custom = !!overrides[key];
@@ -514,7 +554,7 @@ function AppearanceTab() {
 
       <section>
         <h3 className="mb-2 text-sm font-medium">Typography</h3>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-2 narrow:grid-cols-1 gap-4">
           <div>
             <div className="mb-1 text-xs text-[var(--color-text-muted)]">Font</div>
             <select
@@ -655,7 +695,7 @@ function AppearanceTab() {
 
       <section>
         <h3 className="mb-2 text-sm font-medium">Background effect</h3>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-2 narrow:grid-cols-1 gap-4">
           <div>
             <div className="mb-1 text-xs text-[var(--color-text-muted)]">Effect</div>
             <select
@@ -1449,18 +1489,34 @@ function VoiceTab() {
 
       <section>
         <h3 className="mb-1 text-sm font-medium">Input device</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Microphone used for dictation.
-        </p>
-        <SettingSelect
-          value={appSettings.sttInputDevice ?? ""}
-          onChange={(v) => setAppSettings({ sttInputDevice: v || null })}
-        >
-          <option value="">System default</option>
-          {voiceInputDevices.map((d) => (
-            <option key={d.name} value={d.name}>{d.name}</option>
-          ))}
-        </SettingSelect>
+        {isRemote() ? (
+          /* The list is the *desktop's* microphones, and a phone does not use
+             them: it records here and sends the audio over for your computer to
+             transcribe with the provider above. Offering the choice anyway
+             would be a picker that changes nothing. */
+          <p className="text-xs text-[var(--color-text-muted)]">
+            This device records with its own microphone and sends the audio to your computer,
+            which converts it to 16 kHz mono WAV with ffmpeg before handing it to the provider
+            above — the same format the computer's own microphone produces, so a local
+            transcription server accepts both. Without ffmpeg installed the recording is sent as
+            it was recorded, and the error says so if the provider refuses it.
+          </p>
+        ) : (
+          <>
+            <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+              Microphone used for dictation.
+            </p>
+            <SettingSelect
+              value={appSettings.sttInputDevice ?? ""}
+              onChange={(v) => setAppSettings({ sttInputDevice: v || null })}
+            >
+              <option value="">System default</option>
+              {voiceInputDevices.map((d) => (
+                <option key={d.name} value={d.name}>{d.name}</option>
+              ))}
+            </SettingSelect>
+          </>
+        )}
       </section>
 
       <section>
@@ -1492,6 +1548,20 @@ function VoiceTab() {
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
           Re-transcribes the recording on an interval. Each pass is a full request — free against
           a local server, billed per call against a hosted one.
+          {isRemote() && (
+            /* The desktop re-transcribes the utterance so far every couple of
+               seconds. Doing that from a phone means re-uploading the whole
+               recording on every tick, so the phone does not — and a switch
+               that is on while nothing happens is worse than one that explains
+               itself. */
+            <>
+              {" "}
+              <span className="text-[var(--color-text)]">
+                This device does not do this: it would re-upload the whole recording on every
+                pass. The setting below applies when you dictate on the computer itself.
+              </span>
+            </>
+          )}
         </p>
         <ToggleRow
           label="Show words while speaking"
@@ -2579,9 +2649,14 @@ function McpTab() {
         <div className="flex flex-col gap-3">
           {mcpServers.map((s) => (
             <div key={s.id} className="rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
-              <div className="flex items-start justify-between gap-3">
+              {/* Five actions and four badges fit a 980px panel and not a phone
+                  (0.17.3). Unwrapped, the name column collapsed to nothing and
+                  the buttons still ran off the right edge — the screenshot that
+                  prompted this had a card showing half a Disconnect button and
+                  no server name at all. */}
+              <div className="flex items-start justify-between gap-3 narrow:flex-col narrow:items-stretch">
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 narrow:flex-wrap">
                     <span className="truncate text-sm font-medium">{s.name}</span>
                     <span className="rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[10px] uppercase text-[var(--color-text-muted)]">
                       {s.transport}
@@ -2595,7 +2670,7 @@ function McpTab() {
                     {s.transport === "stdio" ? s.command : s.url}
                   </div>
                 </div>
-                <div className="flex shrink-0 items-center gap-1">
+                <div className="flex shrink-0 items-center gap-1 narrow:flex-wrap">
                   <button
                     onClick={() => connect(s)}
                     disabled={busyId === s.id}
@@ -3367,7 +3442,7 @@ function KnowledgeTab() {
       {/* Default embedding provider + model */}
       <section>
         <div className="mb-1.5 text-xs font-medium">Default embedding model</div>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 narrow:grid-cols-1 gap-2">
           <label className="block">
             <div className="mb-1 text-[11px] text-[var(--color-text-muted)]">Provider</div>
             <select value={providerId ?? ""} onChange={(e) => setProviderId(e.target.value || null)} className="input">
@@ -3633,32 +3708,64 @@ function ApiTab() {
   const refreshBind = () => api.apiBindState().then(setBind).catch(console.error);
   useEffect(() => { void refreshBind(); }, []);
 
-  const baseUrl = `http://127.0.0.1:${appSettings.apiPort ?? 8765}`;
+  // The address it is *actually* bound to, not the one it used to always be.
+  // Falling back to loopback matches what an un-bound server would be if it
+  // came up, and never overstates reach.
+  const baseUrl = `http://${bind?.address || "127.0.0.1"}:${appSettings.apiPort ?? 8765}`;
   const parsedPort = parseInt(portInput, 10);
   const portInvalid = !Number.isFinite(parsedPort) || parsedPort < 1 || parsedPort > 65535;
 
   // Push the current config to the backend, persist it, and reflect any error.
-  async function apply(next: { apiEnabled?: boolean; apiPort?: number; apiToken?: string }) {
+  //
+  // The LAN bind and its address go through here too (0.17.0) rather than
+  // through a second command: all of them decide which socket is open, and a
+  // panel that could change the bind without restarting the server would be
+  // describing a server that does not exist. Settings are persisted only after
+  // the restart succeeds, so a refused bind does not leave the panel claiming a
+  // configuration the server is not running.
+  async function apply(next: {
+    apiEnabled?: boolean;
+    apiPort?: number;
+    apiToken?: string;
+    apiLan?: boolean;
+    apiBindAddress?: string;
+    apiDiscovery?: boolean;
+  }) {
     const merged = { ...appSettings, ...next };
     setBusy(true);
     setStatus(null);
     try {
-      // Ensure a token exists before enabling.
+      // Ensure a token exists before enabling. Still generated even in the
+      // LAN case: pairing mints per-device tokens, but the static one is what
+      // a script on this machine uses and the server refuses to start without.
       if (merged.apiEnabled && !merged.apiToken) {
         merged.apiToken = await api.generateApiToken();
       }
-      await api.applyApiSettings(merged.apiEnabled, merged.apiPort, merged.apiToken);
+      await api.applyApiSettings(
+        merged.apiEnabled,
+        merged.apiPort,
+        merged.apiToken,
+        merged.apiLan,
+        merged.apiBindAddress,
+        merged.apiDiscovery,
+      );
       await setAppSettings({
         apiEnabled: merged.apiEnabled,
         apiPort: merged.apiPort,
         apiToken: merged.apiToken,
+        apiLan: merged.apiLan,
+        apiBindAddress: merged.apiBindAddress,
+        apiDiscovery: merged.apiDiscovery,
       });
-      setStatus(merged.apiEnabled ? `Running on ${`http://127.0.0.1:${merged.apiPort}`}` : "Stopped.");
+      setStatus(merged.apiEnabled ? "Running." : "Stopped.");
       await refreshBind();
     } catch (e: any) {
       setStatus(`Error: ${e?.message || String(e)}`);
-      // Roll the toggle back if start failed.
+      // Roll the toggle back if start failed. Same for the LAN bind: a refused
+      // bind that left the switch reading "on the network" would be the exact
+      // dishonesty the persisted bind outcome was added to end.
       if (next.apiEnabled) await setAppSettings({ apiEnabled: false });
+      if (next.apiLan) await setAppSettings({ apiLan: false });
       await refreshBind();
     } finally {
       setBusy(false);
@@ -3695,8 +3802,9 @@ function ApiTab() {
       <section>
         <h3 className="mb-1 text-sm font-medium">Local HTTP API</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          A local REST + SSE API on 127.0.0.1 with the same capabilities as the app — chats,
-          zones, projects, messages. Every request needs your bearer token.
+          A REST + SSE API with the same capabilities as the app — chats, zones, projects,
+          messages. It listens on 127.0.0.1 only, until you switch on remote access below. Every
+          request needs a token.
         </p>
         <div
           onClick={() => !busy && apply({ apiEnabled: !appSettings.apiEnabled })}
@@ -3718,14 +3826,15 @@ function ApiTab() {
           <div className="mt-2 flex items-start gap-2 rounded border border-[var(--color-danger)]/50 bg-[var(--color-danger)]/5 px-2.5 py-2 text-xs">
             <AlertTriangle size={13} className="mt-0.5 shrink-0 text-[var(--color-danger)]" />
             <span>
-              The server is switched on but is not listening on port {bind.port}
+              The server is switched on but is not listening on {bind.address}:{bind.port}
               {bind.error ? <>: <span className="font-mono">{bind.error}</span></> : "."}
             </span>
           </div>
         )}
         {appSettings.apiEnabled && bind?.ok && (
           <p className="mt-2 text-xs text-[var(--color-text-muted)]">
-            Listening on port {bind.port}. Ask it about itself:{" "}
+            Listening on <span className="font-mono">{bind.address}:{bind.port}</span>. Ask it
+            about itself:{" "}
             <span className="font-mono">GET {baseUrl}/api/health</span> and{" "}
             <span className="font-mono">/api/routes</span> — both answer without a token.
           </p>
@@ -3788,6 +3897,82 @@ function ApiTab() {
           Append <span className="font-mono">?wait=true</span> to get the final message as JSON instead of an SSE stream.
         </p>
       </section>
+    </div>
+  );
+}
+
+// ─── Phone & remote ───────────────────────────────────────────────────────────
+
+/**
+ * Its own tab as of 0.17.3.
+ *
+ * It shipped as a section inside the API panel because that is where it was
+ * built — same socket, same `apply`. That is not where anyone looks for it.
+ * Somebody connecting a phone is not thinking about REST endpoints, and burying
+ * the feature under a developer heading made it findable only by people who did
+ * not need it.
+ *
+ * It still drives the same `apply`, because the LAN bind and the API server are
+ * one restart. The tab is a place to stand, not a second mechanism.
+ */
+function RemoteTab() {
+  const appSettings = useApp((s) => s.appSettings);
+  const setAppSettings = useApp((s) => s.setAppSettings);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function apply(next: {
+    apiEnabled?: boolean;
+    apiLan?: boolean;
+    apiBindAddress?: string;
+    apiDiscovery?: boolean;
+  }) {
+    const merged = { ...appSettings, ...next };
+    setBusy(true);
+    setError(null);
+    try {
+      // Turning on remote access turns on the server it needs. The alternative
+      // is an error telling somebody to go and flip a switch on another tab,
+      // which is the app refusing to do the obvious thing.
+      if (merged.apiLan) merged.apiEnabled = true;
+      if (merged.apiEnabled && !merged.apiToken) {
+        merged.apiToken = await api.generateApiToken();
+      }
+      await api.applyApiSettings(
+        merged.apiEnabled,
+        merged.apiPort,
+        merged.apiToken,
+        merged.apiLan,
+        merged.apiBindAddress,
+        merged.apiDiscovery,
+      );
+      await setAppSettings({
+        apiEnabled: merged.apiEnabled,
+        apiPort: merged.apiPort,
+        apiToken: merged.apiToken,
+        apiLan: merged.apiLan,
+        apiBindAddress: merged.apiBindAddress,
+        apiDiscovery: merged.apiDiscovery,
+      });
+    } catch (e: any) {
+      setError(e?.message || String(e));
+      // A refused bind must not leave the switch reading "on the network".
+      if (next.apiLan) await setAppSettings({ apiLan: false });
+      if (next.apiEnabled) await setAppSettings({ apiEnabled: false });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-6">
+      {error && (
+        <div className="flex items-start gap-2 rounded border border-[var(--color-danger)]/50 bg-[var(--color-danger)]/5 px-2.5 py-2 text-xs">
+          <AlertTriangle size={13} className="mt-0.5 shrink-0 text-[var(--color-danger)]" />
+          <span>{error}</span>
+        </div>
+      )}
+      <RemoteAccess apply={apply} busy={busy} />
     </div>
   );
 }
@@ -4517,7 +4702,7 @@ function OptionCards<T extends string | number>({
   align?: "left" | "center";
 }) {
   return (
-    <div className={layout === "row" ? "flex gap-2" : "flex flex-col gap-2"}>
+    <div className={layout === "row" ? "flex flex-wrap gap-2" : "flex flex-col gap-2"}>
       {options.map(([val, label, description]) => (
         <button
           key={val}

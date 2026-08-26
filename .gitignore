@@ -11,7 +11,12 @@ vite.config.d.ts
 
 # Tauri
 src-tauri/target/
-src-tauri/gen/
+# Tauri's generated schemas, which are rebuilt every build — except the Android
+# project, which is a real source tree (see the Android note below). Written as
+# `gen/*` plus a negation rather than `gen/`, because git will not descend into
+# an excluded directory to find a re-included child.
+src-tauri/gen/*
+!src-tauri/gen/android/
 # src-tauri/Cargo.lock is deliberately tracked: MultiZone ships as a binary, so
 # the lockfile is what makes a given commit build the same dependency versions
 # on every machine and in CI.
@@ -34,3 +39,19 @@ artifacts/
 
 # The promotional website is built and deployed separately from the app.
 promo/website/
+
+# Android (0.17.2). The generated Gradle project *is* committed — it carries
+# real decisions (the cleartext policy that lets the app reach a LAN address,
+# the `multizone://` deep link) that `tauri android init` would not reproduce.
+# Its own .gitignore already excludes the machine-specific parts.
+.env.android
+src-tauri/gen/android/app/src/main/jniLibs/
+# The signing key and the file that points at it. `src-tauri/gen/android/` is
+# deliberately *not* ignored — it is a real source tree — so without these two
+# lines a local release build would commit the app's signing credentials into a
+# repository. CI writes `keystore.properties` onto a runner it then throws away;
+# a developer writing one has nothing throwing it away for them.
+src-tauri/gen/android/keystore.properties
+*.jks
+*.keystore
+*.p12

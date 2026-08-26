@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager};
-use tokio::sync::{oneshot, Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock};
 
 pub struct AppState {
     pub db: SqlitePool,
@@ -22,8 +22,14 @@ pub struct AppState {
     pub active_streams: Arc<RwLock<HashMap<String, Arc<AtomicBool>>>>,
     /// Running HTTP API server, if enabled. Replaced on settings change.
     pub api_server: Mutex<Option<crate::api::ApiHandle>>,
-    /// Pending tool-approval gates: chatId → oneshot sender for the approval answer.
-    pub tool_approvals: Arc<Mutex<HashMap<String, oneshot::Sender<crate::commands::messages::ApprovalAnswer>>>>,
+    /// The mDNS advertisement (0.17.0), and why it is not running if it is not.
+    /// Its lifetime is the server's: they start and stop together, because an
+    /// advertisement outliving its socket points phones at a closed port.
+    pub mdns: Mutex<crate::commands::remote::Discovery>,
+    /// Tool calls blocked on the user: approval key → the call and where its
+    /// answer goes. Carries the call's details as of 0.17.0 so the queue can be
+    /// read — and answered — from somewhere other than the window that asked.
+    pub tool_approvals: crate::commands::messages::ApprovalGate,
     /// Live dictation sessions (0.8.0): sessionId → capture handle, from
     /// `start_dictation` until `stop_dictation`/`cancel_dictation` removes it.
     pub voice_sessions: Arc<Mutex<HashMap<String, crate::audio::CaptureHandle>>>,
@@ -98,6 +104,7 @@ impl AppState {
             settings_backup_path,
             active_streams: Arc::new(RwLock::new(HashMap::new())),
             api_server: Mutex::new(None),
+            mdns: Mutex::new(Default::default()),
             tool_approvals: Arc::new(Mutex::new(HashMap::new())),
             voice_sessions: Arc::new(Mutex::new(HashMap::new())),
         })

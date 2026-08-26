@@ -1082,6 +1082,90 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## 0.17.x — The phone as a second window
+
+Notes and design in [CONNECTIVITY.md](CONNECTIVITY.md#part-3--the-phone-as-a-second-window), including a build note on what the design got right and the four things it did not anticipate.
+
+### 0.17.0 — Reachable, and only by devices you named
+
+- [x] LAN bind as its own switch, separate from `apiEnabled` — putting the app on the network is a different decision from switching the API on
+- [x] Bind one chosen interface, never `0.0.0.0`; a vanished interface is a named bind error, not a quiet fall back to loopback
+- [x] `BindState` carries the address, so "switched on" and "on the network" stop being the same claim
+- [x] Pairing: a six-digit code, single-use, expiring in three minutes, burned after five wrong guesses, and only while the desktop has the dialog open
+- [x] Per-device tokens; the registry keeps a SHA-256, never the token
+- [x] Revoke per device; forget refuses a device that is still live
+- [x] Every pairing attempt logged — it is the only unauthenticated write on the surface
+- [x] mDNS advertisement, never fatal (a blocked multicast must not lock out a phone that knows the address)
+- [x] The pending-approval queue is readable and answerable over the API, with a countdown
+- [x] Settings → API → Remote access: the switch, the interface picker, the code, the QR, the device list
+- [~] The token lives in the WebView's `localStorage`, not the platform keystore
+
+### 0.17.1 — The transport
+
+- [x] `GET /api/events` — every event a window would receive, bridged from the same `app.listen`, with an explicit forwarded list
+- [x] `src/lib/remote/transport.ts` implements `invoke` and `listen` over HTTP + SSE; `src/lib/tauri.ts` changed by two import lines
+- [x] The command → route map is generated from `COVERAGE`, with `--check` in `npm test`
+- [x] Argument placement is a rule with two stated exceptions, in pure functions with tests
+- [x] A sweep over every real call site, which found the greedy `:id` match before a user did
+- [x] `POST /api/chats/:id/messages` honours `overrideZoneId` / `overrideModel` — it accepted and discarded them
+- [x] The Rust drift test reads every `module::command`, not only `commands::`
+
+### 0.17.2 — The shell
+
+- [x] The pairing screen: address plus code, or paste the QR's link and both fill in
+- [x] "Can't reach your computer" as a stated reason rather than a spinner
+- [x] The approval queue above everything, since the call that is waiting is often not in the chat you are looking at
+- [x] Touch targets and safe areas in CSS, scoped to `pointer: coarse` — no component renders differently on a phone
+- [x] Every module `#[cfg(desktop)]`; the mobile binary is a WebView with no `invoke_handler`, so there is no second store to go wrong
+- [x] Cargo dependencies split by target — an Android build does not compile BoringSSL and an OCR engine
+- [x] Android target: network security config for LAN cleartext, `multizone://pair` deep link, per-platform capabilities
+- [x] Verified end to end: APK built, installed, launched, pairing screen renders
+- [ ] iOS target (the crate is split for it; nothing has been built or tested)
+- [ ] Wake-on-LAN, deliberately deferred — the obvious follow-on to "your computer is asleep"
+
+### 0.17.3 — What a real handset showed
+
+Found by installing the APK and using it, not by reading the code.
+
+- [x] The 0.17.2 touch CSS put `min-height` on every `button`, which stretched the Toggle's track and left its knob at the top edge — every switch in Settings rendered as a tall thin capsule. Targets are grown by name now, and the Toggle grows as a whole control
+- [x] `coarse:` and `narrow:` Tailwind variants — a touchscreen laptop wants bigger targets at any width, a half-width desktop window wants the layout without them
+- [x] Sidebar overlays the chat on a narrow window instead of sitting beside it
+- [x] Settings is full-bleed on a phone; its 176px tab rail becomes a scrolling strip
+- [x] MCP server cards wrap instead of running off the edge
+- [x] Remote access is its own Settings tab, above API — it shipped inside the API panel because that is where it was built, not where anyone looks for it
+- [x] The app's own launcher icon, adaptive icon included, with a `--check` in the test suite so a re-init cannot quietly restore Android's template
+- [x] An APK in every release, built on Linux (Windows refuses the jniLibs symlink without Developer Mode); signing opt-in via secrets so a missing keystore cannot take the Windows release down with it
+
+### 0.17.4 — Pairing that asks, and a phone that remembers
+
+- [x] The desktop is *armed* first; the code exists only once a named device asks for it, and appears with "<name> at <address> wants to connect" beside it
+- [x] `POST /api/pair/request` — unauthenticated, and unable to produce a code on its own. An unarmed desktop refuses; a desktop already showing a code for someone else refuses too, so a second device cannot cancel the first one's pairing by asking
+- [x] Discovery from the phone: a /24 sweep of the unauthenticated health check, in the mobile shell's one command. Not mDNS — Android needs a MulticastLock and consumer Wi-Fi blocks client multicast on exactly the networks people use
+- [x] Saved computers, with switching, and forgetting that says it is local-only
+- [x] Retry and Switch on the offline banner — nothing re-entered
+- [x] Dictation from the phone: the WebView captures, the desktop transcribes. `POST /api/transcribe`
+- [x] `mergeAppSettings` drops `undefined` — `{ x: cond ? true : undefined }` was erasing `x`, which clobbered `apiEnabled` and `apiToken` and would have stopped the API starting at the next launch
+- [ ] Live partial transcripts while dictating from a phone (would re-upload the whole recording every tick)
+- [ ] Speech playback of answers on the phone
+
+### 0.17.5 — The envelope that erased your settings
+
+*The 0.17.4 handset feedback, second round. Three of these are one bug wearing different clothes: something that was silently the wrong shape, with no test positioned to notice.*
+
+- [x] **Data loss, fixed and disclosed.** `GET /api/settings/:key` answers `{"key":…,"value":…}` where the command returns the value. The transport handed the envelope to `JSON.parse`, every settings read from a phone threw, the store fell back to `DEFAULT_APP_SETTINGS` — and the next write merged against *those* and persisted them over the desktop's real settings. Appearance, the dictation provider and endpoint, the base zone, the approval allow-lists: all replaced by defaults, from a device that had never successfully read them
+- [x] `Coverage::Route` gains a `-> field` suffix; the generator carries it into the route map and the transport unwraps it. Seven routes declare one
+- [x] **A drift test that reads the handlers**: any handler answering a JSON object literal, wired to a route a command claims, must declare which key holds the value. Removing an annotation fails the build
+- [x] **The store refuses to write state it could not read.** Both `app_settings` and `theme` are whole-object writes, so one made blind is an erase, not a lost preference. `appSettingsLoaded` / `themeLoaded` are set on success only — never in a `finally` — and Settings shows a banner saying changes will not stick. This rule alone would have contained the bug above
+- [x] **Android back.** The shell's handler is `webView.canGoBack()`, which in an SPA that never touches history is always false — so back closed the app from everywhere. `useBackDismiss` pushes a history entry per layer: modals, the command palette, the sidebar drawer and the pairing wizard step backwards, and only the root exits
+- [x] **A way back to the connection screen.** Pairing was a one-way door. Settings → Phone & remote names the computer this device is paired with and offers *Switch computer*, keeping every token
+- [x] **Reconnecting no longer sits there.** `retryNow()` was clearing the listener registrations, so a reconnect that *succeeded* left the app deaf to it for good — the retry button broke the thing it was meant to fix. Plus an 8s connect deadline instead of Android's 60s+ TCP timeout, a 10s backoff cap, and an immediate retry when the app is foregrounded or the network returns
+- [x] **The computer prepares the audio, it does not relay it.** Dictation from the phone sent `audio/webm;codecs=opus` straight through, while the desktop's own capture path has always produced 16 kHz mono WAV — which is what a local whisper or MLX server decodes. `transcode.rs` converts uploads with ffmpeg before they reach the provider, in-memory, never touching disk. Optional: without ffmpeg the bytes pass through and the error names what is missing
+- [x] `100vw` is not the drawable width. The app root was `h-screen w-screen` inside a body padded by the safe-area insets, so in landscape everything was shifted by the cutout and the right edge of every full-width row fell off the screen. `h-full w-full`
+- [x] Checkboxes and radios grow their *tap target*, not their box — they were in the same `min-height` rule the Toggle regression came from, and stretched into capsules with the tick pinned to the top
+- [ ] Bundling ffmpeg (~80 MB per installer for one feature); using the system one instead
+
+---
+
 ## 1.0.0 — Hardening & Public Release
 
 *How each open item below can actually be closed — including the three that a manual pass cannot honestly close at all — is worked through in [TEST_STRATEGY.md](TEST_STRATEGY.md). Summary: build the mock streaming provider first (it turns "no dropped tokens" from an unfalsifiable claim into a diff, and needs no provider, key or network), run `npm run build` and `cargo test --lib` on every change (37 files of Rust tests exist and nothing ran them; this is now a pair of git hooks rather than a CI job), and test the updater against a local two-build loop rather than the release pipeline, where a build is a publish.*
@@ -1252,5 +1336,7 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
   5. Tier B, only if real packages demand it
 
   Steps 1 and 2 are genuinely near-term and useful with no mod system attached at all — step 1 makes every existing `app_control` interaction better, and step 2 is 0.13.0 finishing its own job. Do not schedule this as one release.
+
+
 - [ ] Deep research mode: multi-step sourced research using subchats; requires design session before scheduling
 - [ ] Zone snapshot/versioning: save zone config at chat creation time so editing a zone does not alter historical context

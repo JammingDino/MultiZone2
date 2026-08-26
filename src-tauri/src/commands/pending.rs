@@ -134,8 +134,8 @@ pub async fn queue_chat_message(
 
 /// Drop a queued message that hasn't been delivered yet.
 #[tauri::command]
-pub async fn cancel_pending_message(chat_id: String, id: String) -> AppResult<bool> {
-    Ok(remove(&chat_id, &id))
+pub async fn cancel_pending_message(chat_id: String, message_id: String) -> AppResult<bool> {
+    Ok(remove(&chat_id, &message_id))
 }
 
 #[cfg(test)]

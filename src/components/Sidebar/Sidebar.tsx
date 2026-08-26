@@ -538,7 +538,7 @@ function DeleteProjectDialog({
 }) {
   const chatLabel = `${chatCount} chat${chatCount === 1 ? "" : "s"}`;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onCancel}>
+    <div className="mz-safe-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onCancel}>
       <div
         className="w-[380px] rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] p-4 shadow-xl"
         onClick={(e) => e.stopPropagation()}

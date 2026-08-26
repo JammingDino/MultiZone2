@@ -1,38 +1,94 @@
+//! The crate has two shapes (0.17.2).
+//!
+//! On the desktop it is the whole app: the database, the agentic loop, MCP, the
+//! knowledge index, the file tools, the HTTP API. On a phone it is a WebView
+//! and nothing else — see [`mobile`], which explains why that is a `cfg` rather
+//! than a runtime choice.
+//!
+//! Every module below is desktop-only, and the list is the honest statement of
+//! what a phone does not carry.
+
+#[cfg(mobile)]
+mod mobile;
+
+#[cfg(desktop)]
 mod api;
+#[cfg(desktop)]
 mod approvals;
+#[cfg(desktop)]
 mod audio;
+#[cfg(desktop)]
 mod checkpoints;
+#[cfg(desktop)]
 mod checks;
+#[cfg(desktop)]
 mod db;
+#[cfg(desktop)]
 mod diffs;
+#[cfg(desktop)]
 mod instructions;
+#[cfg(desktop)]
 mod knowledge;
+#[cfg(desktop)]
 mod llm;
+#[cfg(desktop)]
 mod mcp;
+#[cfg(desktop)]
 mod ocr;
+#[cfg(desktop)]
 mod plans;
+#[cfg(desktop)]
+mod remote;
+#[cfg(desktop)]
 mod repomap;
+#[cfg(desktop)]
 mod runs;
+#[cfg(desktop)]
 mod search;
+#[cfg(desktop)]
 mod review;
+#[cfg(desktop)]
 mod pdf_bridge;
+#[cfg(desktop)]
 mod skillpacks;
+#[cfg(desktop)]
 mod tools;
+#[cfg(desktop)]
 mod util;
+#[cfg(desktop)]
 mod commands;
+#[cfg(desktop)]
 mod state;
+#[cfg(desktop)]
 mod theme;
+#[cfg(desktop)]
 mod error;
+#[cfg(desktop)]
 mod events;
+#[cfg(desktop)]
 mod stt_api;
+#[cfg(desktop)]
+mod transcode;
+#[cfg(desktop)]
 mod tts_api;
+#[cfg(desktop)]
 mod updater_token;
 
+#[cfg(desktop)]
 use state::AppState;
+#[cfg(desktop)]
 use tauri::Manager;
+#[cfg(desktop)]
 use tracing_subscriber::EnvFilter;
 
-#[cfg(not(debug_assertions))]
+/// The mobile entry point. Android and iOS call this instead of `main`.
+#[cfg(mobile)]
+#[tauri::mobile_entry_point]
+pub fn run() {
+    mobile::run();
+}
+
+#[cfg(all(desktop, not(debug_assertions)))]
 fn install_panic_hook(path: std::path::PathBuf) {
     std::panic::set_hook(Box::new(move |info| {
         let backtrace = std::backtrace::Backtrace::force_capture();
@@ -48,12 +104,14 @@ fn install_panic_hook(path: std::path::PathBuf) {
 }
 
 /// The updater plugin, authenticated against the private repository.
+#[cfg_attr(mobile, allow(dead_code))]
 ///
 /// A missing or malformed token is not fatal — the plugin is still installed so
 /// the Settings → Updates UI keeps working, it just reports that no manifest
 /// could be reached. That is the same failure the user sees when offline, and
 /// it beats the app refusing to start over a credential it only needs for an
 /// optional background check.
+#[cfg(desktop)]
 fn build_updater_plugin<R: tauri::Runtime>(
 ) -> tauri::plugin::TauriPlugin<R, tauri_plugin_updater::Config> {
     let builder = tauri_plugin_updater::Builder::new();
@@ -79,7 +137,8 @@ fn build_updater_plugin<R: tauri::Runtime>(
     builder.build()
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// The desktop entry point, called by `main`.
+#[cfg(desktop)]
 pub fn run() {
     let filter =
         || EnvFilter::from_default_env().add_directive("multizone=debug".parse().unwrap());
@@ -336,6 +395,17 @@ pub fn run() {
             commands::api::apply_api_settings,
             commands::api::generate_api_token,
             commands::api::api_bind_state,
+            commands::remote::remote_status,
+            commands::remote::list_network_interfaces,
+            commands::remote::list_paired_devices,
+            commands::remote::revoke_paired_device,
+            commands::remote::forget_paired_device,
+            commands::remote::rename_paired_device,
+            commands::remote::pairing_status,
+            commands::remote::open_pairing,
+            commands::remote::arm_pairing,
+            commands::remote::close_pairing,
+            commands::messages::pending_approvals,
             commands::voice::list_voice_input_devices,
             commands::voice::start_dictation,
             commands::voice::stop_dictation,

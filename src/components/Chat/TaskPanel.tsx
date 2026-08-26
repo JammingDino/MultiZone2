@@ -347,7 +347,7 @@ function StepRow({ step, onStrike }: { step: PlanStep; onStrike: () => void }) {
       </div>
       {open && hasDetail && (
         <div className="ml-5 max-h-56 overflow-y-auto rounded border border-[var(--color-border)] bg-[var(--color-bg)]/40 px-2 py-1.5">
-          {detail && <Markdown source={detail} className="mz-plan-prose" fontSize="0.75rem" />}
+          {detail && <Markdown source={detail} className="mz-plan-prose" fontSize="0.75rem" plainTables />}
           {step.acceptance?.trim() && (
             <div className="mt-1.5 text-[11px] text-[var(--color-text-muted)]">
               <span className="font-medium text-[var(--color-text)]">Done when </span>

@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+/* `coarse:` — a touchscreen, not a narrow window. The two are different
+   questions: a touchscreen laptop wants bigger targets at any width, and a
+   half-width desktop window does not want them at all. */
+@custom-variant coarse (@media (pointer: coarse));
+/* `narrow:` — the layout question, for the handful of places where a phone
+   needs a different arrangement rather than a bigger one. */
+@custom-variant narrow (@media (max-width: 767px));
+
 @theme {
   --color-bg: #0b0d10;
   --color-panel: #14171c;
@@ -894,3 +902,142 @@ html.shadows [class*="shadow-xl"] {
 @media (prefers-reduced-motion: reduce) {
   .mz-jump-flash { animation-duration: 0.01ms; }
 }
+
+/* ─── Touch (0.17.2) ──────────────────────────────────────────────────────────
+ *
+ * The mobile shell runs the same React the desktop does; what differs is the
+ * input device and the notch. Both are handled here rather than by forking
+ * components, because a component that renders differently on a phone is a
+ * component that has to be kept working twice.
+ *
+ * Scoped to coarse pointers rather than to a width: a touchscreen laptop wants
+ * the bigger targets and a narrow desktop window does not.
+ */
+@media (pointer: coarse) {
+  /*
+   * A blanket `min-height` on `button` was the first attempt and it was wrong.
+   * Half the app's buttons set their own height — the settings Toggle is a
+   * 20px-tall pill with an absolutely positioned knob — so forcing 36px on all
+   * of them stretched the track and left the knob pinned to its top edge. Every
+   * switch in Settings rendered as a tall thin capsule.
+   *
+   * The lesson generalises: a global rule cannot know which elements are laid
+   * out by their own height. So the targets that genuinely need growing are
+   * grown by name, and controls that own their geometry opt in via `.mz-tap`.
+   */
+  select {
+    min-height: 2.25rem;
+  }
+
+  /* Checkboxes and radios grow their *target*, not their box (0.17.5).
+   *
+   * They were in the rule above, and they are exactly the case the paragraph
+   * above warns about: both are 16px squares drawn by this stylesheet with an
+   * absolutely positioned tick inside, so a 36px min-height stretched the box
+   * into a tall capsule and left the tick at the top of it — the same shape the
+   * Toggle regression made, on the control right next to it.
+   *
+   * An invisible inset overlay gives the 36px a thumb needs without the
+   * element occupying 36px of layout. `::before` is free on both: the tick and
+   * the dot are drawn with `::after`. */
+  input[type="checkbox"]::before,
+  input[type="radio"]::before {
+    content: "";
+    position: absolute;
+    /* 16px + 10px each side = 36px, the same target as everything else here. */
+    inset: -10px;
+  }
+
+  /* Opt-in, for a control whose own height is incidental rather than load-bearing. */
+  .mz-tap {
+    min-height: 2.25rem;
+    min-width: 2.25rem;
+  }
+
+  /* iOS zooms the page in when a field with text under 16px is focused, and
+     then does not zoom back out. */
+  input,
+  textarea,
+  select {
+    font-size: max(1rem, inherit);
+  }
+}
+
+/* Nothing on a touchscreen has a hover state a finger can produce, and leaving
+   them in means a tapped control stays "hovered" until something else is
+   tapped. */
+@media (hover: none) {
+  *:hover {
+    transition: none;
+  }
+}
+
+/* Under the notch and the home indicator, but not under their content. Zero on
+   every desktop, so this is unconditional.
+ *
+ * The app's own root is sized `h-full w-full` rather than `h-screen w-screen`
+ * for this to mean anything (0.17.5). `100vw` is the *viewport*, insets
+ * included, so a root sized that way inside a padded body is the full width
+ * shifted sideways by the inset — which in landscape put the right-hand end of
+ * every full-width row (the reconnect banner's buttons, most visibly) off the
+ * edge of the screen. `h-full` fills the body's content box, which is the part
+ * of the screen that is actually drawable. */
+body {
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+    env(safe-area-inset-bottom) env(safe-area-inset-left);
+  /* The app owns its scrolling; a rubber-banding page behind it is the phone
+     browser's idea, not ours. */
+  overscroll-behavior: none;
+}
+
+/* ─── Narrow windows (0.17.3) ─────────────────────────────────────────────────
+ *
+ * The app was laid out for a window, and a phone is not one. These are the two
+ * that showed up as *breakage* rather than as tightness, found by running the
+ * real app on a real handset. Everything else that needs a different
+ * arrangement uses the `narrow:` variant at its own call site.
+ */
+
+/* 1. Nothing may push the page sideways. A single over-wide row turns every
+ *    vertical scroll into a diagonal one, and the app's own panels then scroll
+ *    independently of the body — which reads as the layout being broken. */
+html,
+body,
+#root {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/* 2. Long unbroken strings — a file path, a URL, a token — are the usual cause.
+ *    Wrapped rather than clipped, because the whole point of showing an address
+ *    is that somebody can read it. Everything else that needs a different
+ *    arrangement on a phone uses the `narrow:` variant at its own call site,
+ *    which keeps the reason next to the markup it applies to. */
+@media (max-width: 767px) {
+  .mz-wrap-anywhere {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+}
+
+/*
+ * Safe areas apply to fixed overlays too (0.17.4).
+ *
+ * The body padding above keeps normal flow clear of the notch, and a
+ * `position: fixed` overlay ignores it entirely — it is positioned against the
+ * viewport, not against the body's padding box. Full-bleed Settings on a phone
+ * therefore drew its own header underneath the status bar clock, which is what
+ * the first handset screenshot showed.
+ *
+ * Padding rather than insets, so a panel sized `h-full` resolves against the
+ * padded box and still fits.
+ */
+@media (max-width: 767px) {
+  .mz-safe-overlay {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+}
+

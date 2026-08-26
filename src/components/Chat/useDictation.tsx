@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import { Loader2, Mic } from "lucide-react";
 import * as api from "@/lib/tauri";
+// `dictationApi`, not `dictation`: `DictationMeter` takes a prop by that
+// name, and a module shadowed by a prop is a bug that typechecks in one scope
+// and not the other.
+import * as dictationApi from "@/lib/dictation";
 import { useApp } from "@/store/app";
 import { useTts } from "@/store/tts";
 import { CHROME_QUIET } from "@/lib/chrome";
@@ -232,7 +236,7 @@ export function useDictation({
       if (inFlight || stopped) return;
       inFlight = true;
       try {
-        const partial = await api.dictationPartial(voiceSessionId);
+        const partial = await dictationApi.partial(voiceSessionId);
         if (!stopped && !stoppingRef.current && partial) spliceTranscript(partial, false);
       } catch {
         // A failed partial is not worth surfacing — the final transcript is the
@@ -350,7 +354,7 @@ export function DictationMeter({ dictation }: { dictation: DictationController }
     const id = setInterval(async () => {
       let level = 0;
       try {
-        level = await api.dictationLevel(sessionId);
+        level = await dictationApi.level(sessionId);
       } catch {
         // The session ended between the poll and the read — the effect's
         // cleanup is about to run anyway.

@@ -258,7 +258,65 @@ pub struct EngineCtx {
     pub db: SqlitePool,
     pub http: reqwest::Client,
     pub active_streams: Arc<RwLock<HashMap<String, Arc<AtomicBool>>>>,
-    pub tool_approvals: Arc<tokio::sync::Mutex<HashMap<String, oneshot::Sender<ApprovalAnswer>>>>,
+    pub tool_approvals: ApprovalGate,
+}
+
+/// How long a tool call waits for an answer before denying itself.
+///
+/// Named rather than inlined because the pending queue reports a countdown
+/// against it: a client showing "expires in 40s" and an engine giving up at
+/// some other number would be worse than showing nothing.
+pub const APPROVAL_TIMEOUT_SECS: u64 = 300;
+
+/// The pending-approval map: approval key → the call waiting on an answer.
+///
+/// Named, because it is threaded through `AppState`, `EngineCtx` and the API's
+/// own state, and spelling the type out in three places is how the three drift.
+pub type ApprovalGate = Arc<tokio::sync::Mutex<HashMap<String, PendingApproval>>>;
+
+/// A tool call blocked on the user, and enough about it to describe it to
+/// somebody who is not standing in front of the desktop (0.17.0).
+///
+/// This used to be a bare `oneshot::Sender` — which is all the *desktop* needs,
+/// because the dialog asking the question is the same window that will answer
+/// it. From a phone the question and the answer are in different places, and a
+/// run that reaches an approval with nobody at the machine simply stalls for
+/// five minutes and then denies. The metadata is what makes the queue readable
+/// over the API, and therefore what makes leaving a run unattended a decision
+/// rather than a gamble.
+pub struct PendingApproval {
+    pub chat_id: String,
+    /// The perspective zone this participant is, or `None` for the primary.
+    pub zone_id: Option<String>,
+    pub tool: String,
+    /// The call's arguments as the model wrote them, JSON.
+    pub arguments: String,
+    /// What the call would do to a file, when that is a thing it does.
+    pub diff: Option<crate::diffs::FileDiff>,
+    pub requested_at: i64,
+    /// Where the answer goes. Consumed by whoever answers first.
+    pub responder: oneshot::Sender<ApprovalAnswer>,
+}
+
+/// One pending approval as the API and the GUI see it — the same thing without
+/// the channel, which does not serialise and would not mean anything remotely.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingApprovalView {
+    /// The map key: the chat id, or `chatId::zoneId` for a perspective zone.
+    /// Handed back so a client can answer without reconstructing the rule.
+    pub key: String,
+    pub chat_id: String,
+    pub zone_id: Option<String>,
+    pub tool: String,
+    pub arguments: String,
+    pub diff: Option<crate::diffs::FileDiff>,
+    pub requested_at: i64,
+    /// Seconds until the five-minute wait gives up and denies this call. A
+    /// phone showing a queue needs to say which of these is about to expire —
+    /// "denied because nobody answered" is a real outcome and reads like a bug
+    /// unless the countdown was visible.
+    pub expires_in_secs: i64,
 }
 
 /// What the user said when asked to approve a tool call.
@@ -394,8 +452,8 @@ pub async fn cancel_stream(state: State<'_, AppState>, chat_id: String) -> AppRe
         .cloned()
         .collect();
     for k in keys {
-        if let Some(tx) = approvals.remove(&k) {
-            let _ = tx.send(ApprovalAnswer::denied());
+        if let Some(pending) = approvals.remove(&k) {
+            let _ = pending.responder.send(ApprovalAnswer::denied());
         }
     }
     Ok(())
@@ -456,10 +514,40 @@ pub async fn respond_tool_approval(
 ) -> AppResult<()> {
     let key = approval_key(&chat_id, zone_id.as_deref());
     let mut map = state.tool_approvals.lock().await;
-    if let Some(tx) = map.remove(&key) {
-        let _ = tx.send(ApprovalAnswer { approved, hunks });
+    if let Some(pending) = map.remove(&key) {
+        let _ = pending.responder.send(ApprovalAnswer { approved, hunks });
     }
     Ok(())
+}
+
+/// Every tool call currently blocked on the user, newest request last.
+///
+/// The queue exists so a run can be left alone: a phone (or a second window, or
+/// a script) can see what is waiting and answer it, instead of the run stalling
+/// for five minutes at a dialog nobody is standing in front of and then denying
+/// itself. Per-category auto-approval (0.14.2) decides what reaches this queue
+/// at all; this decides whether reaching it is the end of the run.
+#[tauri::command]
+pub async fn pending_approvals(
+    state: State<'_, AppState>,
+) -> AppResult<Vec<PendingApprovalView>> {
+    let map = state.tool_approvals.lock().await;
+    let now = now_ts();
+    let mut out: Vec<PendingApprovalView> = map
+        .iter()
+        .map(|(key, p)| PendingApprovalView {
+            key: key.clone(),
+            chat_id: p.chat_id.clone(),
+            zone_id: p.zone_id.clone(),
+            tool: p.tool.clone(),
+            arguments: p.arguments.clone(),
+            diff: p.diff.clone(),
+            requested_at: p.requested_at,
+            expires_in_secs: ((p.requested_at + APPROVAL_TIMEOUT_SECS as i64 * 1000 - now) / 1000).max(0),
+        })
+        .collect();
+    out.sort_by_key(|v| v.requested_at);
+    Ok(out)
 }
 
 /// Replace a message's text content in place and flag it as user-edited.
@@ -2378,7 +2466,6 @@ async fn run_participant_turn(
 
             let answer = if needs_approval {
                 let (tx, rx) = oneshot::channel::<ApprovalAnswer>();
-                ctx.tool_approvals.lock().await.insert(approval_key.clone(), tx);
 
                 // What this call would actually do to the file, as a diff
                 // (0.10.2). `None` for every tool that isn't a content write —
@@ -2394,6 +2481,22 @@ async fn run_participant_turn(
                 .await
                 .unwrap_or(None);
 
+                // Registered before it is announced, so the queue a remote
+                // client reads can never be missing a call the stream has
+                // already told it about.
+                ctx.tool_approvals.lock().await.insert(
+                    approval_key.clone(),
+                    PendingApproval {
+                        chat_id: chat_id.to_string(),
+                        zone_id: persp.map(str::to_string),
+                        tool: tc.function.name.clone(),
+                        arguments: tc.function.arguments.clone(),
+                        diff: diff.clone(),
+                        requested_at: now_ts(),
+                        responder: tx,
+                    },
+                );
+
                 sink.emit_for(chat_id, persp, StreamPayload::ToolApprovalRequired {
                     index: 0,
                     name: tc.function.name.clone(),
@@ -2401,9 +2504,8 @@ async fn run_participant_turn(
                     diff,
                 });
 
-                // Wait up to 5 minutes for the user to approve or deny.
                 let result = tokio::time::timeout(
-                    tokio::time::Duration::from_secs(300),
+                    tokio::time::Duration::from_secs(APPROVAL_TIMEOUT_SECS),
                     rx,
                 )
                 .await

@@ -11,6 +11,11 @@ import { ImportSettingsDialog } from "./components/Settings/ImportSettingsDialog
 import { UpdatePrompt } from "./components/UpdatePrompt";
 import { ShortcutsHelpModal } from "./components/common/ShortcutsHelpModal";
 import { CommandPalette } from "@/components/CommandPalette";
+import { PairingScreen } from "@/components/Remote/PairingScreen";
+import { ConnectionBanner } from "@/components/Remote/ConnectionBanner";
+import { ApprovalQueue } from "@/components/Remote/ApprovalQueue";
+import { useRemote } from "@/lib/remote/useRemote";
+import { useIsNarrow } from "@/lib/useIsNarrow";
 import { useApp } from "./store/app";
 import { useGlobalShortcuts } from "./lib/useGlobalShortcuts";
 import { usePdfReadBridge } from "./lib/usePdfReadBridge";
@@ -20,8 +25,46 @@ import { seedDefaultSkills, SKILL_SEED_VERSION } from "./lib/defaultSkills";
 import { resolveBaseProvider } from "./lib/baseZone";
 import * as api from "./lib/tauri";
 import { installPerfHandle, mark, markInteractive } from "./lib/perf";
+import { useBackDismiss } from "./lib/useBackDismiss";
+
+/**
+ * The sidebar, positioned for the window it is in.
+ *
+ * Wide: an ordinary flex child beside the chat. Narrow *and expanded*: an
+ * overlay with a backdrop, so the chat keeps the full width underneath and
+ * tapping away closes it — the gesture people already expect from every drawer
+ * on a phone.
+ */
+function SidebarSlot() {
+  const narrow = useIsNarrow();
+  const sidebarOpen = useApp((s) => s.sidebarOpen);
+  const setSidebarOpen = useApp((s) => s.setSidebarOpen);
+
+  // Back closes the drawer before it does anything else — the same expectation
+  // as tapping the backdrop, on the control people reach for first.
+  useBackDismiss(narrow && sidebarOpen, () => setSidebarOpen(false));
+
+  if (!narrow || !sidebarOpen) return <Sidebar />;
+
+  return (
+    <>
+      <div
+        className="absolute inset-0 z-20 bg-black/50"
+        onClick={() => setSidebarOpen(false)}
+        aria-hidden
+      />
+      <div className="absolute inset-y-0 left-0 z-30 flex max-w-[85vw] shadow-2xl">
+        <Sidebar />
+      </div>
+    </>
+  );
+}
 
 export default function App() {
+  // Whether this window is the app or a window onto it (0.17.2). A phone that
+  // has not been paired can do exactly one thing, so it is checked before
+  // anything else mounts — every hook below assumes a backend to talk to.
+  const remote = useRemote();
   const providersLoaded = useApp((s) => s.providersLoaded);
   const providers = useApp((s) => s.providers);
   const setAppSettings = useApp((s) => s.setAppSettings);
@@ -67,7 +110,14 @@ export default function App() {
   // or write and every file tool fails until the user picks a folder. Only
   // fills a blank — a directory the user chose is never moved — and it stays
   // out of settings exports, so each install resolves its own.
+  //
+  // Never from a remote (0.17.2): the file tools run on the *desktop*, and a
+  // phone helpfully filling this in would set the desktop's working directory
+  // to a path that exists on the phone. The one place the local/remote
+  // distinction leaks into the app proper, and it leaks because the answer
+  // genuinely differs.
   useEffect(() => {
+    if (remote.session) return;
     if (!appSettingsLoaded || defaultDirectory?.trim() || defaultDirRef.current) return;
     defaultDirRef.current = true;
     (async () => {
@@ -80,7 +130,7 @@ export default function App() {
       }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appSettingsLoaded, defaultDirectory]);
+  }, [appSettingsLoaded, defaultDirectory, remote.session]);
 
   // Seed the curated zone library onto disk (all curated presets, including the
   // community extras). Re-runs when the shipped set version grows so existing
@@ -162,16 +212,42 @@ export default function App() {
   const showOnboarding = noProvider && !onboardingSkipped;
   const showNoProviderBanner = noProvider && onboardingSkipped;
 
+  // Nothing to show and nothing to load: this device holds no copy of anything,
+  // which is the point. Rendered before the rest of the tree so the seeders and
+  // the provider check never run against a backend that is not there.
+  if (remote.needsPairing) {
+    return (
+      <div className="h-full w-full overflow-hidden text-[var(--color-text)]">
+        <BackgroundEffect />
+        <div className="relative z-10 h-full w-full">
+          <PairingScreen onPaired={() => window.location.reload()} />
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="h-screen w-screen overflow-hidden text-[var(--color-text)]">
+    <div className="h-full w-full overflow-hidden text-[var(--color-text)]">
       <BackgroundEffect />
       <div className="relative z-10 flex h-full w-full flex-col">
-        <TitleBar />
+        {/* The window chrome is the desktop's; a phone has the system's. */}
+        {!remote.shell && <TitleBar />}
+        {remote.session && <ConnectionBanner state={remote.connection} />}
+        {/* Above the chat, not inside it: the call that is waiting is often not
+            in the chat you are looking at. */}
+        <ApprovalQueue />
         {showNoProviderBanner && <NoProviderBanner />}
         {/* Onboarding overlays only the content area so the title bar stays
             draggable/resizable while it's up. */}
         <div className="relative flex flex-1 overflow-hidden">
-          <Sidebar />
+          {/* On a phone the sidebar overlays the chat instead of sitting beside
+              it (0.17.3). A 288px column beside a chat panel needs roughly twice
+              the width a handset has, and the two side by side is what the first
+              build actually did — both squeezed, the chat's own content clipped.
+              The collapsed rail is left alone: it is 48px, it carries the
+              expand control, and a drawer with no visible way to open it is
+              worse than a thin strip. */}
+          <SidebarSlot />
           <ChatPanel />
           {showOnboarding && <Onboarding />}
           {shortcutsHelpOpen && <ShortcutsHelpModal onClose={closeShortcutsHelp} />}

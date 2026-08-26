@@ -2,7 +2,7 @@
 
 Notes behind the 0.11.x and 1.2.x entries in [RELEASE_PLAN.md](RELEASE_PLAN.md). Two questions that turned out to be the same question: *can the app set itself up, so that connecting it to things is not a job for someone who reads code?*
 
-**Part 3 was added in 0.14.0** and asks the question from the other side: what does it take for something that is *not* on this machine — a phone, a tablet, a second laptop — to reach the app? It turns out to be mostly the same answer, because Part 1 already made the API the whole app.
+**Part 3 was added in 0.14.0** and asks the question from the other side: what does it take for something that is *not* on this machine — a phone, a tablet, a second laptop — to reach the app? It turns out to be mostly the same answer, because Part 1 already made the API the whole app. **Part 3 was built as 0.17.x**, in the three stages it was sized as, and the notes at the end of it record what the design got right and the four things it did not anticipate.
 
 Written August 2026, against 0.10.1. **Part 1 was built as 0.11.0** — the route index, the honest health check, the persisted bind outcome and the drift test all landed, and the ten routes became 105.
 
@@ -105,7 +105,7 @@ The line to hold, per the roadmap's principles: the model may *propose* configur
 
 ## Part 3 — the phone as a second window
 
-*Added August 2026, against 0.14.0, when the backlog's one-line "Mobile: Tauri mobile target" was re-scoped. Nothing here is built; this is the design the backlog entry points at.*
+*Added August 2026, against 0.14.0, when the backlog's one-line "Mobile: Tauri mobile target" was re-scoped. **Built as 0.17.0 (the desktop half), 0.17.1 (the transport) and 0.17.2 (the shell)** — the design below is left as written, with a build note at the end, because the interesting part is which of its predictions survived contact.*
 
 ### The premise
 
@@ -164,3 +164,127 @@ The desktop half is worth building first and stands on its own — a LAN bind, p
 - [mcp/mod.rs](../src-tauri/src/mcp/mod.rs) — transports and connection handling
 - [commands/api.rs](../src-tauri/src/commands/api.rs) — port/token config and server lifecycle
 - [README.md](../README.md#L138) — the hand-maintained route table
+
+---
+
+## Part 3, as built (0.17.x)
+
+The sizing was right and the sequencing was right: the desktop half landed first and was useful before any mobile toolchain existed, the transport was developed in a desktop browser against a real instance, and the shell turned out to be a pairing screen and some CSS.
+
+**The four missing things, and what each actually cost.**
+
+- **The LAN bind** was the smallest and had the sharpest edge. "Bind the selected interface rather than `0.0.0.0`" was the whole design, and the case it does not mention is the one that matters: the laptop moves networks and the chosen address is gone. Falling back to loopback would leave the panel reading "on the network" with a server nothing can reach, and falling back to a *different* network would put the app somewhere the user never picked. So a vanished interface is a named bind error, reported through the same persisted `BindState` row that 0.11.0 added for a port already in use — a piece of machinery built for one failure absorbing a second one it was not designed for.
+- **Pairing** came out as designed. Worth recording that the six digits are not what makes it safe: the window only exists while the user is looking at it, the code is single-use, it expires, and **five wrong guesses burn it**. That last one is the load-bearing part and is the one easiest to leave out — without it, a code that lives three minutes is still a few thousand guesses over a LAN.
+- **Approvals on the phone** were half-built already and the half that was missing was the interesting one. `POST /api/chats/:id/approval` existed; there was no way to *find out* something was waiting. The pending map held bare `oneshot::Sender`s, which is all the desktop needs because the window that asks is the window that answers. It now carries the call, its arguments, its diff and a countdown.
+- **Discovery** worked as sized and is the one piece that is allowed to fail. mDNS is blocked on more networks than anyone expects, and a phone that already knows the address must not be locked out because the desktop could not shout about itself.
+
+**What the design did not anticipate, all four found by building rather than by reading.**
+
+1. **`listen` had no remote half.** The document says "implement that module's surface against HTTP + SSE" and treats it as one job. It is two: `invoke` had a route for everything since 0.11.0, and `listen` had *nothing* — the only SSE on the surface was the one a send opens for its own turn. A window that never hears `chats-changed` shows a stale sidebar after a sub-agent spawns. `GET /api/events` bridges the same `app.listen` the window uses, with an explicit forwarded list, because `pdf-read-request` asks the *window* to do work and a phone cannot serve it.
+2. **`POST /api/chats/:id/messages` silently discarded per-turn overrides.** It accepted `overrideZoneId` and ran the chat's own zone. A remote zone picker would have appeared to work and done nothing. Found by writing a client against the route.
+3. **The drift test had a blind spot.** It parsed only lines beginning `commands::`, so `pdf_bridge::resolve_pdf_read` had been exempt from the coverage requirement since the test was written in 0.11.0. A drift test with a blind spot is worse than none, because it is trusted. It reads every `module::command` now.
+4. **The mobile build had to be a different crate shape, not a different configuration.** The document's "nothing is stored there that the desktop does not already hold" is a promise about behaviour, and a Tauri mobile build compiles the whole lib — SQLite, the agentic loop, MCP, the file tools — into the APK by default. A build that *contained* the database layer and merely chose not to open it is one bug away from breaking the promise. Every module is `#[cfg(desktop)]`; the mobile binary is a WebView with no `invoke_handler` at all. The dependency list is split the same way, in cargo's target terms, so an Android build does not compile BoringSSL and an OCR engine to host a web view.
+
+**One thing the design named that is worth repeating, because building it made it concrete.** Android has forbidden cleartext HTTP by default since API 28 and is right to. This app is the case the rule does not fit — one server, on the user's own LAN, at an IP literal no CA will issue for. The alternative is teaching people to install a self-signed root on their phone, which is materially worse. What makes it acceptable is the out-of-scope list above: nothing here leaves the LAN, so the traffic crosses the user's own router and nothing else.
+
+**Still not built, and still deliberately:** wake-on-LAN, any access from outside the LAN, and any offline mode. The token also lives in the WebView's `localStorage` rather than the platform keystore, which is the one place the implementation is weaker than the design — noted in `transport.ts` rather than quietly.
+
+### What using it changed (0.17.3–0.17.4)
+
+The design above was written before anything was built, and survived better
+than it had any right to. Four things it could not have known, all of which
+came from installing the APK on a handset and using it rather than from reading
+the code back:
+
+1. **A phone is not a narrow window, and the two must not be conflated.** The
+   first touch pass put a `min-height` on every button, which stretched the
+   settings Toggle's track and left its knob pinned to the top — every switch in
+   the app rendered as a tall capsule. Target size follows the *pointer*, layout
+   follows the *width*, and a rule that cannot tell which elements own their own
+   geometry should not be global.
+2. **"Show a code" is the wrong verb.** The design says the desktop shows a code
+   and the phone enters it, which reads fine and walks the user between two
+   screens neither of which knows about the other. Inverting it — the desktop is
+   armed, the phone asks, the code appears *with the asking device's name on it*
+   — costs one unauthenticated route and turns an anonymous six digits into an
+   identified request. The security property is unchanged and is easier to state:
+   no code exists unless somebody armed the desktop.
+3. **mDNS is the least dependable half of discovery, not the most.** The design
+   treats it as the answer and manual entry as the fallback. On Android it needs
+   a `MulticastLock`, and consumer routers block client-to-client multicast often
+   enough that it fails on exactly the networks people want to use. A /24 sweep
+   of the unauthenticated health check works wherever plain TCP does — which is
+   the same condition the app itself needs — so that is what the phone does. The
+   advertisement stays for everything that is not a phone.
+4. **Dictation is the thing the phone is *better* at**, and the design does not
+   mention it. It is the one input where the remote has the advantage: a good
+   microphone in your hand, a transcription provider on the machine at home. It
+   fits the rule exactly — the phone captures, the desktop infers.
+
+One bug worth recording because of its shape rather than its size:
+`Object.assign` copies an explicit `undefined` over a real value, so
+`{ apiEnabled: cond ? true : undefined }` — written to mean "set it, or leave it
+alone" — silently erased the setting. It clobbered `apiEnabled` and `apiToken`,
+which would have stopped the API server starting at the next launch with nothing
+on screen to explain why. It was found by reading `/api/health` on a running app
+and noticing a bound socket reporting `enabled: false` — which is precisely the
+job that endpoint was rebuilt for in 0.11.0, catching a lie that no test was
+positioned to see.
+
+
+### What a second week of using it changed (0.17.5)
+
+The first round of handset feedback (above) was about things the design had not
+thought about. This round was about things it had thought about and got
+*silently* wrong, which is a different and worse category.
+
+1. **A response shape is part of an interface, and nothing was checking it.**
+   The design's central claim is that `src/lib/tauri.ts` is one seam: implement
+   `invoke` against HTTP and the app *is* the remote client. That holds only if
+   a route returns what its command returns. Seven do not — `GET
+   /api/settings/:key` answers `{"key":…,"value":…}` where the command returns
+   the string — and nothing anywhere said so. Every settings read from a phone
+   threw in `JSON.parse`, the store fell back to its defaults, and the next
+   write merged against those defaults and **persisted them over the desktop's
+   real settings**. A read bug became a write bug because the store's writes are
+   whole-object.
+
+   Two lessons, and only one of them is about envelopes. The first: the drift
+   test proved the *route* existed and had never had an opinion about what came
+   back, so `COVERAGE` now carries `-> field` and a test reads the handlers to
+   enforce it. The second is larger — **a client that cannot read its state must
+   not be allowed to write it.** The store now refuses, and says so on screen.
+   That rule would have contained this bug even with the envelope unfixed.
+
+2. **The platform's own navigation is a feature you have to implement.** Android's
+   back gesture is not a nicety, it is the way out of everything, and the shell
+   hands it to `webView.canGoBack()` — which in a single-page app that never
+   touches history is always false, so every press closed the app. Layers push a
+   history entry now. This generalises past Android: the design's "the existing
+   app *is* the remote client" is true of the *data* path and false of the
+   *interaction* path, and the second one has to be ported deliberately.
+
+3. **`100vw` is not the width of the screen you can draw on.** The app root was
+   `h-screen w-screen` inside a body padded by the safe-area insets, so in
+   landscape the whole app was shifted sideways by the cutout and the right-hand
+   end of every full-width row fell off the edge. The general form of the
+   "header under the status bar" patch from 0.17.4, which had been fixed one
+   overlay at a time.
+
+4. **Being a remote is not the same as being a relay.** Dictation from the phone
+   uploaded `audio/webm;codecs=opus` and passed it straight to the transcription
+   endpoint — while the desktop's own capture path has always resampled to 16 kHz
+   mono WAV, because that is what a local whisper or MLX server decodes. Two
+   paths into one endpoint handing it two different formats, and only the cloud
+   one was ever exercised. The computer now *prepares* the audio with ffmpeg
+   before sending it on, which is the rule the whole design already states: the
+   phone captures, and the work happens on the machine with the tools installed.
+   ffmpeg is optional and its absence is explained rather than fatal.
+
+**A note on how these were found.** All four came from a person using the app on
+their own phone for a week, and none of them would have been found by reading
+the code — the settings loss in particular was only visible by reading the
+desktop's database and noticing what was no longer in it. The 0.17.x notes now
+record two bugs (this one and the `Object.assign` erase in 0.17.4) whose shape
+is identical: **a write that means "change this one thing" implemented as a
+write of everything.** Worth watching for a third.

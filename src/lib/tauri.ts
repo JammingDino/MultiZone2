@@ -1,5 +1,8 @@
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+// The one seam (0.17.1). These were `@tauri-apps/api`'s `invoke` and `listen`
+// directly; they are now the transport, which is those two functions on the
+// desktop and HTTP + SSE when this window is a remote for one. Every binding
+// below is unchanged — that was the point of there being a single seam.
+import { invoke, listen, type UnlistenFn } from "@/lib/remote/transport";
 import type { PdfReadPage } from "@/lib/pdf";
 import type {
   Attachment,
@@ -10,6 +13,11 @@ import type {
   LibraryEntry,
   ApiBindState,
   ApplyOutcome,
+  NetworkInterface,
+  PairedDevice,
+  PairingView,
+  PendingApproval,
+  RemoteStatus,
   Checkpoint,
   CheckpointUsage,
   StagedEdit,
@@ -506,7 +514,7 @@ export const queueChatMessage = (
 ) => invoke<{ running: boolean; id: string | null }>("queue_chat_message", { chatId, id, text, mode });
 /** Drop a queued message that hasn't reached the model yet. */
 export const cancelPendingMessage = (chatId: string, id: string) =>
-  invoke<boolean>("cancel_pending_message", { chatId, id });
+  invoke<boolean>("cancel_pending_message", { chatId, messageId: id });
 /**
  * `hunks` (0.10.2) approves only part of a previewed file change: the call still
  * runs, with its arguments rewritten to exactly the content the user agreed to.
@@ -614,9 +622,88 @@ export const importChatFromMarkdown = (path: string) =>
   invoke<Chat>("import_chat_from_markdown", { path });
 
 // API server
-export const applyApiSettings = (enabled: boolean, port: number, token: string) =>
-  invoke<void>("apply_api_settings", { enabled, port, token });
+/**
+ * Push the API config and (re)start the server.
+ *
+ * `lan`, `bindAddress` and `discovery` (0.17.0) are part of this call rather
+ * than a separate one because every one of them changes which socket is open —
+ * a panel that could change the bind without restarting would be describing a
+ * server that does not exist.
+ */
+export const applyApiSettings = (
+  enabled: boolean,
+  port: number,
+  token: string,
+  lan?: boolean,
+  bindAddress?: string,
+  discovery?: boolean,
+) =>
+  invoke<void>("apply_api_settings", {
+    enabled,
+    port,
+    token,
+    lan: lan ?? false,
+    bindAddress: bindAddress ?? "",
+    discovery: discovery ?? true,
+  });
 export const generateApiToken = () => invoke<string>("generate_api_token");
+
+// Remote access (0.17.0) — a phone as a second window onto this desktop.
+/** Whether the app is reachable from the network, on which address, and
+ *  whether it is being advertised. */
+export const remoteStatus = () => invoke<RemoteStatus>("remote_status");
+/** The addresses this machine could bind. */
+export const listNetworkInterfaces = () =>
+  invoke<NetworkInterface[]>("list_network_interfaces");
+export const listPairedDevices = () => invoke<PairedDevice[]>("list_paired_devices");
+/** Revoke one device. Its token stops working on its next request; nothing
+ *  else notices — which is the whole point of per-device tokens. */
+export const revokePairedDevice = (id: string) =>
+  invoke<PairedDevice>("revoke_paired_device", { id });
+/** Drop a revoked device from the list. Refuses one that is still live. */
+export const forgetPairedDevice = (id: string) =>
+  invoke<void>("forget_paired_device", { id });
+export const renamePairedDevice = (id: string, name: string) =>
+  invoke<PairedDevice>("rename_paired_device", { id, name });
+/** The code on screen, its QR link, and recent attempts. */
+export const pairingStatus = () => invoke<PairingView>("pairing_status");
+/**
+ * Wait for a device to ask for a code (0.17.4) — the normal path.
+ *
+ * The code then appears *because* a phone asked, with that phone's name beside
+ * it, instead of the user fetching six digits and walking to a device that has
+ * no idea any of it happened.
+ */
+export const armPairing = () => invoke<PairingView>("arm_pairing");
+/** Show a code immediately, without waiting to be asked. The path for a client
+ *  that cannot ask: a browser driven by hand, or a build older than 0.17.4. */
+export const openPairing = () => invoke<PairingView>("open_pairing");
+export const closePairing = () => invoke<PairingView>("close_pairing");
+
+/**
+ * Every tool call waiting on a human.
+ *
+ * Answering is still `respondToolApproval`; what was missing was any way to
+ * find out something was waiting. From a phone that is the difference between
+ * a run you left alone and a run that quietly denied itself five minutes after
+ * you walked away.
+ */
+export const pendingApprovals = () => invoke<PendingApproval[]>("pending_approvals");
+
+/** Emitted when a device asks a waiting desktop for a code (0.17.4), so the
+ *  panel that armed it shows the digits without anyone pressing refresh. */
+export function onPairingRequested(
+  handler: (e: { address: string }) => void,
+): Promise<UnlistenFn> {
+  return listen<{ address: string }>("pairing-requested", (e) => handler(e.payload));
+}
+
+/** Emitted when a device pairs, so an open pairing dialog can say so. */
+export function onDevicesChanged(
+  handler: (e: { deviceId: string }) => void,
+): Promise<UnlistenFn> {
+  return listen<{ deviceId: string }>("devices-changed", (e) => handler(e.payload));
+}
 
 // Attachments
 export const uploadAttachment = (chatId: string, filePath: string) =>

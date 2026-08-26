@@ -226,7 +226,7 @@ export function PlanReview({
         ) : onContext && context ? (
           <div className="min-h-0 flex-1 overflow-y-auto">
             <SectionLabel icon={<BookOpen size={11} />} text="Context, assumptions and open questions" />
-            <Markdown source={context} className="mz-plan-prose" fontSize="0.78rem" />
+            <Markdown source={context} className="mz-plan-prose" fontSize="0.78rem" plainTables />
           </div>
         ) : current ? (
           editingId === current.id ? (
@@ -440,7 +440,7 @@ function StepPage({
       <div className="flex min-h-[4rem] flex-1 flex-col gap-2 overflow-y-auto overscroll-contain">
         {detail ? (
           <div className="rounded border border-[var(--color-border)] bg-[var(--color-bg)]/40 px-2.5 py-2">
-            <Markdown source={detail} className="mz-plan-prose" fontSize="0.78rem" />
+            <Markdown source={detail} className="mz-plan-prose" fontSize="0.78rem" plainTables />
           </div>
         ) : (
           <div className="rounded border border-dashed border-[var(--color-border)] px-2.5 py-2 text-[11px] italic text-[var(--color-text-muted)]">

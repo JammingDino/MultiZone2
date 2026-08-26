@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext HTTP, on purpose (0.17.2).
+
+  Android has forbidden cleartext by default since API 28, and it is right to.
+  This app is the case the rule does not fit: it talks to one server, on the
+  user's own LAN, at an address that is an IP literal — 192.168.1.5 — and there
+  is no certificate authority on earth that will issue for that. The choice is
+  cleartext on a local network or a self-signed certificate the user has to
+  install as a trusted root on their phone, which is a materially worse thing
+  to teach somebody to do.
+
+  What makes it acceptable is what the design already refuses: nothing here
+  reaches outside the LAN. No relay, no tunnel, no account. The traffic crosses
+  the user's own router and nothing else.
+
+  Narrowed as far as Android allows. `domain-config` matches hostnames, not
+  address ranges, so "private ranges only" is not expressible — this is why the
+  base config is the one carrying the permission.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

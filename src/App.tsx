@@ -11,6 +11,10 @@ import { ImportSettingsDialog } from "./components/Settings/ImportSettingsDialog
 import { UpdatePrompt } from "./components/UpdatePrompt";
 import { ShortcutsHelpModal } from "./components/common/ShortcutsHelpModal";
 import { CommandPalette } from "@/components/CommandPalette";
+import { PairingScreen } from "@/components/Remote/PairingScreen";
+import { ConnectionBanner } from "@/components/Remote/ConnectionBanner";
+import { ApprovalQueue } from "@/components/Remote/ApprovalQueue";
+import { useRemote } from "@/lib/remote/useRemote";
 import { useApp } from "./store/app";
 import { useGlobalShortcuts } from "./lib/useGlobalShortcuts";
 import { usePdfReadBridge } from "./lib/usePdfReadBridge";
@@ -22,6 +26,10 @@ import * as api from "./lib/tauri";
 import { installPerfHandle, mark, markInteractive } from "./lib/perf";
 
 export default function App() {
+  // Whether this window is the app or a window onto it (0.17.2). A phone that
+  // has not been paired can do exactly one thing, so it is checked before
+  // anything else mounts — every hook below assumes a backend to talk to.
+  const remote = useRemote();
   const providersLoaded = useApp((s) => s.providersLoaded);
   const providers = useApp((s) => s.providers);
   const setAppSettings = useApp((s) => s.setAppSettings);
@@ -67,7 +75,14 @@ export default function App() {
   // or write and every file tool fails until the user picks a folder. Only
   // fills a blank — a directory the user chose is never moved — and it stays
   // out of settings exports, so each install resolves its own.
+  //
+  // Never from a remote (0.17.2): the file tools run on the *desktop*, and a
+  // phone helpfully filling this in would set the desktop's working directory
+  // to a path that exists on the phone. The one place the local/remote
+  // distinction leaks into the app proper, and it leaks because the answer
+  // genuinely differs.
   useEffect(() => {
+    if (remote.session) return;
     if (!appSettingsLoaded || defaultDirectory?.trim() || defaultDirRef.current) return;
     defaultDirRef.current = true;
     (async () => {
@@ -80,7 +95,7 @@ export default function App() {
       }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appSettingsLoaded, defaultDirectory]);
+  }, [appSettingsLoaded, defaultDirectory, remote.session]);
 
   // Seed the curated zone library onto disk (all curated presets, including the
   // community extras). Re-runs when the shipped set version grows so existing
@@ -162,11 +177,30 @@ export default function App() {
   const showOnboarding = noProvider && !onboardingSkipped;
   const showNoProviderBanner = noProvider && onboardingSkipped;
 
+  // Nothing to show and nothing to load: this device holds no copy of anything,
+  // which is the point. Rendered before the rest of the tree so the seeders and
+  // the provider check never run against a backend that is not there.
+  if (remote.needsPairing) {
+    return (
+      <div className="h-screen w-screen overflow-hidden text-[var(--color-text)]">
+        <BackgroundEffect />
+        <div className="relative z-10 h-full w-full">
+          <PairingScreen onPaired={() => window.location.reload()} />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="h-screen w-screen overflow-hidden text-[var(--color-text)]">
       <BackgroundEffect />
       <div className="relative z-10 flex h-full w-full flex-col">
-        <TitleBar />
+        {/* The window chrome is the desktop's; a phone has the system's. */}
+        {!remote.shell && <TitleBar />}
+        {remote.session && <ConnectionBanner state={remote.connection} />}
+        {/* Above the chat, not inside it: the call that is waiting is often not
+            in the chat you are looking at. */}
+        <ApprovalQueue />
         {showNoProviderBanner && <NoProviderBanner />}
         {/* Onboarding overlays only the content area so the title bar stays
             draggable/resizable while it's up. */}

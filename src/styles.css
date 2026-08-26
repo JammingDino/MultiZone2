@@ -894,3 +894,51 @@ html.shadows [class*="shadow-xl"] {
 @media (prefers-reduced-motion: reduce) {
   .mz-jump-flash { animation-duration: 0.01ms; }
 }
+
+/* ─── Touch (0.17.2) ──────────────────────────────────────────────────────────
+ *
+ * The mobile shell runs the same React the desktop does; what differs is the
+ * input device and the notch. Both are handled here rather than by forking
+ * components, because a component that renders differently on a phone is a
+ * component that has to be kept working twice.
+ *
+ * Scoped to coarse pointers rather than to a width: a touchscreen laptop wants
+ * the bigger targets and a narrow desktop window does not.
+ */
+@media (pointer: coarse) {
+  /* 44px is the smallest thing a finger reliably hits. The desktop's controls
+     are sized for a cursor, and every one of them is a button or an input. */
+  button,
+  [role="button"],
+  select,
+  input[type="checkbox"],
+  input[type="radio"] {
+    min-height: 2.25rem;
+  }
+
+  /* Nothing here has a hover state a finger can produce, and leaving them in
+     means a tapped control stays "hovered" until something else is tapped. */
+  @media (hover: none) {
+    *:hover {
+      transition: none;
+    }
+  }
+
+  /* iOS zooms the page in when a field with text under 16px is focused, and
+     then does not zoom back out. */
+  input,
+  textarea,
+  select {
+    font-size: max(1rem, inherit);
+  }
+}
+
+/* Under the notch and the home indicator, but not under their content. Zero on
+   every desktop, so this is unconditional. */
+body {
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+    env(safe-area-inset-bottom) env(safe-area-inset-left);
+  /* The app owns its scrolling; a rubber-banding page behind it is the phone
+     browser's idea, not ours. */
+  overscroll-behavior: none;
+}

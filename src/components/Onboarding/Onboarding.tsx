@@ -1,12 +1,19 @@
 import { useRef, useState } from "react";
-import { Layers, Loader2, Server, Sparkles, ArrowRight, Check, FileUp, Upload } from "lucide-react";
+import { Layers, Loader2, Server, Sparkles, ArrowRight, Check, FileUp, Upload, ExternalLink, Gift } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
+import { openPath } from "@/lib/tauri";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
 import { PrivacyStatementModal } from "@/components/common/PrivacyStatement";
 import { seedDefaultZones } from "@/lib/defaultZones";
 import { claimSettingsDrop, pickBundleFile } from "@/lib/importSettings";
-import { PROVIDER_PRESETS, presetForBaseUrl } from "@/lib/providerPresets";
+import {
+  FREE_TIER_CAVEAT,
+  FREE_TIER_PRESETS,
+  PROVIDER_PRESETS,
+  presetForBaseUrl,
+  type ProviderPreset,
+} from "@/lib/providerPresets";
 import { PRIMARY_ACTION } from "@/lib/chrome";
 
 /**
@@ -40,6 +47,15 @@ export function Onboarding() {
   const [error, setError] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const dragDepth = useRef(0);
+
+  const selectedPreset = presetForBaseUrl(baseUrl);
+
+  /** Fill the form from a preset, including the model hint for the next step. */
+  function applyPreset(p: ProviderPreset) {
+    setName(p.name);
+    setBaseUrl(p.baseUrl);
+    if (p.suggestedModel) setModel(p.suggestedModel);
+  }
 
   async function onConnect() {
     if (!name.trim() || !baseUrl.trim()) return;
@@ -200,17 +216,41 @@ export function Onboarding() {
 
         {step === "provider" ? (
           <div className="flex flex-col gap-3">
+            {/* The free tiers come first, and on their own, because "install a
+                local model" is not a real answer for most people — it wants a
+                capable machine and a download in gigabytes, and the result is
+                slower and weaker than these. */}
+            <div>
+              <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-[var(--color-text)]">
+                <Gift size={12} className="text-[var(--color-accent)]" />
+                No key yet? These are free to start
+              </div>
+              <div className="flex flex-col overflow-hidden rounded-md border border-[var(--color-border)]">
+                {FREE_TIER_PRESETS.map((p) => (
+                  <FreeTierRow
+                    key={p.id}
+                    preset={p}
+                    selected={presetForBaseUrl(baseUrl)?.id === p.id}
+                    onPick={() => applyPreset(p)}
+                  />
+                ))}
+              </div>
+              <p className="mt-1.5 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
+                {FREE_TIER_CAVEAT}
+              </p>
+            </div>
+
             <div>
               <div className="mb-1.5 text-[11px] text-[var(--color-text-muted)]">
-                Pick your service and we'll fill in the address
+                Or pick another service and we'll fill in the address
               </div>
               <div className="flex flex-wrap gap-1.5">
-                {PROVIDER_PRESETS.map((p) => (
+                {OTHER_PRESETS.map((p) => (
                   <button
                     key={p.id}
                     type="button"
                     title={`${p.blurb} — ${p.baseUrl}`}
-                    onClick={() => { setName(p.name); setBaseUrl(p.baseUrl); }}
+                    onClick={() => applyPreset(p)}
                     className={`rounded-full border px-2.5 py-1 text-xs ${
                       presetForBaseUrl(baseUrl)?.id === p.id
                         ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]"
@@ -232,8 +272,24 @@ export function Onboarding() {
               <input value={apiKey} onChange={(e) => setApiKey(e.target.value)} type="password" className="ob-input" placeholder="sk-… (leave blank for local)" />
             </FieldRow>
             <p className="text-[11px] text-[var(--color-text-muted)]">
-              Running Ollama locally? The defaults above usually just work. Using OpenAI, OpenRouter, or
-              another service? Paste its OpenAI-compatible base URL and key.
+              {selectedPreset?.keyUrl ? (
+                <>
+                  Get a {selectedPreset.name} key from{" "}
+                  <button
+                    type="button"
+                    onClick={() => void openPath(selectedPreset.keyUrl!)}
+                    className="text-[var(--color-accent)] hover:underline"
+                  >
+                    {selectedPreset.keyUrl}
+                  </button>
+                  , paste it above, and connect.
+                </>
+              ) : (
+                <>
+                  Running a model locally? The Ollama defaults usually just work, and no key is needed.
+                  Anything else: paste its OpenAI-compatible base URL and key.
+                </>
+              )}
             </p>
             {error && <div className="rounded bg-[var(--color-danger)]/10 p-2 text-xs text-[var(--color-danger)]">{error}</div>}
             <button
@@ -341,5 +397,55 @@ function FieldRow({ label, children }: { label: string; children: React.ReactNod
       <div className="mb-1 text-xs text-[var(--color-text-muted)]">{label}</div>
       {children}
     </label>
+  );
+}
+
+/** Everything that is not a standing free tier — the pill row below the list. */
+const OTHER_PRESETS = PROVIDER_PRESETS.filter((p) => p.freeTier === undefined);
+
+/**
+ * One free provider: what it is, what it gives away, and a link straight to the
+ * key page. The link is the point — the allowance next to it is indicative and
+ * these numbers move, so the user should land on the source of truth rather
+ * than trust a string compiled into the binary.
+ */
+function FreeTierRow({
+  preset,
+  selected,
+  onPick,
+}: {
+  preset: ProviderPreset;
+  selected: boolean;
+  onPick: () => void;
+}) {
+  return (
+    <div
+      className={`flex items-center gap-2 border-b border-[var(--color-border)] px-2.5 py-2 last:border-b-0 ${
+        selected ? "bg-[var(--color-panel-hover)]" : ""
+      }`}
+    >
+      <button type="button" onClick={onPick} className="flex-1 text-left">
+        <div className="flex items-center gap-1.5 text-xs font-medium">
+          {preset.name}
+          {selected && <Check size={11} className="text-[var(--color-accent)]" />}
+        </div>
+        <div className="text-[11px] text-[var(--color-text-muted)]">
+          {preset.freeTier} · {preset.blurb}
+        </div>
+      </button>
+      {preset.keyUrl && (
+        <button
+          type="button"
+          title={`Open ${preset.keyUrl}`}
+          onClick={() => {
+            onPick();
+            void openPath(preset.keyUrl!);
+          }}
+          className="flex flex-shrink-0 items-center gap-1 rounded border border-[var(--color-border)] px-1.5 py-1 text-[11px] text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+        >
+          Get a key <ExternalLink size={10} />
+        </button>
+      )}
+    </div>
   );
 }

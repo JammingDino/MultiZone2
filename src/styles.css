@@ -513,7 +513,12 @@ input[type="color"]:hover { border-color: var(--color-accent); }
 }
 
 .markdown table {
-  width: auto;
+  /* Fill the message column. A table is a comparison, and shrink-to-fit puts
+     the columns being compared closer together than the eye wants them —
+     `min-width` rather than `width` so a table with more columns than fit
+     still grows past the column and scrolls in its own container. */
+  width: 100%;
+  min-width: 100%;
   margin: 0.5em 0;
   border-collapse: collapse;
   font-size: 0.95em;

@@ -3,6 +3,7 @@ import { AlertTriangle, FileUp, Server, X } from "lucide-react";
 import { useApp } from "@/store/app";
 import { pickBundleFile } from "@/lib/importSettings";
 import { CHROME_QUIET, PRIMARY_ACTION } from "@/lib/chrome";
+import { FREE_TIER_PRESETS } from "@/lib/providerPresets";
 
 /**
  * Standing notice for an install with no provider configured (1.0).
@@ -37,8 +38,22 @@ export function NoProviderBanner() {
       <div className="flex-1">
         <div className="font-medium">No model connected</div>
         <div className="mt-0.5 text-[var(--color-text-muted)]">
-          {error ?? "Messages won't send until you connect a provider or import settings from another install."}
+          {error ??
+            "Messages won't send until you connect a provider or import settings from another install."}
         </div>
+        {/* Named here too, because the banner is what someone who skipped setup
+            actually reads — and "connect a provider" is only actionable if you
+            already know one you can use for nothing. */}
+        {!error && (
+          <div className="mt-0.5 text-[var(--color-text-muted)]">
+            {FREE_TIER_PRESETS.length > 0 && (
+              <>
+                No key? {FREE_TIER_PRESETS.slice(0, 3).map((p) => p.name).join(", ")} and{" "}
+                {FREE_TIER_PRESETS.length - 3} more are free to start, and setup lists them.
+              </>
+            )}
+          </div>
+        )}
         <div className="mt-2 flex flex-wrap gap-2">
           <button
             onClick={() => {

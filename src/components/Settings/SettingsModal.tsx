@@ -4783,7 +4783,9 @@ function ProviderForm({ value, onClose, onDeleted }: { value: Partial<Provider>;
       {!value.id && (
         <div className="mb-3">
           <div className="mb-1.5 text-xs text-[var(--color-text-muted)]">
-            Start from a known service, or fill the fields in yourself
+            Start from a known service, or fill the fields in yourself.{" "}
+            <span className="text-[var(--color-accent)]">Free</span> marks the ones with a standing
+            free tier and no card.
           </div>
           <div className="flex flex-wrap gap-1.5">
             {PROVIDER_PRESETS.map((p) => (
@@ -4799,6 +4801,9 @@ function ProviderForm({ value, onClose, onDeleted }: { value: Partial<Provider>;
                 }`}
               >
                 {p.name}
+                {p.freeTier && (
+                  <span className="ml-1 text-[10px] text-[var(--color-accent)]">free</span>
+                )}
               </button>
             ))}
           </div>
@@ -4837,6 +4842,7 @@ function ProviderForm({ value, onClose, onDeleted }: { value: Partial<Provider>;
           >
             {preset.keyUrl.replace(/^https:\/\//, "")}
           </a>
+          {preset.freeTier && ` — ${preset.freeTier}.`}
         </p>
       )}
       <Field label="Default model">

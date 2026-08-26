@@ -22,6 +22,17 @@ export type ProviderPreset = {
   suggestedModel?: string;
   /** One-line orientation for people who don't recognise the name. */
   blurb: string;
+  /**
+   * The standing free allowance, in a few words, for a provider that has one —
+   * and only where a card is *not* required to get it. Absent means "this one
+   * wants a payment method", not "this one is expensive".
+   *
+   * These numbers move. They are a reason to try a provider first, not a
+   * promise: the link under the field is the source of truth, and a wrong
+   * number here costs a user one rate-limit message rather than money.
+   * Checked August 2026.
+   */
+  freeTier?: string;
 };
 
 export const PROVIDER_PRESETS: ProviderPreset[] = [
@@ -50,6 +61,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     needsKey: true,
     suggestedModel: "gemini-2.5-flash",
     blurb: "Gemini via AI Studio",
+    freeTier: "1,500 requests a day on Flash, no card",
   },
   {
     id: "openrouter",
@@ -58,6 +70,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     keyUrl: "https://openrouter.ai/keys",
     needsKey: true,
     blurb: "One key, hundreds of models",
+    freeTier: "50 requests a day across its free models, no card",
   },
   {
     id: "deepseek",
@@ -83,6 +96,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     keyUrl: "https://console.groq.com/keys",
     needsKey: true,
     blurb: "Very fast open-weight hosting",
+    freeTier: "1,000 requests a day, no card",
   },
   {
     id: "mistral",
@@ -91,6 +105,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     keyUrl: "https://console.mistral.ai/api-keys",
     needsKey: true,
     blurb: "Mistral and Codestral",
+    freeTier: "A free tier on La Plateforme, no card",
   },
   {
     id: "nvidia",
@@ -99,6 +114,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     keyUrl: "https://build.nvidia.com",
     needsKey: true,
     blurb: "NVIDIA-hosted open models",
+    freeTier: "Free credits on signup, no card",
   },
   {
     id: "together",
@@ -107,6 +123,35 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     keyUrl: "https://api.together.ai/settings/api-keys",
     needsKey: true,
     blurb: "Open-weight model hosting",
+  },
+  {
+    id: "cerebras",
+    name: "Cerebras",
+    baseUrl: "https://api.cerebras.ai/v1",
+    keyUrl: "https://cloud.cerebras.ai",
+    needsKey: true,
+    suggestedModel: "gpt-oss-120b",
+    blurb: "Open-weight models at very high speed",
+    freeTier: "1M tokens a day, no card",
+  },
+  {
+    id: "zai",
+    name: "Z.ai (GLM)",
+    baseUrl: "https://api.z.ai/api/paas/v4",
+    keyUrl: "https://z.ai",
+    needsKey: true,
+    suggestedModel: "glm-4.7-flash",
+    blurb: "GLM models; the Flash variants are free",
+    freeTier: "Free Flash models, rate limited",
+  },
+  {
+    id: "cohere",
+    name: "Cohere",
+    baseUrl: "https://api.cohere.ai/compatibility/v1",
+    keyUrl: "https://dashboard.cohere.com/api-keys",
+    needsKey: true,
+    blurb: "Command models, strong at retrieval",
+    freeTier: "Trial key, ~1,000 calls a month",
   },
   {
     id: "ollama",
@@ -137,6 +182,62 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     blurb: "Self-hosted vLLM server",
   },
 ];
+
+/**
+ * The providers someone with no key and no local model can actually start on,
+ * best allowance first.
+ *
+ * This list exists because "install Ollama first" is not a real answer for most
+ * people — it wants a capable machine, a download measured in gigabytes, and a
+ * tolerance for the result being slower and weaker than the free hosted tiers.
+ * Every entry here is free without a payment method and takes about a minute to
+ * get a key for.
+ *
+ * There is deliberately no "no key at all" option: a hosted endpoint that
+ * answers without a key is either someone else's key being spent or a proxy
+ * that sees every prompt, and neither belongs in a local-first app. The only
+ * genuinely keyless providers are the local ones below, which is the trade
+ * being made either way.
+ */
+const FREE_TIER_ORDER = [
+  // Biggest standing allowance and the one most people already have an account
+  // for; also the only free tier here that takes images.
+  "google",
+  // Fastest to first token by a distance, which is what a first impression is.
+  "groq",
+  // The largest token budget of the lot, on capable open-weight models.
+  "cerebras",
+  // One key, many models — the best answer when the user does not yet know
+  // which model they want.
+  "openrouter",
+  "mistral",
+  "zai",
+  "nvidia",
+  "cohere",
+];
+
+export const FREE_TIER_PRESETS: ProviderPreset[] = PROVIDER_PRESETS.filter(
+  (p) => p.freeTier !== undefined,
+).sort((a, b) => {
+  // A preset that gains a free tier without being ranked sorts last rather than
+  // to the front, which is the safe direction for a recommendation.
+  const rank = (id: string) => {
+    const i = FREE_TIER_ORDER.indexOf(id);
+    return i === -1 ? FREE_TIER_ORDER.length : i;
+  };
+  return rank(a.id) - rank(b.id);
+});
+
+/**
+ * The sentence that has to accompany a free-tier recommendation.
+ *
+ * MultiZone's first principle is that nothing leaves the machine unless the
+ * user chooses, and PRIVACY.md says so in the app. Suggesting a hosted provider
+ * in onboarding *is* that choice being offered, so it is offered with what it
+ * costs: free tiers are generally funded by the prompts sent to them.
+ */
+export const FREE_TIER_CAVEAT =
+  "These send your messages to that company's servers, and free tiers are usually the ones that train on what you send. Nothing is shared until you pick one, and a local model stays entirely on this machine.";
 
 /** The preset a base URL belongs to, if any — used to label an existing row. */
 export function presetForBaseUrl(baseUrl: string | null | undefined): ProviderPreset | null {

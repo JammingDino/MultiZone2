@@ -18,7 +18,7 @@ export function PrivacyStatementModal({ onClose }: { onClose: () => void }) {
   return (
     <Modal onClose={onClose} header={<h2 className="text-sm font-medium">Privacy</h2>}>
       <div className="h-full overflow-auto px-1">
-        <Markdown source={statement} fontSize="13px" />
+        <Markdown source={statement} fontSize="13px" plainTables />
       </div>
     </Modal>
   );

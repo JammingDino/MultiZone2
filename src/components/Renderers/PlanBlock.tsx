@@ -202,7 +202,7 @@ function PlanFold({ label, body }: { label: string; body: string }) {
       </button>
       {open && (
         <div className="mt-1 max-h-72 overflow-y-auto rounded border border-[var(--color-border)] bg-[var(--color-bg)]/40 px-2 py-1.5">
-          <Markdown source={body} className="mz-plan-prose" fontSize="0.75rem" />
+          <Markdown source={body} className="mz-plan-prose" fontSize="0.75rem" plainTables />
         </div>
       )}
     </div>

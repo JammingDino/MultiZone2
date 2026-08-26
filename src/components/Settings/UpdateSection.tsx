@@ -57,7 +57,7 @@ export function UpdateSection() {
                   literal `##` and `-`. */}
               {u.notes && (
                 <div className="mt-1.5 max-h-40 overflow-auto rounded border border-[var(--color-border)] px-2.5 py-2">
-                  <Markdown source={u.notes} fontSize="12px" />
+                  <Markdown source={u.notes} fontSize="12px" plainTables />
                 </div>
               )}
             </div>

@@ -133,7 +133,7 @@ export function UpdatePrompt() {
             <div className="mb-2 text-[10.5px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
               What's new
             </div>
-            <Markdown source={u.notes} fontSize="13px" />
+            <Markdown source={u.notes} fontSize="13px" plainTables />
           </div>
         )}
 

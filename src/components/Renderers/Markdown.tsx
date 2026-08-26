@@ -56,6 +56,29 @@ const MD_COMPONENTS: Components = {
   table: MarkdownTable,
 };
 
+/**
+ * The same set with an inert table, for markdown that is chrome rather than
+ * conversation (`plainTables`).
+ *
+ * A table in an answer is data the model produced and the reader may want to
+ * reorder or chart. A table in release notes is prose in columns: there is
+ * nothing to sort it by, "chart this" has nothing to chart, and "ask about
+ * this" would offer to paste the changelog into the composer. The toolbar is
+ * not merely useless there, it is a set of wrong suggestions.
+ *
+ * Also module-level, for the same remount reason as `MD_COMPONENTS`.
+ */
+const MD_COMPONENTS_PLAIN_TABLES: Components = {
+  ...MD_COMPONENTS,
+  table(props) {
+    return (
+      <div className="my-2 overflow-x-auto">
+        <table {...props} />
+      </div>
+    );
+  },
+};
+
 const REMARK_PLUGINS = [remarkGfm, remarkMath];
 const REHYPE_PLUGINS = [rehypeKatex];
 
@@ -65,6 +88,7 @@ export function Markdown({
   part,
   className = "",
   fontSize,
+  plainTables = false,
 }: {
   source: string;
   citations?: Citation[];
@@ -77,6 +101,9 @@ export function Markdown({
    *  the conversation (release notes, say) is chrome, and should be sized like
    *  the chrome around it rather than tracking the reader's message size. */
   fontSize?: string;
+  /** Render tables as plain tables — see `MD_COMPONENTS_PLAIN_TABLES`. Set for
+   *  the same markdown that sets `fontSize`: chrome, not conversation. */
+  plainTables?: boolean;
 }) {
   // Append the citation plugin only when there are citations to map, so ordinary
   // messages keep the stable module-level plugin array (no needless re-parse).
@@ -113,7 +140,7 @@ export function Markdown({
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
         rehypePlugins={REHYPE_PLUGINS}
-        components={MD_COMPONENTS}
+        components={plainTables ? MD_COMPONENTS_PLAIN_TABLES : MD_COMPONENTS}
       >
         {normalized}
       </ReactMarkdown>

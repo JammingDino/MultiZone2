@@ -1,5 +1,8 @@
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+// The one seam (0.17.1). These were `@tauri-apps/api`'s `invoke` and `listen`
+// directly; they are now the transport, which is those two functions on the
+// desktop and HTTP + SSE when this window is a remote for one. Every binding
+// below is unchanged — that was the point of there being a single seam.
+import { invoke, listen, type UnlistenFn } from "@/lib/remote/transport";
 import type { PdfReadPage } from "@/lib/pdf";
 import type {
   Attachment,
@@ -511,7 +514,7 @@ export const queueChatMessage = (
 ) => invoke<{ running: boolean; id: string | null }>("queue_chat_message", { chatId, id, text, mode });
 /** Drop a queued message that hasn't reached the model yet. */
 export const cancelPendingMessage = (chatId: string, id: string) =>
-  invoke<boolean>("cancel_pending_message", { chatId, id });
+  invoke<boolean>("cancel_pending_message", { chatId, messageId: id });
 /**
  * `hunks` (0.10.2) approves only part of a previewed file change: the call still
  * runs, with its arguments rewritten to exactly the content the user agreed to.

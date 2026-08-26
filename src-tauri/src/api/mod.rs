@@ -37,6 +37,7 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::{oneshot, RwLock};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
+pub mod events;
 pub mod routes;
 
 use crate::commands::chats::CHAT_COLS;
@@ -52,6 +53,10 @@ pub(crate) struct ApiState {
     pub(crate) tool_approvals: crate::commands::messages::ApprovalGate,
     pub(crate) app: AppHandle,
     pub(crate) token: String,
+    /// The Tauri→SSE event bridge (0.17.1). Shared, because every subscriber to
+    /// `GET /api/events` reads the same broadcast — and because the listeners
+    /// feeding it are unregistered when the last handle drops.
+    pub(crate) events: Arc<events::EventBridge>,
 }
 
 impl ApiState {
@@ -98,7 +103,8 @@ pub async fn start(
     port: u16,
     token: String,
 ) -> crate::error::AppResult<ApiHandle> {
-    let state = ApiState { db, http, active_streams, tool_approvals, app, token };
+    let events = Arc::new(events::EventBridge::start(app.clone()));
+    let state = ApiState { db, http, active_streams, tool_approvals, app, token, events };
     let router = build_router(state);
 
     let addr = SocketAddr::from((address, port));
@@ -156,6 +162,10 @@ pub(crate) async fn call_in_process(
         http: ctx.http.clone(),
         active_streams: ctx.active_streams.clone(),
         tool_approvals: ctx.tool_approvals.clone(),
+        // A bridge for one request that will never subscribe to it. Cheap, and
+        // it drops with the state — the alternative was making the field
+        // optional and every use of it ask a question with one real answer.
+        events: Arc::new(events::EventBridge::start(app.clone())),
         app,
         token: token.clone(),
     };
@@ -334,6 +344,8 @@ fn build_router(state: ApiState) -> Router {
         .route("/api/devices/:id", axum::routing::delete(h::revoke_device).post(h::rename_device))
         .route("/api/pairing", get(h::pairing_status).post(h::open_pairing).delete(h::close_pairing))
         .route("/api/approvals", get(h::pending_approvals))
+        // The other half of the frontend's one seam: `listen`, as a stream.
+        .route("/api/events", get(events::events))
         .route("/api/mirror", post(h::mirror_all))
         .route("/api/mirror/import", post(h::import_markdown))
         .route_layer(middleware::from_fn_with_state(state.clone(), auth_mw));
@@ -737,6 +749,18 @@ struct SendBody {
     /// zone (`initiated_by_zone_id`). Used by orchestration over the API.
     #[serde(default)]
     sender_zone_id: Option<String>,
+    /// Answer this one turn as a different zone, without touching the chat's
+    /// stored one (0.17.1). `"__simple__"` forces a Quick turn.
+    ///
+    /// The GUI has had this since zones did — the API silently discarded it and
+    /// ran the chat's own zone instead, which meant a remote window's zone
+    /// picker would appear to work and quietly do nothing. Found by building a
+    /// client against this route rather than by reading it.
+    #[serde(default)]
+    override_zone_id: Option<String>,
+    /// Model for this one turn, overriding the resolved zone's.
+    #[serde(default)]
+    override_model: Option<String>,
 }
 
 fn resolve_parts(body: SendBody) -> Result<Vec<InputPart>, ApiError> {
@@ -762,6 +786,11 @@ async fn send_message(
     Json(body): Json<SendBody>,
 ) -> ApiResult<Response> {
     let sender_zone_id = body.sender_zone_id.clone();
+    let turn = TurnOverride {
+        zone_id: body.override_zone_id.clone(),
+        model: body.override_model.clone(),
+        ..TurnOverride::default()
+    };
     let parts = resolve_parts(body)?;
     let ctx = st.engine();
 
@@ -793,7 +822,7 @@ async fn send_message(
         // Blocking: run to completion, then return the turn's new primary messages.
         let start = now_ts();
         let sink = StreamSink::tauri(st.app.clone());
-        run_send_entry(&ctx, &sink, &chat_id, parts, TurnOverride::default()).await?;
+        run_send_entry(&ctx, &sink, &chat_id, parts, turn).await?;
         let rows = sqlx::query_as::<_, Message>(&format!(
             "SELECT {MSG_COLS} FROM messages
              WHERE chat_id = ?1 AND zone_id IS NULL AND created_at >= ?2
@@ -812,7 +841,7 @@ async fn send_message(
     let sink = StreamSink::api(st.app.clone(), tx);
     tokio::spawn(async move {
         // Dropping `sink` (and thus the sender) when this finishes ends the SSE.
-        let _ = run_send_entry(&ctx, &sink, &chat_id, parts, TurnOverride::default()).await;
+        let _ = run_send_entry(&ctx, &sink, &chat_id, parts, turn).await;
     });
 
     let stream = UnboundedReceiverStream::new(rx)

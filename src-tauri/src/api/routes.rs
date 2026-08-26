@@ -52,7 +52,7 @@ const fn open(method: &'static str, path: &'static str, description: &'static st
 
 /// Bumped whenever a route is added, removed or changes shape, so a caller can
 /// tell "the app is older than my script" from "my script is wrong".
-pub const ROUTE_SET_VERSION: u32 = 6;
+pub const ROUTE_SET_VERSION: u32 = 7;
 
 pub const ROUTES: &[RouteDef] = &[
     // Discovery — deliberately unauthenticated. A caller debugging a broken
@@ -93,7 +93,7 @@ pub const ROUTES: &[RouteDef] = &[
     r("POST", "/api/chats", "Create a chat"),
     r("DELETE", "/api/chats/:id", "Delete a chat"),
     r("GET", "/api/chats/:id/messages", "Every message in a chat"),
-    r("POST", "/api/chats/:id/messages", "Send a message; streams SSE unless ?wait=true"),
+    r("POST", "/api/chats/:id/messages", "Send a message ({text|parts}, optional overrideZoneId/overrideModel for this turn only); streams SSE unless ?wait=true"),
     r("PATCH", "/api/chats/:id/messages/:messageId", "Replace a message's text in place"),
     r("DELETE", "/api/chats/:id/messages/from", "Delete a message and everything after it"),
     r("DELETE", "/api/chats/:id/participant-messages", "Delete one participant's latest-round messages"),
@@ -212,6 +212,7 @@ pub const ROUTES: &[RouteDef] = &[
     r("POST", "/api/pairing", "Show a pairing code"),
     r("DELETE", "/api/pairing", "Take the pairing code off screen"),
     r("GET", "/api/approvals", "Every tool call waiting on a human, with what it would do and how long is left"),
+    r("GET", "/api/events", "SSE: every app event a window would receive — the turn, the sidebar, settings, devices"),
 
     r("GET", "/api/theme", "The appearance settings in force, with every field's type, range, default and meaning — and the CSS variables custom CSS should target"),
     r("PATCH", "/api/theme", "Change appearance: mode, accent, the palette colours (background · panels · hover · borders · text · muted text), background effect, glass, bloom, and custom CSS. Validated, and says what is wrong with a patch it rejects"),
@@ -389,6 +390,11 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     )),
     ("api::generate_api_token", GuiOnly(
         "a token minted over an already-authenticated channel adds nothing; the point is to hand it to someone who has none",
+    )),
+    // Registered as `pdf_bridge::` rather than `commands::`, which is how it
+    // escaped this table until 0.17.1 — see the drift test.
+    ("pdf_bridge::resolve_pdf_read", GuiOnly(
+        "answers a request the backend made *of the window*: it hands back page text the webview rasterized, so there is nobody on the other end of it remotely",
     )),
     ("files::open_path", GuiOnly("opens a path in this machine's shell — nothing a remote caller can observe")),
     ("files::reveal_path", GuiOnly("shows a path in this machine's file manager")),
@@ -1749,11 +1755,27 @@ mod tests {
             .map(|(list, _)| list)
             .expect("lib.rs should contain a generate_handler! list");
 
+        // Every `module::command` in the list, not only `commands::` ones.
+        //
+        // It read `commands::` until 0.17.1, which quietly exempted anything
+        // registered from elsewhere — `pdf_bridge::resolve_pdf_read` had been
+        // invisible to this test since it was written. A drift test with a
+        // blind spot is worse than none, because it is trusted.
         let commands: Vec<String> = handler_list
             .lines()
             .filter_map(|line| {
                 let line = line.trim().trim_end_matches(',');
-                line.strip_prefix("commands::").map(str::to_string)
+                let (_, name) = line.rsplit_once("::")?;
+                // A path, not a comment or a stray brace.
+                if name.is_empty()
+                    || !name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+                {
+                    return None;
+                }
+                // Keys stay as they always were — the path with the shared
+                // `commands::` prefix dropped — so adding this case does not
+                // rewrite the two hundred entries that were already right.
+                Some(line.strip_prefix("commands::").unwrap_or(line).to_string())
             })
             .collect();
         assert!(commands.len() > 50, "parsed too few commands — has lib.rs changed shape?");

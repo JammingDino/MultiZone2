@@ -1,6 +1,6 @@
 [package]
 name = "multizone"
-version = "0.17.0"
+version = "0.17.1"
 description = "MultiZone — LLM interface"
 authors = ["MultiZone"]
 edition = "2021"
@@ -123,6 +123,10 @@ tauri-plugin-notification = "2.3.3"
 if-addrs = "0.13"
 mdns-sd = "0.13"
 rand = "0.9"
+# `GET /api/events` (0.17.1): a `Stream` written as a loop with `yield`, which
+# is what an SSE bridge over a broadcast receiver reads like. The hand-rolled
+# alternative is a state machine nobody would want to change.
+async-stream = "0.3"
 
 [dev-dependencies]
 # Checkpoint tests write real files and restore them — the behaviour under test

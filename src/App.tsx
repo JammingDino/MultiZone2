@@ -15,6 +15,7 @@ import { PairingScreen } from "@/components/Remote/PairingScreen";
 import { ConnectionBanner } from "@/components/Remote/ConnectionBanner";
 import { ApprovalQueue } from "@/components/Remote/ApprovalQueue";
 import { useRemote } from "@/lib/remote/useRemote";
+import { useIsNarrow } from "@/lib/useIsNarrow";
 import { useApp } from "./store/app";
 import { useGlobalShortcuts } from "./lib/useGlobalShortcuts";
 import { usePdfReadBridge } from "./lib/usePdfReadBridge";
@@ -24,6 +25,35 @@ import { seedDefaultSkills, SKILL_SEED_VERSION } from "./lib/defaultSkills";
 import { resolveBaseProvider } from "./lib/baseZone";
 import * as api from "./lib/tauri";
 import { installPerfHandle, mark, markInteractive } from "./lib/perf";
+
+/**
+ * The sidebar, positioned for the window it is in.
+ *
+ * Wide: an ordinary flex child beside the chat. Narrow *and expanded*: an
+ * overlay with a backdrop, so the chat keeps the full width underneath and
+ * tapping away closes it — the gesture people already expect from every drawer
+ * on a phone.
+ */
+function SidebarSlot() {
+  const narrow = useIsNarrow();
+  const sidebarOpen = useApp((s) => s.sidebarOpen);
+  const setSidebarOpen = useApp((s) => s.setSidebarOpen);
+
+  if (!narrow || !sidebarOpen) return <Sidebar />;
+
+  return (
+    <>
+      <div
+        className="absolute inset-0 z-20 bg-black/50"
+        onClick={() => setSidebarOpen(false)}
+        aria-hidden
+      />
+      <div className="absolute inset-y-0 left-0 z-30 flex max-w-[85vw] shadow-2xl">
+        <Sidebar />
+      </div>
+    </>
+  );
+}
 
 export default function App() {
   // Whether this window is the app or a window onto it (0.17.2). A phone that
@@ -205,7 +235,14 @@ export default function App() {
         {/* Onboarding overlays only the content area so the title bar stays
             draggable/resizable while it's up. */}
         <div className="relative flex flex-1 overflow-hidden">
-          <Sidebar />
+          {/* On a phone the sidebar overlays the chat instead of sitting beside
+              it (0.17.3). A 288px column beside a chat panel needs roughly twice
+              the width a handset has, and the two side by side is what the first
+              build actually did — both squeezed, the chat's own content clipped.
+              The collapsed rail is left alone: it is 48px, it carries the
+              expand control, and a drawer with no visible way to open it is
+              worse than a thin strip. */}
+          <SidebarSlot />
           <ChatPanel />
           {showOnboarding && <Onboarding />}
           {shortcutsHelpOpen && <ShortcutsHelpModal onClose={closeShortcutsHelp} />}

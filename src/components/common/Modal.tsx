@@ -12,6 +12,17 @@ import { CHROME_QUIET } from "@/lib/chrome";
 const WORKSPACE_SIZE = "h-[700px] w-[980px]";
 
 /**
+ * On a phone the workspace size is not a size, it is the screen (0.17.3).
+ *
+ * A 980×700 panel inside a 360×800 viewport was clamped to `max-w-[96vw]` and
+ * then had its contents laid out for the width it asked for, so every panel
+ * scrolled sideways under a floating rounded card. Full-bleed, square corners,
+ * no backdrop gap: the modal *is* the screen, which is also what a phone user
+ * expects a settings screen to be.
+ */
+const MOBILE_SIZE = "narrow:h-full narrow:max-h-full narrow:w-full narrow:max-w-full narrow:rounded-none narrow:border-0";
+
+/**
  * Shared modal shell (0.7.3 consistency pass). Standardises the overlay, panel
  * chrome, header height/padding, and close-button placement so every modal —
  * Settings, Zone editor, Zone library, Projects — looks and behaves the same.
@@ -51,7 +62,7 @@ export function Modal({
       onClick={onClose}
     >
       <div
-        className={`flex max-h-[94vh] max-w-[96vw] flex-col rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] shadow-2xl ${size === "workspace" ? WORKSPACE_SIZE : ""} ${className}`}
+        className={`flex max-h-[94vh] max-w-[96vw] flex-col rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] shadow-2xl ${MOBILE_SIZE} ${size === "workspace" ? WORKSPACE_SIZE : ""} ${className}`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border)] px-5">

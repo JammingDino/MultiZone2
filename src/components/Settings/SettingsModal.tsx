@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { X, Plus, Trash2, RefreshCw, Server, Palette, MessageSquare, Database, AlertTriangle, Loader2, Folder, FolderOpen, Globe, Copy, Check, Brain, Sparkles, FileUp, FileDown, Plug, Wifi, WifiOff, Library, Layers, ChevronDown, ChevronRight, Mic, Volume2, AudioLines, Stethoscope, ExternalLink, Download, Search } from "lucide-react";
+import { X, Plus, Trash2, RefreshCw, Server, Smartphone, Palette, MessageSquare, Database, AlertTriangle, Loader2, Folder, FolderOpen, Globe, Copy, Check, Brain, Sparkles, FileUp, FileDown, Plug, Wifi, WifiOff, Library, Layers, ChevronDown, ChevronRight, Mic, Volume2, AudioLines, Stethoscope, ExternalLink, Download, Search } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useApp } from "@/store/app";
 import type { BackgroundEffect, GlassStyle, ThemeColorKey } from "@/store/app";
@@ -34,16 +34,16 @@ import type { ApiBindState, ApprovalCategory, ApprovalPolicy, CheckpointUsage, C
 import { formatBytes, formatCount, formatTokens } from "@/lib/format";
 import { PRIMARY_ACTION } from "@/lib/chrome";
 
-type Tab = "providers" | "zones" | "appearance" | "chat" | "voice" | "speech" | "skills" | "mcp" | "knowledge" | "memory" | "api" | "data";
+type Tab = "providers" | "zones" | "appearance" | "chat" | "voice" | "speech" | "skills" | "mcp" | "knowledge" | "memory" | "remote" | "api" | "data";
 
-const TAB_IDS: Tab[] = ["providers", "zones", "appearance", "chat", "voice", "speech", "skills", "mcp", "knowledge", "memory", "api", "data"];
+const TAB_IDS: Tab[] = ["providers", "zones", "appearance", "chat", "voice", "speech", "skills", "mcp", "knowledge", "memory", "remote", "api", "data"];
 
 /** The nav label for each tab, reused when a tab fails to render so the message
  * names the screen the user actually clicked. */
 const TAB_LABELS: Record<Tab, string> = {
   providers: "Providers", zones: "Zones", appearance: "Appearance", chat: "Chat",
   voice: "Dictation", speech: "Speech", skills: "Skills", mcp: "MCP",
-  knowledge: "Knowledge", memory: "Memory", api: "API", data: "Data",
+  knowledge: "Knowledge", memory: "Memory", remote: "Phone & remote", api: "API", data: "Data",
 };
 
 function isTab(v: string | null): v is Tab {
@@ -61,8 +61,13 @@ export function SettingsModal() {
   return (
     <Modal onClose={closeSettings} header={<ModalTitle>Settings</ModalTitle>}>
       <style>{`.input { width: 100%; border: 1px solid var(--color-border); border-radius: 4px; padding: 8px 12px; background: var(--color-panel); font-size: 13px; outline: none; } .input:focus { border-color: var(--color-accent); }`}</style>
-        <div className="flex flex-1 overflow-hidden">
-          <nav className="flex w-44 flex-col gap-0.5 overflow-y-auto border-r border-[var(--color-border)] p-2 text-sm">
+        {/* A left rail of tabs is 176px the phone does not have (0.17.3). On a
+            narrow screen the same buttons become one horizontally scrolling
+            strip along the top — the tab list is the one part of Settings that
+            has to stay reachable from every panel, and a strip keeps it visible
+            without a second navigation concept to learn. */}
+        <div className="flex flex-1 overflow-hidden narrow:flex-col">
+          <nav className="flex w-44 flex-col gap-0.5 overflow-y-auto border-r border-[var(--color-border)] p-2 text-sm narrow:w-full narrow:flex-none narrow:flex-row narrow:overflow-x-auto narrow:overflow-y-hidden narrow:border-r-0 narrow:border-b">
             <NavGroup label="Models" />
             <TabButton active={tab === "providers"} icon={<Server size={14} />} label="Providers" onClick={() => setTab("providers")} />
             <TabButton active={tab === "zones"} icon={<Layers size={14} />} label="Zones" onClick={() => setTab("zones")} />
@@ -80,6 +85,12 @@ export function SettingsModal() {
             <TabButton active={tab === "mcp"} icon={<Plug size={14} />} label="MCP" onClick={() => setTab("mcp")} />
 
             <NavGroup label="System" />
+            {/* Above API, and its own tab (0.17.3). It was a section inside the
+                API panel, which is where it was *built* rather than where
+                anybody would look for it: someone connecting a phone is not
+                thinking about REST, and the two have different audiences even
+                though they share a socket. */}
+            <TabButton active={tab === "remote"} icon={<Smartphone size={14} />} label="Phone & remote" onClick={() => setTab("remote")} />
             <TabButton active={tab === "api"} icon={<Globe size={14} />} label="API" onClick={() => setTab("api")} />
             <TabButton active={tab === "data"} icon={<Database size={14} />} label="Data" onClick={() => setTab("data")} />
           </nav>
@@ -98,6 +109,7 @@ export function SettingsModal() {
                 {tab === "mcp" && <McpTab />}
                 {tab === "knowledge" && <KnowledgeTab />}
                 {tab === "memory" && <MemoryTab />}
+                {tab === "remote" && <RemoteTab />}
                 {tab === "api" && <ApiTab />}
                 {tab === "data" && <DataTab />}
               </div>
@@ -108,9 +120,11 @@ export function SettingsModal() {
   );
 }
 
+/** A heading in the tab rail. Hidden when the rail becomes a horizontal strip:
+ *  a group label in a scrolling row of tabs reads as another tab. */
 function NavGroup({ label }: { label: string }) {
   return (
-    <div className="mt-3 px-2 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)] first:mt-0">
+    <div className="mt-3 px-2 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)] first:mt-0 narrow:hidden">
       {label}
     </div>
   );
@@ -120,7 +134,7 @@ function TabButton({ active, icon, label, onClick }: { active: boolean; icon: Re
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-2 rounded px-2 py-1.5 text-left ${
+      className={`flex items-center gap-2 rounded px-2 py-1.5 text-left narrow:shrink-0 narrow:whitespace-nowrap narrow:px-3 narrow:py-2 ${
         active ? "bg-[var(--color-panel-hover)] text-[var(--color-text)]" : "text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
       }`}
     >
@@ -2580,9 +2594,14 @@ function McpTab() {
         <div className="flex flex-col gap-3">
           {mcpServers.map((s) => (
             <div key={s.id} className="rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
-              <div className="flex items-start justify-between gap-3">
+              {/* Five actions and four badges fit a 980px panel and not a phone
+                  (0.17.3). Unwrapped, the name column collapsed to nothing and
+                  the buttons still ran off the right edge — the screenshot that
+                  prompted this had a card showing half a Disconnect button and
+                  no server name at all. */}
+              <div className="flex items-start justify-between gap-3 narrow:flex-col narrow:items-stretch">
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 narrow:flex-wrap">
                     <span className="truncate text-sm font-medium">{s.name}</span>
                     <span className="rounded border border-[var(--color-border)] px-1.5 py-0.5 text-[10px] uppercase text-[var(--color-text-muted)]">
                       {s.transport}
@@ -2596,7 +2615,7 @@ function McpTab() {
                     {s.transport === "stdio" ? s.command : s.url}
                   </div>
                 </div>
-                <div className="flex shrink-0 items-center gap-1">
+                <div className="flex shrink-0 items-center gap-1 narrow:flex-wrap">
                   <button
                     onClick={() => connect(s)}
                     disabled={busyId === s.id}
@@ -3814,8 +3833,6 @@ function ApiTab() {
         </div>
       </section>
 
-      <RemoteAccess apply={apply} busy={busy} />
-
       <section>
         <h3 className="mb-2 text-sm font-medium">Example</h3>
         <pre className="overflow-x-auto rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3 font-mono text-[11px] leading-relaxed text-[var(--color-text-muted)]">
@@ -3825,6 +3842,82 @@ function ApiTab() {
           Append <span className="font-mono">?wait=true</span> to get the final message as JSON instead of an SSE stream.
         </p>
       </section>
+    </div>
+  );
+}
+
+// ─── Phone & remote ───────────────────────────────────────────────────────────
+
+/**
+ * Its own tab as of 0.17.3.
+ *
+ * It shipped as a section inside the API panel because that is where it was
+ * built — same socket, same `apply`. That is not where anyone looks for it.
+ * Somebody connecting a phone is not thinking about REST endpoints, and burying
+ * the feature under a developer heading made it findable only by people who did
+ * not need it.
+ *
+ * It still drives the same `apply`, because the LAN bind and the API server are
+ * one restart. The tab is a place to stand, not a second mechanism.
+ */
+function RemoteTab() {
+  const appSettings = useApp((s) => s.appSettings);
+  const setAppSettings = useApp((s) => s.setAppSettings);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function apply(next: {
+    apiEnabled?: boolean;
+    apiLan?: boolean;
+    apiBindAddress?: string;
+    apiDiscovery?: boolean;
+  }) {
+    const merged = { ...appSettings, ...next };
+    setBusy(true);
+    setError(null);
+    try {
+      // Turning on remote access turns on the server it needs. The alternative
+      // is an error telling somebody to go and flip a switch on another tab,
+      // which is the app refusing to do the obvious thing.
+      if (merged.apiLan) merged.apiEnabled = true;
+      if (merged.apiEnabled && !merged.apiToken) {
+        merged.apiToken = await api.generateApiToken();
+      }
+      await api.applyApiSettings(
+        merged.apiEnabled,
+        merged.apiPort,
+        merged.apiToken,
+        merged.apiLan,
+        merged.apiBindAddress,
+        merged.apiDiscovery,
+      );
+      await setAppSettings({
+        apiEnabled: merged.apiEnabled,
+        apiPort: merged.apiPort,
+        apiToken: merged.apiToken,
+        apiLan: merged.apiLan,
+        apiBindAddress: merged.apiBindAddress,
+        apiDiscovery: merged.apiDiscovery,
+      });
+    } catch (e: any) {
+      setError(e?.message || String(e));
+      // A refused bind must not leave the switch reading "on the network".
+      if (next.apiLan) await setAppSettings({ apiLan: false });
+      if (next.apiEnabled) await setAppSettings({ apiEnabled: false });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-6">
+      {error && (
+        <div className="flex items-start gap-2 rounded border border-[var(--color-danger)]/50 bg-[var(--color-danger)]/5 px-2.5 py-2 text-xs">
+          <AlertTriangle size={13} className="mt-0.5 shrink-0 text-[var(--color-danger)]" />
+          <span>{error}</span>
+        </div>
+      )}
+      <RemoteAccess apply={apply} busy={busy} />
     </div>
   );
 }

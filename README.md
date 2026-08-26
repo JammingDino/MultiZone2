@@ -111,17 +111,21 @@ Hover any message and hit **Edit**. The editor is the composer you already use: 
 
 ## Voice dictation
 
-Dictate instead of typing (0.8.0+). Transcription goes to a provider you configure under **Settings → Voice**, using the OpenAI-compatible `/audio/transcriptions` endpoint — so pointing it at a local server (e.g. LM Studio serving a whisper model) keeps your audio on your machine.
+Dictate instead of typing (0.8.0+). Transcription goes to a provider you configure under **Settings → Dictation**, using the OpenAI-compatible `/audio/transcriptions` endpoint — so pointing it at a local server (e.g. LM Studio serving a whisper model) keeps your audio on your machine.
 
-Dictation behaves like typing: start a recording with text selected and what you say **replaces the selection**, leaving the caret after it. With nothing selected, the transcript is inserted at the cursor — unless **Settings → Voice → Insertion mode** is set to *Replace field*, which always overwrites the whole composer.
+Dictation behaves like typing: start a recording with text selected and what you say **replaces the selection**, leaving the caret after it. With nothing selected, the transcript is inserted at the cursor — unless **Settings → Dictation → Insertion mode** is set to *Replace field*, which always overwrites the whole composer.
+
+**From a phone, too** (0.17.4+). This is the one input where being a remote is an *advantage* — a good microphone in your hand, a transcription provider on the machine at home — so the phone records and your computer transcribes. It is not a relay: your computer converts the recording to 16 kHz mono WAV with **ffmpeg** before handing it on, which is the same format its own microphone produces, so a local whisper or MLX server accepts audio from either device. Without ffmpeg installed the recording is passed through as recorded, and if the provider refuses that format the error says which piece is missing. Set `MULTIZONE_FFMPEG` if yours is not on `PATH`.
+
+The one honest difference from dictating at the computer: **no live preview**. The desktop re-transcribes the utterance every couple of seconds, which over a LAN would mean re-uploading the whole recording on every pass — so the phone shows no words until you stop, rather than showing stale ones.
 
 ### Audio uploads
 
-Dictation needs you at the microphone, and it only helps with what you are about to say. Drop an **audio file** into any composer instead — MP3, WAV, M4A, MP4, FLAC, OGG, WebM — and it is transcribed through the same provider and sent as text (0.12.0+).
+Dictation needs you at the microphone, and it only helps with what you are about to say. Drop an **audio file** into any composer instead — MP3, WAV, M4A, MP4, FLAC, OGG, WebM — and it is transcribed through the same provider and sent as text (0.12.0+). Anything that is not already WAV goes through the same ffmpeg conversion described above, so the list of formats that work is the list ffmpeg reads rather than the list your transcription server happens to.
 
 The point is that the model never sees audio. **Any zone works, including text-only models**, because what arrives is a transcript — so a voice memo, a meeting recording or an interview reaches a model that has no audio input at all. It also means a recording you would never sit through dictating in real time is one drag away from being something you can ask questions about.
 
-Two choices under **Settings → Voice → Audio uploads**, both overridable per recording on the composer itself:
+Two choices under **Settings → Dictation → Audio uploads**, both overridable per recording on the composer itself:
 
 | Setting | Options |
 |---------|---------|
@@ -219,7 +223,9 @@ process is exactly what an injected instruction would ask for.
 
 MultiZone can expose a local HTTP API so external tools or scripts can drive it like a CLI — listing and creating chats, picking zones/projects, and sending messages with the same agentic loop the GUI uses.
 
-Enable it under **Settings → API**: toggle it on, optionally change the port, and copy the auto-generated bearer token. The server binds to `127.0.0.1` and every request must include `Authorization: Bearer <token>`. Reaching it from another device on your network is a separate switch — see [Your phone as a second window](#your-phone-as-a-second-window).
+Enable it under **Settings → API**: toggle it on, optionally change the port, and copy the auto-generated bearer token. The server binds to `127.0.0.1` and every request must include `Authorization: Bearer <token>`. Reaching it from another device on your network is a separate switch, under **Settings → Phone & remote** — see [Your phone as a second window](#your-phone-as-a-second-window).
+
+A handful of routes wrap the value in a one-key object for readability — `GET /api/settings/:key` answers `{"key":…,"value":…}` — and each one now declares that in the coverage table the route map is generated from, so a client cannot be handed an envelope it does not know about. A test reads the handlers and fails the build if a route wraps something without saying so.
 
 Base URL: `http://127.0.0.1:8765` (default port).
 
@@ -287,13 +293,22 @@ API-driven activity also updates any matching chat open in the app live — and 
 
 That shape is deliberate, and the alternative is the tempting one. A phone cannot run a 30B local model, which is the premise of the product. Every tool that matters — `read_file`, the shell, the knowledge index, an `npx` MCP server — is meaningless without your computer's filesystem. And two independent stores would have to sync, which is the cloud-sync feature this app refuses; a remote client has no second copy, so the hard problem is deleted rather than solved.
 
-**Setting it up.** Under **Settings → API → Remote access**:
+**Getting the app.** Every release carries an `.apk` alongside the desktop installers. There is no store listing; sideload it, and the in-app updater does not apply to it.
+
+**Setting it up.** Under **Settings → Phone & remote** on the computer:
 
 1. Turn on **Reachable from this network**. The app says plainly that it is now on your network, and shows the address it bound. It binds one interface you choose, never `0.0.0.0`.
-2. Tap **Show a pairing code**. You get six digits and a QR.
-3. On the phone, enter the address and the code — or paste the QR's link, which fills in both.
+2. Tap **Pair a device**. Nothing is shown yet — the computer is now *waiting*.
+3. Open the app on the phone. It sweeps your network for computers running MultiZone, or you can type the address. Tap **Next**.
+4. The code appears on the computer **with the phone's name on it** — six digits and a QR. Enter it on the phone, then name the device.
+
+The ceremony runs that way round on purpose (0.17.4). "The desktop shows a code and the phone enters it" walks you between two screens neither of which knows about the other; having the phone *ask* costs one route and turns anonymous digits into an identified request. The security property is the easier one to state: **no code exists unless somebody armed the computer**.
 
 The phone gets **its own token**, not a copy of yours. Each paired device is listed with when it was last seen, and revoking one signs out that device and nothing else. The code works once, expires in three minutes, and burns after five wrong guesses; every attempt is logged where you will see it.
+
+**Saved computers.** Every computer you pair with is kept, so switching between the laptop and the desktop is one tap and no new code. **Settings → Phone & remote** on the phone names the computer it is talking to and offers **Switch computer**, which keeps every token — it is not a sign-out. If the connection drops, the banner offers *Try again* without re-entering anything.
+
+**Android's own controls work.** Back closes the panel you are in — a dialog, Settings, the sidebar drawer — and only leaves the app at the top level.
 
 **Approvals reach the phone.** A tool call waiting on a human appears at the top of the screen with what it would do and how long is left before it denies itself. That, plus per-category auto-approval (0.14.2), is what makes leaving a long run unattended a decision rather than a gamble.
 

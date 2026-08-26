@@ -1495,9 +1495,11 @@ function VoiceTab() {
              transcribe with the provider above. Offering the choice anyway
              would be a picker that changes nothing. */
           <p className="text-xs text-[var(--color-text-muted)]">
-            This device records with its own microphone and sends the audio to your computer to
-            transcribe — the provider and model above are the ones it uses. There is no live
-            preview while you speak; the transcript arrives when you stop.
+            This device records with its own microphone and sends the audio to your computer,
+            which converts it to 16 kHz mono WAV with ffmpeg before handing it to the provider
+            above — the same format the computer's own microphone produces, so a local
+            transcription server accepts both. Without ffmpeg installed the recording is sent as
+            it was recorded, and the error says so if the provider refuses it.
           </p>
         ) : (
           <>
@@ -1546,6 +1548,20 @@ function VoiceTab() {
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
           Re-transcribes the recording on an interval. Each pass is a full request — free against
           a local server, billed per call against a hosted one.
+          {isRemote() && (
+            /* The desktop re-transcribes the utterance so far every couple of
+               seconds. Doing that from a phone means re-uploading the whole
+               recording on every tick, so the phone does not — and a switch
+               that is on while nothing happens is worse than one that explains
+               itself. */
+            <>
+              {" "}
+              <span className="text-[var(--color-text)]">
+                This device does not do this: it would re-upload the whole recording on every
+                pass. The setting below applies when you dictate on the computer itself.
+              </span>
+            </>
+          )}
         </p>
         <ToggleRow
           label="Show words while speaking"

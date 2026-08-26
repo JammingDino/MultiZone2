@@ -1320,5 +1320,21 @@ Found by installing the APK and using it, not by reading the code.
 - [ ] Live partial transcripts while dictating from a phone (would re-upload the whole recording every tick)
 - [ ] Speech playback of answers on the phone
 
+### 0.17.5 — The envelope that erased your settings
+
+*The 0.17.4 handset feedback, second round. Three of these are one bug wearing different clothes: something that was silently the wrong shape, with no test positioned to notice.*
+
+- [x] **Data loss, fixed and disclosed.** `GET /api/settings/:key` answers `{"key":…,"value":…}` where the command returns the value. The transport handed the envelope to `JSON.parse`, every settings read from a phone threw, the store fell back to `DEFAULT_APP_SETTINGS` — and the next write merged against *those* and persisted them over the desktop's real settings. Appearance, the dictation provider and endpoint, the base zone, the approval allow-lists: all replaced by defaults, from a device that had never successfully read them
+- [x] `Coverage::Route` gains a `-> field` suffix; the generator carries it into the route map and the transport unwraps it. Seven routes declare one
+- [x] **A drift test that reads the handlers**: any handler answering a JSON object literal, wired to a route a command claims, must declare which key holds the value. Removing an annotation fails the build
+- [x] **The store refuses to write state it could not read.** Both `app_settings` and `theme` are whole-object writes, so one made blind is an erase, not a lost preference. `appSettingsLoaded` / `themeLoaded` are set on success only — never in a `finally` — and Settings shows a banner saying changes will not stick. This rule alone would have contained the bug above
+- [x] **Android back.** The shell's handler is `webView.canGoBack()`, which in an SPA that never touches history is always false — so back closed the app from everywhere. `useBackDismiss` pushes a history entry per layer: modals, the command palette, the sidebar drawer and the pairing wizard step backwards, and only the root exits
+- [x] **A way back to the connection screen.** Pairing was a one-way door. Settings → Phone & remote names the computer this device is paired with and offers *Switch computer*, keeping every token
+- [x] **Reconnecting no longer sits there.** `retryNow()` was clearing the listener registrations, so a reconnect that *succeeded* left the app deaf to it for good — the retry button broke the thing it was meant to fix. Plus an 8s connect deadline instead of Android's 60s+ TCP timeout, a 10s backoff cap, and an immediate retry when the app is foregrounded or the network returns
+- [x] **The computer prepares the audio, it does not relay it.** Dictation from the phone sent `audio/webm;codecs=opus` straight through, while the desktop's own capture path has always produced 16 kHz mono WAV — which is what a local whisper or MLX server decodes. `transcode.rs` converts uploads with ffmpeg before they reach the provider, in-memory, never touching disk. Optional: without ffmpeg the bytes pass through and the error names what is missing
+- [x] `100vw` is not the drawable width. The app root was `h-screen w-screen` inside a body padded by the safe-area insets, so in landscape everything was shifted by the cutout and the right edge of every full-width row fell off the screen. `h-full w-full`
+- [x] Checkboxes and radios grow their *tap target*, not their box — they were in the same `min-height` rule the Toggle regression came from, and stretched into capsules with the tick pinned to the top
+- [ ] Bundling ffmpeg (~80 MB per installer for one feature); using the system one instead
+
 - [ ] Deep research mode: multi-step sourced research using subchats; requires design session before scheduling
 - [ ] Zone snapshot/versioning: save zone config at chat creation time so editing a zone does not alter historical context

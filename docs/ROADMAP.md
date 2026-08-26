@@ -42,7 +42,7 @@ Semantic versioning. Each release is tagged `vMAJOR.MINOR.PATCH`.
 | **1.0.0** | Hardening & Public Release | Planned |
 | **1.2.x** | Signed-in connectors — OAuth, keychain, per-scope consent | Planned |
 | **Post-1.0** | Code interface + edit engine, study mode, shared mode surface, moddable app surface, Diffusion LLM | Backlog |
-| **0.17.x** | The phone as a second window: LAN bind, pairing, device registry, the remote transport, the Android shell | Built |
+| **0.17.x** | The phone as a second window: LAN bind, pairing, device registry, the remote transport, the Android shell. 0.17.5 closed what a week of real use found — a response envelope that was erasing settings, Android's back button, and desktop-side audio conversion for dictation | Built |
 
 ---
 

@@ -925,10 +925,27 @@ html.shadows [class*="shadow-xl"] {
    * out by their own height. So the targets that genuinely need growing are
    * grown by name, and controls that own their geometry opt in via `.mz-tap`.
    */
-  select,
-  input[type="checkbox"],
-  input[type="radio"] {
+  select {
     min-height: 2.25rem;
+  }
+
+  /* Checkboxes and radios grow their *target*, not their box (0.17.5).
+   *
+   * They were in the rule above, and they are exactly the case the paragraph
+   * above warns about: both are 16px squares drawn by this stylesheet with an
+   * absolutely positioned tick inside, so a 36px min-height stretched the box
+   * into a tall capsule and left the tick at the top of it — the same shape the
+   * Toggle regression made, on the control right next to it.
+   *
+   * An invisible inset overlay gives the 36px a thumb needs without the
+   * element occupying 36px of layout. `::before` is free on both: the tick and
+   * the dot are drawn with `::after`. */
+  input[type="checkbox"]::before,
+  input[type="radio"]::before {
+    content: "";
+    position: absolute;
+    /* 16px + 10px each side = 36px, the same target as everything else here. */
+    inset: -10px;
   }
 
   /* Opt-in, for a control whose own height is incidental rather than load-bearing. */

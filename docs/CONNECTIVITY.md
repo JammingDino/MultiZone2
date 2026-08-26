@@ -231,3 +231,60 @@ and noticing a bound socket reporting `enabled: false` — which is precisely th
 job that endpoint was rebuilt for in 0.11.0, catching a lie that no test was
 positioned to see.
 
+
+### What a second week of using it changed (0.17.5)
+
+The first round of handset feedback (above) was about things the design had not
+thought about. This round was about things it had thought about and got
+*silently* wrong, which is a different and worse category.
+
+1. **A response shape is part of an interface, and nothing was checking it.**
+   The design's central claim is that `src/lib/tauri.ts` is one seam: implement
+   `invoke` against HTTP and the app *is* the remote client. That holds only if
+   a route returns what its command returns. Seven do not — `GET
+   /api/settings/:key` answers `{"key":…,"value":…}` where the command returns
+   the string — and nothing anywhere said so. Every settings read from a phone
+   threw in `JSON.parse`, the store fell back to its defaults, and the next
+   write merged against those defaults and **persisted them over the desktop's
+   real settings**. A read bug became a write bug because the store's writes are
+   whole-object.
+
+   Two lessons, and only one of them is about envelopes. The first: the drift
+   test proved the *route* existed and had never had an opinion about what came
+   back, so `COVERAGE` now carries `-> field` and a test reads the handlers to
+   enforce it. The second is larger — **a client that cannot read its state must
+   not be allowed to write it.** The store now refuses, and says so on screen.
+   That rule would have contained this bug even with the envelope unfixed.
+
+2. **The platform's own navigation is a feature you have to implement.** Android's
+   back gesture is not a nicety, it is the way out of everything, and the shell
+   hands it to `webView.canGoBack()` — which in a single-page app that never
+   touches history is always false, so every press closed the app. Layers push a
+   history entry now. This generalises past Android: the design's "the existing
+   app *is* the remote client" is true of the *data* path and false of the
+   *interaction* path, and the second one has to be ported deliberately.
+
+3. **`100vw` is not the width of the screen you can draw on.** The app root was
+   `h-screen w-screen` inside a body padded by the safe-area insets, so in
+   landscape the whole app was shifted sideways by the cutout and the right-hand
+   end of every full-width row fell off the edge. The general form of the
+   "header under the status bar" patch from 0.17.4, which had been fixed one
+   overlay at a time.
+
+4. **Being a remote is not the same as being a relay.** Dictation from the phone
+   uploaded `audio/webm;codecs=opus` and passed it straight to the transcription
+   endpoint — while the desktop's own capture path has always resampled to 16 kHz
+   mono WAV, because that is what a local whisper or MLX server decodes. Two
+   paths into one endpoint handing it two different formats, and only the cloud
+   one was ever exercised. The computer now *prepares* the audio with ffmpeg
+   before sending it on, which is the rule the whole design already states: the
+   phone captures, and the work happens on the machine with the tools installed.
+   ffmpeg is optional and its absence is explained rather than fatal.
+
+**A note on how these were found.** All four came from a person using the app on
+their own phone for a week, and none of them would have been found by reading
+the code — the settings loss in particular was only visible by reading the
+desktop's database and noticing what was no longer in it. The 0.17.x notes now
+record two bugs (this one and the `Object.assign` erase in 0.17.4) whose shape
+is identical: **a write that means "change this one thing" implemented as a
+write of everything.** Worth watching for a third.

@@ -540,17 +540,35 @@ pub async fn transcribe_audio_upload(
     // A per-upload language wins over the global default, so one foreign-language
     // recording doesn't require changing a setting and changing it back.
     let lang = language.filter(|l| !l.trim().is_empty()).or(default_lang);
-    crate::stt_api::transcribe_via_provider(
+
+    // The computer prepares the audio; it does not merely relay it (0.17.5).
+    //
+    // The desktop's own capture path hands endpoints 16 kHz mono WAV — see
+    // `audio.rs`, which resamples at capture for exactly that reason. Uploads
+    // did not, so a phone's `audio/webm;codecs=opus` went out untouched and a
+    // local whisper or MLX server, which is the case this app exists for,
+    // refused it. `transcode` puts both paths on the same format.
+    let prepared = crate::transcode::prepare_for_transcription(bytes, &file_name).await;
+    let result = crate::stt_api::transcribe_via_provider(
         &state.http,
         &base_url,
         api_key.as_deref(),
         &model,
-        bytes,
-        &file_name,
+        prepared.bytes,
+        &prepared.file_name,
         lang.as_deref(),
         with_metadata,
     )
-    .await
+    .await;
+
+    // A provider that refuses unconverted audio is the *symptom*; the missing
+    // converter is the cause, and it is the half the user can act on. Naming it
+    // here rather than in a log is the difference between "dictation doesn't
+    // work from my phone" and one install command.
+    match (result, prepared.note) {
+        (Err(e), Some(note)) => Err(AppError::Other(format!("{e} — {note}"))),
+        (result, _) => result,
+    }
 }
 
 /// Condenses a long assistant response into a short, speech-friendly summary

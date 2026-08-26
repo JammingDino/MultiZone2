@@ -68,6 +68,8 @@ mod events;
 #[cfg(desktop)]
 mod stt_api;
 #[cfg(desktop)]
+mod transcode;
+#[cfg(desktop)]
 mod tts_api;
 #[cfg(desktop)]
 mod updater_token;

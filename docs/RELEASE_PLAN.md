@@ -1252,5 +1252,48 @@ Detailed work items grouped by release. Direction in [ROADMAP.md](ROADMAP.md).
   5. Tier B, only if real packages demand it
 
   Steps 1 and 2 are genuinely near-term and useful with no mod system attached at all — step 1 makes every existing `app_control` interaction better, and step 2 is 0.13.0 finishing its own job. Do not schedule this as one release.
+---
+
+## 0.17.x — The phone as a second window
+
+Notes and design in [CONNECTIVITY.md](CONNECTIVITY.md#part-3--the-phone-as-a-second-window), including a build note on what the design got right and the four things it did not anticipate.
+
+### 0.17.0 — Reachable, and only by devices you named
+
+- [x] LAN bind as its own switch, separate from `apiEnabled` — putting the app on the network is a different decision from switching the API on
+- [x] Bind one chosen interface, never `0.0.0.0`; a vanished interface is a named bind error, not a quiet fall back to loopback
+- [x] `BindState` carries the address, so "switched on" and "on the network" stop being the same claim
+- [x] Pairing: a six-digit code, single-use, expiring in three minutes, burned after five wrong guesses, and only while the desktop has the dialog open
+- [x] Per-device tokens; the registry keeps a SHA-256, never the token
+- [x] Revoke per device; forget refuses a device that is still live
+- [x] Every pairing attempt logged — it is the only unauthenticated write on the surface
+- [x] mDNS advertisement, never fatal (a blocked multicast must not lock out a phone that knows the address)
+- [x] The pending-approval queue is readable and answerable over the API, with a countdown
+- [x] Settings → API → Remote access: the switch, the interface picker, the code, the QR, the device list
+- [~] The token lives in the WebView's `localStorage`, not the platform keystore
+
+### 0.17.1 — The transport
+
+- [x] `GET /api/events` — every event a window would receive, bridged from the same `app.listen`, with an explicit forwarded list
+- [x] `src/lib/remote/transport.ts` implements `invoke` and `listen` over HTTP + SSE; `src/lib/tauri.ts` changed by two import lines
+- [x] The command → route map is generated from `COVERAGE`, with `--check` in `npm test`
+- [x] Argument placement is a rule with two stated exceptions, in pure functions with tests
+- [x] A sweep over every real call site, which found the greedy `:id` match before a user did
+- [x] `POST /api/chats/:id/messages` honours `overrideZoneId` / `overrideModel` — it accepted and discarded them
+- [x] The Rust drift test reads every `module::command`, not only `commands::`
+
+### 0.17.2 — The shell
+
+- [x] The pairing screen: address plus code, or paste the QR's link and both fill in
+- [x] "Can't reach your computer" as a stated reason rather than a spinner
+- [x] The approval queue above everything, since the call that is waiting is often not in the chat you are looking at
+- [x] Touch targets and safe areas in CSS, scoped to `pointer: coarse` — no component renders differently on a phone
+- [x] Every module `#[cfg(desktop)]`; the mobile binary is a WebView with no `invoke_handler`, so there is no second store to go wrong
+- [x] Cargo dependencies split by target — an Android build does not compile BoringSSL and an OCR engine
+- [x] Android target: network security config for LAN cleartext, `multizone://pair` deep link, per-platform capabilities
+- [x] Verified end to end: APK built, installed, launched, pairing screen renders
+- [ ] iOS target (the crate is split for it; nothing has been built or tested)
+- [ ] Wake-on-LAN, deliberately deferred — the obvious follow-on to "your computer is asleep"
+
 - [ ] Deep research mode: multi-step sourced research using subchats; requires design session before scheduling
 - [ ] Zone snapshot/versioning: save zone config at chat creation time so editing a zone does not alter historical context

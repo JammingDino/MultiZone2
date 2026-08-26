@@ -219,7 +219,7 @@ process is exactly what an injected instruction would ask for.
 
 MultiZone can expose a local HTTP API so external tools or scripts can drive it like a CLI — listing and creating chats, picking zones/projects, and sending messages with the same agentic loop the GUI uses.
 
-Enable it under **Settings → API**: toggle it on, optionally change the port, and copy the auto-generated bearer token. The server binds to `127.0.0.1` only and every request must include `Authorization: Bearer <token>`.
+Enable it under **Settings → API**: toggle it on, optionally change the port, and copy the auto-generated bearer token. The server binds to `127.0.0.1` and every request must include `Authorization: Bearer <token>`. Reaching it from another device on your network is a separate switch — see [Your phone as a second window](#your-phone-as-a-second-window).
 
 Base URL: `http://127.0.0.1:8765` (default port).
 
@@ -228,7 +228,8 @@ Base URL: `http://127.0.0.1:8765` (default port).
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/routes` | Every route this build serves, with a one-line description each. |
-| `GET` | `/api/health` | `enabled` · `bound` · `answering` · `tokenPresent` · `tokenAccepted`, plus the app version and route-set version. Five separate questions with five separate answers — if you cannot reach the app, this tells you which one is false. |
+| `GET` | `/api/health` | `enabled` · `bound` · `answering` · `tokenPresent` · `tokenAccepted`, plus the app version, route-set version, and the address it bound. Six separate questions with six separate answers — if you cannot reach the app, this tells you which one is false. |
+| `POST` | `/api/pair` | Redeem a pairing code for a per-device token (0.17.0). The only unauthenticated *write*, and it can only succeed while a code is on screen on the desktop. Body: `{ "code", "name"?, "platform"? }`. |
 
 Everything else needs the bearer token. Rather than reproduce the whole surface here — where it would go stale, as it did — ask the app:
 
@@ -279,6 +280,26 @@ curl -X POST "http://127.0.0.1:8765/api/chats/<chat-id>/messages?wait=true" \
 ```
 
 API-driven activity also updates any matching chat open in the app live — and so does everything else it writes. A zone created over the API appears in the sidebar, and a theme changed over it is the theme you are looking at, without a restart.
+
+## Your phone as a second window
+
+*0.17.x.* MultiZone on a phone is **a remote for your computer, not a second app**. Same chats, same zones, same projects — you send from the phone and the machine at home runs the turn, with its providers, its models, its files, its MCP servers. Nothing infers on the phone and nothing is stored there.
+
+That shape is deliberate, and the alternative is the tempting one. A phone cannot run a 30B local model, which is the premise of the product. Every tool that matters — `read_file`, the shell, the knowledge index, an `npx` MCP server — is meaningless without your computer's filesystem. And two independent stores would have to sync, which is the cloud-sync feature this app refuses; a remote client has no second copy, so the hard problem is deleted rather than solved.
+
+**Setting it up.** Under **Settings → API → Remote access**:
+
+1. Turn on **Reachable from this network**. The app says plainly that it is now on your network, and shows the address it bound. It binds one interface you choose, never `0.0.0.0`.
+2. Tap **Show a pairing code**. You get six digits and a QR.
+3. On the phone, enter the address and the code — or paste the QR's link, which fills in both.
+
+The phone gets **its own token**, not a copy of yours. Each paired device is listed with when it was last seen, and revoking one signs out that device and nothing else. The code works once, expires in three minutes, and burns after five wrong guesses; every attempt is logged where you will see it.
+
+**Approvals reach the phone.** A tool call waiting on a human appears at the top of the screen with what it would do and how long is left before it denies itself. That, plus per-category auto-approval (0.14.2), is what makes leaving a long run unattended a decision rather than a gamble.
+
+**Deliberately not built:** any access from outside your LAN — no relay, no tunnel, no account, because that is cloud sync wearing a different hat — and no offline mode. If your computer cannot be reached, the phone says so rather than showing you a stale copy. The honest failure mode is **your computer being asleep**, and the app names it instead of spinning.
+
+The desktop half stands on its own: the same LAN bind, pairing and device registry are what a tablet, a second laptop, or a script on your network needs, and none of it requires a phone.
 
 ### Letting the assistant drive the app
 

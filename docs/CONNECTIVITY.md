@@ -2,7 +2,7 @@
 
 Notes behind the 0.11.x and 1.2.x entries in [RELEASE_PLAN.md](RELEASE_PLAN.md). Two questions that turned out to be the same question: *can the app set itself up, so that connecting it to things is not a job for someone who reads code?*
 
-**Part 3 was added in 0.14.0** and asks the question from the other side: what does it take for something that is *not* on this machine — a phone, a tablet, a second laptop — to reach the app? It turns out to be mostly the same answer, because Part 1 already made the API the whole app.
+**Part 3 was added in 0.14.0** and asks the question from the other side: what does it take for something that is *not* on this machine — a phone, a tablet, a second laptop — to reach the app? It turns out to be mostly the same answer, because Part 1 already made the API the whole app. **Part 3 was built as 0.17.x**, in the three stages it was sized as, and the notes at the end of it record what the design got right and the four things it did not anticipate.
 
 Written August 2026, against 0.10.1. **Part 1 was built as 0.11.0** — the route index, the honest health check, the persisted bind outcome and the drift test all landed, and the ten routes became 105.
 
@@ -105,7 +105,7 @@ The line to hold, per the roadmap's principles: the model may *propose* configur
 
 ## Part 3 — the phone as a second window
 
-*Added August 2026, against 0.14.0, when the backlog's one-line "Mobile: Tauri mobile target" was re-scoped. Nothing here is built; this is the design the backlog entry points at.*
+*Added August 2026, against 0.14.0, when the backlog's one-line "Mobile: Tauri mobile target" was re-scoped. **Built as 0.17.0 (the desktop half), 0.17.1 (the transport) and 0.17.2 (the shell)** — the design below is left as written, with a build note at the end, because the interesting part is which of its predictions survived contact.*
 
 ### The premise
 
@@ -164,3 +164,28 @@ The desktop half is worth building first and stands on its own — a LAN bind, p
 - [mcp/mod.rs](../src-tauri/src/mcp/mod.rs) — transports and connection handling
 - [commands/api.rs](../src-tauri/src/commands/api.rs) — port/token config and server lifecycle
 - [README.md](../README.md#L138) — the hand-maintained route table
+
+---
+
+## Part 3, as built (0.17.x)
+
+The sizing was right and the sequencing was right: the desktop half landed first and was useful before any mobile toolchain existed, the transport was developed in a desktop browser against a real instance, and the shell turned out to be a pairing screen and some CSS.
+
+**The four missing things, and what each actually cost.**
+
+- **The LAN bind** was the smallest and had the sharpest edge. "Bind the selected interface rather than `0.0.0.0`" was the whole design, and the case it does not mention is the one that matters: the laptop moves networks and the chosen address is gone. Falling back to loopback would leave the panel reading "on the network" with a server nothing can reach, and falling back to a *different* network would put the app somewhere the user never picked. So a vanished interface is a named bind error, reported through the same persisted `BindState` row that 0.11.0 added for a port already in use — a piece of machinery built for one failure absorbing a second one it was not designed for.
+- **Pairing** came out as designed. Worth recording that the six digits are not what makes it safe: the window only exists while the user is looking at it, the code is single-use, it expires, and **five wrong guesses burn it**. That last one is the load-bearing part and is the one easiest to leave out — without it, a code that lives three minutes is still a few thousand guesses over a LAN.
+- **Approvals on the phone** were half-built already and the half that was missing was the interesting one. `POST /api/chats/:id/approval` existed; there was no way to *find out* something was waiting. The pending map held bare `oneshot::Sender`s, which is all the desktop needs because the window that asks is the window that answers. It now carries the call, its arguments, its diff and a countdown.
+- **Discovery** worked as sized and is the one piece that is allowed to fail. mDNS is blocked on more networks than anyone expects, and a phone that already knows the address must not be locked out because the desktop could not shout about itself.
+
+**What the design did not anticipate, all four found by building rather than by reading.**
+
+1. **`listen` had no remote half.** The document says "implement that module's surface against HTTP + SSE" and treats it as one job. It is two: `invoke` had a route for everything since 0.11.0, and `listen` had *nothing* — the only SSE on the surface was the one a send opens for its own turn. A window that never hears `chats-changed` shows a stale sidebar after a sub-agent spawns. `GET /api/events` bridges the same `app.listen` the window uses, with an explicit forwarded list, because `pdf-read-request` asks the *window* to do work and a phone cannot serve it.
+2. **`POST /api/chats/:id/messages` silently discarded per-turn overrides.** It accepted `overrideZoneId` and ran the chat's own zone. A remote zone picker would have appeared to work and done nothing. Found by writing a client against the route.
+3. **The drift test had a blind spot.** It parsed only lines beginning `commands::`, so `pdf_bridge::resolve_pdf_read` had been exempt from the coverage requirement since the test was written in 0.11.0. A drift test with a blind spot is worse than none, because it is trusted. It reads every `module::command` now.
+4. **The mobile build had to be a different crate shape, not a different configuration.** The document's "nothing is stored there that the desktop does not already hold" is a promise about behaviour, and a Tauri mobile build compiles the whole lib — SQLite, the agentic loop, MCP, the file tools — into the APK by default. A build that *contained* the database layer and merely chose not to open it is one bug away from breaking the promise. Every module is `#[cfg(desktop)]`; the mobile binary is a WebView with no `invoke_handler` at all. The dependency list is split the same way, in cargo's target terms, so an Android build does not compile BoringSSL and an OCR engine to host a web view.
+
+**One thing the design named that is worth repeating, because building it made it concrete.** Android has forbidden cleartext HTTP by default since API 28 and is right to. This app is the case the rule does not fit — one server, on the user's own LAN, at an IP literal no CA will issue for. The alternative is teaching people to install a self-signed root on their phone, which is materially worse. What makes it acceptable is the out-of-scope list above: nothing here leaves the LAN, so the traffic crosses the user's own router and nothing else.
+
+**Still not built, and still deliberately:** wake-on-LAN, any access from outside the LAN, and any offline mode. The token also lives in the WebView's `localStorage` rather than the platform keystore, which is the one place the implementation is weaker than the design — noted in `transport.ts` rather than quietly.
+

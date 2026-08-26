@@ -38,7 +38,7 @@ export function ConnectionBanner({ state }: { state: ConnectionState }) {
 
   return (
     <div
-      className={`flex items-center gap-2.5 px-3.5 py-2.5 text-sm ${
+      className={`flex flex-wrap items-center gap-2.5 px-3.5 py-2.5 text-sm ${
         asleep
           ? "bg-[var(--color-danger)]/10 text-[var(--color-text)]"
           : "bg-[var(--color-accent)]/10 text-[var(--color-text)]"
@@ -49,7 +49,7 @@ export function ConnectionBanner({ state }: { state: ConnectionState }) {
       ) : (
         <Loader2 size={15} className="shrink-0 animate-spin text-[var(--color-accent)]" />
       )}
-      <div className="min-w-0 flex-1">
+      <div className="min-w-[12rem] flex-1">
         {asleep ? (
           <>
             <div>Can't reach your computer.</div>

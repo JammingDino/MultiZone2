@@ -956,7 +956,15 @@ html.shadows [class*="shadow-xl"] {
 }
 
 /* Under the notch and the home indicator, but not under their content. Zero on
-   every desktop, so this is unconditional. */
+   every desktop, so this is unconditional.
+ *
+ * The app's own root is sized `h-full w-full` rather than `h-screen w-screen`
+ * for this to mean anything (0.17.5). `100vw` is the *viewport*, insets
+ * included, so a root sized that way inside a padded body is the full width
+ * shifted sideways by the inset — which in landscape put the right-hand end of
+ * every full-width row (the reconnect banner's buttons, most visibly) off the
+ * edge of the screen. `h-full` fills the body's content box, which is the part
+ * of the screen that is actually drawable. */
 body {
   padding: env(safe-area-inset-top) env(safe-area-inset-right)
     env(safe-area-inset-bottom) env(safe-area-inset-left);

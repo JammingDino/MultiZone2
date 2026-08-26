@@ -217,7 +217,7 @@ export default function App() {
   // the provider check never run against a backend that is not there.
   if (remote.needsPairing) {
     return (
-      <div className="h-screen w-screen overflow-hidden text-[var(--color-text)]">
+      <div className="h-full w-full overflow-hidden text-[var(--color-text)]">
         <BackgroundEffect />
         <div className="relative z-10 h-full w-full">
           <PairingScreen onPaired={() => window.location.reload()} />
@@ -227,7 +227,7 @@ export default function App() {
   }
 
   return (
-    <div className="h-screen w-screen overflow-hidden text-[var(--color-text)]">
+    <div className="h-full w-full overflow-hidden text-[var(--color-text)]">
       <BackgroundEffect />
       <div className="relative z-10 flex h-full w-full flex-col">
         {/* The window chrome is the desktop's; a phone has the system's. */}

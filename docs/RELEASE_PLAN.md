@@ -1295,5 +1295,30 @@ Notes and design in [CONNECTIVITY.md](CONNECTIVITY.md#part-3--the-phone-as-a-sec
 - [ ] iOS target (the crate is split for it; nothing has been built or tested)
 - [ ] Wake-on-LAN, deliberately deferred — the obvious follow-on to "your computer is asleep"
 
+### 0.17.3 — What a real handset showed
+
+Found by installing the APK and using it, not by reading the code.
+
+- [x] The 0.17.2 touch CSS put `min-height` on every `button`, which stretched the Toggle's track and left its knob at the top edge — every switch in Settings rendered as a tall thin capsule. Targets are grown by name now, and the Toggle grows as a whole control
+- [x] `coarse:` and `narrow:` Tailwind variants — a touchscreen laptop wants bigger targets at any width, a half-width desktop window wants the layout without them
+- [x] Sidebar overlays the chat on a narrow window instead of sitting beside it
+- [x] Settings is full-bleed on a phone; its 176px tab rail becomes a scrolling strip
+- [x] MCP server cards wrap instead of running off the edge
+- [x] Remote access is its own Settings tab, above API — it shipped inside the API panel because that is where it was built, not where anyone looks for it
+- [x] The app's own launcher icon, adaptive icon included, with a `--check` in the test suite so a re-init cannot quietly restore Android's template
+- [x] An APK in every release, built on Linux (Windows refuses the jniLibs symlink without Developer Mode); signing opt-in via secrets so a missing keystore cannot take the Windows release down with it
+
+### 0.17.4 — Pairing that asks, and a phone that remembers
+
+- [x] The desktop is *armed* first; the code exists only once a named device asks for it, and appears with "<name> at <address> wants to connect" beside it
+- [x] `POST /api/pair/request` — unauthenticated, and unable to produce a code on its own. An unarmed desktop refuses; a desktop already showing a code for someone else refuses too, so a second device cannot cancel the first one's pairing by asking
+- [x] Discovery from the phone: a /24 sweep of the unauthenticated health check, in the mobile shell's one command. Not mDNS — Android needs a MulticastLock and consumer Wi-Fi blocks client multicast on exactly the networks people use
+- [x] Saved computers, with switching, and forgetting that says it is local-only
+- [x] Retry and Switch on the offline banner — nothing re-entered
+- [x] Dictation from the phone: the WebView captures, the desktop transcribes. `POST /api/transcribe`
+- [x] `mergeAppSettings` drops `undefined` — `{ x: cond ? true : undefined }` was erasing `x`, which clobbered `apiEnabled` and `apiToken` and would have stopped the API starting at the next launch
+- [ ] Live partial transcripts while dictating from a phone (would re-upload the whole recording every tick)
+- [ ] Speech playback of answers on the phone
+
 - [ ] Deep research mode: multi-step sourced research using subchats; requires design session before scheduling
 - [ ] Zone snapshot/versioning: save zone config at chat creation time so editing a zone does not alter historical context

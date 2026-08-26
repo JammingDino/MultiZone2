@@ -189,3 +189,45 @@ The sizing was right and the sequencing was right: the desktop half landed first
 
 **Still not built, and still deliberately:** wake-on-LAN, any access from outside the LAN, and any offline mode. The token also lives in the WebView's `localStorage` rather than the platform keystore, which is the one place the implementation is weaker than the design — noted in `transport.ts` rather than quietly.
 
+### What using it changed (0.17.3–0.17.4)
+
+The design above was written before anything was built, and survived better
+than it had any right to. Four things it could not have known, all of which
+came from installing the APK on a handset and using it rather than from reading
+the code back:
+
+1. **A phone is not a narrow window, and the two must not be conflated.** The
+   first touch pass put a `min-height` on every button, which stretched the
+   settings Toggle's track and left its knob pinned to the top — every switch in
+   the app rendered as a tall capsule. Target size follows the *pointer*, layout
+   follows the *width*, and a rule that cannot tell which elements own their own
+   geometry should not be global.
+2. **"Show a code" is the wrong verb.** The design says the desktop shows a code
+   and the phone enters it, which reads fine and walks the user between two
+   screens neither of which knows about the other. Inverting it — the desktop is
+   armed, the phone asks, the code appears *with the asking device's name on it*
+   — costs one unauthenticated route and turns an anonymous six digits into an
+   identified request. The security property is unchanged and is easier to state:
+   no code exists unless somebody armed the desktop.
+3. **mDNS is the least dependable half of discovery, not the most.** The design
+   treats it as the answer and manual entry as the fallback. On Android it needs
+   a `MulticastLock`, and consumer routers block client-to-client multicast often
+   enough that it fails on exactly the networks people want to use. A /24 sweep
+   of the unauthenticated health check works wherever plain TCP does — which is
+   the same condition the app itself needs — so that is what the phone does. The
+   advertisement stays for everything that is not a phone.
+4. **Dictation is the thing the phone is *better* at**, and the design does not
+   mention it. It is the one input where the remote has the advantage: a good
+   microphone in your hand, a transcription provider on the machine at home. It
+   fits the rule exactly — the phone captures, the desktop infers.
+
+One bug worth recording because of its shape rather than its size:
+`Object.assign` copies an explicit `undefined` over a real value, so
+`{ apiEnabled: cond ? true : undefined }` — written to mean "set it, or leave it
+alone" — silently erased the setting. It clobbered `apiEnabled` and `apiToken`,
+which would have stopped the API server starting at the next launch with nothing
+on screen to explain why. It was found by reading `/api/health` on a running app
+and noticing a bound socket reporting `enabled: false` — which is precisely the
+job that endpoint was rebuilt for in 0.11.0, catching a lie that no test was
+positioned to see.
+

@@ -12,6 +12,7 @@ import { Modal, ModalTitle } from "@/components/common/Modal";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import { HexColorField } from "@/components/common/ColorPicker";
 import { UpdateSection } from "@/components/Settings/UpdateSection";
+import { RemoteAccess } from "@/components/Settings/RemoteAccess";
 import { Toggle, ToggleRow } from "@/components/common/Toggle";
 import { PrivacyStatementLink } from "@/components/common/PrivacyStatement";
 import { InstalledZones, useZoneActions } from "@/components/Zones/InstalledZones";
@@ -3633,32 +3634,64 @@ function ApiTab() {
   const refreshBind = () => api.apiBindState().then(setBind).catch(console.error);
   useEffect(() => { void refreshBind(); }, []);
 
-  const baseUrl = `http://127.0.0.1:${appSettings.apiPort ?? 8765}`;
+  // The address it is *actually* bound to, not the one it used to always be.
+  // Falling back to loopback matches what an un-bound server would be if it
+  // came up, and never overstates reach.
+  const baseUrl = `http://${bind?.address || "127.0.0.1"}:${appSettings.apiPort ?? 8765}`;
   const parsedPort = parseInt(portInput, 10);
   const portInvalid = !Number.isFinite(parsedPort) || parsedPort < 1 || parsedPort > 65535;
 
   // Push the current config to the backend, persist it, and reflect any error.
-  async function apply(next: { apiEnabled?: boolean; apiPort?: number; apiToken?: string }) {
+  //
+  // The LAN bind and its address go through here too (0.17.0) rather than
+  // through a second command: all of them decide which socket is open, and a
+  // panel that could change the bind without restarting the server would be
+  // describing a server that does not exist. Settings are persisted only after
+  // the restart succeeds, so a refused bind does not leave the panel claiming a
+  // configuration the server is not running.
+  async function apply(next: {
+    apiEnabled?: boolean;
+    apiPort?: number;
+    apiToken?: string;
+    apiLan?: boolean;
+    apiBindAddress?: string;
+    apiDiscovery?: boolean;
+  }) {
     const merged = { ...appSettings, ...next };
     setBusy(true);
     setStatus(null);
     try {
-      // Ensure a token exists before enabling.
+      // Ensure a token exists before enabling. Still generated even in the
+      // LAN case: pairing mints per-device tokens, but the static one is what
+      // a script on this machine uses and the server refuses to start without.
       if (merged.apiEnabled && !merged.apiToken) {
         merged.apiToken = await api.generateApiToken();
       }
-      await api.applyApiSettings(merged.apiEnabled, merged.apiPort, merged.apiToken);
+      await api.applyApiSettings(
+        merged.apiEnabled,
+        merged.apiPort,
+        merged.apiToken,
+        merged.apiLan,
+        merged.apiBindAddress,
+        merged.apiDiscovery,
+      );
       await setAppSettings({
         apiEnabled: merged.apiEnabled,
         apiPort: merged.apiPort,
         apiToken: merged.apiToken,
+        apiLan: merged.apiLan,
+        apiBindAddress: merged.apiBindAddress,
+        apiDiscovery: merged.apiDiscovery,
       });
-      setStatus(merged.apiEnabled ? `Running on ${`http://127.0.0.1:${merged.apiPort}`}` : "Stopped.");
+      setStatus(merged.apiEnabled ? "Running." : "Stopped.");
       await refreshBind();
     } catch (e: any) {
       setStatus(`Error: ${e?.message || String(e)}`);
-      // Roll the toggle back if start failed.
+      // Roll the toggle back if start failed. Same for the LAN bind: a refused
+      // bind that left the switch reading "on the network" would be the exact
+      // dishonesty the persisted bind outcome was added to end.
       if (next.apiEnabled) await setAppSettings({ apiEnabled: false });
+      if (next.apiLan) await setAppSettings({ apiLan: false });
       await refreshBind();
     } finally {
       setBusy(false);
@@ -3695,8 +3728,9 @@ function ApiTab() {
       <section>
         <h3 className="mb-1 text-sm font-medium">Local HTTP API</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          A local REST + SSE API on 127.0.0.1 with the same capabilities as the app — chats,
-          zones, projects, messages. Every request needs your bearer token.
+          A REST + SSE API with the same capabilities as the app — chats, zones, projects,
+          messages. It listens on 127.0.0.1 only, until you switch on remote access below. Every
+          request needs a token.
         </p>
         <div
           onClick={() => !busy && apply({ apiEnabled: !appSettings.apiEnabled })}
@@ -3718,14 +3752,15 @@ function ApiTab() {
           <div className="mt-2 flex items-start gap-2 rounded border border-[var(--color-danger)]/50 bg-[var(--color-danger)]/5 px-2.5 py-2 text-xs">
             <AlertTriangle size={13} className="mt-0.5 shrink-0 text-[var(--color-danger)]" />
             <span>
-              The server is switched on but is not listening on port {bind.port}
+              The server is switched on but is not listening on {bind.address}:{bind.port}
               {bind.error ? <>: <span className="font-mono">{bind.error}</span></> : "."}
             </span>
           </div>
         )}
         {appSettings.apiEnabled && bind?.ok && (
           <p className="mt-2 text-xs text-[var(--color-text-muted)]">
-            Listening on port {bind.port}. Ask it about itself:{" "}
+            Listening on <span className="font-mono">{bind.address}:{bind.port}</span>. Ask it
+            about itself:{" "}
             <span className="font-mono">GET {baseUrl}/api/health</span> and{" "}
             <span className="font-mono">/api/routes</span> — both answer without a token.
           </p>
@@ -3778,6 +3813,8 @@ function ApiTab() {
           </button>
         </div>
       </section>
+
+      <RemoteAccess apply={apply} busy={busy} />
 
       <section>
         <h3 className="mb-2 text-sm font-medium">Example</h3>

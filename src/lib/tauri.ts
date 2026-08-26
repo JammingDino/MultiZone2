@@ -10,6 +10,11 @@ import type {
   LibraryEntry,
   ApiBindState,
   ApplyOutcome,
+  NetworkInterface,
+  PairedDevice,
+  PairingView,
+  PendingApproval,
+  RemoteStatus,
   Checkpoint,
   CheckpointUsage,
   StagedEdit,
@@ -614,9 +619,73 @@ export const importChatFromMarkdown = (path: string) =>
   invoke<Chat>("import_chat_from_markdown", { path });
 
 // API server
-export const applyApiSettings = (enabled: boolean, port: number, token: string) =>
-  invoke<void>("apply_api_settings", { enabled, port, token });
+/**
+ * Push the API config and (re)start the server.
+ *
+ * `lan`, `bindAddress` and `discovery` (0.17.0) are part of this call rather
+ * than a separate one because every one of them changes which socket is open —
+ * a panel that could change the bind without restarting would be describing a
+ * server that does not exist.
+ */
+export const applyApiSettings = (
+  enabled: boolean,
+  port: number,
+  token: string,
+  lan?: boolean,
+  bindAddress?: string,
+  discovery?: boolean,
+) =>
+  invoke<void>("apply_api_settings", {
+    enabled,
+    port,
+    token,
+    lan: lan ?? false,
+    bindAddress: bindAddress ?? "",
+    discovery: discovery ?? true,
+  });
 export const generateApiToken = () => invoke<string>("generate_api_token");
+
+// Remote access (0.17.0) — a phone as a second window onto this desktop.
+/** Whether the app is reachable from the network, on which address, and
+ *  whether it is being advertised. */
+export const remoteStatus = () => invoke<RemoteStatus>("remote_status");
+/** The addresses this machine could bind. */
+export const listNetworkInterfaces = () =>
+  invoke<NetworkInterface[]>("list_network_interfaces");
+export const listPairedDevices = () => invoke<PairedDevice[]>("list_paired_devices");
+/** Revoke one device. Its token stops working on its next request; nothing
+ *  else notices — which is the whole point of per-device tokens. */
+export const revokePairedDevice = (id: string) =>
+  invoke<PairedDevice>("revoke_paired_device", { id });
+/** Drop a revoked device from the list. Refuses one that is still live. */
+export const forgetPairedDevice = (id: string) =>
+  invoke<void>("forget_paired_device", { id });
+export const renamePairedDevice = (id: string, name: string) =>
+  invoke<PairedDevice>("rename_paired_device", { id, name });
+/** The code on screen, its QR link, and recent attempts. */
+export const pairingStatus = () => invoke<PairingView>("pairing_status");
+/** Show a pairing code. Refuses unless the API is bound to a LAN address —
+ *  a code no phone can reach is a dead end somebody would spend a minute
+ *  typing into one. */
+export const openPairing = () => invoke<PairingView>("open_pairing");
+export const closePairing = () => invoke<PairingView>("close_pairing");
+
+/**
+ * Every tool call waiting on a human.
+ *
+ * Answering is still `respondToolApproval`; what was missing was any way to
+ * find out something was waiting. From a phone that is the difference between
+ * a run you left alone and a run that quietly denied itself five minutes after
+ * you walked away.
+ */
+export const pendingApprovals = () => invoke<PendingApproval[]>("pending_approvals");
+
+/** Emitted when a device pairs, so an open pairing dialog can say so. */
+export function onDevicesChanged(
+  handler: (e: { deviceId: string }) => void,
+): Promise<UnlistenFn> {
+  return listen<{ deviceId: string }>("devices-changed", (e) => handler(e.payload));
+}
 
 // Attachments
 export const uploadAttachment = (chatId: string, filePath: string) =>

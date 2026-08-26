@@ -810,10 +810,23 @@ export interface AppSettings {
   zoneLibraryPageSize: number;
   /** When true, the embedded local HTTP API server runs. */
   apiEnabled: boolean;
-  /** Port the API server binds to on 127.0.0.1. */
+  /** Port the API server binds to. */
   apiPort: number;
   /** Bearer token required by the API server. */
   apiToken: string;
+  /**
+   * Remote access (0.17.0): bind a network interface rather than loopback, so
+   * a phone, a tablet or a second laptop can reach the app.
+   *
+   * Deliberately separate from `apiEnabled`. Switching the API on for a local
+   * script and putting the app on the network are different decisions, and
+   * only the second one changes who can knock.
+   */
+  apiLan: boolean;
+  /** Which interface, by IPv4 address. Empty means "pick the obvious one". */
+  apiBindAddress: string;
+  /** Advertise over mDNS so a phone need not be told the address at all. */
+  apiDiscovery: boolean;
   /**
    * Which tool safety classes are auto-approved without showing an approval prompt.
    * "all"           — approve everything (default, preserves old behavior)
@@ -1189,6 +1202,9 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   apiEnabled: false,
   apiPort: 8765,
   apiToken: "",
+  apiLan: false,
+  apiBindAddress: "",
+  apiDiscovery: true,
   autoApproveLevel: "all",
   approvals: { categories: {}, shellAllow: [], shellDeny: [], editAllow: [], editDeny: [] },
   notifyWhenWaiting: true,
@@ -1397,9 +1413,109 @@ export interface ApplyOutcome {
 export interface ApiBindState {
   ok: boolean;
   port: number;
+  /**
+   * Which address it bound, or tried to (0.17.0). "Switched on" and "on the
+   * network" became different facts when the LAN bind landed, and a row that
+   * only recorded the port could not tell them apart.
+   */
+  address: string;
   /** Why the bind failed, in the OS's own words. */
   error: string | null;
   at: number;
+}
+
+// ─── Remote access (0.17.0) ──────────────────────────────────────────────────
+
+/** One address the API could bind, as the interface picker shows it. */
+export interface NetworkInterface {
+  /** The OS's name for it — `Wi-Fi`, `en0`, `eth0`. */
+  name: string;
+  address: string;
+  loopback: boolean;
+  /** An RFC1918 or link-local address: a home LAN rather than the internet. */
+  private: boolean;
+}
+
+/** Where remote access stands, assembled from four facts that used to live in
+ *  four different places. */
+export interface RemoteStatus {
+  apiEnabled: boolean;
+  /** Bound to something other than loopback. */
+  lan: boolean;
+  address: string;
+  port: number;
+  bound: boolean;
+  bindError: string | null;
+  /** mDNS is advertising. False when switched off *or* when it failed —
+   *  `discoveryError` tells them apart, and a blocked mDNS is not a reason the
+   *  phone cannot connect. */
+  discovering: boolean;
+  discoveryError: string | null;
+  /** What a phone should point at, or null when the bind is loopback. */
+  baseUrl: string | null;
+  interfaces: NetworkInterface[];
+  /** False on a machine whose only address is loopback. */
+  lanAvailable: boolean;
+}
+
+/** A device that has been through pairing. The token is never here — the
+ *  desktop keeps only its hash. */
+export interface PairedDevice {
+  id: string;
+  name: string;
+  platform: string;
+  createdAt: number;
+  lastSeenAt: number | null;
+  lastSeenIp: string | null;
+  /** Set rather than deleted, so a revoke is visible. */
+  revokedAt: number | null;
+  /** True for the device making the request — only ever set over the API, and
+   *  what stops a phone's device list being five similar names each with a
+   *  revoke button. */
+  self?: boolean;
+}
+
+/** The code currently on screen. */
+export interface PairingOffer {
+  code: string;
+  expiresAt: number;
+  /** Wrong guesses left before this code is burned. */
+  attemptsRemaining: number;
+}
+
+/** One attempt at pairing, accepted or not. */
+export interface PairingAttempt {
+  id: string;
+  address: string;
+  deviceName: string | null;
+  ok: boolean;
+  reason: string | null;
+  createdAt: number;
+}
+
+/** The pairing dialog's whole state. */
+export interface PairingView {
+  offer: PairingOffer | null;
+  /** The `multizone://pair` deep link a QR encodes. Null without an offer, or
+   *  without a LAN address to name. */
+  link: string | null;
+  attempts: PairingAttempt[];
+}
+
+/** A tool call blocked on a human, as the queue reports it (0.17.0). */
+export interface PendingApproval {
+  /** The approval key: the chat id, or `chatId::zoneId` for a perspective. */
+  key: string;
+  chatId: string;
+  zoneId: string | null;
+  tool: string;
+  /** The call's arguments as the model wrote them, JSON. */
+  arguments: string;
+  diff: FileDiff | null;
+  requestedAt: number;
+  /** Seconds before the call denies itself. A queue without this reads a
+   *  timeout as a bug. */
+  expiresInSecs: number;
 }
 
 /** What the checkpoint store is holding, for Settings → Data (0.10.0). */

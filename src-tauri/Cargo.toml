@@ -1,6 +1,6 @@
 [package]
 name = "multizone"
-version = "0.17.3"
+version = "0.17.4"
 description = "MultiZone — LLM interface"
 authors = ["MultiZone"]
 edition = "2021"
@@ -34,6 +34,11 @@ serde_json = "1.0"
 
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Shared because the mobile shell sweeps its own /24 for desktops (0.17.4) and
+# needs to know which /24 that is. See `mobile::discover_desktops` for why the
+# phone probes rather than listening for the mDNS the desktop advertises.
+if-addrs = "0.13"
 
 # ─── Desktop only ────────────────────────────────────────────────────────────
 #
@@ -133,12 +138,12 @@ tauri-plugin-process = "2"
 similar = { version = "3.1.2", default-features = false, features = ["text"] }
 
 # Remote access (0.17.0) — a phone as a second window onto this desktop.
-# `if-addrs` enumerates the machine's addresses so the LAN bind is a choice
-# between real interfaces rather than a blanket `0.0.0.0`; `mdns-sd` advertises
-# the desktop so nobody has to type the address that choice produced. `rand`
+# `mdns-sd` advertises the desktop so nobody has to type an address; `rand`
 # generates the six-digit pairing code (already in the tree via several deps;
-# this only makes it direct). Token hashing reuses the `sha2` above.
-if-addrs = "0.13"
+# this only makes it direct). Token hashing reuses the `sha2` above, and
+# `if-addrs` — which enumerates the machine's addresses so the LAN bind is a
+# choice between real interfaces rather than a blanket `0.0.0.0` — is shared
+# with the mobile build above.
 mdns-sd = "0.13"
 rand = "0.9"
 # `GET /api/events` (0.17.1): a `Stream` written as a loop with `yield`, which

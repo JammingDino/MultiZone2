@@ -18,6 +18,7 @@ export const ROUTE_MAP: Record<string, RouteBinding> = {
   apply_all_staged_edits: { method: "POST", path: "/api/chats/:id/staged-edits/apply" },
   apply_staged_edit: { method: "POST", path: "/api/staged-edits/:id/apply" },
   approve_plan: { method: "POST", path: "/api/plans/:id/approve" },
+  arm_pairing: { method: "POST", path: "/api/pairing/arm" },
   branch_chat: { method: "POST", path: "/api/chats/:id/branch" },
   cancel_pending_message: { method: "DELETE", path: "/api/chats/:id/queue/:messageId" },
   cancel_stream: { method: "POST", path: "/api/chats/:id/cancel" },
@@ -138,6 +139,7 @@ export const ROUTE_MAP: Record<string, RouteBinding> = {
   set_setting: { method: "PUT", path: "/api/settings/:key" },
   set_skill_enabled: { method: "POST", path: "/api/skills/:id/enabled" },
   skill_packs_root: { method: "GET", path: "/api/skill-packs/root" },
+  transcribe_audio_upload: { method: "POST", path: "/api/transcribe" },
   update_message: { method: "PATCH", path: "/api/chats/:id/messages/:messageId" },
   update_plan_steps: { method: "POST", path: "/api/plans/:id/steps" },
   upsert_library_entry: { method: "POST", path: "/api/zone-library" },
@@ -183,7 +185,6 @@ export const GUI_ONLY: Record<string, string> = {
   summarize_for_speech: "condenses an answer for the window's player",
   synthesize_speech: "returns audio for the window's player",
   transcribe_audio_file: "transcribes a file chosen in a native file dialog",
-  transcribe_audio_upload: "transcribes bytes the window already holds as a composer attachment",
   upload_attachment: "moves bytes the window already holds into app storage",
   write_export_file: "writes to a path the user picked in a native save dialog",
 };

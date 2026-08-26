@@ -42,44 +42,144 @@ const CODE_TTL_MS: i64 = 180_000;
 /// Wrong guesses before the window is burned and the user is shown a new code.
 const MAX_FAILURES: u32 = 5;
 
-struct Window {
-    code: String,
-    expires_at: i64,
-    failures: u32,
+/// The desktop's side of pairing, as a three-state machine (0.17.4).
+///
+/// It was two states — a code, or nothing — which forced the user to press a
+/// button, read six digits, walk to the phone, and type them into a screen that
+/// had no idea any of that had happened. The phone can ask, so it does: the
+/// desktop is *armed* first, and the code only exists once a named device has
+/// asked for one. That changes the code from a thing you go and fetch into a
+/// thing that appears when you need it, and it lets the desktop say **who** is
+/// asking, which is the question the person approving actually has.
+///
+/// The security property is unchanged and is the reason `Armed` exists at all:
+/// no code is ever produced unless the user opened this screen and asked for a
+/// device. An unarmed desktop refuses the request outright.
+enum State {
+    /// The user has asked to pair, and nothing has answered yet.
+    Armed { expires_at: i64 },
+    /// A code is on screen, for a device that asked for it.
+    Offered {
+        code: String,
+        expires_at: i64,
+        failures: u32,
+        /// `None` for a code produced by the desktop on its own — the QR path,
+        /// where nothing has identified itself yet.
+        requester: Option<Requester>,
+    },
 }
 
-/// The one open pairing window, if any.
+/// A name a device gave itself, made safe to draw.
+///
+/// Same treatment as a paired device's name and for the same reason: this is
+/// text that arrived over the network and is about to be rendered next to a
+/// code the user is deciding whether to trust.
+pub fn clean_display_name(name: &str) -> String {
+    let cleaned: String = name.trim().chars().filter(|c| !c.is_control()).take(60).collect();
+    if cleaned.is_empty() { "An unnamed device".to_string() } else { cleaned }
+}
+
+/// Who asked. Display text off the network, so it is cleaned before it is kept.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Requester {
+    pub name: String,
+    pub platform: String,
+    pub address: String,
+}
+
+/// The one pairing window, if any.
 ///
 /// Process-global rather than hung off `AppState` because the API's router and
 /// the Tauri command layer both reach it and neither owns it — and because
 /// there is exactly one desktop showing exactly one code. A `std::sync::Mutex`
 /// is enough: every critical section here is a few comparisons and holds no
 /// await point.
-static WINDOW: Mutex<Option<Window>> = Mutex::new(None);
+static WINDOW: Mutex<Option<State>> = Mutex::new(None);
 
-/// What the desktop shows, and what a QR encodes.
+/// What the desktop shows, and what the phone's wizard reacts to.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PairingOffer {
-    pub code: String,
+    /// `None` while armed and waiting: there is nothing to show yet, and a
+    /// blank where the code goes is the honest rendering of that.
+    pub code: Option<String>,
     pub expires_at: i64,
     /// Attempts left before this code is burned.
     pub attempts_remaining: u32,
+    /// The device that asked, once one has.
+    pub requester: Option<Requester>,
 }
 
-/// Open a pairing window, replacing any code already on screen.
-///
-/// Re-opening rather than refusing is deliberate: the user pressing the button
-/// again means "give me a code I can actually see", and answering that with an
-/// error because a forgotten one is still live would be the app arguing with
-/// them about a decision they have already made.
+/// Arm the desktop: from now until it expires, one device may ask for a code.
+pub fn arm() -> PairingOffer {
+    let expires_at = now_ts() + CODE_TTL_MS;
+    *WINDOW.lock().unwrap() = Some(State::Armed { expires_at });
+    tracing::info!("pairing armed for {}s", CODE_TTL_MS / 1000);
+    PairingOffer { code: None, expires_at, attempts_remaining: MAX_FAILURES, requester: None }
+}
+
+/// Show a code without waiting to be asked — the QR path, and the fallback for
+/// a client that cannot reach `/api/pair/request` (an older build, or a browser
+/// somebody is typing into by hand).
 pub fn open() -> PairingOffer {
+    let expires_at = now_ts() + CODE_TTL_MS;
+    let code = generate_code();
+    *WINDOW.lock().unwrap() = Some(State::Offered {
+        code: code.clone(),
+        expires_at,
+        failures: 0,
+        requester: None,
+    });
+    tracing::info!("pairing code shown, expires in {}s", CODE_TTL_MS / 1000);
+    PairingOffer {
+        code: Some(code),
+        expires_at,
+        attempts_remaining: MAX_FAILURES,
+        requester: None,
+    }
+}
+
+/// A device asks the armed desktop for a code.
+///
+/// Refused unless the desktop is armed, which is the whole guarantee: this
+/// endpoint is unauthenticated, so without the arming step anyone on the network
+/// could make a code appear on somebody else's screen.
+pub fn request_code(requester: Requester) -> Result<PairingOffer, &'static str> {
+    let mut guard = WINDOW.lock().unwrap();
     let now = now_ts();
+
+    match guard.as_ref() {
+        Some(State::Armed { expires_at }) if now < *expires_at => {}
+        // A code is already out for somebody else. Answering with a fresh one
+        // would let a second device on the network cancel the first device's
+        // pairing simply by asking.
+        Some(State::Offered { expires_at, .. }) if now < *expires_at => {
+            return Err("the desktop is already showing a code for another device")
+        }
+        _ => {
+            *guard = None;
+            return Err(
+                "the desktop is not waiting for a device — open Settings → Phone & remote on your computer and tap \"Pair a device\"",
+            );
+        }
+    }
+
     let code = generate_code();
     let expires_at = now + CODE_TTL_MS;
-    *WINDOW.lock().unwrap() = Some(Window { code: code.clone(), expires_at, failures: 0 });
-    tracing::info!("pairing window opened, expires in {}s", CODE_TTL_MS / 1000);
-    PairingOffer { code, expires_at, attempts_remaining: MAX_FAILURES }
+    tracing::info!("pairing code issued to {} at {}", requester.name, requester.address);
+    *guard = Some(State::Offered {
+        code: code.clone(),
+        expires_at,
+        failures: 0,
+        requester: Some(requester.clone()),
+    });
+    Ok(PairingOffer {
+        code: Some(code),
+        expires_at,
+        attempts_remaining: MAX_FAILURES,
+        requester: Some(requester),
+    })
 }
 
 /// Close the pairing window. Idempotent — closing the dialog and the code
@@ -88,19 +188,34 @@ pub fn close() {
     *WINDOW.lock().unwrap() = None;
 }
 
-/// The live offer, or `None` if no code is on screen. Expiry is evaluated here
-/// rather than by a timer, so a window nobody asked about simply is not open.
+/// The live window, or `None`. Expiry is evaluated here rather than by a timer,
+/// so a window nobody asked about simply is not open.
 pub fn status() -> Option<PairingOffer> {
     let mut guard = WINDOW.lock().unwrap();
-    let expired = guard.as_ref().is_some_and(|w| now_ts() >= w.expires_at);
+    let now = now_ts();
+    let expired = match guard.as_ref() {
+        Some(State::Armed { expires_at }) => now >= *expires_at,
+        Some(State::Offered { expires_at, .. }) => now >= *expires_at,
+        None => false,
+    };
     if expired {
         *guard = None;
     }
-    guard.as_ref().map(|w| PairingOffer {
-        code: w.code.clone(),
-        expires_at: w.expires_at,
-        attempts_remaining: MAX_FAILURES.saturating_sub(w.failures),
-    })
+    match guard.as_ref() {
+        Some(State::Armed { expires_at }) => Some(PairingOffer {
+            code: None,
+            expires_at: *expires_at,
+            attempts_remaining: MAX_FAILURES,
+            requester: None,
+        }),
+        Some(State::Offered { code, expires_at, failures, requester }) => Some(PairingOffer {
+            code: Some(code.clone()),
+            expires_at: *expires_at,
+            attempts_remaining: MAX_FAILURES.saturating_sub(*failures),
+            requester: requester.clone(),
+        }),
+        None => None,
+    }
 }
 
 /// Six digits, uniform, leading zeros kept.
@@ -140,18 +255,23 @@ impl Refusal {
 /// no await inside it: two phones racing the same code must not both win, and
 /// the way that goes wrong is a check and a consume with a suspension point
 /// between them.
-fn take_window(code: &str) -> Result<(), Refusal> {
+fn take_window(presented: &str) -> Result<(), Refusal> {
     let mut guard = WINDOW.lock().unwrap();
-    let Some(window) = guard.as_mut() else {
+    let now = now_ts();
+
+    // Armed is not offered: the desktop is waiting to be asked, and nothing has
+    // been. Reported as "no window" rather than "wrong code", because guessing
+    // is not what has gone wrong.
+    let Some(State::Offered { code, expires_at, failures, .. }) = guard.as_mut() else {
         return Err(Refusal::NoWindow);
     };
-    if now_ts() >= window.expires_at {
+    if now >= *expires_at {
         *guard = None;
         return Err(Refusal::Expired);
     }
-    if !constant_time_eq(window.code.as_bytes(), code.trim().as_bytes()) {
-        window.failures += 1;
-        if window.failures >= MAX_FAILURES {
+    if !constant_time_eq(code.as_bytes(), presented.trim().as_bytes()) {
+        *failures += 1;
+        if *failures >= MAX_FAILURES {
             *guard = None;
             return Err(Refusal::Burned);
         }
@@ -304,10 +424,10 @@ mod tests {
     fn a_correct_code_works_exactly_once() {
         let _g = guard();
         let offer = open();
-        assert!(take_window(&offer.code).is_ok());
+        assert!(take_window(offer.code.as_ref().unwrap()).is_ok());
         // The second device to present the same code finds nothing to present
         // it to — which is the difference between single-use and unlikely.
-        assert_eq!(take_window(&offer.code), Err(Refusal::NoWindow));
+        assert_eq!(take_window(offer.code.as_ref().unwrap()), Err(Refusal::NoWindow));
     }
 
     /// The protection that is actually doing the work. Without it a code that
@@ -322,7 +442,7 @@ mod tests {
         assert_eq!(take_window("999999"), Err(Refusal::Burned));
         // And the real code no longer works either — burned means burned, not
         // "the attacker is locked out and the owner is not".
-        assert_eq!(take_window(&offer.code), Err(Refusal::NoWindow));
+        assert_eq!(take_window(offer.code.as_ref().unwrap()), Err(Refusal::NoWindow));
     }
 
     #[test]
@@ -339,7 +459,9 @@ mod tests {
     fn an_expired_window_is_not_open() {
         let _g = guard();
         open();
-        WINDOW.lock().unwrap().as_mut().unwrap().expires_at = now_ts() - 1;
+        if let Some(State::Offered { expires_at, .. }) = WINDOW.lock().unwrap().as_mut() {
+            *expires_at = now_ts() - 1;
+        }
         assert!(status().is_none(), "an expired code must not still be on offer");
     }
 
@@ -348,8 +470,77 @@ mod tests {
         let _g = guard();
         let first = open();
         let second = open();
-        assert_eq!(take_window(&first.code), Err(Refusal::WrongCode));
-        assert!(take_window(&second.code).is_ok());
+        assert_eq!(take_window(first.code.as_ref().unwrap()), Err(Refusal::WrongCode));
+        assert!(take_window(second.code.as_ref().unwrap()).is_ok());
+    }
+
+    fn requester() -> Requester {
+        Requester {
+            name: "Pixel 8".into(),
+            platform: "android".into(),
+            address: "192.168.1.42".into(),
+        }
+    }
+
+    /// The guarantee the whole `Armed` state exists for. `/api/pair/request` is
+    /// unauthenticated, so without this anybody on the network could make a code
+    /// appear on somebody else's screen.
+    #[test]
+    fn an_unarmed_desktop_refuses_to_produce_a_code() {
+        let _g = guard();
+        close();
+        let err = request_code(requester()).unwrap_err();
+        assert!(err.contains("not waiting for a device"), "{err}");
+        assert!(status().is_none());
+    }
+
+    #[test]
+    fn arming_then_asking_produces_a_code_for_a_named_device() {
+        let _g = guard();
+        let armed = arm();
+        assert!(armed.code.is_none(), "nothing to show until a device asks");
+
+        let offered = request_code(requester()).unwrap();
+        let code = offered.code.expect("a code");
+        assert_eq!(offered.requester.unwrap().name, "Pixel 8");
+        // And the desktop is now showing exactly that code.
+        assert_eq!(status().unwrap().code.as_deref(), Some(code.as_str()));
+        assert!(take_window(&code).is_ok());
+    }
+
+    /// Otherwise a second device on the network could cancel the first device's
+    /// pairing just by asking, which is a denial of service with a friendly face.
+    #[test]
+    fn a_second_device_cannot_replace_a_code_already_out() {
+        let _g = guard();
+        arm();
+        let first = request_code(requester()).unwrap().code.unwrap();
+        let err = request_code(requester()).unwrap_err();
+        assert!(err.contains("already showing a code"), "{err}");
+        assert_eq!(status().unwrap().code.as_deref(), Some(first.as_str()));
+    }
+
+    #[test]
+    fn an_expired_arm_is_not_armed() {
+        let _g = guard();
+        arm();
+        if let Some(State::Armed { expires_at }) = WINDOW.lock().unwrap().as_mut() {
+            *expires_at = now_ts() - 1;
+        }
+        assert!(status().is_none());
+        assert!(request_code(requester()).is_err());
+    }
+
+    /// Armed is not offered. A phone that guesses while the desktop is still
+    /// waiting has not got the code wrong — there is no code — and telling it
+    /// otherwise would burn attempts against a window that never existed.
+    #[test]
+    fn guessing_at_an_armed_window_is_not_a_wrong_code() {
+        let _g = guard();
+        arm();
+        assert_eq!(take_window("123456"), Err(Refusal::NoWindow));
+        assert!(status().is_some(), "and the arming survives it");
+        close();
     }
 
     #[test]

@@ -401,6 +401,7 @@ pub fn run() {
             commands::remote::rename_paired_device,
             commands::remote::pairing_status,
             commands::remote::open_pairing,
+            commands::remote::arm_pairing,
             commands::remote::close_pairing,
             commands::messages::pending_approvals,
             commands::voice::list_voice_input_devices,

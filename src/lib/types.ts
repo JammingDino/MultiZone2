@@ -1475,12 +1475,27 @@ export interface PairedDevice {
   self?: boolean;
 }
 
-/** The code currently on screen. */
+/** A device that has asked the desktop for a code. */
+export interface PairingRequester {
+  name: string;
+  platform: string;
+  address: string;
+}
+
+/** The pairing window on the desktop. */
 export interface PairingOffer {
-  code: string;
+  /**
+   * `null` while armed and waiting for a device to ask (0.17.4). There is
+   * nothing to show yet, and a blank where the code goes is the honest
+   * rendering of that.
+   */
+  code: string | null;
   expiresAt: number;
   /** Wrong guesses left before this code is burned. */
   attemptsRemaining: number;
+  /** The device that asked, once one has. `null` for a code the desktop
+   *  produced on its own — the QR path, where nothing has identified itself. */
+  requester: PairingRequester | null;
 }
 
 /** One attempt at pairing, accepted or not. */

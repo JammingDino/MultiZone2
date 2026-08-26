@@ -121,8 +121,16 @@ pub struct PairingView {
 /// A URL rather than a JSON blob because a QR scanner that is not this app
 /// still does something sensible with it — and because the mobile shell can
 /// register the scheme and be handed the whole pairing in one tap.
-fn pairing_link(address: &str, port: u16, code: &str) -> String {
-    format!("multizone://pair?host={address}&port={port}&code={code}")
+///
+/// The code is optional as of 0.17.4. While the desktop is merely *armed* there
+/// is no code yet, and the link is still worth showing: scanning it saves the
+/// part people actually get wrong, which is typing an IP address. The phone
+/// then asks for a code over the link it just learned.
+fn pairing_link(address: &str, port: u16, code: Option<&str>) -> String {
+    match code {
+        Some(code) => format!("multizone://pair?host={address}&port={port}&code={code}"),
+        None => format!("multizone://pair?host={address}&port={port}"),
+    }
 }
 
 #[tauri::command]
@@ -133,35 +141,52 @@ pub async fn pairing_status(state: State<'_, AppState>) -> AppResult<PairingView
     let port = bind.as_ref().map(|b| b.port).unwrap_or(8765);
     let link = match (&offer, address.as_str()) {
         (Some(o), addr) if !addr.is_empty() && addr != "127.0.0.1" => {
-            Some(pairing_link(addr, port, &o.code))
+            Some(pairing_link(addr, port, o.code.as_deref()))
         }
         _ => None,
     };
     Ok(PairingView { offer, link, attempts: pairing::recent_attempts(&state.db, 10).await? })
 }
 
-/// Show a pairing code.
+/// Refuse to offer pairing at all unless a device could actually reach us.
 ///
-/// Refuses unless the API is actually bound to a LAN address, because a code
-/// that no phone can reach is a dead end the user would spend a minute typing
-/// into one. The error names the switch they need rather than the state they
-/// are in.
+/// A code that no phone can get to is a dead end somebody would spend a minute
+/// typing into one, so the error names the switch they need rather than the
+/// state they are in.
+async fn require_reachable(state: &AppState) -> AppResult<()> {
+    match super::api::read_bind_state(&state.db).await.as_ref() {
+        Some(b) if b.ok && b.address != LOOPBACK => Ok(()),
+        Some(b) if b.ok => Err(AppError::Invalid(
+            "the API is only listening on 127.0.0.1 — switch on remote access before pairing a device".into(),
+        )),
+        _ => Err(AppError::Invalid(
+            "the API server is not listening — switch it on before pairing a device".into(),
+        )),
+    }
+}
+
+const LOOPBACK: &str = "127.0.0.1";
+
+/// Wait for a device to ask for a code (0.17.4).
+///
+/// The normal path. The user taps this, picks up their phone, and the code
+/// appears on the desktop *when the phone asks for it* — with the phone's name
+/// beside it, so the thing being approved is identified rather than anonymous.
+#[tauri::command]
+pub async fn arm_pairing(state: State<'_, AppState>) -> AppResult<PairingView> {
+    require_reachable(&state).await?;
+    pairing::arm();
+    pairing_status(state).await
+}
+
+/// Show a code immediately, without waiting to be asked.
+///
+/// The path for a client that cannot ask — a browser somebody is driving by
+/// hand, or a build older than 0.17.4. Kept because the alternative is a
+/// version skew that presents as "pairing is broken".
 #[tauri::command]
 pub async fn open_pairing(state: State<'_, AppState>) -> AppResult<PairingView> {
-    let bind = super::api::read_bind_state(&state.db).await;
-    match bind.as_ref() {
-        Some(b) if b.ok && b.address != "127.0.0.1" => {}
-        Some(b) if b.ok => {
-            return Err(AppError::Invalid(
-                "the API is only listening on 127.0.0.1 — switch on LAN access before pairing a device".into(),
-            ))
-        }
-        _ => {
-            return Err(AppError::Invalid(
-                "the API server is not listening — switch it on before pairing a device".into(),
-            ))
-        }
-    }
+    require_reachable(&state).await?;
     pairing::open();
     pairing_status(state).await
 }
@@ -269,9 +294,19 @@ mod tests {
 
     #[test]
     fn the_pairing_link_carries_everything_the_phone_needs() {
-        let link = pairing_link("192.168.1.5", 8765, "042317");
+        let link = pairing_link("192.168.1.5", 8765, Some("042317"));
         assert_eq!(link, "multizone://pair?host=192.168.1.5&port=8765&code=042317");
         // Parseable by the mobile shell without a JSON decoder in the scanner.
         assert!(link.starts_with("multizone://pair?"));
+    }
+
+    /// Armed and waiting: no code exists yet, and the link must not claim one.
+    /// It is still worth showing — scanning it saves typing an IP address,
+    /// which is the part people actually get wrong.
+    #[test]
+    fn a_link_shown_before_a_code_exists_carries_only_the_address() {
+        let link = pairing_link("192.168.1.5", 8765, None);
+        assert_eq!(link, "multizone://pair?host=192.168.1.5&port=8765");
+        assert!(!link.contains("code"));
     }
 }

@@ -11,9 +11,9 @@
  * from, by design. What it offers instead is the truth and a retry.
  */
 
-import { CloudOff, Loader2, Wifi } from "lucide-react";
+import { CloudOff, Loader2, RefreshCw, Wifi } from "lucide-react";
 import { useEffect, useState } from "react";
-import { currentSession, signOut } from "@/lib/remote/transport";
+import { currentSession, disconnect, retryNow } from "@/lib/remote/transport";
 import type { ConnectionState } from "@/lib/remote/transport";
 
 export function ConnectionBanner({ state }: { state: ConnectionState }) {
@@ -55,7 +55,7 @@ export function ConnectionBanner({ state }: { state: ConnectionState }) {
             <div>Can't reach your computer.</div>
             <div className="text-xs text-[var(--color-text-muted)]">
               It may be asleep or on a different network. Nothing is stored on this device, so
-              there is nothing to show until it is back.
+              there is nothing to show until it is back — you stay paired either way.
             </div>
           </>
         ) : (
@@ -63,12 +63,26 @@ export function ConnectionBanner({ state }: { state: ConnectionState }) {
         )}
       </div>
       {asleep && (
-        <button
-          onClick={() => signOut()}
-          className="shrink-0 rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs"
-        >
-          Use another computer
-        </button>
+        <div className="flex shrink-0 gap-1.5">
+          {/* The reconnect loop backs off to thirty seconds, which is right for
+              a sleeping desktop and wrong for somebody who has just woken it and
+              is holding the phone. Nothing is re-entered: the token is still
+              saved, this only stops the waiting. */}
+          <button
+            onClick={() => retryNow()}
+            className="mz-tap flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs"
+          >
+            <RefreshCw size={12} /> Try again
+          </button>
+          {/* Disconnect, not sign out: every token is kept, and this drops back
+              to the list of computers so switching to the laptop is one tap. */}
+          <button
+            onClick={() => disconnect()}
+            className="mz-tap rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs"
+          >
+            Switch
+          </button>
+        </div>
       )}
     </div>
   );

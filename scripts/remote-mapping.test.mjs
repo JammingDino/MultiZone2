@@ -207,9 +207,21 @@ test("a pairing link carries the desktop and the code", () => {
 // A QR scanner points at whatever is in front of it. Anything that is not one
 // of our links has to come back null rather than half-parsed into an address
 // the phone then tries to pair with.
+// A link with only an address is the armed case: the desktop is waiting and no
+// code exists yet, so scanning it still saves typing the IP.
+test("a link with no code carries the address alone", () => {
+  assert.deepEqual(parsePairingLink("multizone://pair?host=192.168.1.5&port=8765"), {
+    baseUrl: "http://192.168.1.5:8765",
+    code: null,
+  });
+});
+
+// A QR scanner points at whatever is in front of it. Anything that is not one
+// of our links has to come back null rather than half-parsed into an address
+// the phone then tries to pair with.
 test("anything that is not a pairing link is refused", () => {
   assert.equal(parsePairingLink("https://example.com/?code=1"), null);
-  assert.equal(parsePairingLink("multizone://pair?host=192.168.1.5"), null);
+  assert.equal(parsePairingLink("multizone://pair?code=042317"), null, "no host");
   assert.equal(parsePairingLink("not a url"), null);
 });
 

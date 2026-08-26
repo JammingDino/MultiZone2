@@ -328,6 +328,7 @@ fn build_router(state: ApiState) -> Router {
         .route("/api/projects/:id/knowledge/default", post(h::set_project_kb_default))
         .route("/api/projects/:id/knowledge/documents", get(h::project_kb_documents))
         // Tools, usage, settings, storage
+        .route("/api/transcribe", post(h::transcribe_upload))
         .route("/api/tools", get(h::list_tools))
         .route("/api/tool-usage", get(h::tool_usage).delete(h::reset_tool_usage))
         .route("/api/usage", get(h::lifetime_usage))
@@ -343,6 +344,7 @@ fn build_router(state: ApiState) -> Router {
         .route("/api/devices", get(h::list_devices))
         .route("/api/devices/:id", axum::routing::delete(h::revoke_device).post(h::rename_device))
         .route("/api/pairing", get(h::pairing_status).post(h::open_pairing).delete(h::close_pairing))
+        .route("/api/pairing/arm", post(h::arm_pairing))
         .route("/api/approvals", get(h::pending_approvals))
         // The other half of the frontend's one seam: `listen`, as a stream.
         .route("/api/events", get(events::events))
@@ -362,6 +364,7 @@ fn build_router(state: ApiState) -> Router {
         // is no window unless the user opened one on the desktop, the code is
         // single-use, it expires, and five wrong answers burn it.
         .route("/api/pair", post(h::pair))
+        .route("/api/pair/request", post(h::pair_request))
         .merge(protected)
         .layer(middleware::from_fn_with_state(state.clone(), notify_gui_mw))
         .layer(CorsLayer::permissive())

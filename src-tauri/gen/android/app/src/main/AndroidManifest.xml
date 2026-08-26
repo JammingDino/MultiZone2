@@ -2,6 +2,17 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Dictation (0.17.4). The recording happens here because this is where
+         the microphone is; the transcription happens on the paired computer,
+         with the speech provider it is already configured with. wry's
+         `RustWebChromeClient.onPermissionRequest` already asks for these at
+         runtime when `getUserMedia` is called — declaring them is all that was
+         missing. Not required, so a device without a microphone can still
+         install the app and use everything else. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
 

@@ -37,12 +37,21 @@ import {
   parsePairingLink,
   STREAMING,
 } from "./mapping";
+import {
+  activate,
+  activeConnection,
+  deactivate,
+  forgetConnection,
+  hostOf,
+  saveConnection,
+} from "./connections";
 
 export { normalizeBaseUrl, parsePairingLink };
+export * from "./connections";
 
 // ─── The session ─────────────────────────────────────────────────────────────
 
-/** A paired desktop this client can talk to. */
+/** The desktop this client is currently talking to. */
 export interface RemoteSession {
   /** e.g. `http://192.168.1.5:8765` — no trailing slash. */
   baseUrl: string;
@@ -53,29 +62,28 @@ export interface RemoteSession {
   deviceName: string;
 }
 
-const STORAGE_KEY = "multizone.remote.session";
-
-let session: RemoteSession | null = readStoredSession();
+let session: RemoteSession | null = fromSaved();
 
 /**
- * Where the token lives.
+ * The active saved connection, as a session.
  *
- * `localStorage` on the app's own origin, which on a packaged mobile shell is
- * inside the app's private data directory. That is not the platform keystore,
- * and the difference matters on a rooted or unlocked device — noted here rather
- * than quietly, because it is the one place this implementation is weaker than
- * the design it came from.
+ * The tokens live in `connections.ts` — a list, since 0.17.4 — and this is
+ * whichever one the transport is pointed at. Storage is `localStorage` on the
+ * app's own origin, which on a packaged mobile shell is inside the app's
+ * private data directory. That is not the platform keystore, and the difference
+ * matters on a rooted or unlocked device: noted here rather than quietly,
+ * because it is the one place this implementation is weaker than the design it
+ * came from.
  */
-function readStoredSession(): RemoteSession | null {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as RemoteSession;
-    if (!parsed?.baseUrl || !parsed?.token) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
+function fromSaved(): RemoteSession | null {
+  const active = activeConnection();
+  if (!active) return null;
+  return {
+    baseUrl: active.baseUrl,
+    token: active.token,
+    deviceId: active.id,
+    deviceName: active.deviceName,
+  };
 }
 
 /** True when this window is a remote for a desktop rather than the desktop. */
@@ -87,21 +95,41 @@ export function currentSession(): RemoteSession | null {
   return session;
 }
 
-export function setSession(next: RemoteSession | null) {
-  session = next;
-  try {
-    if (next) localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    else localStorage.removeItem(STORAGE_KEY);
-  } catch {}
-  // Anything mid-flight belongs to the desktop we were talking to a moment ago.
+/**
+ * Point the transport at a saved computer, or at none.
+ *
+ * Everything mid-flight belongs to the desktop we were talking to a moment ago,
+ * so the event stream is torn down either way.
+ */
+export function useConnection(id: string | null) {
+  if (id === null) deactivate();
+  else if (!activate(id)) return;
+  session = fromSaved();
   closeEventStream();
+  if (session) ensureEventStream();
+  // Forced rather than left to `setConnectionState`, which is a no-op when the
+  // string has not changed — switching between two unreachable computers must
+  // still redraw the screen that names them.
+  setConnectionState(session ? "connecting" : "offline");
+  announceConnection();
 }
 
-/** Forget the desktop. Does not revoke on the far side — a device that cannot
- *  reach the desktop cannot ask it to forget, and pretending otherwise would
- *  leave a live token with nothing on screen to revoke. */
-export function signOut() {
-  setSession(null);
+/** Back to the list of computers, keeping every token. */
+export function disconnect() {
+  useConnection(null);
+}
+
+/**
+ * Give up waiting and try again now.
+ *
+ * The reconnect loop backs off to thirty seconds, which is right for a desktop
+ * that is asleep and wrong for somebody who has just woken it and is holding
+ * the phone. This is the button that means "I know something changed".
+ */
+export function retryNow() {
+  if (!session) return;
+  closeEventStream();
+  ensureEventStream();
 }
 
 // ─── Pairing ─────────────────────────────────────────────────────────────────
@@ -113,10 +141,34 @@ export interface PairResult {
 }
 
 /**
+ * Ask a waiting desktop to show a pairing code for this device (0.17.4).
+ *
+ * Unauthenticated, and safe because it cannot make a code appear on its own:
+ * the desktop has to have been armed by somebody standing in front of it. A
+ * refusal comes back as the sentence explaining that, which is the one thing
+ * the person holding the phone can act on.
+ */
+export async function requestPairingCode(opts: {
+  baseUrl: string;
+  name: string;
+  platform: string;
+}): Promise<{ expiresAt: number }> {
+  const baseUrl = normalizeBaseUrl(opts.baseUrl);
+  const res = await fetch(`${baseUrl}/api/pair/request`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: opts.name, platform: opts.platform }),
+  });
+  const body = await readBody(res);
+  if (!res.ok) throw new Error(errorMessage(body, res.status));
+  return body as { expiresAt: number };
+}
+
+/**
  * Redeem a code for this device's own token, and remember the desktop.
  *
- * The only call in this file that does not need a session, for the obvious
- * reason.
+ * One of the two calls in this file that does not need a session, for the
+ * obvious reason.
  */
 export async function pair(opts: {
   baseUrl: string;
@@ -133,14 +185,32 @@ export async function pair(opts: {
   const body = await readBody(res);
   if (!res.ok) throw new Error(errorMessage(body, res.status));
   const grant = body as PairResult;
-  const next: RemoteSession = {
+
+  saveConnection({
+    id: grant.deviceId,
     baseUrl,
     token: grant.token,
-    deviceId: grant.deviceId,
     deviceName: grant.deviceName,
-  };
-  setSession(next);
-  return next;
+    label: hostOf(baseUrl),
+  });
+  session = fromSaved();
+  closeEventStream();
+  ensureEventStream();
+  return session!;
+}
+
+/** Rename this device on the desktop it is paired with. */
+export async function renameThisDevice(name: string): Promise<void> {
+  if (!session) throw new Error("not connected to a computer");
+  const res = await fetch(`${session.baseUrl}/api/devices/${session.deviceId}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${session.token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) throw new Error(errorMessage(await readBody(res), res.status));
 }
 
 // ─── invoke ──────────────────────────────────────────────────────────────────
@@ -252,7 +322,12 @@ export function onConnectionChange(fn: (s: ConnectionState) => void): () => void
 function setConnectionState(next: ConnectionState) {
   if (next === connectionState) return;
   connectionState = next;
-  for (const fn of connectionWatchers) fn(next);
+  announceConnection();
+}
+
+/** Tell every watcher to re-read, whatever the state string says. */
+function announceConnection() {
+  for (const fn of connectionWatchers) fn(connectionState);
 }
 
 export function connection(): ConnectionState {
@@ -300,7 +375,13 @@ async function runEventStream() {
         // device is not paired any more, and retrying forever would show a
         // "connecting" spinner for a session that will never come back.
         setConnectionState("offline");
-        signOut();
+        // Revoked on the desktop, or its database was replaced. Retrying
+        // forever would show a spinner for a session that will never come back,
+        // and the entry is dead — so drop it and let the user pick another
+        // computer or pair again.
+        if (session) forgetConnection(session.deviceId);
+        session = null;
+        streamStarted = false;
         return;
       }
       if (!res.ok || !res.body) throw new Error(`events: ${res.status}`);

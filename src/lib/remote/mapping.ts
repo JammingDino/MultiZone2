@@ -133,16 +133,25 @@ export function normalizeBaseUrl(input: string): string {
   return `${url.protocol}//${url.host}`;
 }
 
-/** Parse a `multizone://pair?host=…&port=…&code=…` link (or QR payload). */
-export function parsePairingLink(link: string): { baseUrl: string; code: string } | null {
+/**
+ * Parse a `multizone://pair?host=…&port=…&code=…` link (or QR payload).
+ *
+ * The code is optional as of 0.17.4: while the desktop is armed and waiting,
+ * no code exists yet, and the link is still worth scanning because it carries
+ * the address — which is the part people actually get wrong. A link with no
+ * `host` is not one of ours and comes back null, because a QR scanner points at
+ * whatever is in front of it.
+ */
+export function parsePairingLink(
+  link: string,
+): { baseUrl: string; code: string | null } | null {
   try {
     const url = new URL(link.trim());
     if (url.protocol !== "multizone:") return null;
     const host = url.searchParams.get("host");
-    const code = url.searchParams.get("code");
-    if (!host || !code) return null;
+    if (!host) return null;
     const port = url.searchParams.get("port") || "8765";
-    return { baseUrl: normalizeBaseUrl(`${host}:${port}`), code };
+    return { baseUrl: normalizeBaseUrl(`${host}:${port}`), code: url.searchParams.get("code") };
   } catch {
     return null;
   }

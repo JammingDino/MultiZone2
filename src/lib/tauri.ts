@@ -667,9 +667,16 @@ export const renamePairedDevice = (id: string, name: string) =>
   invoke<PairedDevice>("rename_paired_device", { id, name });
 /** The code on screen, its QR link, and recent attempts. */
 export const pairingStatus = () => invoke<PairingView>("pairing_status");
-/** Show a pairing code. Refuses unless the API is bound to a LAN address —
- *  a code no phone can reach is a dead end somebody would spend a minute
- *  typing into one. */
+/**
+ * Wait for a device to ask for a code (0.17.4) — the normal path.
+ *
+ * The code then appears *because* a phone asked, with that phone's name beside
+ * it, instead of the user fetching six digits and walking to a device that has
+ * no idea any of it happened.
+ */
+export const armPairing = () => invoke<PairingView>("arm_pairing");
+/** Show a code immediately, without waiting to be asked. The path for a client
+ *  that cannot ask: a browser driven by hand, or a build older than 0.17.4. */
 export const openPairing = () => invoke<PairingView>("open_pairing");
 export const closePairing = () => invoke<PairingView>("close_pairing");
 
@@ -682,6 +689,14 @@ export const closePairing = () => invoke<PairingView>("close_pairing");
  * you walked away.
  */
 export const pendingApprovals = () => invoke<PendingApproval[]>("pending_approvals");
+
+/** Emitted when a device asks a waiting desktop for a code (0.17.4), so the
+ *  panel that armed it shows the digits without anyone pressing refresh. */
+export function onPairingRequested(
+  handler: (e: { address: string }) => void,
+): Promise<UnlistenFn> {
+  return listen<{ address: string }>("pairing-requested", (e) => handler(e.payload));
+}
 
 /** Emitted when a device pairs, so an open pairing dialog can say so. */
 export function onDevicesChanged(

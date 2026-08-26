@@ -52,7 +52,7 @@ const fn open(method: &'static str, path: &'static str, description: &'static st
 
 /// Bumped whenever a route is added, removed or changes shape, so a caller can
 /// tell "the app is older than my script" from "my script is wrong".
-pub const ROUTE_SET_VERSION: u32 = 7;
+pub const ROUTE_SET_VERSION: u32 = 9;
 
 pub const ROUTES: &[RouteDef] = &[
     // Discovery — deliberately unauthenticated. A caller debugging a broken
@@ -61,6 +61,7 @@ pub const ROUTES: &[RouteDef] = &[
     open("GET", "/api/health", "Whether the API is enabled, bound, answering, and whether your token was accepted"),
     open("GET", "/api/routes", "Every route this build serves, with a one-line description"),
     open("POST", "/api/pair", "Redeem a pairing code shown on the desktop for a per-device token ({code, name?, platform?})"),
+    open("POST", "/api/pair/request", "Ask a waiting desktop to show a pairing code for this device ({name?, platform?}). Refused unless somebody armed it there."),
 
     // Providers & zones
     r("GET", "/api/providers", "Configured model providers"),
@@ -194,6 +195,7 @@ pub const ROUTES: &[RouteDef] = &[
     r("DELETE", "/api/projects/:id/knowledge", "Clear a project's index"),
 
     // Tools, usage, settings, storage
+    r("POST", "/api/transcribe", "Transcribe uploaded audio through the configured speech provider ({fileName, audioB64, withMetadata?, language?})"),
     r("GET", "/api/tools", "Every callable tool function, with its safety level"),
     r("GET", "/api/tool-usage", "Per-zone tool call counters (?zoneId= for one zone)"),
     r("DELETE", "/api/tool-usage", "Reset the counters (?zoneId= for one zone)"),
@@ -209,7 +211,8 @@ pub const ROUTES: &[RouteDef] = &[
     r("DELETE", "/api/devices/:id", "Revoke a device (?forget=true drops an already-revoked one from the list)"),
     r("POST", "/api/devices/:id", "Rename a device ({name})"),
     r("GET", "/api/pairing", "The pairing code on screen, its QR link, and recent attempts"),
-    r("POST", "/api/pairing", "Show a pairing code"),
+    r("POST", "/api/pairing", "Show a pairing code immediately, without waiting to be asked"),
+    r("POST", "/api/pairing/arm", "Wait for a device to ask for a code"),
     r("DELETE", "/api/pairing", "Take the pairing code off screen"),
     r("GET", "/api/approvals", "Every tool call waiting on a human, with what it would do and how long is left"),
     r("GET", "/api/events", "SSE: every app event a window would receive — the turn, the sidebar, settings, devices"),
@@ -416,7 +419,12 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("voice::create_cloned_voice", GuiOnly("uploads a reference sample chosen in a native file dialog")),
     ("voice::delete_cloned_voice", GuiOnly("removes a voice from a picker in Settings")),
     ("voice::transcribe_audio_file", GuiOnly("transcribes a file chosen in a native file dialog")),
-    ("voice::transcribe_audio_upload", GuiOnly("transcribes bytes the window already holds as a composer attachment")),
+    // Was GUI-only until 0.17.4, on the reasoning that the window already holds
+    // the bytes. It still does — but the window can now be a phone, and the
+    // phone is precisely the device where dictating is the point. Capture
+    // happens in the WebView, transcription happens here, on the provider the
+    // desktop is configured with. Nothing is inferred on the phone.
+    ("voice::transcribe_audio_upload", Route("POST /api/transcribe")),
     // Remote access (0.17.0). The pairing *redemption* has no command of its
     // own — a device with no token cannot call a Tauri command, so `POST
     // /api/pair` is the only way in and there is nothing here to pair it with.
@@ -428,6 +436,7 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("remote::rename_paired_device", Route("POST /api/devices/:id")),
     ("remote::pairing_status", Route("GET /api/pairing")),
     ("remote::open_pairing", Route("POST /api/pairing")),
+    ("remote::arm_pairing", Route("POST /api/pairing/arm")),
     ("remote::close_pairing", Route("DELETE /api/pairing")),
     ("messages::pending_approvals", Route("GET /api/approvals")),
 
@@ -1699,6 +1708,75 @@ pub async fn pair(
     // window most likely to be open at this exact moment.
     let _ = st.app.emit("devices-changed", json!({ "deviceId": grant.device_id }));
     Ok(Json(grant).into_response())
+}
+
+/// A device asks the desktop to show it a code (0.17.4).
+///
+/// Unauthenticated, like `/api/pair` and for the same reason: a device with no
+/// token is exactly what this is for. It is safe because it cannot *produce* a
+/// code on its own — the desktop must already be armed, which happens only when
+/// somebody opened Settings → Phone & remote and tapped "Pair a device". An
+/// unarmed desktop answers with the sentence that says so.
+///
+/// What it buys is that the code appears when it is needed, with the asking
+/// device's name beside it, instead of the user fetching six digits and then
+/// walking to a phone that has no idea any of it happened.
+pub async fn pair_request(
+    State(st): State<ApiState>,
+    connect: Option<axum::extract::ConnectInfo<std::net::SocketAddr>>,
+    Json(body): Json<Value>,
+) -> ApiResult<Response> {
+    let address = connect.map(|ci| ci.0.ip().to_string()).unwrap_or_else(|| "unknown".into());
+    let requester = crate::remote::pairing::Requester {
+        name: crate::remote::pairing::clean_display_name(&s(&body, "name").unwrap_or_default()),
+        platform: s(&body, "platform").unwrap_or_else(|| "other".into()),
+        address: address.clone(),
+    };
+
+    match crate::remote::pairing::request_code(requester) {
+        Ok(offer) => {
+            // The desktop is showing a code for a device it can now name, and
+            // the panel that armed it is the window most likely to be open.
+            let _ = st.app.emit("pairing-requested", json!({ "address": address }));
+            // The code itself never leaves the desktop: the phone is told a code
+            // exists and how long it has, and the user reads the digits off the
+            // screen. Returning them here would make the whole ceremony
+            // decorative.
+            Ok(Json(json!({
+                "waiting": true,
+                "expiresAt": offer.expires_at,
+                "attemptsRemaining": offer.attempts_remaining,
+            }))
+            .into_response())
+        }
+        Err(why) => Err(ApiError(crate::error::AppError::Invalid(why.to_string()))),
+    }
+}
+
+pub async fn arm_pairing(State(st): State<ApiState>) -> ApiResult<Response> {
+    Ok(Json(commands::remote::arm_pairing(app_state(&st)).await?).into_response())
+}
+
+/// Transcribe audio the caller is holding (0.17.4).
+///
+/// The route that makes dictation work from a phone. The recording is captured
+/// in the WebView — which is the one audio path a phone actually has — and the
+/// bytes come here to be transcribed by the *desktop's* speech provider. That
+/// keeps the rule the rest of the app follows: the phone is an input device and
+/// a screen, and nothing is inferred on it.
+pub async fn transcribe_upload(
+    State(st): State<ApiState>,
+    Json(body): Json<Value>,
+) -> ApiResult<Response> {
+    let transcription = commands::voice::transcribe_audio_upload(
+        app_state(&st),
+        required(&body, "fileName")?,
+        required(&body, "audioB64")?,
+        b(&body, "withMetadata").unwrap_or(false),
+        s(&body, "language"),
+    )
+    .await?;
+    Ok(Json(transcription).into_response())
 }
 
 #[cfg(test)]

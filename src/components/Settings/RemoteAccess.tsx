@@ -72,9 +72,15 @@ export function RemoteAccess({ apply, busy }: RemoteAccessProps) {
   // gracefully: the user is looking at a code, and the moment it is used is the
   // moment the dialog should stop showing it.
   useEffect(() => {
-    const un = api.onDevicesChanged(() => void refresh());
+    const uns = [
+      api.onDevicesChanged(() => void refresh()),
+      // A phone asking for a code is the moment this panel goes from "waiting"
+      // to showing six digits, and it originates on the other device — so it
+      // arrives as an event rather than as something to poll for.
+      api.onPairingRequested(() => void refresh()),
+    ];
     return () => {
-      void un.then((f) => f());
+      for (const un of uns) void un.then((f) => f());
     };
   }, [refresh]);
 
@@ -102,7 +108,16 @@ export function RemoteAccess({ apply, busy }: RemoteAccessProps) {
           onChange={(v) => {
             if (!canGoLan && v) return;
             setError(null);
-            void apply({ apiLan: v, apiEnabled: v ? true : undefined }).then(refresh);
+            // Built conditionally rather than passing `apiEnabled: undefined`
+            // to mean "leave it alone". Spreading an explicit `undefined` over
+            // a value *overwrites* it — `{...s, apiEnabled: undefined}` is not
+            // `{...s}` — so turning remote access off was writing
+            // `apiEnabled: undefined` into settings and quietly switching the
+            // API server off with it. Found by reading `/api/health` on a
+            // running app and seeing `enabled: false` on a bound socket.
+            const patch: Parameters<typeof apply>[0] = { apiLan: v };
+            if (v) patch.apiEnabled = true;
+            void apply(patch).then(refresh);
           }}
         />
 
@@ -244,16 +259,36 @@ function PairingSection({
     if (!offer) return;
     const tick = () => setRemaining(Math.max(0, Math.round((offer.expiresAt - Date.now()) / 1000)));
     tick();
+    let ticks = 0;
     const id = setInterval(() => {
       tick();
+      ticks += 1;
       // The desktop is the authority on whether the window is still open, so
       // when the countdown reaches zero the panel asks rather than assuming.
-      if (offer.expiresAt - Date.now() <= 0) void onChanged();
+      if (offer.expiresAt - Date.now() <= 0) {
+        void onChanged();
+        return;
+      }
+      // While armed, re-read every couple of seconds as a backstop. The event
+      // above is what normally brings the code in; this is what covers an event
+      // that was missed, and it only runs during the minutes somebody is stood
+      // here waiting.
+      if (!offer.code && ticks % 2 === 0) void onChanged();
     }, 1000);
     return () => clearInterval(id);
   }, [offer, onChanged]);
 
-  async function open() {
+  async function arm() {
+    onError(null);
+    try {
+      await api.armPairing();
+      await onChanged();
+    } catch (e: any) {
+      onError(e?.message || String(e));
+    }
+  }
+
+  async function showCode() {
     onError(null);
     try {
       await api.openPairing();
@@ -276,9 +311,9 @@ function PairingSection({
     <section>
       <h3 className="mb-1 text-sm font-medium">Pair a device</h3>
       <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-        Show a code, then enter it on the device — or scan the square. The code works once and
-        expires in a few minutes. The device gets its own token, so you can revoke it on its own
-        later.
+        Tap below, then open MultiZone on the device and pick this computer. A code appears here
+        when it asks — it works once, expires in a few minutes, and the device gets its own token
+        so you can revoke it on its own later.
       </p>
 
       {!canPair && (
@@ -290,16 +325,63 @@ function PairingSection({
 
       {canPair && !offer && (
         <button
-          onClick={open}
+          onClick={arm}
           disabled={busy}
           className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-3 py-2 text-sm hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-50"
         >
-          <Smartphone size={14} /> Show a pairing code
+          <Smartphone size={14} /> Pair a device
         </button>
       )}
 
-      {canPair && offer && (
+      {/* Armed: nothing to show yet, and saying so beats showing a placeholder
+          six digits somebody might try to type. */}
+      {canPair && offer && !offer.code && (
         <div className="rounded border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/5 p-4">
+          <div className="flex items-center gap-2 text-sm">
+            <Loader2 size={15} className="animate-spin text-[var(--color-accent)]" />
+            Waiting for a device…
+          </div>
+          <p className="mt-2 text-xs text-[var(--color-text-muted)]">
+            Open MultiZone on your phone and choose this computer. A code will appear here when it
+            asks — you do not have to type anything yet.
+            {remaining > 0 && (
+              <> Waiting for another {Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, "0")}.</>
+            )}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              onClick={close}
+              className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:border-[var(--color-accent)]"
+            >
+              <X size={12} /> Stop waiting
+            </button>
+            {/* The escape hatch for a device that cannot ask — a browser
+                somebody is driving by hand, or an older build. */}
+            <button
+              onClick={showCode}
+              className="rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs text-[var(--color-text-muted)] hover:border-[var(--color-accent)]"
+            >
+              Show a code now instead
+            </button>
+          </div>
+          {pairing?.link && <div className="mt-4"><PairingQr link={pairing.link} /></div>}
+        </div>
+      )}
+
+      {canPair && offer?.code && (
+        <div className="rounded border border-[var(--color-accent)]/40 bg-[var(--color-accent)]/5 p-4">
+          {/* Who is asking, when anyone is. The whole reason the phone requests
+              rather than the desktop volunteering: an anonymous code is a
+              decision made with no information. */}
+          {offer.requester && (
+            <div className="mb-3 text-sm">
+              <span className="font-medium">{offer.requester.name}</span>
+              <span className="text-[var(--color-text-muted)]">
+                {" "}
+                at {offer.requester.address} wants to connect
+              </span>
+            </div>
+          )}
           <div className="flex flex-wrap items-start gap-5">
             <div>
               <div className="font-mono text-3xl tracking-[0.4em] text-[var(--color-accent)]">
@@ -313,15 +395,15 @@ function PairingSection({
                     {offer.attemptsRemaining === 1 ? "" : "s"} left
                   </>
                 ) : (
-                  <>Expired — show a new one.</>
+                  <>Expired — start again.</>
                 )}
               </div>
               <div className="mt-3 flex gap-2">
                 <button
-                  onClick={open}
+                  onClick={arm}
                   className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:border-[var(--color-accent)]"
                 >
-                  <RefreshCw size={12} /> New code
+                  <RefreshCw size={12} /> Start again
                 </button>
                 <button
                   onClick={close}

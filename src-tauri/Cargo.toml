@@ -14,14 +14,35 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2.0", features = [] }
 
+# ─── Shared by both shapes ───────────────────────────────────────────────────
+#
+# The crate builds two things (see src/lib.rs): the whole app on a desktop, and
+# a WebView shell on a phone. Only what the shell genuinely needs lives here —
+# everything else is under the target section below, so an Android build does
+# not compile SQLite, BoringSSL, an OCR engine and an audio stack in order to
+# host a web view.
 [dependencies]
 tauri = { version = "2.1", features = [] }
 tauri-plugin-dialog = "2.0"
 tauri-plugin-fs = "2.0"
+# Mobile too: the moment a run stops for an approval is exactly the moment the
+# phone is in a pocket.
+tauri-plugin-notification = "2.3.3"
 
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# ─── Desktop only ────────────────────────────────────────────────────────────
+#
+# `cfg(desktop)` is Tauri's, and cargo does not know it — so the split has to be
+# stated in the target's own terms. Keep this in step with the `#[cfg(desktop)]`
+# module list in src/lib.rs: a dependency left above that only the desktop uses
+# is minutes of Android build time for nothing, and one moved down here that
+# mobile needs is a link error.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tokio = { version = "1.41", features = ["full"] }
 tokio-stream = "0.1"
 futures-util = "0.3"
@@ -94,8 +115,6 @@ cpal = "0.15"
 hound = "3.5"
 
 thiserror = "2.0"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 
 # Browser-impersonating HTTP client for the "smart" web tools (smart_search /
@@ -112,7 +131,6 @@ wreq-util = "2.2.6"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 similar = { version = "3.1.2", default-features = false, features = ["text"] }
-tauri-plugin-notification = "2.3.3"
 
 # Remote access (0.17.0) — a phone as a second window onto this desktop.
 # `if-addrs` enumerates the machine's addresses so the LAN bind is a choice

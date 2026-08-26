@@ -16,7 +16,9 @@
     "check:all": "npm run build && npm test && npm run test:rust",
     "hooks:install": "git config core.hooksPath .githooks",
     "tauri": "tauri",
-    "tauri:build:fast": "tauri build --no-bundle"
+    "tauri:build:fast": "tauri build --no-bundle",
+    "android:dev": "tauri android dev",
+    "android:build": "tauri android build --debug --target aarch64"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.1.1",

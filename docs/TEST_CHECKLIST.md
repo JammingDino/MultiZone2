@@ -24,6 +24,12 @@ than a note in the margin.
 - [ ] Version matches across `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`
 - [ ] 🔁 Version is *ahead* of the newest git tag (v0.9.9 shipped while the stamps still read 0.9.9)
 - [ ] `releaseBuild` is `true` only in the commit intended to publish
+- [ ] Android: `node scripts/sync-android-icons.mjs --check` passes (CI runs it too, and a
+      failure there is a release with the template robot on it)
+- [ ] 🔁 The released APK is *signed*. Gradle emits `app-universal-release-unsigned.apk`
+      alongside the signed one whenever the keystore is missing, and both match
+      `*-release*.apk` — the upload step excludes `unsigned` for that reason. An unsigned
+      APK looks like a successful release until somebody tries to install it
 
 ## 1. First run 🖥️
 

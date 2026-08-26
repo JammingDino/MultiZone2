@@ -46,3 +46,12 @@ promo/website/
 # Its own .gitignore already excludes the machine-specific parts.
 .env.android
 src-tauri/gen/android/app/src/main/jniLibs/
+# The signing key and the file that points at it. `src-tauri/gen/android/` is
+# deliberately *not* ignored — it is a real source tree — so without these two
+# lines a local release build would commit the app's signing credentials into a
+# repository. CI writes `keystore.properties` onto a runner it then throws away;
+# a developer writing one has nothing throwing it away for them.
+src-tauri/gen/android/keystore.properties
+*.jks
+*.keystore
+*.p12

@@ -17,6 +17,7 @@ jobs:
     outputs:
       should_build: ${{ steps.flag.outputs.should_build }}
       version: ${{ steps.flag.outputs.version }}
+      android: ${{ steps.flag.outputs.android }}
 
     steps:
       - name: Checkout
@@ -25,12 +26,20 @@ jobs:
       - name: Read build flag and version
         id: flag
         shell: bash
+        env:
+          # Whether an APK is coming is decided once, here, so the release notes
+          # and the build job cannot disagree about it. A `secrets` context is
+          # not available in a job-level `if:` or in a `releaseBody`, but it is
+          # available to a step — so the answer becomes an output instead.
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
           SHOULD_BUILD=$(node -p "require('./package.json').releaseBuild")
           VERSION=$(node -p "require('./package.json').version")
+          if [ -n "$KEYSTORE" ]; then ANDROID=true; else ANDROID=false; fi
           echo "should_build=$SHOULD_BUILD" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "releaseBuild=$SHOULD_BUILD  version=$VERSION"
+          echo "android=$ANDROID" >> "$GITHUB_OUTPUT"
+          echo "releaseBuild=$SHOULD_BUILD  version=$VERSION  android=$ANDROID"
 
   # ── Build MSI + NSIS installer and publish a GitHub Release ──────────────
   build:
@@ -91,7 +100,7 @@ jobs:
             | Installer | Description |
             |-----------|-------------|
             | `*_x64-setup.exe` | Windows installer |
-            | `MultiZone-*.apk` | Android — a remote for your computer, not a second app. Pair it under Settings → Phone & remote. |
+            ${{ needs.check.outputs.android == 'true' && '| `MultiZone-*.apk` | Android — a remote for your computer, not a second app. Pair it under Settings → Phone & remote. |' || '' }}
 
             Existing installs update themselves — see Settings → Data → Updates.
 
@@ -153,13 +162,11 @@ jobs:
         id: keys
         shell: bash
         env:
-          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          SIGNED: ${{ needs.check.outputs.android }}
         run: |
-          if [ -n "$KEYSTORE" ]; then
-            echo "signed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "signed=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::No ANDROID_KEYSTORE_BASE64 secret — skipping the Android build. The Windows release is unaffected."
+          echo "signed=$SIGNED" >> "$GITHUB_OUTPUT"
+          if [ "$SIGNED" != "true" ]; then
+            echo "::notice::No ANDROID_KEYSTORE_BASE64 secret — skipping the Android build. The Windows release is unaffected, and its notes do not mention an APK."
           fi
 
       - name: Setup Node 22
@@ -246,9 +253,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.check.outputs.version }}
         run: |
-          APK=$(find src-tauri/gen/android/app/build/outputs/apk -name '*-release*.apk' | head -1)
+          # Excluding `unsigned` explicitly: Gradle names the unsigned output
+          # `…-release-unsigned.apk`, which also matches `*-release*`, and an
+          # unsigned APK is one Android will refuse to install. Shipping one
+          # would look like a successful release right up until somebody tried
+          # to open it.
+          APK=$(find src-tauri/gen/android/app/build/outputs/apk -name '*-release*.apk' ! -name '*unsigned*' | head -1)
           if [ -z "$APK" ]; then
-            echo "::error::the Android build produced no release APK"
+            echo "::error::the Android build produced no signed release APK"
             exit 1
           fi
           cp "$APK" "MultiZone-$VERSION.apk"
@@ -257,7 +269,13 @@ jobs:
   # ── Bump patch version and reset the build flag ──────────────────────────
   bump-version:
     name: Bump patch version
-    needs: build
+    # Waits for the APK as well as the installer. `releaseBuild` is reset here,
+    # so bumping before the Android job finishes would disarm the pipeline on a
+    # release whose APK had failed to upload — leaving it permanently missing,
+    # with the only way back a hand-edited version bump. A skipped Android job
+    # (no keystore) still counts as success, which is what makes the secrets
+    # optional rather than load-bearing.
+    needs: [build, android]
     runs-on: ubuntu-latest
     permissions:
       contents: write

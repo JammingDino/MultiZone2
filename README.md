@@ -293,7 +293,9 @@ API-driven activity also updates any matching chat open in the app live — and 
 
 That shape is deliberate, and the alternative is the tempting one. A phone cannot run a 30B local model, which is the premise of the product. Every tool that matters — `read_file`, the shell, the knowledge index, an `npx` MCP server — is meaningless without your computer's filesystem. And two independent stores would have to sync, which is the cloud-sync feature this app refuses; a remote client has no second copy, so the hard problem is deleted rather than solved.
 
-**Getting the app.** Every release carries an `.apk` alongside the desktop installers. There is no store listing; sideload it, and the in-app updater does not apply to it.
+**Getting the app.** Every release carries an `.apk` alongside the desktop installers, built and signed by CI from the same commit as the Windows installer. There is no store listing; sideload it, and the in-app updater does not apply to it — a new version means downloading the new APK.
+
+Android identifies an app by its signing key, so an install signed with a *different* key (a local debug build, say) has to be uninstalled before a release APK will replace it. Uninstalling clears the phone's saved computers and its pairing token; the desktop still lists the old device, which you can revoke under **Settings → Phone & remote**.
 
 **Setting it up.** Under **Settings → Phone & remote** on the computer:
 

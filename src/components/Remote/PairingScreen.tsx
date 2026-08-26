@@ -21,6 +21,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { useBackDismiss } from "@/lib/useBackDismiss";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -84,6 +85,19 @@ export function PairingScreen({ onPaired }: { onPaired: () => void }) {
     setBaseUrl("");
     setError(null);
   }
+
+  // Back walks the wizard backwards rather than leaving the app (0.17.5). The
+  // steps are already reversible — every one has its own Back — so this is the
+  // same three transitions on the phone's own control. The last step is not
+  // included: naming happens *after* the pairing has been redeemed, and going
+  // back from it would suggest the code still has to be entered again.
+  const backTo: (() => void) | null =
+    step === "code"
+      ? () => setStep("computers")
+      : adding && saved.length > 0 && step === "computers"
+        ? () => setAdding(false)
+        : null;
+  useBackDismiss(backTo !== null, () => backTo?.());
 
   if (!adding) {
     return (

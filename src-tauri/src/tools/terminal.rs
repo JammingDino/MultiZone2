@@ -87,6 +87,12 @@ const MAX_RETURN_CHARS: usize = 30_000;
 const DEFAULT_START_WAIT_MS: u64 = 700;
 const DEFAULT_WRITE_WAIT_MS: u64 = 400;
 const DEFAULT_TIMEOUT_MS: u64 = 15_000;
+/// A wait that names a finishing condition is waiting on *work*, not on a prompt
+/// appearing, so it gets a working-length default instead of the fifteen seconds
+/// that suits "is it asking for the password yet".
+const DEFAULT_UNTIL_TIMEOUT_MS: u64 = 300_000;
+/// How long without output counts as quiet, for `until: "idle"`.
+const DEFAULT_IDLE_MS: u64 = 2_000;
 
 const MAX_DELAY_MS: u64 = 120_000;
 const MAX_WAIT_MS: u64 = 120_000;
@@ -117,21 +123,34 @@ fn tool(name: &str, description: &str, parameters: Value) -> Tool {
 
 /// Shared by every function that can wait, so the timing vocabulary is identical
 /// wherever it appears.
+///
+/// `until` is the one that stops a read loop. Without it the only questions this
+/// tool could answer were "has this text appeared yet" and "what has it printed
+/// in the last N milliseconds" — both of which a caller waiting on a build has to
+/// ask over and over, paying for the transcript on every turn and still learning
+/// late that it finished. `until` names the condition instead, so the call
+/// returns once, at the moment it holds.
 fn wait_props() -> Value {
     json!({
+        "until": {
+            "type": "string",
+            "enum": ["exit", "idle", "output"],
+            "description": "Finish this call when the process exits (\"exit\"), when its output has been quiet for `idle_ms` (\"idle\" — a server that has finished booting), or as soon as anything new is printed (\"output\"). One call, one answer: prefer this with a generous `timeout_ms` over reading again in a loop."
+        },
+        "idle_ms": { "type": "integer", "description": "With until=\"idle\", how long without output counts as quiet. Default 2000." },
         "wait_for": {
             "type": "string",
-            "description": "Regex to wait for in the new output, e.g. \"[Pp]assword:\". Returns the moment it matches; `matched` says whether it did."
+            "description": "Regex to wait for in the new output, e.g. \"[Pp]assword:\". Returns the moment it matches; `matched` says whether it did. Combines with `until` — whichever happens first ends the call, and `waited_until` says which."
         },
-        "timeout_ms": { "type": "integer", "description": "Limit on wait_for. Default 15000." },
-        "wait_ms": { "type": "integer", "description": "With no wait_for, collect output for this long." }
+        "timeout_ms": { "type": "integer", "description": "Cap on the wait. Default 15000, or 300000 when `until` is set; 600000 max." },
+        "wait_ms": { "type": "integer", "description": "With no `until` and no `wait_for`, collect output for this long." }
     })
 }
 
 fn start_definition() -> Tool {
     tool(
         "terminal_start",
-        "Start a process that keeps running after this call returns — a server, a REPL, a log to follow, anything you must type into later. For a command that finishes on its own use `run_command`. Pipes, not a TTY: pass `sudo -S`, and unbuffer output (`python -u`).",
+        "Start a process that keeps running after this call returns — a server, a REPL, a log to follow, anything you must type into later. For a command that finishes on its own use `run_command`; for one too slow for its timeout, start it here with `until: \"exit\"` and a generous `timeout_ms`, which returns once, when it is done. Pipes, not a TTY: pass `sudo -S`, and unbuffer output (`python -u`).",
         {
             let mut props = json!({
                 "command": {
@@ -175,7 +194,7 @@ fn write_definition() -> Tool {
 fn read_definition() -> Tool {
     tool(
         "terminal_read",
-        "Read what a terminal has printed, and whether it is still running. Pass a previous call's `cursor` for only what is new; otherwise the tail.",
+        "Read what a terminal has printed, and whether it is still running. Pass a previous call's `cursor` for only what is new; otherwise the tail. Do not poll: to learn when a long job finishes, make ONE call with `until: \"exit\"` (plus `cursor`, and a `timeout_ms` you are willing to wait) and it returns at the moment it exits.",
         {
             let mut props = json!({
                 "terminal_id": { "type": "string" },
@@ -295,6 +314,18 @@ impl Buffer {
 
 // ── Terminal ─────────────────────────────────────────────────────────────────
 
+/// What a wait is waiting *for* — the `until` argument, once parsed.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Goal {
+    /// The process finishes. The one that turns a poll into a single call.
+    Exit,
+    /// Output stops for this long — a server that has finished booting, or a
+    /// build that is between phases.
+    Idle(Duration),
+    /// Anything at all is printed.
+    Output,
+}
+
 struct Terminal {
     id: String,
     name: String,
@@ -355,35 +386,91 @@ impl Terminal {
     /// Wait until `pattern` matches the output after `from`, the timeout expires,
     /// or the process exits. Returns (new output, matched).
     ///
-    /// `Notify` keeps no permit for a notification nobody was waiting on, so the
-    /// waiter is armed with `enable()` *before* the buffer is read. Registering
-    /// after the read would drop any output that landed in between, and the wait
-    /// would then run to its full timeout with the answer already on screen.
+    /// The pattern case of [`wait_until`](Self::wait_until), kept under its own
+    /// name because "wait for the prompt" is what most callers are doing.
     async fn wait_for_pattern(
         &self,
         from: u64,
         pattern: &regex::Regex,
         timeout: Duration,
     ) -> (String, bool) {
+        let (text, reason) = self.wait_until(from, Some(pattern), Goal::Exit, timeout).await;
+        (text, reason == "match")
+    }
+
+    /// Wait for a named finishing condition, and say which one ended the wait.
+    ///
+    /// This is what makes one call enough. A caller that wants to know when a
+    /// build finishes says so once and is told once, at the moment it happens,
+    /// instead of reading the buffer on a timer — which pays for the transcript
+    /// every turn and still learns late.
+    ///
+    /// `pattern` is an *additional* early exit rather than the goal, so
+    /// `wait_for` and `until` compose: whichever holds first returns.
+    ///
+    /// `Notify` keeps no permit for a notification nobody was waiting on, so the
+    /// waiter is armed with `enable()` *before* the buffer is read. Registering
+    /// after the read would drop any output that landed in between, and the wait
+    /// would then run to its full timeout with the answer already on screen.
+    async fn wait_until(
+        &self,
+        from: u64,
+        pattern: Option<&regex::Regex>,
+        goal: Goal,
+        timeout: Duration,
+    ) -> (String, &'static str) {
         let deadline = tokio::time::Instant::now() + timeout;
+        // Quiet is measured from the start of the wait as well as from the last
+        // chunk: a process that went silent before the call is idle *now*, and
+        // should not have to print something first to be allowed to say so.
+        let opened = now_ms();
+
         loop {
             let waiter = self.bell.notified();
             tokio::pin!(waiter);
             waiter.as_mut().enable();
 
-            let (text, _) = self.out.lock().await.since(from);
-            if pattern.is_match(&text) {
-                return (text, true);
+            let (text, last_at, total) = {
+                let buf = self.out.lock().await;
+                (buf.since(from).0, buf.last_at, buf.total())
+            };
+            if let Some(re) = pattern {
+                if re.is_match(&text) {
+                    return (text, "match");
+                }
             }
             // A dead process prints nothing more, so waiting on one is waiting out
-            // a timeout that can only fail.
+            // a timeout that can only fail — and its exit satisfies every goal
+            // below, which is the whole point of `until: "exit"`.
             if !self.running().await {
-                return (text, false);
+                return (text, "exit");
             }
-            if tokio::time::timeout_at(deadline, waiter).await.is_err() {
-                let (text, _) = self.out.lock().await.since(from);
-                let matched = pattern.is_match(&text);
-                return (text, matched);
+            if goal == Goal::Output && total > from {
+                return (text, "output");
+            }
+
+            // How long to sleep before looking again. Only `idle` has a deadline
+            // of its own; the rest wake on the bell or on the timeout.
+            let wake = match goal {
+                Goal::Idle(quiet) => {
+                    let quiet_ms = quiet.as_millis() as u64;
+                    let silent_for = now_ms().saturating_sub(last_at.max(opened));
+                    if silent_for >= quiet_ms {
+                        return (text, "idle");
+                    }
+                    (tokio::time::Instant::now() + Duration::from_millis(quiet_ms - silent_for))
+                        .min(deadline)
+                }
+                _ => deadline,
+            };
+
+            if tokio::time::timeout_at(wake, waiter).await.is_err() {
+                if tokio::time::Instant::now() >= deadline {
+                    let (text, _) = self.out.lock().await.since(from);
+                    return (text, "timeout");
+                }
+                // An idle window elapsed with the bell silent: round again, and
+                // the check at the top of the loop is what returns.
             }
         }
     }
@@ -845,28 +932,82 @@ async fn envelope(t: &Terminal, output: &str, clipped: bool, lost: bool) -> Valu
     v
 }
 
+/// What a wait produced: the new output, whether `wait_for` matched, and — when
+/// the call named a finishing condition — which one ended it.
+struct Waited {
+    text: String,
+    matched: Option<bool>,
+    /// `"exit"`, `"match"`, `"idle"`, `"output"` or `"timeout"`; `None` when the
+    /// call only asked to collect output for a fixed span.
+    reason: Option<&'static str>,
+}
+
 /// Apply whichever wait the call asked for, from cursor `from`.
-async fn apply_wait(t: &Terminal, args: &Value, from: u64, default_ms: u64) -> (String, Option<bool>) {
-    if let Some(pattern) = s(args, "wait_for") {
-        let timeout = Duration::from_millis(
-            ms(args, "timeout_ms", MAX_TIMEOUT_MS).unwrap_or(DEFAULT_TIMEOUT_MS),
-        );
-        match regex::Regex::new(&pattern) {
-            Ok(re) => {
-                let (text, matched) = t.wait_for_pattern(from, &re, timeout).await;
-                return (text, Some(matched));
-            }
-            Err(_) => {
-                // An unparseable pattern is the model's mistake, not a reason to
-                // return nothing: fall back to a plain wait and say so via matched.
-                let text = t.wait_span(from, timeout.min(Duration::from_millis(2_000))).await;
-                return (text, Some(false));
-            }
-        }
+async fn apply_wait(t: &Terminal, args: &Value, from: u64, default_ms: u64) -> Waited {
+    let asked = s(args, "wait_for");
+    let re = asked.as_deref().and_then(|p| regex::Regex::new(p).ok());
+    // An unparseable pattern is the model's mistake, not a reason to return
+    // nothing: it falls through as "no pattern" and is reported via `matched`.
+    let bad_pattern = asked.is_some() && re.is_none();
+
+    let goal = match s(args, "until").as_deref() {
+        Some("exit") => Some(Goal::Exit),
+        Some("idle") => Some(Goal::Idle(Duration::from_millis(
+            ms(args, "idle_ms", MAX_WAIT_MS).unwrap_or(DEFAULT_IDLE_MS),
+        ))),
+        Some("output") => Some(Goal::Output),
+        // An unrecognised value is not a licence to block for five minutes.
+        _ => None,
+    };
+
+    // Nothing to wait *for*: collect output for a span, as before.
+    if goal.is_none() && re.is_none() {
+        let span = if bad_pattern {
+            DEFAULT_TIMEOUT_MS.min(2_000)
+        } else {
+            ms(args, "wait_ms", MAX_WAIT_MS).unwrap_or(default_ms)
+        };
+        let text = t.wait_span(from, Duration::from_millis(span)).await;
+        return Waited { text, matched: bad_pattern.then_some(false), reason: None };
     }
-    let span = ms(args, "wait_ms", MAX_WAIT_MS).unwrap_or(default_ms);
-    let text = t.wait_span(from, Duration::from_millis(span)).await;
-    (text, None)
+
+    // A named condition is worth minutes; a prompt that has not appeared in
+    // fifteen seconds usually is not coming.
+    let default_timeout = if goal.is_some() { DEFAULT_UNTIL_TIMEOUT_MS } else { DEFAULT_TIMEOUT_MS };
+    let timeout =
+        Duration::from_millis(ms(args, "timeout_ms", MAX_TIMEOUT_MS).unwrap_or(default_timeout));
+    // With only a pattern, exit is still an early out — waiting for text from a
+    // process that has stopped printing can only run the clock out.
+    let (text, reason) = t
+        .wait_until(from, re.as_ref(), goal.unwrap_or(Goal::Exit), timeout)
+        .await;
+
+    let matched = if bad_pattern {
+        Some(false)
+    } else {
+        re.as_ref().map(|r| r.is_match(&text))
+    };
+    Waited { text, matched, reason: Some(reason) }
+}
+
+/// Report how the wait ended, and — when the clock ran out on something still
+/// running — the single call that resumes it.
+///
+/// The hint is the point. Told only "still running", a caller reads again, and
+/// again, paying for the output every turn; told the one call that returns at
+/// the moment it finishes, it makes that call instead.
+fn note_wait(v: &mut Value, w: &Waited) {
+    if let Some(m) = w.matched {
+        v["matched"] = json!(m);
+    }
+    let Some(reason) = w.reason else { return };
+    v["waited_until"] = json!(reason);
+    if reason == "timeout" && v["running"] == json!(true) {
+        v["hint"] = json!(format!(
+            "still running. Do not read again in a loop: make one call to terminal_read with cursor={} and until=\"exit\" (and a timeout_ms you are willing to wait), which returns at the moment it finishes.",
+            v["cursor"]
+        ));
+    }
 }
 
 pub async fn start(
@@ -912,8 +1053,8 @@ pub async fn start(
     if let Some(delay) = ms(args, "delay_ms", MAX_DELAY_MS) {
         tokio::time::sleep(Duration::from_millis(delay)).await;
     }
-    let (text, matched) = apply_wait(&term, args, 0, DEFAULT_START_WAIT_MS).await;
-    let (output, clipped) = clip(&clean_output(&text));
+    let waited = apply_wait(&term, args, 0, DEFAULT_START_WAIT_MS).await;
+    let (output, clipped) = clip(&clean_output(&waited.text));
 
     let mut v = envelope(&term, &output, clipped, false).await;
     v["name"] = json!(term.name);
@@ -921,9 +1062,7 @@ pub async fn start(
     if let Some(dir) = &term.cwd {
         v["cwd"] = json!(dir);
     }
-    if let Some(m) = matched {
-        v["matched"] = json!(m);
-    }
+    note_wait(&mut v, &waited);
     Ok(v.to_string())
 }
 
@@ -975,12 +1114,10 @@ pub async fn write(args: &Value, db: &SqlitePool, chat_id: &str) -> AppResult<St
         }
     }
 
-    let (text, matched) = apply_wait(&term, args, from, DEFAULT_WRITE_WAIT_MS).await;
-    let (output, clipped) = clip(&clean_output(&text));
+    let waited = apply_wait(&term, args, from, DEFAULT_WRITE_WAIT_MS).await;
+    let (output, clipped) = clip(&clean_output(&waited.text));
     let mut v = envelope(&term, &output, clipped, false).await;
-    if let Some(m) = matched {
-        v["matched"] = json!(m);
-    }
+    note_wait(&mut v, &waited);
     Ok(v.to_string())
 }
 
@@ -996,19 +1133,25 @@ pub async fn read(args: &Value, db: &SqlitePool, chat_id: &str) -> AppResult<Str
 
     let cursor = args.get("cursor").and_then(|v| v.as_u64());
     let mut lost = false;
+    let mut waited: Option<Waited> = None;
     let text = match cursor {
         Some(from) => {
-            let (waited, _) = apply_wait(&term, args, from, 0).await;
+            let mut w = apply_wait(&term, args, from, 0).await;
             // A cursor read reports its own gap; the wait helper only sees text.
             lost = term.out.lock().await.since(from).1;
-            waited
+            let text = std::mem::take(&mut w.text);
+            waited = Some(w);
+            text
         }
         None => {
             // No cursor: wait first if asked, then hand back the tail, so a
-            // `wait_for` on a fresh read still behaves.
-            if args.get("wait_for").is_some() || args.get("wait_ms").is_some() {
+            // `wait_for` or an `until` on a fresh read still behaves.
+            if args.get("wait_for").is_some()
+                || args.get("wait_ms").is_some()
+                || args.get("until").is_some()
+            {
                 let from = term.out.lock().await.total();
-                let _ = apply_wait(&term, args, from, 0).await;
+                waited = Some(apply_wait(&term, args, from, 0).await);
             }
             let lines = args
                 .get("tail_lines")
@@ -1020,7 +1163,11 @@ pub async fn read(args: &Value, db: &SqlitePool, chat_id: &str) -> AppResult<Str
     };
 
     let (output, clipped) = clip(&clean_output(&text));
-    Ok(envelope(&term, &output, clipped, lost).await.to_string())
+    let mut v = envelope(&term, &output, clipped, lost).await;
+    if let Some(w) = &waited {
+        note_wait(&mut v, w);
+    }
+    Ok(v.to_string())
 }
 
 pub async fn list(db: &SqlitePool, chat_id: &str) -> AppResult<String> {
@@ -1292,6 +1439,77 @@ mod tests {
             "the process the terminal started outlived terminal_stop",
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// One call, one answer — the reason this module grew an `until`.
+    ///
+    /// A caller waiting on a slow command used to have only `wait_for`, so it
+    /// asked "has the text appeared yet" on a fifteen-second timer and paid for
+    /// the transcript on every round. `until: "exit"` states the condition once:
+    /// the call sits there for as long as the work takes and returns *at* the
+    /// exit, which is what this pins down — the wait must outlast a run longer
+    /// than the old default and still come back promptly when it ends.
+    #[tokio::test]
+    #[ignore = "spawns real shell processes"]
+    async fn one_wait_spans_a_whole_run_and_returns_when_it_exits() {
+        #[cfg(windows)]
+        let script = "Start-Sleep -Seconds 3; Write-Host done; exit 7";
+        #[cfg(not(windows))]
+        let script = "sleep 3; echo done; exit 7";
+
+        let term = spawn_terminal("slow".into(), Some(script.into()), "auto", None, "session-w".into())
+            .await
+            .expect("spawn");
+
+        let started = std::time::Instant::now();
+        let (text, reason) = term
+            .wait_until(0, None, Goal::Exit, Duration::from_secs(60))
+            .await;
+        let elapsed = started.elapsed();
+
+        assert_eq!(reason, "exit", "the wait must end because it finished: {text:?}");
+        assert!(text.contains("done"), "output printed before the exit is missing: {text:?}");
+        assert_eq!(term.exit_code().await, Some(7));
+        // Long enough that a fifteen-second wait_for would have returned empty
+        // first, short enough that the call did not sit out its own timeout.
+        assert!(elapsed >= Duration::from_secs(2), "returned before the work did: {elapsed:?}");
+        assert!(elapsed < Duration::from_secs(30), "kept waiting after the exit: {elapsed:?}");
+
+        term.kill().await;
+    }
+
+    /// `idle` is the answer for something that never exits. A server prints its
+    /// banner and goes quiet, and "quiet" is the only signal that it is up —
+    /// there is no exit to wait for and the banner text is not known in advance.
+    #[tokio::test]
+    #[ignore = "spawns real shell processes"]
+    async fn idle_returns_once_the_output_settles() {
+        #[cfg(windows)]
+        let script = "Write-Host booting; Start-Sleep -Seconds 1; Write-Host ready; Start-Sleep -Seconds 30";
+        #[cfg(not(windows))]
+        let script = "echo booting; sleep 1; echo ready; sleep 30";
+
+        let term = spawn_terminal("server".into(), Some(script.into()), "auto", None, "session-v".into())
+            .await
+            .expect("spawn");
+
+        let started = std::time::Instant::now();
+        let (text, reason) = term
+            .wait_until(0, None, Goal::Idle(Duration::from_millis(1_500)), Duration::from_secs(25))
+            .await;
+
+        assert_eq!(reason, "idle", "expected the settle, got {reason} with {text:?}");
+        assert!(text.contains("ready"), "returned before the boot finished: {text:?}");
+        assert!(
+            term.running().await,
+            "idle must not wait for the process to end — that is what `exit` is for"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(20),
+            "sat out the timeout instead of noticing the quiet"
+        );
+
+        term.kill().await;
     }
 
     /// A process that ends on its own is reaped, its exit code recorded, and a

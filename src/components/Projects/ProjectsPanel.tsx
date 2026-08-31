@@ -1,15 +1,18 @@
-import { useEffect, useState } from "react";
-import { X, Plus, Trash2, Folder, FolderOpen, Database, RefreshCw, FileText, Loader2, AlertTriangle } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { X, Plus, Trash2, Folder, FolderOpen, Database, RefreshCw, FileText, Loader2, AlertTriangle, ChevronLeft } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useApp } from "@/store/app";
 import { useShallow } from "zustand/react/shallow";
 import * as api from "@/lib/tauri";
+import { isRemote } from "@/lib/remote/transport";
 import type { IndexSummary, KbDocument, KnowledgeStatus, Project, Tag, Zone } from "@/lib/types";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import { IconPicker } from "@/components/common/IconPicker";
 import { ColorPicker } from "@/components/common/ColorPicker";
 import { Modal } from "@/components/common/Modal";
 import { PRIMARY_ACTION } from "@/lib/chrome";
+import { useIsNarrow } from "@/lib/useIsNarrow";
+import { useBackDismiss } from "@/lib/useBackDismiss";
 
 export function ProjectsPanel() {
   const { zones, projects, tags, closeProjectsPanel, refreshProjects, refreshTags } = useApp(
@@ -58,6 +61,67 @@ export function ProjectsPanel() {
   );
 }
 
+// ─── Two panes, or one ───────────────────────────────────────────────
+
+/**
+ * The list-beside-editor shape both tabs are, arranged for the window it is in
+ * (0.17.6).
+ *
+ * On a desktop this is what it always was: a fixed 224px list, the editor
+ * taking the rest. On a phone that arithmetic is the bug — the list is
+ * `shrink-0`, so on a 360px screen the editor is handed what is left, every
+ * field in it is squeezed to a sliver, and the panel reads as "projects cannot
+ * be opened here". A phone gets one screen at a time instead: the list, then
+ * the editor, with back returning to the list rather than closing the panel.
+ *
+ * Shared rather than written twice because projects and tags are the same
+ * screen with different rows, and the phone arrangement is the part that would
+ * quietly rot in the copy nobody opened.
+ */
+function MasterDetail({
+  list,
+  detail,
+  open,
+  onBack,
+  backLabel,
+}: {
+  list: ReactNode;
+  detail: ReactNode;
+  /** True when the editor has something to show — an existing row, or a new one. */
+  open: boolean;
+  onBack: () => void;
+  backLabel: string;
+}) {
+  const narrow = useIsNarrow();
+  // One layer, one press: back leaves the editor for the list, and only a
+  // second press closes the panel (the Modal registers the layer under this
+  // one). See lib/useBackDismiss.ts.
+  useBackDismiss(narrow && open, onBack);
+
+  if (!narrow) {
+    return (
+      <>
+        <div className="flex w-56 shrink-0 flex-col border-r border-[var(--color-border)]">{list}</div>
+        <div className="flex min-w-0 flex-1 flex-col">{detail}</div>
+      </>
+    );
+  }
+
+  if (!open) return <div className="flex min-h-0 w-full flex-col">{list}</div>;
+
+  return (
+    <div className="flex min-h-0 w-full min-w-0 flex-col">
+      <button
+        onClick={onBack}
+        className="flex shrink-0 items-center gap-1 border-b border-[var(--color-border)] px-3 py-2.5 text-left text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+      >
+        <ChevronLeft size={15} /> {backLabel}
+      </button>
+      {detail}
+    </div>
+  );
+}
+
 // ─── Projects tab ─────────────────────────────────────────────────────────────
 
 function ProjectsTab({
@@ -93,52 +157,54 @@ function ProjectsTab({
   }
 
   return (
-    <>
-      {/* Left list */}
-      <div className="flex w-56 shrink-0 flex-col border-r border-[var(--color-border)]">
-        <div className="border-b border-[var(--color-border)] p-2">
-          <button
-            onClick={() => { setSelectedId(null); setIsNew(true); }}
-            className={`flex w-full items-center justify-center gap-1.5 rounded border border-dashed py-2 text-xs transition ${
-              isNew
-                ? "border-[var(--color-accent)] text-[var(--color-accent)]"
-                : "border-[var(--color-border)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
-            }`}
-          >
-            <Plus size={12} /> New Project
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto py-1">
-          {projects.length === 0 && (
-            <div className="px-3 py-4 text-xs text-[var(--color-text-muted)]">No projects yet.</div>
-          )}
-          {projects.map((p) => {
-            const isSelected = p.id === selectedId && !isNew;
-            const Icon = getZoneIcon(p.icon);
-            const color = p.accentColor ?? "var(--color-accent)";
-            return (
-              <div
-                key={p.id}
-                onClick={() => { setSelectedId(p.id); setIsNew(false); }}
-                className={`flex cursor-pointer items-center gap-2 px-2 py-2 transition ${
-                  isSelected ? "bg-[var(--color-panel-hover)]" : "hover:bg-[var(--color-panel-hover)]"
-                }`}
-              >
-                <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded" style={{ background: color }}>
-                  <Icon size={13} color="white" />
+    <MasterDetail
+      open={showForm}
+      onBack={() => { setSelectedId(null); setIsNew(false); }}
+      backLabel="All projects"
+      list={
+        <>
+          <div className="border-b border-[var(--color-border)] p-2">
+            <button
+              onClick={() => { setSelectedId(null); setIsNew(true); }}
+              className={`flex w-full items-center justify-center gap-1.5 rounded border border-dashed py-2 text-xs transition ${
+                isNew
+                  ? "border-[var(--color-accent)] text-[var(--color-accent)]"
+                  : "border-[var(--color-border)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+              }`}
+            >
+              <Plus size={12} /> New Project
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto py-1">
+            {projects.length === 0 && (
+              <div className="px-3 py-4 text-xs text-[var(--color-text-muted)]">No projects yet.</div>
+            )}
+            {projects.map((p) => {
+              const isSelected = p.id === selectedId && !isNew;
+              const Icon = getZoneIcon(p.icon);
+              const color = p.accentColor ?? "var(--color-accent)";
+              return (
+                <div
+                  key={p.id}
+                  onClick={() => { setSelectedId(p.id); setIsNew(false); }}
+                  className={`flex cursor-pointer items-center gap-2 px-2 py-2 transition coarse:py-3 ${
+                    isSelected ? "bg-[var(--color-panel-hover)]" : "hover:bg-[var(--color-panel-hover)]"
+                  }`}
+                >
+                  <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded" style={{ background: color }}>
+                    <Icon size={13} color="white" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium">{p.name}</div>
+                  </div>
                 </div>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium">{p.name}</div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Right form */}
-      <div className="flex min-w-0 flex-1 flex-col">
-        {showForm ? (
+              );
+            })}
+          </div>
+        </>
+      }
+      detail={
+        showForm ? (
           <ProjectForm
             project={isNew ? null : selected}
             zones={zones}
@@ -149,9 +215,9 @@ function ProjectsTab({
           <div className="flex flex-1 flex-col items-center justify-center gap-2 text-[var(--color-text-muted)]">
             <div className="text-sm">Select a project to edit, or create a new one.</div>
           </div>
-        )}
-      </div>
-    </>
+        )
+      }
+    />
   );
 }
 
@@ -195,6 +261,19 @@ function ProjectForm({
       setDefaultContextEnabled(false);
     }
   }, [project?.id]);
+
+  /**
+   * The folder picker is *this* window's file dialog, and this window is not
+   * always the machine the path is for (0.17.6).
+   *
+   * A project directory is where the file tools read and write, and they run on
+   * the desktop. From a phone the native dialog offers the phone's own storage,
+   * so anything chosen there names a directory the desktop does not have — and
+   * on Android there is no directory picker to offer in the first place, so the
+   * button was simply dead. A remote types the path instead, which is the one
+   * thing it knows better than a picker pointed at the wrong filesystem.
+   */
+  const remote = isRemote();
 
   async function pickDirectory() {
     const selected = await open({ directory: true, multiple: false });
@@ -268,7 +347,7 @@ function ProjectForm({
 
         {/* Identity: the same side-by-side icon + colour pair the zone editor
             uses, from the same two controls. */}
-        <div className="mb-4 grid grid-cols-2 gap-3">
+        <div className="mb-4 grid grid-cols-2 gap-3 narrow:grid-cols-1">
           <IconPicker value={icon} onChange={setIcon} activeColor={activeColor} />
           <ColorPicker value={accentColor} onChange={setAccentColor} />
         </div>
@@ -288,29 +367,46 @@ function ProjectForm({
             Project directory
             <span className="ml-2 font-normal opacity-60">(file_system tool reads run from here)</span>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={pickDirectory}
-              className="flex shrink-0 items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
-            >
-              <FolderOpen size={13} /> Choose folder…
-            </button>
-            {directory ? (
-              <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5">
-                <Folder size={12} className="shrink-0 text-[var(--color-text-muted)]" />
-                <span className="truncate font-mono text-xs" title={directory}>{directory}</span>
-                <button
-                  onClick={() => setDirectory(null)}
-                  className="ml-auto shrink-0 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-                  title="Clear directory"
-                >
-                  <X size={12} />
-                </button>
-              </div>
-            ) : (
-              <span className="text-xs text-[var(--color-text-muted)]">No directory set</span>
-            )}
-          </div>
+          {remote ? (
+            <>
+              <input
+                value={directory ?? ""}
+                onChange={(e) => setDirectory(e.target.value.trim() || null)}
+                spellCheck={false}
+                autoCapitalize="off"
+                autoCorrect="off"
+                placeholder="C:\\Users\\you\\code\\thing"
+                className="input font-mono text-xs"
+              />
+              <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
+                A path on the computer, not on this device — the file tools run at the other end.
+              </p>
+            </>
+          ) : (
+            <div className="flex items-center gap-2 narrow:flex-col narrow:items-stretch">
+              <button
+                onClick={pickDirectory}
+                className="flex shrink-0 items-center gap-1.5 rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+              >
+                <FolderOpen size={13} /> Choose folder…
+              </button>
+              {directory ? (
+                <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5">
+                  <Folder size={12} className="shrink-0 text-[var(--color-text-muted)]" />
+                  <span className="truncate font-mono text-xs" title={directory}>{directory}</span>
+                  <button
+                    onClick={() => setDirectory(null)}
+                    className="ml-auto shrink-0 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                    title="Clear directory"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ) : (
+                <span className="text-xs text-[var(--color-text-muted)]">No directory set</span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Context snippet */}
@@ -578,7 +674,7 @@ function KnowledgeSection({ project }: { project: Project }) {
         </div>
       )}
 
-      <div className="mb-3 flex items-center gap-2">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
         {dirty && (
           <button
             onClick={saveConfig}
@@ -733,46 +829,50 @@ function TagsTab({
   async function onDeleteTag() { await onDeleted(); setSelectedId(null); setIsNew(false); }
 
   return (
-    <>
-      <div className="flex w-56 shrink-0 flex-col border-r border-[var(--color-border)]">
-        <div className="border-b border-[var(--color-border)] p-2">
-          <button
-            onClick={() => { setSelectedId(null); setIsNew(true); }}
-            className={`flex w-full items-center justify-center gap-1.5 rounded border border-dashed py-2 text-xs transition ${
-              isNew ? "border-[var(--color-accent)] text-[var(--color-accent)]" : "border-[var(--color-border)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
-            }`}
-          >
-            <Plus size={12} /> New Tag
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto py-1">
-          {tags.length === 0 && <div className="px-3 py-4 text-xs text-[var(--color-text-muted)]">No tags yet.</div>}
-          {tags.map((t) => {
-            const isSelected = t.id === selectedId && !isNew;
-            return (
-              <div
-                key={t.id}
-                onClick={() => { setSelectedId(t.id); setIsNew(false); }}
-                className={`flex cursor-pointer items-center gap-2 px-2 py-2 transition ${isSelected ? "bg-[var(--color-panel-hover)]" : "hover:bg-[var(--color-panel-hover)]"}`}
-              >
-                <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: t.color ?? "var(--color-text-muted)" }} />
-                <span className="truncate text-sm">{t.name}</span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="flex min-w-0 flex-1 flex-col">
-        {showForm ? (
+    <MasterDetail
+      open={showForm}
+      onBack={() => { setSelectedId(null); setIsNew(false); }}
+      backLabel="All tags"
+      list={
+        <>
+          <div className="border-b border-[var(--color-border)] p-2">
+            <button
+              onClick={() => { setSelectedId(null); setIsNew(true); }}
+              className={`flex w-full items-center justify-center gap-1.5 rounded border border-dashed py-2 text-xs transition ${
+                isNew ? "border-[var(--color-accent)] text-[var(--color-accent)]" : "border-[var(--color-border)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+              }`}
+            >
+              <Plus size={12} /> New Tag
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto py-1">
+            {tags.length === 0 && <div className="px-3 py-4 text-xs text-[var(--color-text-muted)]">No tags yet.</div>}
+            {tags.map((t) => {
+              const isSelected = t.id === selectedId && !isNew;
+              return (
+                <div
+                  key={t.id}
+                  onClick={() => { setSelectedId(t.id); setIsNew(false); }}
+                  className={`flex cursor-pointer items-center gap-2 px-2 py-2 transition coarse:py-3 ${isSelected ? "bg-[var(--color-panel-hover)]" : "hover:bg-[var(--color-panel-hover)]"}`}
+                >
+                  <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: t.color ?? "var(--color-text-muted)" }} />
+                  <span className="truncate text-sm">{t.name}</span>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      }
+      detail={
+        showForm ? (
           <TagForm tag={isNew ? null : selected} onSaved={onSaveTag} onDeleted={onDeleteTag} />
         ) : (
           <div className="flex flex-1 items-center justify-center text-sm text-[var(--color-text-muted)]">
             Select a tag to edit, or create a new one.
           </div>
-        )}
-      </div>
-    </>
+        )
+      }
+    />
   );
 }
 

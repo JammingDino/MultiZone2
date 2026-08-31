@@ -82,7 +82,8 @@ Confirmed, from the repository README at v0.15.7:
   fingerprint, no headless browser — JS-only pages are reported as such, not returned blank.
   Legacy key-based `web_search` providers still available (SearXNG, Brave, Tavily, Serper).
 - **Terminals** — `terminal_start/write/read/list/stop` keep a process alive between calls, with
-  `delay_ms`, `wait_for` + `timeout_ms`, `wait_ms`. Pipes, not a PTY: servers, build tools and
+  `delay_ms`, `wait_for` + `timeout_ms`, `wait_ms`, and `until` (`exit` / `idle` / `output`) so
+  waiting on a long job is one call that returns when it finishes rather than a read loop. Pipes, not a PTY: servers, build tools and
   REPLs work; full-screen TUIs and interactive `ssh` do not.
 - **Replay** — the run as it happened, including declined approvals, failed tools, mid-turn zone
   switches, rewritten plans, plus every tool call's arguments, output and duration.

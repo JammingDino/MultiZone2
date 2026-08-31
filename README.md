@@ -95,6 +95,8 @@ The original single-engine tools are still available, mainly for the key-based p
 
 Driving an interactive program is a timing problem, so every call that can wait takes `delay_ms` (wait *before* typing — start a server, send the sudo password five seconds later), `wait_for` (a regex to wait for in the new output, with `timeout_ms`, reporting whether it matched), or `wait_ms` (collect for a fixed span).
 
+Waiting on *work* is a different question, and `until` answers it in one call: `until: "exit"` returns at the moment the process finishes, `until: "idle"` when its output has been quiet for `idle_ms` (a server that has finished booting), `until: "output"` at the next thing printed. `waited_until` says which condition ended the call. Without it, a model watching a slow build has to read the buffer over and over — paying for the transcript every turn and still finding out late.
+
 Reader tasks drain stdout and stderr continuously, so output printed *between* tool calls is still there when you look; ANSI escapes are stripped and a `\r`-redrawn progress line collapses to where it landed. Terminals are visible to the whole session — a leader's dev server is one its own sub-agents can query — and are never reaped on idle: they end when stopped, when the process exits, or when the app closes.
 
 stdin/stdout are **pipes, not a PTY**. Servers, build tools and REPLs work; programs that insist on a real terminal do not — pass `sudo -S`, expect `ssh` password prompts and full-screen TUIs to fail, and stop a process with `terminal_stop` rather than trying to send Ctrl-C. Children block-buffer on a pipe, so unbuffer where it matters (`python -u`, `stdbuf -oL`); `PYTHONUNBUFFERED` is set for you.

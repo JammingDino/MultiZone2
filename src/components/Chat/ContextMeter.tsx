@@ -86,9 +86,19 @@ export function ContextMeter({ chatId }: { chatId: string }) {
   const teamMeterEnabled = useApp((s) => s.appSettings.teamContextMeter !== false);
   const streaming = useApp((s) => Boolean(s.streamingByChat[chatId]));
 
+  // Compaction is a property of the chat row, and it changes what the
+  // conversation half is worth — so it is read here and handed to the
+  // estimator rather than left for the reader to apply in their head.
+  const chat = useApp((s) => s.chats.find((c) => c.id === chatId) ?? null);
+  const summary = chat?.contextSummary ?? null;
+  const summaryThrough = chat?.contextSummaryThrough ?? null;
+
   // The conversation half, live from what the store already holds — no round
   // trip, so it updates the moment a message lands rather than on the next poll.
-  const est = useMemo(() => chatContextEstimate(messages), [messages]);
+  const est = useMemo(
+    () => chatContextEstimate(messages, { contextSummary: summary, contextSummaryThrough: summaryThrough }),
+    [messages, summary, summaryThrough],
+  );
 
   const [usage, setUsage] = useState<SessionUsage | null>(null);
   // Only a change of chat invalidates what we're holding. Clearing it whenever
@@ -224,7 +234,13 @@ export function ContextMeter({ chatId }: { chatId: string }) {
         anchorRef={buttonRef}
         align="end"
         zIndex={30}
-        className="min-w-[290px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] p-2 text-xs shadow-lg"
+        /* A width, not just a floor. `min-w` alone let the widest thing inside
+           set the size, and the widest thing is a paragraph of explanatory prose
+           — so the panel grew to whatever length that sentence happened to be
+           and the figures, which are the point, were left stranded at opposite
+           ends of a very long row. Capped so the numbers stay a scannable
+           column. */
+        className="w-[320px] max-w-[calc(100vw-1.5rem)] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] p-2 text-xs shadow-lg"
       >
           <div>
             <div className="mb-1 font-medium text-[var(--color-text)]">This chat (est.)</div>
@@ -245,6 +261,28 @@ export function ContextMeter({ chatId }: { chatId: string }) {
               <MeterRow label="Conversation" value={est.totalTokens} />
               <MeterRow label="Input (you, files, tools)" value={est.inputTokens} sub />
               <MeterRow label="Output (answers, thinking)" value={est.outputTokens} sub />
+              {/* What a compaction actually did (0.17.6). Until this row
+                  existed, `compact_context` reported success and every figure in
+                  this panel stayed exactly where it was DASH so the one question a
+                  user has after condensing a chat ("did that do anything?") had
+                  no answer anywhere in the UI. The before-figure is what makes it
+                  evidence rather than another number. */}
+              {est.compacted && (
+                <>
+                  <MeterRow
+                    label={`Condensed ${est.compacted.messages} earlier message${est.compacted.messages === 1 ? "" : "s"}`}
+                    value={est.compacted.summaryTokens}
+                    sub
+                    suffix=" summary"
+                  />
+                  <MeterRow
+                    label={est.compacted.savedTokens >= 0 ? "Saved, vs. uncondensed" : "Cost, vs. uncondensed"}
+                    value={Math.abs(est.compacted.savedTokens)}
+                    sub
+                    suffix={` of ${formatTokens(est.compacted.wasTokens)}`}
+                  />
+                </>
+              )}
             </div>
 
             <div className="mt-1 border-t border-[var(--color-border)] pt-1">
@@ -370,6 +408,9 @@ export function ContextMeter({ chatId }: { chatId: string }) {
 
             <div className="mt-1.5 text-[10px] leading-relaxed text-[var(--color-text-muted)]">
               Context is the size of the next request, estimated from text length.
+              {est.compacted
+                ? " The condensed turns are counted as the summary that replaces them, not as themselves — they are still in the chat, just not in the request."
+                : ""}
               {showTeam && " Each agent carries its own."}
               {hasSpend && chatSpent && (
                 <>

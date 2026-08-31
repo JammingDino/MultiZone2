@@ -64,17 +64,54 @@ export interface ContextEstimate {
   inputTokens: number;
   /** Tokens the model generated: assistant answers, reasoning, tool-call args. */
   outputTokens: number;
-  /** inputTokens + outputTokens — the whole conversation's context size. */
+  /** inputTokens + outputTokens — the size of the conversation half of the next
+   *  request, after any compaction. */
   totalTokens: number;
+  /** What a compaction is currently taking out, or null if none is in effect.
+   *  This is the evidence that one did anything: without it the meter reports
+   *  the same figure before and after, and the user has no way to tell. */
+  compacted: CompactionSaving | null;
+}
+
+export interface CompactionSaving {
+  /** Messages replaced by the summary in the request — still on screen, and
+   *  still in the database. */
+  messages: number;
+  /** What the summary itself costs, since it is not free. */
+  summaryTokens: number;
+  /** Conversation tokens before the compaction, so the pair reads as a before
+   *  and after rather than as one number without a reference. */
+  wasTokens: number;
+  /** wasTokens minus what is carried now. Negative is possible and is left
+   *  signed — a summary longer than the turns it replaced is worth seeing, not
+   *  worth hiding. */
+  savedTokens: number;
 }
 
 /**
- * Estimate the current context size of a chat from its persisted messages.
- * "Input" is everything the model reads (user turns, tool responses, uploaded
- * file text, images); "output" is everything it generated (answers, thinking,
- * and the tool calls it emitted).
+ * The chat fields that describe a compaction, as the meter receives them.
+ *
+ * Named separately from `Chat` so this module stays free of the store's shape
+ * and can be tested with two literals.
  */
-export function chatContextEstimate(messages: Message[]): ContextEstimate {
+export interface CompactionState {
+  contextSummary: string | null;
+  contextSummaryThrough: number | null;
+}
+
+/**
+ * Characters the summary carries beyond its own text.
+ *
+ * `compacted_prefix` in the backend wraps the model's summary in a standing
+ * `# Conversation so far` preamble before sending it, and that preamble is part
+ * of what the request pays for. Mirrored as a constant rather than duplicated
+ * as a string: the exact wording is the backend's business, its rough size is
+ * this module's, and a constant cannot drift into a second copy of the prose.
+ */
+const SUMMARY_PREAMBLE_CHARS = 330;
+
+/** The running sums for one set of messages, before they become an estimate. */
+function tally(messages: Message[]): { inputTokens: number; outputTokens: number } {
   let inputChars = 0;
   let outputChars = 0;
   let images = 0;
@@ -90,7 +127,66 @@ export function chatContextEstimate(messages: Message[]): ContextEstimate {
     }
   }
 
-  const inputTokens = estimateTokens(inputChars) + images * IMAGE_TOKEN_ESTIMATE;
-  const outputTokens = estimateTokens(outputChars);
-  return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens };
+  return {
+    inputTokens: estimateTokens(inputChars) + images * IMAGE_TOKEN_ESTIMATE,
+    outputTokens: estimateTokens(outputChars),
+  };
+}
+
+/**
+ * Estimate the context a chat's next request will carry, from its messages.
+ * "Input" is everything the model reads (user turns, tool responses, uploaded
+ * file text, images); "output" is everything it generated (answers, thinking,
+ * and the tool calls it emitted).
+ *
+ * **Compaction is applied here** (0.17.6), because it is applied on the way out.
+ * The meter used to sum every message in the store, so a chat that had just
+ * condensed forty turns reported exactly the number it reported before — the
+ * one moment the reading matters most, and the one moment it was furthest from
+ * what the model would receive. The rule mirrors `build_history` in
+ * `commands/messages.rs`: messages at or before the cutoff are replaced by the
+ * summary, which is itself sent as a system message and counted as input, and a
+ * cutoff that elides nothing is not a compaction at all.
+ */
+export function chatContextEstimate(
+  messages: Message[],
+  compaction?: CompactionState | null,
+): ContextEstimate {
+  const full = tally(messages);
+  const summary = compaction?.contextSummary?.trim();
+  const through = compaction?.contextSummaryThrough ?? null;
+
+  const kept = summary && through !== null
+    ? messages.filter((m) => m.createdAt > through)
+    : messages;
+
+  // A cutoff older than every surviving message elides nothing, and the backend
+  // declines to inject the summary in that case — so neither does this.
+  if (!summary || through === null || kept.length === messages.length) {
+    return {
+      inputTokens: full.inputTokens,
+      outputTokens: full.outputTokens,
+      totalTokens: full.inputTokens + full.outputTokens,
+      compacted: null,
+    };
+  }
+
+  const summaryTokens = estimateTokens(summary.length + SUMMARY_PREAMBLE_CHARS);
+  const live = tally(kept);
+  const inputTokens = live.inputTokens + summaryTokens;
+  const outputTokens = live.outputTokens;
+  const totalTokens = inputTokens + outputTokens;
+  const wasTokens = full.inputTokens + full.outputTokens;
+
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    compacted: {
+      messages: messages.length - kept.length,
+      summaryTokens,
+      wasTokens,
+      savedTokens: wasTokens - totalTokens,
+    },
+  };
 }

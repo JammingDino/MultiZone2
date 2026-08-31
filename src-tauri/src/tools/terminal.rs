@@ -135,22 +135,22 @@ fn wait_props() -> Value {
         "until": {
             "type": "string",
             "enum": ["exit", "idle", "output"],
-            "description": "Finish this call when the process exits (\"exit\"), when its output has been quiet for `idle_ms` (\"idle\" — a server that has finished booting), or as soon as anything new is printed (\"output\"). One call, one answer: prefer this with a generous `timeout_ms` over reading again in a loop."
+            "description": "End the call when the process exits, when its output has gone quiet for `idle_ms` (a server that has booted), or at the next output. One call with a generous `timeout_ms`, not a read loop."
         },
-        "idle_ms": { "type": "integer", "description": "With until=\"idle\", how long without output counts as quiet. Default 2000." },
+        "idle_ms": { "type": "integer", "description": "What counts as quiet for until=idle. Default 2000." },
         "wait_for": {
             "type": "string",
-            "description": "Regex to wait for in the new output, e.g. \"[Pp]assword:\". Returns the moment it matches; `matched` says whether it did. Combines with `until` — whichever happens first ends the call, and `waited_until` says which."
+            "description": "Regex to wait for in the new output, e.g. \"[Pp]assword:\". Returns the moment it matches; `matched` says whether it did."
         },
-        "timeout_ms": { "type": "integer", "description": "Cap on the wait. Default 15000, or 300000 when `until` is set; 600000 max." },
-        "wait_ms": { "type": "integer", "description": "With no `until` and no `wait_for`, collect output for this long." }
+        "timeout_ms": { "type": "integer", "description": "Cap on the wait. Default 15000; 300000 with `until`." },
+        "wait_ms": { "type": "integer", "description": "With no wait_for, collect output for this long." }
     })
 }
 
 fn start_definition() -> Tool {
     tool(
         "terminal_start",
-        "Start a process that keeps running after this call returns — a server, a REPL, a log to follow, anything you must type into later. For a command that finishes on its own use `run_command`; for one too slow for its timeout, start it here with `until: \"exit\"` and a generous `timeout_ms`, which returns once, when it is done. Pipes, not a TTY: pass `sudo -S`, and unbuffer output (`python -u`).",
+        "Start a process that keeps running after this call returns — a server, a REPL, a log to follow, anything you must type into later. For a command that finishes on its own use `run_command`, or start it here with `until: \"exit\"` if it outlives that timeout. Pipes, not a TTY: pass `sudo -S`, and unbuffer output (`python -u`).",
         {
             let mut props = json!({
                 "command": {
@@ -194,7 +194,7 @@ fn write_definition() -> Tool {
 fn read_definition() -> Tool {
     tool(
         "terminal_read",
-        "Read what a terminal has printed, and whether it is still running. Pass a previous call's `cursor` for only what is new; otherwise the tail. Do not poll: to learn when a long job finishes, make ONE call with `until: \"exit\"` (plus `cursor`, and a `timeout_ms` you are willing to wait) and it returns at the moment it exits.",
+        "Read what a terminal has printed, and whether it is still running. Pass a previous call's `cursor` for only what is new; otherwise the tail. Never poll: one call with `cursor` and `until: \"exit\"` returns the moment a long job finishes.",
         {
             let mut props = json!({
                 "terminal_id": { "type": "string" },

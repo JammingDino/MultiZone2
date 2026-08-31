@@ -708,7 +708,17 @@ mod tests {
         // group to 2,201, third-largest), which is a charting schema priced like
         // the rest of the surface rather than like a style guide. Same slack as
         // before, and the same reason for it.
-        const BUDGET_BYTES: usize = 41_000;
+        // 0.17.6 adds `until` to the three terminal functions that can wait,
+        // taking it to 42,008. The cost is threefold by construction — it lives
+        // in the shared `wait_props`, which is the same trade the group made for
+        // the timing vocabulary at 0.9.11, and for the same reason: a model that
+        // sees the way to wait on only one function will reach for that
+        // function. The first draft was 42,955, with `terminal` holding three of
+        // the five largest slots because the enum values were explained twice,
+        // once in the enum and again in the prose beside it. Trimmed to one
+        // explanation each, the group is back to third-largest. Ceiling raised
+        // for the capability and no further, on the same slack as before.
+        const BUDGET_BYTES: usize = 42_300;
 
         let ctx = ToolContext {
             project_dir: Some(r"C:\Users\me\project".to_string()),

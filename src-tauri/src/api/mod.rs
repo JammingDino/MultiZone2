@@ -196,7 +196,11 @@ pub(crate) async fn call_in_process(
         .await
         .map_err(|_| {
             AppError::Invalid(format!(
-                "the response is larger than {MAX_BODY} bytes — ask for a narrower slice"
+                "the response is larger than {MAX_BODY} bytes, so none of it was returned. \
+                 Ask for a narrower slice: one item by id (/api/chats/<id>) instead of the whole \
+                 collection, ?limit=N where the route takes one (/api/chats/<id>/events?limit=50), \
+                 or a search route to filter (/api/search?q=...). app_read \"/api/routes\" lists \
+                 every path this build serves and what each one accepts."
             ))
         })?;
     Ok((status, String::from_utf8_lossy(&bytes).into_owned()))

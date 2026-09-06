@@ -275,7 +275,7 @@ function AppResultCard({
           }`}
         >
           {ok ? <Check size={10} /> : <AlertCircle size={10} />}
-          {ok ? "Worked" : "Failed"}
+          {ok ? "Success" : "Error"}
         </span>
         <span className="shrink-0 font-mono text-[10px] text-[var(--color-text-muted)]">{method}</span>
         <span className="min-w-0 truncate font-mono text-[var(--color-text)]" title={path}>

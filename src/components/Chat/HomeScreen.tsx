@@ -146,6 +146,8 @@ export function HomeScreen() {
   const newChatTimestamp = useApp((s) => s.newChatTimestamp);
   const homeScreenDraft = useApp((s) => s.homeScreenDraft);
   const setHomeScreenDraft = useApp((s) => s.setHomeScreenDraft);
+  const homeScreenAttachments = useApp((s) => s.homeScreenAttachments);
+  const setHomeScreenAttachments = useApp((s) => s.setHomeScreenAttachments);
 
   // The base zone for Quick Chat (if configured), else the first provider's
   // default model with no prompt or tools.
@@ -169,7 +171,10 @@ export function HomeScreen() {
   const [text, setText] = useState(homeScreenDraft);
   // Starting a chat from a voice note: the transcript becomes the opening
   // message, same as it does in the in-chat composer (0.12.0).
-  const tray = useAttachments({ onTranscript: (t) => appendTranscript(setText, t) });
+  const tray = useAttachments({
+    onTranscript: (t) => appendTranscript(setText, t),
+    initial: homeScreenAttachments,
+  });
   const pending = tray.pending;
   const [menuOpen, setMenuOpen] = useState(false);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
@@ -207,8 +212,10 @@ export function HomeScreen() {
   const dragDepth = useRef(0);
   const [isDragOver, setIsDragOver] = useState(false);
 
-  // Persist draft text across navigations.
+  // Persist draft text across navigations — and the files staged with it, which
+  // are as much of the draft as the words are.
   useEffect(() => { setHomeScreenDraft(text); }, [text, setHomeScreenDraft]);
+  useEffect(() => { setHomeScreenAttachments(pending); }, [pending, setHomeScreenAttachments]);
 
   // React to new-chat triggers (handles "new chat button while already on HomeScreen").
   // Skip the first tick (that's just the initial mount value).
@@ -223,6 +230,7 @@ export function HomeScreen() {
       ? { type: "zone", id: projZone }
       : quickAvailable ? { type: "quick" } : zones[0] ? { type: "zone", id: zones[0].id } : { type: "quick" });
     setSelectedTagIds(new Set());
+    tray.clear();
     setSelectedPerspectiveIds(new Set());
     setSelectedSubagentIds(new Set());
     setMultizoneLeaderId(null);
@@ -425,6 +433,7 @@ export function HomeScreen() {
 
       setText("");
       setHomeScreenDraft("");
+      setHomeScreenAttachments([]);
       tray.clear();
       api.sendMessage(chat.id, parts).catch(console.error);
     } catch (e) {

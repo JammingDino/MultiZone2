@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ExternalLink, FileText, Loader2, AlertCircle } from "lucide-react";
+import { ExternalLink, FileText, FolderOpen, Loader2, AlertCircle } from "lucide-react";
 import * as api from "@/lib/tauri";
 import { CHROME_OUTLINED } from "@/lib/chrome";
 
@@ -100,13 +100,16 @@ export function HtmlReportBlock({ output }: { output: SavedOutput }) {
             {output.filename || path}
           </span>
         </div>
-        <button
-          onClick={() => api.openPath(path).catch((e) => console.error(e))}
-          className={`flex flex-shrink-0 items-center gap-1 rounded px-2 py-0.5 ${CHROME_OUTLINED}`}
-          title="Open in browser"
-        >
-          <ExternalLink size={11} /> Open in browser
-        </button>
+        <div className="flex flex-shrink-0 items-center gap-1">
+          <button
+            onClick={() => api.openPath(path).catch((e) => console.error(e))}
+            className={`flex items-center gap-1 rounded px-2 py-0.5 ${CHROME_OUTLINED}`}
+            title="Open in browser"
+          >
+            <ExternalLink size={11} /> Open in browser
+          </button>
+          <RevealButton path={path} />
+        </div>
       </div>
       {error ? (
         <div className="flex items-center gap-2 bg-[var(--color-panel)] p-3 text-xs text-[var(--color-danger)]">
@@ -129,5 +132,23 @@ export function HtmlReportBlock({ output }: { output: SavedOutput }) {
         />
       )}
     </div>
+  );
+}
+
+/**
+ * Show the file in the OS file manager (Explorer on Windows, Finder on macOS).
+ *
+ * Shares this file with the chip because both report surfaces need it and the
+ * gesture is one line of behaviour, not a component's worth.
+ */
+export function RevealButton({ path }: { path: string }) {
+  return (
+    <button
+      onClick={() => api.revealPath(path).catch((e) => console.error(e))}
+      className={`flex flex-shrink-0 items-center gap-1 rounded px-2 py-0.5 ${CHROME_OUTLINED}`}
+      title="Show in file explorer"
+    >
+      <FolderOpen size={11} /> Show
+    </button>
   );
 }

@@ -8,6 +8,7 @@ import type { SettingsBundle } from "@/lib/settingsBundle";
 import { clearAttention, notifyWaiting } from "@/lib/notify";
 import { shade } from "@/lib/color";
 import { normalizeApprovals } from "@/lib/approvals";
+import type { PendingAttachment } from "@/lib/attachFiles";
 
 /**
  * Chats whose opening turn has already kicked off an auto-title, so the check
@@ -661,6 +662,12 @@ interface AppStore {
   /** Persists the HomeScreen composer text across navigations. */
   homeScreenDraft: string;
   setHomeScreenDraft: (text: string) => void;
+  /** The staged attachments of that same draft. Kept beside the text because a
+   *  draft is the text *and* what was dropped on it — leaving one behind on a
+   *  trip to another chat silently loses files the user had already picked.
+   *  In memory only, like the text: never written to disk. */
+  homeScreenAttachments: PendingAttachment[];
+  setHomeScreenAttachments: (attachments: PendingAttachment[]) => void;
   refreshProjects: () => Promise<void>;
   refreshTags: () => Promise<void>;
   refreshSkills: () => Promise<void>;
@@ -1097,6 +1104,7 @@ export const useApp = create<AppStore>((set, get) => ({
   newChatProjectId: null,
   newChatTimestamp: 0,
   homeScreenDraft: "",
+  homeScreenAttachments: [],
 
   dismissChatErrors(chatId) {
     set((s) => {
@@ -2135,6 +2143,7 @@ export const useApp = create<AppStore>((set, get) => ({
     newChatTimestamp: s.newChatTimestamp + 1,
   })),
   setHomeScreenDraft: (text) => set({ homeScreenDraft: text }),
+  setHomeScreenAttachments: (attachments) => set({ homeScreenAttachments: attachments }),
 
   async refreshProjects() {
     const projects = await api.listProjects();

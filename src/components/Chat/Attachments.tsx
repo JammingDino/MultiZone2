@@ -44,13 +44,18 @@ import { CHROME_QUIET, PRIMARY_ACTION } from "@/lib/chrome";
  * transcribing but has no idea where a composer's text lives, and a composer that
  * doesn't pass the callback simply keeps the transcript as an attachment — which
  * is exactly the "context" injection mode.
+ *
+ * `initial` seeds the tray from a draft that outlived its composer — the new-chat
+ * screen keeps its staged files in the store, so leaving for another chat and
+ * coming back finds them still there, the way the typed text already was.
  */
 export function useAttachments({
   pdfAsText = false,
   onTranscript,
-}: { pdfAsText?: boolean; onTranscript?: (text: string) => void } = {}) {
+  initial,
+}: { pdfAsText?: boolean; onTranscript?: (text: string) => void; initial?: PendingAttachment[] } = {}) {
   const pdfMode = useApp((s) => s.appSettings.pdfMode);
-  const [pending, setPending] = useState<PendingAttachment[]>([]);
+  const [pending, setPending] = useState<PendingAttachment[]>(initial ?? []);
   /** Why the last attempted attachment didn't stage. Shown until the next try —
    *  a file that silently fails to attach is the bug this replaced. */
   const [attachError, setAttachError] = useState<string | null>(null);
@@ -75,7 +80,7 @@ export function useAttachments({
    *  be retried without asking the user to find the file again. Dropped when the
    *  chip is (they are only a retry buffer, not a second copy of the message). */
   const audioFilesRef = useRef<Map<string, File>>(new Map());
-  const [sawAudio, setSawAudio] = useState(false);
+  const [sawAudio, setSawAudio] = useState(() => (initial ?? []).some((a) => a.fileType === "audio"));
 
   /**
    * Transcribe one staged audio file and settle its chip.

@@ -1,4 +1,4 @@
-import { Brain, BookOpen, Settings2, ArrowRight, Clock, Layers } from "lucide-react";
+import { Brain, BookOpen, Settings2, ArrowRight, Clock, Layers, Check, AlertCircle } from "lucide-react";
 import { Shaped } from "./Shaped";
 
 /**
@@ -210,7 +210,16 @@ export function ChangeVisual({
     );
   }
 
-  // app_control / app_read / enter_plan_mode — a setting and where it landed.
+  // app_read / app_control — what the app said back.
+  //
+  // This used to render as "path → 200", which answers "did it work" only for
+  // people who know their status codes, and shows nothing of what was actually
+  // read. So: a plain worked / didn't-work flag, and the response itself.
+  if (name === "app_read" || name === "app_control") {
+    return <AppResultCard name={name} args={args} result={result} />;
+  }
+
+  // enter_plan_mode and anything else in this family — a setting and where it landed.
   const path = str(args?.path);
   const value = result.body ?? result.status ?? null;
   if (!path && value === null) return <Shaped value={result} />;
@@ -226,6 +235,80 @@ export function ChangeVisual({
         </>
       )}
     </Line>
+  );
+}
+
+/**
+ * The app's own API, answered in words (0.17.8).
+ *
+ * `app_read` returns `{ status, ok, result }`; the card leads with whether it
+ * worked, names the route it asked, and previews the body — the three things
+ * you would otherwise have had to decode from a number and a JSON blob. An
+ * `error` field (a refusal, or a route that never ran) is a failure too, even
+ * though it carries no status at all.
+ */
+function AppResultCard({
+  name,
+  args,
+  result,
+}: {
+  name: string;
+  args: any;
+  result: Record<string, unknown>;
+}) {
+  const error = str(result.error);
+  const status = typeof result.status === "number" ? result.status : null;
+  const ok = error ? false : result.ok === true || (status !== null && status >= 200 && status < 300);
+  const path = str(args?.path) || name;
+  const method = name === "app_read" ? "GET" : (str(args?.method) || "POST").toUpperCase();
+  const body = result.result ?? null;
+  const note = str(result.note);
+
+  return (
+    <div className="overflow-hidden rounded border border-[var(--color-border)] bg-[var(--color-bg)]">
+      <div className="flex items-center gap-2 border-b border-[var(--color-border)] px-2 py-1.5 text-[11px]">
+        <span
+          className={`flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] ${
+            ok
+              ? "bg-emerald-500/10 text-emerald-400"
+              : "bg-[var(--color-danger)]/10 text-[var(--color-danger)]"
+          }`}
+        >
+          {ok ? <Check size={10} /> : <AlertCircle size={10} />}
+          {ok ? "Worked" : "Failed"}
+        </span>
+        <span className="shrink-0 font-mono text-[10px] text-[var(--color-text-muted)]">{method}</span>
+        <span className="min-w-0 truncate font-mono text-[var(--color-text)]" title={path}>
+          {path}
+        </span>
+        {status !== null && (
+          <span
+            className="ml-auto shrink-0 text-[10px] tabular-nums text-[var(--color-text-muted)]"
+            title="HTTP status code"
+          >
+            {status}
+          </span>
+        )}
+      </div>
+
+      {error ? (
+        <div className="px-2 py-1.5 text-[11px] text-[var(--color-danger)]">{error}</div>
+      ) : body != null ? (
+        <div className="max-h-[280px] overflow-auto px-2 py-1.5">
+          <Shaped value={body} />
+        </div>
+      ) : (
+        <div className="px-2 py-1.5 text-[11px] text-[var(--color-text-muted)]">
+          {ok ? "Done — the app returned nothing to show." : "No response body."}
+        </div>
+      )}
+
+      {note && (
+        <div className="border-t border-[var(--color-border)] px-2 py-1 text-[10px] text-[var(--color-text-muted)]">
+          {note}
+        </div>
+      )}
+    </div>
   );
 }
 

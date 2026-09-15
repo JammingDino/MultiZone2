@@ -139,6 +139,8 @@ pub const ROUTES: &[RouteDef] = &[
     r("GET", "/api/chats/:id/terminals/:terminalId", "Read a terminal; with `cursor` holds until new output, exit, or `timeoutMs`"),
     r("POST", "/api/chats/:id/terminals/:terminalId/input", "Type into a terminal; `submit: false` sends no newline"),
     r("DELETE", "/api/chats/:id/terminals/:terminalId", "Stop a terminal and everything it started"),
+    r("GET", "/api/chats/:id/working-dir", "The directory the chat's file tools are scoped to"),
+    r("GET", "/api/fs/list", "One directory's children (`path`), folders first"),
     r("POST", "/api/chats/:id/fix-diagram", "Ask the model to repair a failed diagram"),
     r("GET", "/api/chats/:id/usage", "Estimated context carried by this chat's session"),
 
@@ -354,6 +356,8 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("terminals::read_terminal", Route("GET /api/chats/:id/terminals/:terminalId")),
     ("terminals::write_terminal", Route("POST /api/chats/:id/terminals/:terminalId/input")),
     ("terminals::stop_terminal", Route("DELETE /api/chats/:id/terminals/:terminalId")),
+    ("workspace::chat_working_dir", Route("GET /api/chats/:id/working-dir -> directory")),
+    ("workspace::list_dir", Route("GET /api/fs/list")),
     ("diagram::fix_diagram", Route("POST /api/chats/:id/fix-diagram")),
 
     ("checkpoints::list_checkpoints", Route("GET /api/chats/:id/checkpoints")),
@@ -1043,6 +1047,21 @@ pub async fn stop_terminal(
 ) -> ApiResult<StatusCode> {
     commands::terminals::stop_terminal(app_state(&st), chat_id, terminal_id).await?;
     Ok(NO_CONTENT)
+}
+
+pub async fn chat_working_dir(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+) -> ApiResult<Response> {
+    let dir = commands::workspace::chat_working_dir(app_state(&st), id).await?;
+    Ok(Json(json!({ "directory": dir })).into_response())
+}
+
+pub async fn list_dir(
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> ApiResult<Response> {
+    let path = q.get("path").cloned().unwrap_or_default();
+    Ok(Json(commands::workspace::list_dir(path).await?).into_response())
 }
 
 pub async fn fix_diagram(

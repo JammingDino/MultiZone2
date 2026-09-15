@@ -34,6 +34,23 @@ function writeSidebarOpen(open: boolean) {
   try { localStorage.setItem(SIDEBAR_KEY, String(open)); } catch { /* ignore */ }
 }
 
+// The workspace panel on the right (0.17.9) persists the same way.
+const WORKSPACE_KEY = "ui.workspaceOpen";
+function readWorkspaceOpen(): boolean {
+  try {
+    const raw = localStorage.getItem(WORKSPACE_KEY);
+    return raw === null ? true : raw === "true";
+  } catch {
+    return true;
+  }
+}
+function writeWorkspaceOpen(open: boolean) {
+  try { localStorage.setItem(WORKSPACE_KEY, String(open)); } catch { /* ignore */ }
+}
+
+/** The sections of the workspace panel, for "open the panel on this one". */
+export type WorkspaceSection = "plan" | "terminals" | "files" | "context";
+
 export type StreamPhase =
   | "thinking"
   | "answering"
@@ -621,6 +638,12 @@ interface AppStore {
   closeShortcutsHelp: () => void;
   setSidebarOpen: (open: boolean) => void;
   toggleSidebar: () => void;
+  /** The right-hand workspace panel: plan, terminals, files, context (0.17.9). */
+  workspaceOpen: boolean;
+  setWorkspaceOpen: (open: boolean) => void;
+  /** A section the panel should scroll to and expand; consumed once it has. */
+  workspaceFocus: WorkspaceSection | null;
+  focusWorkspace: (section: WorkspaceSection | null) => void;
   /** Signal the active composer to take keyboard focus. */
   focusComposer: () => void;
   /**
@@ -1109,6 +1132,8 @@ export const useApp = create<AppStore>((set, get) => ({
   defaultZoneId: null,
   shortcutsHelpOpen: false,
   sidebarOpen: readSidebarOpen(),
+  workspaceOpen: readWorkspaceOpen(),
+  workspaceFocus: null,
   focusComposerNonce: 0,
   projectsPanelOpen: false,
   projectsPanelInitId: null,
@@ -2147,6 +2172,18 @@ export const useApp = create<AppStore>((set, get) => ({
   setSidebarOpen: (open) => {
     writeSidebarOpen(open);
     set({ sidebarOpen: open });
+  },
+  setWorkspaceOpen: (open) => {
+    writeWorkspaceOpen(open);
+    set({ workspaceOpen: open });
+  },
+  focusWorkspace: (section) => {
+    if (section) {
+      writeWorkspaceOpen(true);
+      set({ workspaceOpen: true, workspaceFocus: section });
+    } else {
+      set({ workspaceFocus: null });
+    }
   },
   toggleSidebar: () => {
     const next = !get().sidebarOpen;

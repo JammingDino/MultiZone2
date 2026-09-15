@@ -280,6 +280,8 @@ fn build_router(state: ApiState) -> Router {
             get(h::read_terminal).delete(h::stop_terminal),
         )
         .route("/api/chats/:id/terminals/:terminalId/input", post(h::write_terminal))
+        .route("/api/chats/:id/working-dir", get(h::chat_working_dir))
+        .route("/api/fs/list", get(h::list_dir))
         .route("/api/chats/:id/fix-diagram", post(h::fix_diagram))
         .route("/api/chats/:id/usage", get(h::chat_usage))
         // Reversible work

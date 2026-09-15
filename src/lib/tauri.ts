@@ -5,6 +5,7 @@
 import { invoke, listen, type UnlistenFn } from "@/lib/remote/transport";
 import type { PdfReadPage } from "@/lib/pdf";
 import type {
+  DirEntry,
   TerminalInfo,
   TerminalRead,
   ThinkingProfile,
@@ -521,6 +522,11 @@ export const queueChatMessage = (
 /** Drop a queued message that hasn't reached the model yet. */
 export const cancelPendingMessage = (chatId: string, id: string) =>
   invoke<boolean>("cancel_pending_message", { chatId, messageId: id });
+
+// Workspace files (0.17.9).
+export const chatWorkingDir = (chatId: string) =>
+  invoke<string | null>("chat_working_dir", { chatId });
+export const listDir = (path: string) => invoke<DirEntry[]>("list_dir", { path });
 
 // Terminals (0.17.9): the chat's long-lived processes, shared with the agent.
 export const listTerminals = (chatId: string) =>

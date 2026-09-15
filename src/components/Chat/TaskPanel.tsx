@@ -40,9 +40,12 @@ export function TaskPanel({
   chatId,
   streaming,
   compact,
+  full,
 }: {
   chatId: string;
   streaming: boolean;
+  /** In the workspace panel, which scrolls as a whole: no height cap of its own. */
+  full?: boolean;
   /** Something else is competing for the space below the transcript — a plan
    *  waiting on the user. Progress is the less urgent of the two. */
   compact?: boolean;
@@ -111,7 +114,7 @@ export function TaskPanel({
        190px, which is not a conversation any more. The card is a decision and
        this is a progress readout, so this is the one that yields. */
     <div
-      className={`${compact ? "max-h-[16vh]" : "max-h-[32vh]"} overflow-y-auto overscroll-contain rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)]`}
+      className={`${full ? "" : compact ? "max-h-[16vh] overflow-y-auto overscroll-contain" : "max-h-[32vh] overflow-y-auto overscroll-contain"} rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)]`}
     >
       <PlanRows
         plan={root}

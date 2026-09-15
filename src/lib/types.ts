@@ -1756,6 +1756,16 @@ export interface TerminalRead {
   gap: boolean;
 }
 
+// ── Workspace files (0.17.9) ────────────────────────────────────────────────
+
+export interface DirEntry {
+  name: string;
+  path: string;
+  isDir: boolean;
+  size: number | null;
+  modifiedMs: number | null;
+}
+
 // ── Thinking (0.17.9) ───────────────────────────────────────────────────────
 
 export type ThinkingEffort = "low" | "medium" | "high";

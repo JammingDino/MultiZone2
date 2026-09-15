@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { downloadDir } from "@tauri-apps/api/path";
 import { Sidebar } from "./components/Sidebar/Sidebar";
 import { ChatPanel } from "./components/Chat/ChatPanel";
+import { WorkspacePanel } from "@/components/Workspace/WorkspacePanel";
 import { BackgroundEffect } from "./components/BackgroundEffect";
 import { BootSplash } from "./components/BootSplash";
 import { TitleBar } from "./components/TitleBar";
@@ -249,6 +250,9 @@ export default function App() {
               worse than a thin strip. */}
           <SidebarSlot />
           <ChatPanel />
+          {/* The work's state — plan, terminals, files, context — beside the
+              conversation rather than inside it (0.17.9). */}
+          <WorkspacePanel />
           {showOnboarding && <Onboarding />}
           {shortcutsHelpOpen && <ShortcutsHelpModal onClose={closeShortcutsHelp} />}
           {/* Above the panels but inside the content area, so the title bar

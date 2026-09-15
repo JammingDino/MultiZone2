@@ -17,7 +17,7 @@ import { PRIMARY_ACTION } from "@/lib/chrome";
  * Renders nothing when the queue is empty, which is every chat in the default
  * configuration — the panel exists only when there is something to review.
  */
-export function ReviewQueue({ chatId }: { chatId: string }) {
+export function ReviewQueue({ chatId, embedded }: { chatId: string; embedded?: boolean }) {
   const [edits, setEdits] = useState<StagedEdit[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -124,8 +124,8 @@ export function ReviewQueue({ chatId }: { chatId: string }) {
   const diverged = edits.filter((e) => e.diverged).length;
 
   return (
-    <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3">
-      <div className="mx-auto flex max-w-3xl flex-col gap-2">
+    <div className={embedded ? "" : "border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3"}>
+      <div className={embedded ? "flex flex-col gap-2" : "mx-auto flex max-w-3xl flex-col gap-2"}>
         <div className="flex items-center gap-2">
           <ClipboardCheck size={14} className="shrink-0 text-[var(--color-accent)]" />
           <span className="text-sm font-medium">

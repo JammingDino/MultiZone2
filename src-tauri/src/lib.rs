@@ -385,6 +385,8 @@ pub fn run() {
             commands::terminals::write_terminal,
             commands::terminals::stop_terminal,
             commands::terminals::start_terminal,
+            commands::workspace::chat_working_dir,
+            commands::workspace::list_dir,
             commands::messages::respond_tool_approval,
             pdf_bridge::resolve_pdf_read,
             commands::messages::update_message,

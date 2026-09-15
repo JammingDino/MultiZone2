@@ -19,6 +19,7 @@ pub mod knowledge;
 pub mod mirror;
 pub mod pending;
 pub mod terminals;
+pub mod workspace;
 pub mod plans;
 pub mod voice;
 pub mod tool_usage;

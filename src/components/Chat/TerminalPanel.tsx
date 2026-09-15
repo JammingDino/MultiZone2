@@ -23,7 +23,7 @@ import { usePersistentBool } from "@/lib/uiState";
  *
  * Renders nothing when the chat has no terminals, which is nearly always.
  */
-export function TerminalPanel({ chatId }: { chatId: string }) {
+export function TerminalPanel({ chatId, embedded }: { chatId: string; embedded?: boolean }) {
   const [terms, setTerms] = useState<TerminalInfo[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [collapsed, setCollapsed] = usePersistentBool("terminalPanel.collapsed", false);
@@ -86,24 +86,31 @@ export function TerminalPanel({ chatId }: { chatId: string }) {
     }
   };
 
-  if (terms.length === 0 && !starting) return null;
+  if (terms.length === 0 && !starting && !embedded) return null;
   const current = terms.find((t) => t.id === selected) ?? null;
   const live = terms.filter((t) => t.running).length;
+  // Inside the workspace panel the section header already names and folds
+  // this; the strip is tabs and the New button, and it is never collapsed.
+  const folded = collapsed && !embedded;
 
   return (
-    <div className="max-h-[40vh] overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] flex flex-col">
+    <div className={`${embedded ? "max-h-[50vh]" : "max-h-[40vh]"} overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] flex flex-col`}>
       <div className="flex items-center gap-2 px-2.5 py-1.5 text-xs">
-        <button
-          onClick={() => setCollapsed(!collapsed)}
-          className="rounded p-0.5 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-          aria-label={collapsed ? "Show terminals" : "Hide terminals"}
-        >
-          {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
-        </button>
-        <TerminalSquare size={12} className="text-[var(--color-text-muted)]" />
-        <span className="font-medium text-[var(--color-text)]">Terminals</span>
-        <span className="text-[var(--color-text-muted)]">
-          {live} running{terms.length > live ? ` · ${terms.length - live} exited` : ""}
+        {!embedded && (
+          <>
+            <button
+              onClick={() => setCollapsed(!collapsed)}
+              className="rounded p-0.5 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+              aria-label={collapsed ? "Show terminals" : "Hide terminals"}
+            >
+              {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+            </button>
+            <TerminalSquare size={12} className="text-[var(--color-text-muted)]" />
+            <span className="font-medium text-[var(--color-text)]">Terminals</span>
+          </>
+        )}
+        <span className="shrink-0 text-[var(--color-text-muted)]">
+          {terms.length === 0 ? "none open" : `${live} running${terms.length > live ? ` · ${terms.length - live} exited` : ""}`}
         </span>
         <div className="ml-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
           {terms.map((t) => (
@@ -142,7 +149,7 @@ export function TerminalPanel({ chatId }: { chatId: string }) {
         </button>
       </div>
 
-      {!collapsed && starting && (
+      {!folded && starting && (
         <form
           className="flex items-center gap-1 border-t border-[var(--color-border)] px-2.5 py-1.5 text-xs"
           onSubmit={(e) => {
@@ -175,7 +182,7 @@ export function TerminalPanel({ chatId }: { chatId: string }) {
         <div className="border-t border-[var(--color-border)] px-2.5 py-1 text-xs text-red-500">{error}</div>
       )}
 
-      {!collapsed && current && (
+      {!folded && current && (
         <TerminalView key={current.id} chatId={chatId} term={current} onStop={() => stop(current.id)} onChanged={refresh} />
       )}
     </div>

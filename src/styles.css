@@ -19,6 +19,12 @@
   --color-accent: #4f9cf9;
   --color-accent-hover: #6aaffa;
   --color-danger: #ef4444;
+  /* Categorical series for the workspace's bars (0.17.9): fixed order, one
+     per entity, stepped for the dark surface. Light steps below. */
+  --viz-1: #3987e5;
+  --viz-2: #d95926;
+  --viz-3: #199e70;
+  --viz-4: #c98500;
 }
 
 html.light {
@@ -32,6 +38,10 @@ html.light {
   --color-accent: #2f80ed;
   --color-accent-hover: #1d6fdd;
   --color-danger: #d63031;
+  --viz-1: #2a78d6;
+  --viz-2: #eb6834;
+  --viz-3: #1baf7a;
+  --viz-4: #eda100;
 }
 
 html,

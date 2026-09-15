@@ -7,9 +7,9 @@ import { MessageThread } from "./MessageThread";
 import { InputBar, type InputBarHandle } from "./InputBar";
 import { ZonePicker } from "./ZonePicker";
 import { ChatMenu } from "./ChatMenu";
+import { WorkspaceToggle } from "@/components/Workspace/WorkspaceToggle";
 import { ConversationIndicator } from "./ConversationIndicator";
 import { ContextMeter } from "./ContextMeter";
-import { ReviewQueue } from "./ReviewQueue";
 import { DiffView } from "@/components/common/DiffView";
 import {
   IntentVisual,
@@ -24,15 +24,11 @@ import { ZoneLibrary } from "@/components/Zones/ZoneLibrary";
 import { ProjectsPanel } from "@/components/Projects/ProjectsPanel";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import { AskUserCard } from "@/components/Message/StepBlock";
-import { PlanReview } from "@/components/Chat/PlanReview";
-import { TaskPanel } from "@/components/Chat/TaskPanel";
-import { TerminalPanel } from "@/components/Chat/TerminalPanel";
 import { ReplayView } from "@/components/Chat/ReplayView";
 import { resolveBaseModel } from "@/lib/baseZone";
 import { CHROME_ACTIVE, CHROME_OUTLINED, CHROME_QUIET, HEADER_ICON, PRIMARY_ACTION } from "@/lib/chrome";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 import { Popover } from "@/components/common/Popover";
-import { PLAN_APPROVED, systemTurnParts } from "@/lib/systemTurn";
 import { usePersistentBool } from "@/lib/uiState";
 import type { FileDiff, StreamEnvelope } from "@/lib/types";
 
@@ -186,9 +182,6 @@ export function ChatPanel() {
   // still the thing standing between you and the work happening.
   const pendingPlan = useApp((s) => (activeChatId ? s.pendingPlanByChat[activeChatId] : null));
   const loadPendingPlan = useApp((s) => s.loadPendingPlan);
-  const approvePlan = useApp((s) => s.approvePlan);
-  const rejectPlan = useApp((s) => s.rejectPlan);
-  const [planBusy, setPlanBusy] = useState(false);
   // Replay lives in the store because the sidebar's right-click menu can open
   // it for a chat that isn't the one on screen (#13).
   const replayChatId = useApp((s) => s.replayChatId);
@@ -435,6 +428,7 @@ export function ChatPanel() {
               tagCount={(tagsByChat[activeChat.id] ?? []).length}
             />
             <ChatMenu chatId={activeChat.id} />
+            <WorkspaceToggle />
             <PerspectiveZonePicker
               chatId={activeChat.id}
               primaryZoneId={activeChat.zoneId}
@@ -515,77 +509,10 @@ export function ChatPanel() {
               </div>
             </div>
           )}
-          {/* Review queue (0.10.2): staged writes waiting to be read and
-              applied. Renders nothing when nothing is queued, which is every
-              chat unless review mode is on. */}
-          {/* The approved plan while it runs — the only view of what is *about*
-              to happen, and where a step can be struck or the run stopped
-              without cancelling the turn (0.12.1).
-
-              `shrink-0` is load-bearing (0.14.6). Without it this row is a flex
-              item with `min-height: auto` and visible overflow, so a long task
-              list grew without limit: it pushed the transcript up out of the
-              column, put a second scrollbar on the window, and — because the
-              region was not a scroll container itself and the thread's is in a
-              sibling subtree — swallowed the wheel entirely. The panel bounds
-              and scrolls itself; this keeps the flexbox from re-deciding that. */}
-          <div className="shrink-0 px-4">
-            <div className="mx-auto max-w-3xl">
-              <TaskPanel
-                chatId={activeChat.id}
-                streaming={isStreaming}
-                compact={!!pendingPlan && pendingApprovals.length === 0}
-              />
-            </div>
-          </div>
-          {/* The chat's terminals, followed live (0.17.9). Empty — and so
-              absent — for any chat the agent has not started a process in. */}
-          <div className="shrink-0 px-4 pt-2">
-            <div className="mx-auto max-w-3xl">
-              <TerminalPanel chatId={activeChat.id} />
-            </div>
-          </div>
-          <ReviewQueue chatId={activeChat.id} />
-          {/* A filed plan sits *above* the composer rather than in place of it
-              (0.14.6). It used to replace it, which meant the only way to
-              disagree with a plan was the "Keep planning" button — a rejection
-              with no reason attached, so the model's next attempt was a guess.
-              The obvious answer, typing what is wrong, was the one the layout
-              forbade. Approvals and `ask_user` still take the row: those are
-              questions with a fixed set of answers, and there is nothing to
-              type. */}
-          {pendingPlan && pendingApprovals.length === 0 && (
-            <div className="shrink-0 border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 pb-2 pt-3">
-              <div className="mx-auto max-w-3xl">
-                <PlanReview
-                  plan={pendingPlan}
-                  busy={planBusy}
-                  onApprove={async (steps, edited) => {
-                    setPlanBusy(true);
-                    try {
-                      await approvePlan(activeChat.id, pendingPlan.id, steps, edited);
-                      // Approval is a decision, not a message: the turn that
-                      // executes it starts here rather than waiting for the
-                      // user to also type "go". Sent as a system turn so the
-                      // model is told to proceed without the transcript
-                      // claiming the user typed the sentence.
-                      await api.sendMessage(activeChat.id, systemTurnParts(PLAN_APPROVED));
-                    } finally {
-                      setPlanBusy(false);
-                    }
-                  }}
-                  onReject={async () => {
-                    setPlanBusy(true);
-                    try {
-                      await rejectPlan(activeChat.id, pendingPlan.id);
-                    } finally {
-                      setPlanBusy(false);
-                    }
-                  }}
-                />
-              </div>
-            </div>
-          )}
+          {/* The plan, task list, terminals and review queue that used to
+              stack here live in the workspace panel on the right (0.17.9);
+              only what blocks the turn — approvals, ask_user — stays with
+              the composer. */}
           {pendingApprovals.length > 0 ? (
             <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3">
               <div className="mx-auto flex max-w-3xl flex-col gap-2">

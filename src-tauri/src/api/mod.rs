@@ -273,6 +273,12 @@ fn build_router(state: ApiState) -> Router {
         .route("/api/chats/:id/approval", post(h::respond_approval))
         .route("/api/chats/:id/queue", post(h::queue_message))
         .route("/api/chats/:id/queue/:messageId", axum::routing::delete(h::cancel_queued))
+        .route("/api/chats/:id/terminals", get(h::list_terminals).post(h::start_terminal))
+        .route(
+            "/api/chats/:id/terminals/:terminalId",
+            get(h::read_terminal).delete(h::stop_terminal),
+        )
+        .route("/api/chats/:id/terminals/:terminalId/input", post(h::write_terminal))
         .route("/api/chats/:id/fix-diagram", post(h::fix_diagram))
         .route("/api/chats/:id/usage", get(h::chat_usage))
         // Reversible work

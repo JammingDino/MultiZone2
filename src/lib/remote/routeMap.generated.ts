@@ -94,6 +94,7 @@ export const ROUTE_MAP: Record<string, RouteBinding> = {
   list_skills: { method: "GET", path: "/api/skills" },
   list_staged_edits: { method: "GET", path: "/api/chats/:id/staged-edits" },
   list_tags: { method: "GET", path: "/api/tags" },
+  list_terminals: { method: "GET", path: "/api/chats/:id/terminals" },
   list_tool_functions: { method: "GET", path: "/api/tools" },
   list_zones: { method: "GET", path: "/api/zones" },
   mirror_all_chats: { method: "POST", path: "/api/mirror", unwrap: "mirrored" },
@@ -105,6 +106,7 @@ export const ROUTE_MAP: Record<string, RouteBinding> = {
   prune_checkpoints: { method: "POST", path: "/api/checkpoints/prune" },
   queue_chat_message: { method: "POST", path: "/api/chats/:id/queue" },
   read_mcp_resource: { method: "POST", path: "/api/mcp/servers/:id/resources/read", unwrap: "text" },
+  read_terminal: { method: "GET", path: "/api/chats/:id/terminals/:terminalId" },
   regenerate_participant: { method: "POST", path: "/api/chats/:id/regenerate-participant" },
   regenerate_response: { method: "POST", path: "/api/chats/:id/regenerate" },
   reject_plan: { method: "POST", path: "/api/plans/:id/reject" },
@@ -144,6 +146,8 @@ export const ROUTE_MAP: Record<string, RouteBinding> = {
   set_setting: { method: "PUT", path: "/api/settings/:key" },
   set_skill_enabled: { method: "POST", path: "/api/skills/:id/enabled" },
   skill_packs_root: { method: "GET", path: "/api/skill-packs/root", unwrap: "root" },
+  start_terminal: { method: "POST", path: "/api/chats/:id/terminals" },
+  stop_terminal: { method: "DELETE", path: "/api/chats/:id/terminals/:terminalId" },
   transcribe_audio_upload: { method: "POST", path: "/api/transcribe" },
   update_message: { method: "PATCH", path: "/api/chats/:id/messages/:messageId" },
   update_plan_steps: { method: "POST", path: "/api/plans/:id/steps" },
@@ -156,6 +160,7 @@ export const ROUTE_MAP: Record<string, RouteBinding> = {
   upsert_skill: { method: "POST", path: "/api/skills" },
   upsert_tag: { method: "POST", path: "/api/tags" },
   upsert_zone: { method: "POST", path: "/api/zones" },
+  write_terminal: { method: "POST", path: "/api/chats/:id/terminals/:terminalId/input" },
 };
 
 /**

@@ -133,6 +133,11 @@ pub const ROUTES: &[RouteDef] = &[
     r("POST", "/api/chats/:id/approval", "Answer a pending tool approval; `hunks` narrows a file change"),
     r("POST", "/api/chats/:id/queue", "Queue a message to reach the model at the next step boundary"),
     r("DELETE", "/api/chats/:id/queue/:messageId", "Drop a queued message"),
+    r("GET", "/api/chats/:id/terminals", "The chat's long-lived terminals (the set its agent sees)"),
+    r("POST", "/api/chats/:id/terminals", "Open a terminal in the chat's session; `command` optional"),
+    r("GET", "/api/chats/:id/terminals/:terminalId", "Read a terminal; with `cursor` holds until new output, exit, or `timeoutMs`"),
+    r("POST", "/api/chats/:id/terminals/:terminalId/input", "Type into a terminal; `submit: false` sends no newline"),
+    r("DELETE", "/api/chats/:id/terminals/:terminalId", "Stop a terminal and everything it started"),
     r("POST", "/api/chats/:id/fix-diagram", "Ask the model to repair a failed diagram"),
     r("GET", "/api/chats/:id/usage", "Estimated context carried by this chat's session"),
 
@@ -342,6 +347,11 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("messages::list_tool_functions", Route("GET /api/tools")),
     ("pending::queue_chat_message", Route("POST /api/chats/:id/queue")),
     ("pending::cancel_pending_message", Route("DELETE /api/chats/:id/queue/:messageId -> removed")),
+    ("terminals::list_terminals", Route("GET /api/chats/:id/terminals")),
+    ("terminals::start_terminal", Route("POST /api/chats/:id/terminals")),
+    ("terminals::read_terminal", Route("GET /api/chats/:id/terminals/:terminalId")),
+    ("terminals::write_terminal", Route("POST /api/chats/:id/terminals/:terminalId/input")),
+    ("terminals::stop_terminal", Route("DELETE /api/chats/:id/terminals/:terminalId")),
     ("diagram::fix_diagram", Route("POST /api/chats/:id/fix-diagram")),
 
     ("checkpoints::list_checkpoints", Route("GET /api/chats/:id/checkpoints")),
@@ -956,6 +966,70 @@ pub async fn cancel_queued(
 ) -> ApiResult<Response> {
     let removed = commands::pending::cancel_pending_message(chat_id, message_id).await?;
     Ok(Json(json!({ "removed": removed })).into_response())
+}
+
+// ── Terminals (0.17.9) ───────────────────────────────────────────────────────
+
+pub async fn list_terminals(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+) -> ApiResult<Response> {
+    let out = commands::terminals::list_terminals(app_state(&st), id).await?;
+    Ok(Json(out).into_response())
+}
+
+pub async fn start_terminal(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> ApiResult<Response> {
+    let out = commands::terminals::start_terminal(
+        app_state(&st),
+        id,
+        s(&body, "command"),
+        s(&body, "shell"),
+        s(&body, "cwd"),
+        s(&body, "name"),
+    )
+    .await?;
+    Ok(Json(out).into_response())
+}
+
+pub async fn read_terminal(
+    State(st): State<ApiState>,
+    Path((chat_id, terminal_id)): Path<(String, String)>,
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> ApiResult<Response> {
+    let cursor = q.get("cursor").and_then(|v| v.parse::<u64>().ok());
+    let timeout_ms = q.get("timeoutMs").and_then(|v| v.parse::<u64>().ok());
+    let out =
+        commands::terminals::read_terminal(app_state(&st), chat_id, terminal_id, cursor, timeout_ms)
+            .await?;
+    Ok(Json(out).into_response())
+}
+
+pub async fn write_terminal(
+    State(st): State<ApiState>,
+    Path((chat_id, terminal_id)): Path<(String, String)>,
+    Json(body): Json<Value>,
+) -> ApiResult<StatusCode> {
+    commands::terminals::write_terminal(
+        app_state(&st),
+        chat_id,
+        terminal_id,
+        required(&body, "input")?,
+        b(&body, "submit"),
+    )
+    .await?;
+    Ok(NO_CONTENT)
+}
+
+pub async fn stop_terminal(
+    State(st): State<ApiState>,
+    Path((chat_id, terminal_id)): Path<(String, String)>,
+) -> ApiResult<StatusCode> {
+    commands::terminals::stop_terminal(app_state(&st), chat_id, terminal_id).await?;
+    Ok(NO_CONTENT)
 }
 
 pub async fn fix_diagram(

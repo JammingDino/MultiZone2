@@ -396,7 +396,14 @@ export function ChatPanel() {
 
   return (
     <main
-      className="relative flex h-full flex-1 flex-col"
+      /* `min-w-0` is what keeps a narrow window usable (0.17.9). A flex item
+         defaults to min-width:auto — its content's width — so the header's
+         run of controls, which cannot shrink, used to make the whole panel
+         wider than the window. Nothing overflowed visibly; the panel simply
+         extended off the right edge, taking the composer's send button and
+         every header control with it. Zero lets the panel be the window's
+         width and the header sort out its own overflow below. */
+      className="relative flex h-full min-w-0 flex-1 flex-col"
       onDragEnter={onDragEnter}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
@@ -405,7 +412,9 @@ export function ChatPanel() {
       {activeChat ? (
         <div key={activeChat.id} className="mz-view-in flex min-h-0 flex-1 flex-col">
           <header className="mz-drop-in flex min-h-12 flex-wrap items-center gap-2 border-b border-[var(--color-border)] px-3 py-1.5 sm:flex-nowrap sm:gap-3 sm:px-4">
-            <div className="min-w-0 flex-1 truncate text-sm font-medium">{activeChat.title}</div>
+            {/* A floor on the title so the controls cannot squeeze it to
+                nothing, and no ceiling: it takes whatever they leave. */}
+            <div className="min-w-[5rem] flex-1 truncate text-sm font-medium" title={activeChat.title}>{activeChat.title}</div>
             <ConversationIndicator chatId={activeChat.id} />
             <PerspectiveZoneChips
               zones={(chatZonesByChat[activeChat.id] ?? [])
@@ -413,7 +422,11 @@ export function ChatPanel() {
                 .filter((z): z is Zone => !!z)}
               onOpen={(zoneId) => openZoneEditor(zoneId)}
             />
-            <div className="flex shrink-0 items-center gap-2">
+            {/* The controls scroll sideways when there is not room for them
+                all, rather than pushing the panel past the window. Each stays
+                its natural size (`shrink-0` on the children) so nothing
+                collapses into an unreadable sliver. */}
+            <div className="hide-scrollbar flex min-w-0 shrink items-center gap-2 overflow-x-auto [&>*]:shrink-0">
             <ContextMeter chatId={activeChat.id} />
             <MetaStripToggle
               open={metaOpen}

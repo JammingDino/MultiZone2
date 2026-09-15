@@ -991,7 +991,8 @@ pub async fn generate_title(
     };
     let model = req.model.clone();
 
-    let client = LlmClient::new(&state.http, &provider.base_url, provider.api_key.as_deref());
+    let client = LlmClient::new(&state.http, &provider.base_url, provider.api_key.as_deref())
+        .for_chat(&chat_id);
     let resp = request_title(&client, req).await?;
     crate::llm::tokens::record_request(&state.db, &chat_id, &model, &measure, resp.usage.as_ref())
         .await;

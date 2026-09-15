@@ -1248,7 +1248,8 @@ async fn route_zone_id(
         crate::llm::tokens::measure_request(&req, cpt)
     };
 
-    let client = LlmClient::new(http, &provider.base_url, provider.api_key.as_deref());
+    let client =
+        LlmClient::new(http, &provider.base_url, provider.api_key.as_deref()).for_chat(chat_id);
     let resp = client.chat_completion(&req).await?;
     crate::llm::tokens::record_request(db, chat_id, &req.model, &measure, resp.usage.as_ref()).await;
     let raw = resp
@@ -1706,8 +1707,8 @@ async fn run_participant_turn(
         }
     }
 
-    let mut client =
-        LlmClient::new(&ctx.http, &provider.base_url, provider.api_key.as_deref());
+    let mut client = LlmClient::new(&ctx.http, &provider.base_url, provider.api_key.as_deref())
+        .for_chat(chat_id);
 
     // Agentic loop. The budget is a user setting rather than a constant, and its
     // last two steps are spent finishing: one warned step, then a final step with
@@ -1994,7 +1995,8 @@ async fn run_participant_turn(
                     .unwrap_or(Value::Object(Default::default()));
                 inject_global_tool_config(&mut zone_config, &ctx.db, &zone.model).await;
                 client =
-                    LlmClient::new(&ctx.http, &provider.base_url, provider.api_key.as_deref());
+                    LlmClient::new(&ctx.http, &provider.base_url, provider.api_key.as_deref())
+                        .for_chat(chat_id);
                 sink.emit_event(
                     "chat-zone-updated",
                     serde_json::json!({ "chatId": chat_id, "zoneId": zone.id }),
@@ -2381,7 +2383,9 @@ async fn run_participant_turn(
                     content: Some(api_content),
                     tool_calls: None,
                     tool_call_id: Some(tc.id.clone()),
-                    name: Some(tc.function.name.clone()),
+                    // No `name`: the current spec keys a tool result by `tool_call_id` alone,
+                    // and strict gateways (OpenCode Go) reject the legacy field outright.
+                    name: None,
                 });
                 continue;
             }
@@ -2457,7 +2461,9 @@ async fn run_participant_turn(
                     content: Some(api_content),
                     tool_calls: None,
                     tool_call_id: Some(tc.id.clone()),
-                    name: Some(tc.function.name.clone()),
+                    // No `name`: the current spec keys a tool result by `tool_call_id` alone,
+                    // and strict gateways (OpenCode Go) reject the legacy field outright.
+                    name: None,
                 });
                 continue;
             }
@@ -2719,7 +2725,9 @@ async fn run_participant_turn(
                 content: Some(api_content),
                 tool_calls: None,
                 tool_call_id: Some(tc.id.clone()),
-                name: Some(tc.function.name.clone()),
+                // No `name`: the current spec keys a tool result by `tool_call_id` alone,
+                // and strict gateways (OpenCode Go) reject the legacy field outright.
+                name: None,
             });
 
             // Path-triggered rules (0.14.5). A directory deeper in the tree can
@@ -2903,7 +2911,8 @@ async fn run_participant_turn(
                             &ctx.http,
                             &provider.base_url,
                             provider.api_key.as_deref(),
-                        );
+                        )
+                        .for_chat(chat_id);
                         sink.emit_event(
                             "chat-zone-updated",
                             serde_json::json!({ "chatId": chat_id, "zoneId": new_zone_id }),

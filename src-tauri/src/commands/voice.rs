@@ -615,7 +615,8 @@ Respond with ONLY the spoken summary — no preamble, no markdown.\n\nResponse:\
         stream: false,
     };
 
-    let client = LlmClient::new(&state.http, &provider.base_url, provider.api_key.as_deref());
+    let client = LlmClient::new(&state.http, &provider.base_url, provider.api_key.as_deref())
+        .for_chat(&chat_id);
     let resp = client.chat_completion(&req).await?;
     let summary = resp
         .choices

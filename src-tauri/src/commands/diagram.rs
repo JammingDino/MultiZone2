@@ -82,7 +82,8 @@ pub async fn fix_diagram(
         stream: false,
     };
 
-    let client = LlmClient::new(&state.http, &provider.base_url, provider.api_key.as_deref());
+    let client = LlmClient::new(&state.http, &provider.base_url, provider.api_key.as_deref())
+        .for_chat(&chat_id);
     let resp = client.chat_completion(&req).await?;
     let choice = resp
         .choices

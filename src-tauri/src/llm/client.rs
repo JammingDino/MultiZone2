@@ -137,6 +137,21 @@ pub struct LlmClient<'a> {
     pub http: &'a Client,
     pub base_url: String,
     pub api_key: Option<String>,
+    /// The conversation this client speaks for, sent as `x-opencode-session`.
+    ///
+    /// opencode's Go gateway refuses a request without it (400 MissingSessionID)
+    /// because it routes and caches per conversation. Other OpenAI-compatible
+    /// providers ignore an unknown header, so it goes out unconditionally rather
+    /// than being guessed at from the base URL.
+    pub session: String,
+}
+
+/// The fallback session id for work that belongs to no chat — listing models,
+/// embedding a document. Stable for the life of the process, which is the most
+/// a sessionless request can honestly claim.
+fn process_session() -> &'static str {
+    static ID: OnceLock<String> = OnceLock::new();
+    ID.get_or_init(|| format!("multizone-{}", uuid::Uuid::new_v4()))
 }
 
 impl<'a> LlmClient<'a> {
@@ -145,7 +160,18 @@ impl<'a> LlmClient<'a> {
             http,
             base_url: base_url.trim_end_matches('/').to_string(),
             api_key: api_key.map(|s| s.to_string()),
+            session: process_session().to_string(),
         }
+    }
+
+    /// Tie this client to a chat, so every request it sends carries that chat's
+    /// id as its session. Chat ids are already stable and unique per
+    /// conversation, which is exactly what the header wants.
+    pub fn for_chat(mut self, chat_id: &str) -> Self {
+        if !chat_id.is_empty() {
+            self.session = chat_id.to_string();
+        }
+        self
     }
 
     fn url(&self, path: &str) -> String {
@@ -153,6 +179,7 @@ impl<'a> LlmClient<'a> {
     }
 
     fn auth(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        let req = req.header("x-opencode-session", &self.session);
         if let Some(key) = &self.api_key {
             if !key.is_empty() {
                 return req.bearer_auth(key);

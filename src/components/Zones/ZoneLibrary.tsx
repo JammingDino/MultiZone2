@@ -46,6 +46,7 @@ function driftsFromLibrary(entry: LibraryEntry, zone: Zone): boolean {
     parseTools(zone.toolsEnabled).join(",") !== parseTools(entry.toolsEnabled).join(",") ||
     zone.temperature !== entry.temperature ||
     zone.thinkingEnabled !== entry.thinkingEnabled ||
+    (zone.thinkingEffort ?? "medium") !== (entry.thinkingEffort ?? "medium") ||
     zone.isLeader !== entry.isLeader
   );
 }
@@ -273,6 +274,7 @@ export function ZoneLibrary() {
         toolsEnabled: e.toolsEnabled,
         toolConfig: e.toolConfig,
         thinkingEnabled: e.thinkingEnabled,
+        thinkingEffort: e.thinkingEffort ?? "medium",
         includeThinkingInContext: e.includeThinkingInContext,
         isLeader: e.isLeader,
         icon: e.icon,

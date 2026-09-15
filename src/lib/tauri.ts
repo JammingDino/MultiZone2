@@ -7,6 +7,7 @@ import type { PdfReadPage } from "@/lib/pdf";
 import type {
   TerminalInfo,
   TerminalRead,
+  ThinkingProfile,
   Attachment,
   Chat,
   ChatTagEntry,
@@ -79,6 +80,9 @@ export const listZones = () => invoke<Zone[]>("list_zones");
 export const upsertZone = (zone: Partial<Zone> & { name: string; model: string }) =>
   invoke<Zone>("upsert_zone", { zone });
 export const deleteZone = (id: string) => invoke<void>("delete_zone", { id });
+/** What the thinking switch will do for `model` on `providerId` (0.17.9). */
+export const thinkingProfile = (providerId: string | null, model: string) =>
+  invoke<ThinkingProfile>("thinking_profile", { providerId, model });
 
 // Chats
 // MCP resources and prompts (0.15.3). The list calls answer with an empty array

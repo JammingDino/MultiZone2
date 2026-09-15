@@ -264,6 +264,7 @@ pub fn run() {
             commands::zones::list_zones,
             commands::zones::upsert_zone,
             commands::zones::delete_zone,
+            commands::zones::thinking_profile,
             commands::chats::list_chats,
             commands::search::search_messages,
             commands::runs::list_saved_runs,

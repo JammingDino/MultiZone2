@@ -23,6 +23,9 @@ export interface Zone {
   /** JSON-encoded config object */
   toolConfig: string;
   thinkingEnabled: boolean;
+  /** How hard to think when thinking is on. What that becomes on the wire is
+   * decided per model by the backend (0.17.9) — see `ThinkingProfile`. */
+  thinkingEffort: ThinkingEffort;
   /** When false (the default), `<think>…</think>` blocks inside historical
    * assistant messages are stripped before being fed back to the model on
    * subsequent turns. Turn on if the model relies on its own chain-of-thought
@@ -329,6 +332,8 @@ export interface LibraryEntry {
   /** JSON object string of per-tool config. */
   toolConfig: string;
   thinkingEnabled: boolean;
+  /** Missing in older library files; medium. */
+  thinkingEffort?: ThinkingEffort;
   includeThinkingInContext: boolean;
   /** Response Leader preset — installs as a sub-agent-coordinating zone. */
   isLeader: boolean;
@@ -1749,4 +1754,22 @@ export interface TerminalRead {
   running: boolean;
   exitCode: number | null;
   gap: boolean;
+}
+
+// ── Thinking (0.17.9) ───────────────────────────────────────────────────────
+
+export type ThinkingEffort = "low" | "medium" | "high";
+
+/**
+ * How one model is asked to think, from `thinking_profile`. `control` says
+ * which knob exists: `effort` (reasoning_effort with `levels`), `toggle` (a
+ * local server's enable_thinking), `inline` (Gemma's tags, no parameter),
+ * `always` (reasons regardless) or `none` (no reasoning mode at all).
+ */
+export interface ThinkingProfile {
+  family: string;
+  control: "effort" | "toggle" | "inline" | "always" | "none";
+  levels: string[];
+  canDisable: boolean;
+  note: string;
 }

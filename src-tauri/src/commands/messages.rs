@@ -1093,6 +1093,7 @@ fn simple_zone(provider: &Provider) -> AppResult<Zone> {
             .unwrap_or_else(|_| "[]".to_string()),
         tool_config: "{}".to_string(),
         thinking_enabled: false,
+        thinking_effort: "medium".to_string(),
         include_thinking_in_context: false,
         icon: None,
         accent_color: None,
@@ -1937,15 +1938,20 @@ async fn run_participant_turn(
             },
         );
 
-        // Gemma models embed thinking in `<think>…</think>` tags inside the
-        // normal content field; they don't support the reasoning_effort param.
-        let is_gemma = zone.model.to_lowercase().contains("gemma");
-        let reasoning_effort = if zone.thinking_enabled && !is_gemma {
-            Some("medium".to_string())
-        } else {
-            None
-        };
-        let parse_inline_think = zone.thinking_enabled && is_gemma;
+        // How this model is asked to think — or told not to — is its own
+        // business (0.17.9): `reasoning_effort` for OpenAI-style reasoning
+        // models and hosted gateways, a chat-template toggle for local Qwen and
+        // DeepSeek servers, nothing at all for Gemma (inline tags) or gpt-4o
+        // (no reasoning to switch on). See `llm::thinking::profile`.
+        let thinking = crate::llm::thinking::controls(
+            &zone.model,
+            &provider.base_url,
+            zone.thinking_enabled,
+            &zone.thinking_effort,
+        );
+        let reasoning_effort = thinking.reasoning_effort;
+        let chat_template_kwargs = thinking.chat_template_kwargs;
+        let parse_inline_think = thinking.parse_inline;
 
         let req = ChatRequest {
             model: zone.model.clone(),
@@ -1975,7 +1981,7 @@ async fn run_participant_turn(
             },
             tool_choice: None,
             reasoning_effort,
-            chat_template_kwargs: None,
+            chat_template_kwargs,
             // Ask the provider for its own token counts. Exact where ours are
             // estimated, and the only way to see prompt cache hits — which on a
             // long agentic turn are most of what gets billed.
@@ -4435,6 +4441,7 @@ mod tests {
             tools_enabled: r#"["compact","read_file"]"#.into(),
             tool_config: "{}".into(),
             thinking_enabled: false,
+            thinking_effort: "medium".into(),
             include_thinking_in_context: false,
             icon: None,
             accent_color: None,

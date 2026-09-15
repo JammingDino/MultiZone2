@@ -70,6 +70,7 @@ pub const ROUTES: &[RouteDef] = &[
     r("GET", "/api/providers/:id/models", "Models the provider advertises"),
     r("GET", "/api/zones", "All zones"),
     r("POST", "/api/zones", "Create or update a zone"),
+    r("GET", "/api/thinking-profile", "How `model` (on `providerId`) is asked to think: control, levels, a note"),
     r("DELETE", "/api/zones/:id", "Delete a zone"),
     r("GET", "/api/zone-library", "Zone library entries, curated and saved"),
     r("POST", "/api/zone-library", "Create or update a library entry"),
@@ -284,6 +285,7 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("zones::list_zones", Route("GET /api/zones")),
     ("zones::upsert_zone", Route("POST /api/zones")),
     ("zones::delete_zone", Route("DELETE /api/zones/:id")),
+    ("zones::thinking_profile", Route("GET /api/thinking-profile")),
     ("library::list_library_entries", Route("GET /api/zone-library")),
     ("library::upsert_library_entry", Route("POST /api/zone-library")),
     ("library::delete_library_entry", Route("DELETE /api/zone-library/:id")),
@@ -555,6 +557,17 @@ pub async fn delete_zone(
 ) -> ApiResult<StatusCode> {
     commands::zones::delete_zone(app_state(&st), id).await?;
     Ok(NO_CONTENT)
+}
+
+pub async fn thinking_profile(
+    State(st): State<ApiState>,
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> ApiResult<Response> {
+    let model = q.get("model").cloned().unwrap_or_default();
+    let out =
+        commands::zones::thinking_profile(app_state(&st), q.get("providerId").cloned(), model)
+            .await?;
+    Ok(Json(out).into_response())
 }
 
 pub async fn list_library(State(st): State<ApiState>) -> ApiResult<Response> {

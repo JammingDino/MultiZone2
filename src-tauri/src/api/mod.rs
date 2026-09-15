@@ -216,6 +216,7 @@ fn build_router(state: ApiState) -> Router {
         .route("/api/providers/:id", axum::routing::delete(h::delete_provider))
         .route("/api/providers/:id/models", get(h::provider_models))
         .route("/api/zones", get(list_zones).post(h::upsert_zone))
+        .route("/api/thinking-profile", get(h::thinking_profile))
         .route("/api/zones/:id", axum::routing::delete(h::delete_zone))
         .route("/api/zone-library", get(h::list_library).post(h::upsert_library))
         .route("/api/zone-library/:id", axum::routing::delete(h::delete_library))

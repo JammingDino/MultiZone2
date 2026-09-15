@@ -148,6 +148,7 @@ export const ROUTE_MAP: Record<string, RouteBinding> = {
   skill_packs_root: { method: "GET", path: "/api/skill-packs/root", unwrap: "root" },
   start_terminal: { method: "POST", path: "/api/chats/:id/terminals" },
   stop_terminal: { method: "DELETE", path: "/api/chats/:id/terminals/:terminalId" },
+  thinking_profile: { method: "GET", path: "/api/thinking-profile" },
   transcribe_audio_upload: { method: "POST", path: "/api/transcribe" },
   update_message: { method: "PATCH", path: "/api/chats/:id/messages/:messageId" },
   update_plan_steps: { method: "POST", path: "/api/plans/:id/steps" },

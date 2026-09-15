@@ -5,6 +5,15 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+/// (base URL, model) pairs that rejected the thinking fields
+/// (`reasoning_effort` / `chat_template_kwargs`). The profile in
+/// `llm::thinking` is a guess from the model's name; a provider that says no
+/// is believed, once, and not asked again.
+fn no_thinking_controls() -> &'static Mutex<HashSet<(String, String)>> {
+    static SET: OnceLock<Mutex<HashSet<(String, String)>>> = OnceLock::new();
+    SET.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
 /// Base URLs that rejected `stream_options`. Asking for token counts is not
 /// worth a failed turn, but neither is paying a wasted round trip on every
 /// single request to a provider that has already said no once.
@@ -308,39 +317,69 @@ impl<'a> LlmClient<'a> {
         }
     }
 
-    /// One attempt, including the `stream_options` probe and its fallback.
+    /// One attempt, including the optional-field probes and their fallbacks.
+    ///
+    /// Two optional shapes ride on a request — `stream_options` and the
+    /// thinking fields (0.17.9) — and a provider that rejects one says so with
+    /// the same 400 it uses for the other. When the body names a field, that
+    /// one is blamed; otherwise `stream_options` is dropped first (the more
+    /// commonly refused of the two), then the thinking fields. Each refusal is
+    /// remembered so the wasted round trip happens once per provider (and, for
+    /// thinking, per model: the same gateway serves models that do and do not
+    /// take `reasoning_effort`).
     async fn chat_stream_once(
         &self,
         req: &ChatRequest,
     ) -> Result<reqwest::Response, (Option<reqwest::StatusCode>, Option<Duration>, AppError)> {
-        let refused = no_stream_options()
-            .lock()
-            .map(|s| s.contains(&self.base_url))
-            .unwrap_or(false);
+        let key = (self.base_url.clone(), req.model.clone());
+        let mut req = req.clone();
+        if no_stream_options().lock().map(|s| s.contains(&self.base_url)).unwrap_or(false) {
+            req.stream_options = None;
+        }
+        if no_thinking_controls().lock().map(|s| s.contains(&key)).unwrap_or(false) {
+            req.reasoning_effort = None;
+            req.chat_template_kwargs = None;
+        }
 
-        if !refused && req.stream_options.is_some() {
-            match self.post_stream(req).await {
+        loop {
+            let has_usage = req.stream_options.is_some();
+            let has_thinking = req.reasoning_effort.is_some() || req.chat_template_kwargs.is_some();
+            match self.post_stream(&req).await {
                 Ok(res) => return Ok(res),
                 // Only an "I don't understand this request" answer is evidence
-                // about the field. A bad key, a rate limit or a provider outage
-                // says nothing about `stream_options`, and retrying those would
-                // double every failure and then blame the wrong thing.
+                // about a field. A bad key, a rate limit or a provider outage
+                // says nothing about them, and retrying those would double
+                // every failure and then blame the wrong thing.
                 Err(e) if !rejects_the_request(e.0) => return Err(e),
+                Err(e) if !has_usage && !has_thinking => return Err(e),
                 Err(e) => {
-                    tracing::debug!(
-                        "{} refused stream_options ({}); retrying without usage reporting",
-                        self.base_url,
-                        e.2,
-                    );
-                    if let Ok(mut set) = no_stream_options().lock() {
-                        set.insert(self.base_url.clone());
+                    let body = e.2.to_string();
+                    let blame_thinking = has_thinking
+                        && (!has_usage || crate::llm::thinking::rejection_names_thinking(&body));
+                    if blame_thinking {
+                        tracing::debug!(
+                            "{} refused thinking fields for {} ({body}); retrying without",
+                            self.base_url,
+                            req.model,
+                        );
+                        if let Ok(mut set) = no_thinking_controls().lock() {
+                            set.insert(key.clone());
+                        }
+                        req.reasoning_effort = None;
+                        req.chat_template_kwargs = None;
+                    } else {
+                        tracing::debug!(
+                            "{} refused stream_options ({body}); retrying without usage reporting",
+                            self.base_url,
+                        );
+                        if let Ok(mut set) = no_stream_options().lock() {
+                            set.insert(self.base_url.clone());
+                        }
+                        req.stream_options = None;
                     }
                 }
             }
         }
-
-        let plain = ChatRequest { stream_options: None, ..req.clone() };
-        self.post_stream(&plain).await
     }
 
     /// The response status and any `Retry-After`, alongside the error, so the

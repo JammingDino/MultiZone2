@@ -37,6 +37,9 @@ pub struct LibraryEntry {
     pub tool_config: String,
     #[serde(default)]
     pub thinking_enabled: bool,
+    /// `low` / `medium` / `high`; missing means medium.
+    #[serde(default)]
+    pub thinking_effort: Option<String>,
     #[serde(default)]
     pub include_thinking_in_context: bool,
     /// Response Leader preset — installs as a sub-agent-coordinating zone.

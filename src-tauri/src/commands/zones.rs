@@ -33,6 +33,8 @@ pub struct ZoneInput {
     /// JSON-encoded config object
     pub tool_config: Option<String>,
     pub thinking_enabled: Option<bool>,
+    /// `low` / `medium` / `high`; anything else is stored as medium.
+    pub thinking_effort: Option<String>,
     pub include_thinking_in_context: Option<bool>,
     pub icon: Option<String>,
     pub accent_color: Option<String>,
@@ -51,6 +53,11 @@ pub async fn upsert_zone(state: State<'_, AppState>, zone: ZoneInput) -> AppResu
     let tools_enabled = zone.tools_enabled.unwrap_or_else(|| "[]".to_string());
     let tool_config = zone.tool_config.unwrap_or_else(|| "{}".to_string());
     let thinking_enabled = zone.thinking_enabled.unwrap_or(false);
+    let thinking_effort = match zone.thinking_effort.as_deref().map(str::trim) {
+        Some("low") => "low",
+        Some("high") => "high",
+        _ => "medium",
+    };
     let include_thinking_in_context = zone.include_thinking_in_context.unwrap_or(false);
     let is_leader = zone.is_leader.unwrap_or(false);
 
@@ -58,8 +65,8 @@ pub async fn upsert_zone(state: State<'_, AppState>, zone: ZoneInput) -> AppResu
         "INSERT INTO zones (id, name, provider_id, model, system_prompt, temperature_override,
                             max_tokens, top_p, tools_enabled, tool_config, thinking_enabled,
                             include_thinking_in_context, icon, accent_color, is_leader,
-                            fallback_zone_id, approvals, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?18)
+                            fallback_zone_id, approvals, created_at, updated_at, thinking_effort)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?18, ?19)
          ON CONFLICT(id) DO UPDATE SET
            name = excluded.name,
            provider_id = excluded.provider_id,
@@ -71,6 +78,7 @@ pub async fn upsert_zone(state: State<'_, AppState>, zone: ZoneInput) -> AppResu
            tools_enabled = excluded.tools_enabled,
            tool_config = excluded.tool_config,
            thinking_enabled = excluded.thinking_enabled,
+           thinking_effort = excluded.thinking_effort,
            include_thinking_in_context = excluded.include_thinking_in_context,
            icon = excluded.icon,
            accent_color = excluded.accent_color,
@@ -105,6 +113,7 @@ pub async fn upsert_zone(state: State<'_, AppState>, zone: ZoneInput) -> AppResu
         !t.is_empty() && t != "{}"
     }))
     .bind(now)
+    .bind(thinking_effort)
     .execute(&state.db)
     .await?;
 
@@ -124,4 +133,33 @@ pub async fn delete_zone(state: State<'_, AppState>, id: String) -> AppResult<()
         .execute(&state.db)
         .await?;
     Ok(())
+}
+
+/// What the thinking switch will do for this model on this provider (0.17.9),
+/// so the zone editor can show the levels it takes — or say that it has no
+/// reasoning mode — instead of offering every model the same checkbox.
+///
+/// With no provider id the first provider stands in, as it does for quick chat;
+/// with none at all the model is judged as hosted, which only affects the
+/// unrecognised-model fallback.
+#[tauri::command]
+pub async fn thinking_profile(
+    state: State<'_, AppState>,
+    provider_id: Option<String>,
+    model: String,
+) -> AppResult<crate::llm::thinking::Profile> {
+    let base_url: Option<String> = match provider_id.filter(|p| !p.is_empty()) {
+        Some(id) => {
+            sqlx::query_scalar("SELECT base_url FROM providers WHERE id = ?1")
+                .bind(id)
+                .fetch_optional(&state.db)
+                .await?
+        }
+        None => {
+            sqlx::query_scalar("SELECT base_url FROM providers ORDER BY created_at ASC LIMIT 1")
+                .fetch_optional(&state.db)
+                .await?
+        }
+    };
+    Ok(crate::llm::thinking::profile(&model, base_url.as_deref().unwrap_or("")))
 }

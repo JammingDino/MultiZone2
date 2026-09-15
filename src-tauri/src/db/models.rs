@@ -31,6 +31,10 @@ pub struct Zone {
     /// JSON object of per-tool config
     pub tool_config: String,
     pub thinking_enabled: bool,
+    /// How hard to think when thinking is on: `low`, `medium` or `high`.
+    /// What that becomes on the wire depends on the model (0.17.9) — see
+    /// `llm::thinking::controls`.
+    pub thinking_effort: String,
     /// If false, inline thinking blocks (`<think>…</think>` and variants) in
     /// assistant content are stripped before this message is fed back to the
     /// model on subsequent turns. Off by default to keep context tight.
@@ -67,7 +71,7 @@ pub struct Zone {
 /// it fails at runtime, in whichever path nobody happens to be watching.
 pub const ZONE_COLS: &str = "id, name, provider_id, model, system_prompt,
     temperature_override AS temperature, max_tokens, top_p,
-    tools_enabled, tool_config, thinking_enabled, include_thinking_in_context,
+    tools_enabled, tool_config, thinking_enabled, thinking_effort, include_thinking_in_context,
     icon, accent_color, is_leader, fallback_zone_id, approvals, created_at, updated_at";
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]

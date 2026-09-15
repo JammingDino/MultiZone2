@@ -10,7 +10,7 @@ import { ModelCombobox } from "@/components/common/ModelCombobox";
 import { VisionOverrideSelect } from "@/components/common/VisionOverrideSelect";
 import { IconPicker } from "@/components/common/IconPicker";
 import { ColorPicker } from "@/components/common/ColorPicker";
-import type { ApprovalCategory, ApprovalPolicy, Provider, ToolFunctionInfo, ToolUsage, Zone } from "@/lib/types";
+import type { ApprovalCategory, ApprovalPolicy, Provider, ToolFunctionInfo, ToolUsage, Zone, ThinkingEffort, ThinkingProfile } from "@/lib/types";
 import { ALL_TOOLS, TOOL_CATEGORIES, mcpToolEnableId } from "@/lib/types";
 import { useApp } from "@/store/app";
 import { DEFAULT_ZONES } from "@/lib/defaultZones";
@@ -406,6 +406,25 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
   // Thinking is on by default for new zones (0.9.4) — most current models
   // benefit, and the ones that don't simply ignore the request.
   const [thinkingEnabled, setThinkingEnabled] = useState(true);
+  const [thinkingEffort, setThinkingEffort] = useState<ThinkingEffort>("medium");
+  // What the switch will actually do for this model — asked of the backend,
+  // which owns the model→knob table, so the editor can never disagree with
+  // the request builder about it (0.17.9).
+  const [thinkingProfile, setThinkingProfile] = useState<ThinkingProfile | null>(null);
+  useEffect(() => {
+    const m = model.trim();
+    if (!m) {
+      setThinkingProfile(null);
+      return;
+    }
+    let live = true;
+    const timer = setTimeout(() => {
+      api.thinkingProfile(providerId, m)
+        .then((p) => { if (live) setThinkingProfile(p); })
+        .catch(() => { if (live) setThinkingProfile(null); });
+    }, 250);
+    return () => { live = false; clearTimeout(timer); };
+  }, [providerId, model]);
   const [includeThinkingInContext, setIncludeThinkingInContext] = useState(false);
   const [isLeader, setIsLeader] = useState(false);
   const [fallbackZoneId, setFallbackZoneId] = useState<string | null>(null);
@@ -496,6 +515,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
         );
       } catch { /* ignore */ }
       setThinkingEnabled(zone.thinkingEnabled ?? true);
+      setThinkingEffort(zone.thinkingEffort ?? "medium");
       setIncludeThinkingInContext(zone.includeThinkingInContext ?? false);
       setIsLeader(zone.isLeader ?? false);
       setFallbackZoneId(zone.fallbackZoneId ?? null);
@@ -587,6 +607,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
       toolsEnabled: JSON.stringify(tools),
       toolConfig: finalToolConfig,
       thinkingEnabled,
+      thinkingEffort,
       includeThinkingInContext,
       isLeader,
       fallbackZoneId,
@@ -640,7 +661,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     zone?.id, name, providerId, model, systemPrompt, temperature, maxTokens, topP,
-    tools, toolConfig, descOverrides, ttsVoice, thinkingEnabled,
+    tools, toolConfig, descOverrides, ttsVoice, thinkingEnabled, thinkingEffort,
     includeThinkingInContext, isLeader, fallbackZoneId, approvals, icon, accentColor,
   ]);
 
@@ -755,18 +776,44 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
             <div className="mb-1 flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
               <Brain size={12} /> Reasoning
             </div>
-            <label
-              className="flex h-[34px] cursor-pointer items-center gap-2 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 text-xs hover:border-[var(--color-accent)]"
-              title={'Requests reasoning output (sends reasoning_effort: "medium") and renders the model\'s thinking as a step before its answer. Works with reasoning models like DeepSeek-R1, Qwen QwQ, and OpenAI\'s o-series.'}
-            >
-              <input
-                type="checkbox"
-                checked={thinkingEnabled}
-                onChange={(e) => setThinkingEnabled(e.target.checked)}
-                className="shrink-0"
-              />
-              Enable thinking
-            </label>
+            {/* The switch and, where the model has one, its level. Which knob
+                that is — reasoning_effort, a chat-template toggle, nothing —
+                comes from the backend's per-model profile, and the note says
+                what this model will actually do with the setting. */}
+            <div className="flex h-[34px] items-center gap-1.5">
+              <label
+                className={`flex h-full flex-1 items-center gap-2 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 text-xs ${
+                  thinkingProfile?.control === "none" ? "opacity-60" : "cursor-pointer hover:border-[var(--color-accent)]"
+                }`}
+                title="Asks the model to reason before answering and renders its thinking as a step. How it is asked depends on the model — see the note below."
+              >
+                <input
+                  type="checkbox"
+                  checked={thinkingEnabled}
+                  onChange={(e) => setThinkingEnabled(e.target.checked)}
+                  className="shrink-0"
+                />
+                Enable thinking
+              </label>
+              {(thinkingProfile === null || thinkingProfile.control === "effort") && (
+                <select
+                  value={thinkingEffort}
+                  onChange={(e) => setThinkingEffort(e.target.value as ThinkingEffort)}
+                  disabled={!thinkingEnabled}
+                  title="How hard to think. Snapped to the nearest level the model offers."
+                  className="h-full rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-1.5 text-xs text-[var(--color-text)] disabled:opacity-50"
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              )}
+            </div>
+            {thinkingProfile && (
+              <div className="mt-1 text-[10px] leading-snug text-[var(--color-text-muted)]">
+                <span className="font-medium">{thinkingProfile.family}:</span> {thinkingProfile.note}
+              </div>
+            )}
           </div>
         </div>
         </Section>

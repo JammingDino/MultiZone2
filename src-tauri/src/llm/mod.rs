@@ -1,5 +1,6 @@
 pub mod client;
 pub mod continuity;
+pub mod responses;
 pub mod runaway;
 pub mod types;
 pub mod streaming;

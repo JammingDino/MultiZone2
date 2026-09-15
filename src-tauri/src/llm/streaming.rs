@@ -1,4 +1,6 @@
 use crate::error::AppResult;
+use crate::llm::client::LlmStream;
+use crate::llm::responses::{Dialect, Translator};
 use crate::llm::types::{FunctionCall, StreamChunk, StreamToolCall, ToolCall, Usage};
 use eventsource_stream::Eventsource;
 use futures_util::StreamExt;
@@ -38,12 +40,27 @@ pub struct StreamAggregate {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum StreamEvent {
-    Token { delta: String },
-    ThinkingToken { delta: String },
-    ToolCallStart { index: usize, name: String, id: String },
-    ToolCallDeltaArgs { index: usize, delta: String },
-    Done { finish_reason: Option<String> },
-    Error { message: String },
+    Token {
+        delta: String,
+    },
+    ThinkingToken {
+        delta: String,
+    },
+    ToolCallStart {
+        index: usize,
+        name: String,
+        id: String,
+    },
+    ToolCallDeltaArgs {
+        index: usize,
+        delta: String,
+    },
+    Done {
+        finish_reason: Option<String>,
+    },
+    Error {
+        message: String,
+    },
 }
 
 /// Stateful parser that splits inline `<think>…</think>` blocks out of the
@@ -57,7 +74,10 @@ struct InlineThinkParser {
 
 impl InlineThinkParser {
     fn new() -> Self {
-        Self { in_think: false, pending: String::new() }
+        Self {
+            in_think: false,
+            pending: String::new(),
+        }
     }
 
     /// Feed a new text delta; emits to `on_event` and accumulates into `agg`.
@@ -140,7 +160,7 @@ impl InlineThinkParser {
 }
 
 pub async fn consume_stream<F>(
-    response: reqwest::Response,
+    stream: LlmStream,
     cancel: Arc<AtomicBool>,
     parse_inline_think: bool,
     mut on_event: F,
@@ -150,9 +170,16 @@ where
 {
     let mut agg = StreamAggregate::default();
     let mut tool_acc: HashMap<usize, ToolCall> = HashMap::new();
-    let mut think_parser = if parse_inline_think { Some(InlineThinkParser::new()) } else { None };
+    let mut think_parser = if parse_inline_think {
+        Some(InlineThinkParser::new())
+    } else {
+        None
+    };
+    // A Responses stream is read through a translator that turns its events
+    // into the chunks below; a chat stream is the chunks themselves.
+    let mut translator = (stream.dialect == Dialect::Responses).then(Translator::default);
 
-    let mut stream = response.bytes_stream().eventsource();
+    let mut stream = stream.response.bytes_stream().eventsource();
 
     while let Some(event) = stream.next().await {
         if cancel.load(Ordering::Relaxed) {
@@ -168,55 +195,81 @@ where
                 if data.is_empty() {
                     continue;
                 }
-                let chunk: StreamChunk = match serde_json::from_str(&data) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        // Skipping the chunk is right — one unparsable frame
-                        // shouldn't kill a working stream, and some providers
-                        // interleave keep-alives and non-standard events. But a
-                        // provider whose every frame we drop looks exactly like
-                        // a model that answered with silence, so leave a trace.
-                        tracing::debug!("skipping unparsable stream chunk: {e}; data: {data}");
-                        continue;
-                    }
+                let chunks: Vec<StreamChunk> = match &mut translator {
+                    Some(t) => match serde_json::from_str::<serde_json::Value>(&data) {
+                        Ok(v) => match t.translate(&v) {
+                            Ok(chunks) => chunks,
+                            Err(message) => {
+                                on_event(StreamEvent::Error {
+                                    message: message.clone(),
+                                });
+                                agg.error = Some(message);
+                                break;
+                            }
+                        },
+                        Err(e) => {
+                            tracing::debug!(
+                                "skipping unparsable responses event: {e}; data: {data}"
+                            );
+                            continue;
+                        }
+                    },
+                    None => match serde_json::from_str::<StreamChunk>(&data) {
+                        Ok(c) => vec![c],
+                        Err(e) => {
+                            // Skipping the chunk is right — one unparsable frame
+                            // shouldn't kill a working stream, and some providers
+                            // interleave keep-alives and non-standard events. But a
+                            // provider whose every frame we drop looks exactly like
+                            // a model that answered with silence, so leave a trace.
+                            tracing::debug!("skipping unparsable stream chunk: {e}; data: {data}");
+                            continue;
+                        }
+                    },
                 };
-                // Providers disagree about where the usage block rides: most
-                // send it alone in a final chunk, some attach it to the chunk
-                // carrying `finish_reason`. Taking the last non-empty one either
-                // way — and never letting an empty block overwrite a real one.
-                if let Some(u) = chunk.usage {
-                    if !u.is_empty() {
-                        agg.usage = Some(u);
-                    }
-                }
-                for choice in chunk.choices {
-                    if let Some(reason) = &choice.finish_reason {
-                        agg.finish_reason = Some(reason.clone());
-                    }
-                    let thinking = choice
-                        .delta
-                        .reasoning_content
-                        .as_deref()
-                        .or(choice.delta.reasoning.as_deref());
-                    if let Some(text) = thinking {
-                        if !text.is_empty() {
-                            agg.reasoning.push_str(text);
-                            on_event(StreamEvent::ThinkingToken { delta: text.to_string() });
+                for chunk in chunks {
+                    // Providers disagree about where the usage block rides: most
+                    // send it alone in a final chunk, some attach it to the chunk
+                    // carrying `finish_reason`. Taking the last non-empty one either
+                    // way — and never letting an empty block overwrite a real one.
+                    if let Some(u) = chunk.usage {
+                        if !u.is_empty() {
+                            agg.usage = Some(u);
                         }
                     }
-                    if let Some(text) = &choice.delta.content {
-                        if !text.is_empty() {
-                            if let Some(parser) = &mut think_parser {
-                                parser.push(text, &mut agg, &mut on_event);
-                            } else {
-                                agg.content.push_str(text);
-                                on_event(StreamEvent::Token { delta: text.clone() });
+                    for choice in chunk.choices {
+                        if let Some(reason) = &choice.finish_reason {
+                            agg.finish_reason = Some(reason.clone());
+                        }
+                        let thinking = choice
+                            .delta
+                            .reasoning_content
+                            .as_deref()
+                            .or(choice.delta.reasoning.as_deref());
+                        if let Some(text) = thinking {
+                            if !text.is_empty() {
+                                agg.reasoning.push_str(text);
+                                on_event(StreamEvent::ThinkingToken {
+                                    delta: text.to_string(),
+                                });
                             }
                         }
-                    }
-                    if let Some(deltas) = choice.delta.tool_calls {
-                        for d in deltas {
-                            apply_tool_call_delta(&mut tool_acc, d, &mut on_event);
+                        if let Some(text) = &choice.delta.content {
+                            if !text.is_empty() {
+                                if let Some(parser) = &mut think_parser {
+                                    parser.push(text, &mut agg, &mut on_event);
+                                } else {
+                                    agg.content.push_str(text);
+                                    on_event(StreamEvent::Token {
+                                        delta: text.clone(),
+                                    });
+                                }
+                            }
+                        }
+                        if let Some(deltas) = choice.delta.tool_calls {
+                            for d in deltas {
+                                apply_tool_call_delta(&mut tool_acc, d, &mut on_event);
+                            }
                         }
                     }
                 }
@@ -225,7 +278,9 @@ where
                 // Break rather than return: the flush and flatten below still
                 // run, so whatever arrived before the failure — text, reasoning,
                 // half-accumulated tool calls — reaches the caller intact.
-                on_event(StreamEvent::Error { message: e.to_string() });
+                on_event(StreamEvent::Error {
+                    message: e.to_string(),
+                });
                 agg.error = Some(e.to_string());
                 break;
             }
@@ -240,9 +295,14 @@ where
     // Flatten tool calls in index order
     let mut keys: Vec<usize> = tool_acc.keys().copied().collect();
     keys.sort();
-    agg.tool_calls = keys.into_iter().map(|k| tool_acc.remove(&k).unwrap()).collect();
+    agg.tool_calls = keys
+        .into_iter()
+        .map(|k| tool_acc.remove(&k).unwrap())
+        .collect();
 
-    on_event(StreamEvent::Done { finish_reason: agg.finish_reason.clone() });
+    on_event(StreamEvent::Done {
+        finish_reason: agg.finish_reason.clone(),
+    });
     Ok(agg)
 }
 
@@ -358,7 +418,9 @@ mod tests {
     }
 
     fn started(events: &[StreamEvent]) -> bool {
-        events.iter().any(|e| matches!(e, StreamEvent::ToolCallStart { .. }))
+        events
+            .iter()
+            .any(|e| matches!(e, StreamEvent::ToolCallStart { .. }))
     }
 
     /// The common shape: id + name up front, then arguments-only deltas.

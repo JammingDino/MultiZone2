@@ -1,4 +1,5 @@
 use crate::error::{AppError, AppResult};
+use crate::llm::responses::{self, Dialect};
 use crate::llm::types::*;
 use reqwest::Client;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -248,16 +249,39 @@ impl<'a> LlmClient<'a> {
         Ok(resp.data.into_iter().map(|d| d.embedding).collect())
     }
 
+    /// Which endpoint this model is served on here. Almost always chat
+    /// completions; see `llm::responses` for the exceptions and why.
+    pub fn dialect(&self, model: &str) -> Dialect {
+        responses::dialect_for(model, &self.base_url)
+    }
+
+    /// The request as it goes on the wire: the endpoint path and the body.
+    fn wire(&self, req: &ChatRequest) -> (&'static str, serde_json::Value) {
+        match self.dialect(&req.model) {
+            Dialect::ChatCompletions => (
+                "/chat/completions",
+                serde_json::to_value(req).unwrap_or(serde_json::Value::Null),
+            ),
+            Dialect::Responses => ("/responses", responses::request(req)),
+        }
+    }
+
     pub async fn chat_completion(&self, req: &ChatRequest) -> AppResult<ChatResponse> {
-        let http_req = self.http.post(self.url("/chat/completions")).json(req);
+        let (path, body) = self.wire(req);
+        let http_req = self.http.post(self.url(path)).json(&body);
         let res = self.auth(http_req).send().await?;
         if !res.status().is_success() {
             let status = res.status();
             let body = res.text().await.unwrap_or_default();
-            return Err(AppError::Provider(format!("chat/completions {status}: {body}")));
+            return Err(AppError::Provider(format!("{} {status}: {body}", &path[1..])));
         }
-        let resp: ChatResponse = res.json().await?;
-        Ok(resp)
+        match self.dialect(&req.model) {
+            Dialect::ChatCompletions => Ok(res.json().await?),
+            Dialect::Responses => {
+                let v: serde_json::Value = res.json().await?;
+                Ok(responses::response(&v))
+            }
+        }
     }
 
     /// Stream a completion, asking the provider to report its own token counts.
@@ -273,7 +297,7 @@ impl<'a> LlmClient<'a> {
     /// Retries happen here, before a single byte has been streamed, which is the
     /// only place they are safe: once tokens have reached the transcript a retry
     /// would duplicate them.
-    pub async fn chat_stream(&self, req: &ChatRequest) -> AppResult<reqwest::Response> {
+    pub async fn chat_stream(&self, req: &ChatRequest) -> AppResult<LlmStream> {
         if let Some(left) = cooling_for(&self.base_url, Instant::now()) {
             return Err(AppError::Provider(format!(
                 "{} is cooling down for another {}s after {FAILURES_BEFORE_COOLDOWN} failures in a \
@@ -289,7 +313,7 @@ impl<'a> LlmClient<'a> {
             match self.chat_stream_once(req).await {
                 Ok(res) => {
                     note_success(&self.base_url);
-                    return Ok(res);
+                    return Ok(LlmStream { response: res, dialect: self.dialect(&req.model) });
                 }
                 Err((status, wait, e)) => {
                     if !is_transient(status) {
@@ -333,7 +357,12 @@ impl<'a> LlmClient<'a> {
     ) -> Result<reqwest::Response, (Option<reqwest::StatusCode>, Option<Duration>, AppError)> {
         let key = (self.base_url.clone(), req.model.clone());
         let mut req = req.clone();
-        if no_stream_options().lock().map(|s| s.contains(&self.base_url)).unwrap_or(false) {
+        // The Responses body has no `stream_options`; usage rides on the
+        // final event unasked. Dropping the field keeps the probe below from
+        // blaming it for a rejection it could not have caused.
+        if self.dialect(&req.model) == Dialect::Responses
+            || no_stream_options().lock().map(|s| s.contains(&self.base_url)).unwrap_or(false)
+        {
             req.stream_options = None;
         }
         if no_thinking_controls().lock().map(|s| s.contains(&key)).unwrap_or(false) {
@@ -388,7 +417,8 @@ impl<'a> LlmClient<'a> {
         &self,
         req: &ChatRequest,
     ) -> Result<reqwest::Response, (Option<reqwest::StatusCode>, Option<Duration>, AppError)> {
-        let http_req = self.http.post(self.url("/chat/completions")).json(req);
+        let (path, body) = self.wire(req);
+        let http_req = self.http.post(self.url(path)).json(&body);
         let res = self
             .auth(http_req)
             .send()
@@ -401,11 +431,18 @@ impl<'a> LlmClient<'a> {
             return Err((
                 Some(status),
                 wait,
-                AppError::Provider(format!("chat/completions {status}: {body}")),
+                AppError::Provider(format!("{} {status}: {body}", &path[1..])),
             ));
         }
         Ok(res)
     }
+}
+
+/// An open streaming reply and the protocol it speaks, so the consumer can
+/// read it without asking the client again.
+pub struct LlmStream {
+    pub response: reqwest::Response,
+    pub dialect: Dialect,
 }
 
 /// Did the provider reject the request itself, as opposed to failing to serve

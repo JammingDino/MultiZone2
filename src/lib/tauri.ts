@@ -5,6 +5,8 @@
 import { invoke, listen, type UnlistenFn } from "@/lib/remote/transport";
 import type { PdfReadPage } from "@/lib/pdf";
 import type {
+  TerminalInfo,
+  TerminalRead,
   Attachment,
   Chat,
   ChatTagEntry,
@@ -515,6 +517,28 @@ export const queueChatMessage = (
 /** Drop a queued message that hasn't reached the model yet. */
 export const cancelPendingMessage = (chatId: string, id: string) =>
   invoke<boolean>("cancel_pending_message", { chatId, messageId: id });
+
+// Terminals (0.17.9): the chat's long-lived processes, shared with the agent.
+export const listTerminals = (chatId: string) =>
+  invoke<TerminalInfo[]>("list_terminals", { chatId });
+/** With a cursor, holds until output arrives past it (or exit, or `timeoutMs`). */
+export const readTerminal = (chatId: string, terminalId: string, cursor: number | null, timeoutMs?: number) =>
+  invoke<TerminalRead>("read_terminal", { chatId, terminalId, cursor, timeoutMs: timeoutMs ?? null });
+export const writeTerminal = (chatId: string, terminalId: string, input: string, submit = true) =>
+  invoke<void>("write_terminal", { chatId, terminalId, input, submit });
+export const stopTerminal = (chatId: string, terminalId: string) =>
+  invoke<void>("stop_terminal", { chatId, terminalId });
+export const startTerminal = (
+  chatId: string,
+  opts: { command?: string | null; shell?: string | null; cwd?: string | null; name?: string | null } = {},
+) =>
+  invoke<TerminalInfo>("start_terminal", {
+    chatId,
+    command: opts.command ?? null,
+    shell: opts.shell ?? null,
+    cwd: opts.cwd ?? null,
+    name: opts.name ?? null,
+  });
 /**
  * `hunks` (0.10.2) approves only part of a previewed file change: the call still
  * runs, with its arguments rewritten to exactly the content the user agreed to.

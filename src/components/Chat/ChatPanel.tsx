@@ -26,6 +26,7 @@ import { getZoneIcon } from "@/lib/zoneIcons";
 import { AskUserCard } from "@/components/Message/StepBlock";
 import { PlanReview } from "@/components/Chat/PlanReview";
 import { TaskPanel } from "@/components/Chat/TaskPanel";
+import { TerminalPanel } from "@/components/Chat/TerminalPanel";
 import { ReplayView } from "@/components/Chat/ReplayView";
 import { resolveBaseModel } from "@/lib/baseZone";
 import { CHROME_ACTIVE, CHROME_OUTLINED, CHROME_QUIET, HEADER_ICON, PRIMARY_ACTION } from "@/lib/chrome";
@@ -522,6 +523,13 @@ export function ChatPanel() {
                 streaming={isStreaming}
                 compact={!!pendingPlan && pendingApprovals.length === 0}
               />
+            </div>
+          </div>
+          {/* The chat's terminals, followed live (0.17.9). Empty — and so
+              absent — for any chat the agent has not started a process in. */}
+          <div className="shrink-0 px-4 pt-2">
+            <div className="mx-auto max-w-3xl">
+              <TerminalPanel chatId={activeChat.id} />
             </div>
           </div>
           <ReviewQueue chatId={activeChat.id} />

@@ -1239,6 +1239,204 @@ pub async fn stop(args: &Value, db: &SqlitePool, chat_id: &str) -> AppResult<Str
     Ok(v.to_string())
 }
 
+// ── The user's view ──────────────────────────────────────────────────────────
+//
+// Everything above is the model's interface: JSON strings shaped for a tool
+// result. The app's terminal panel wants the same terminals as typed values,
+// without the clip-to-30k and wait vocabulary a transcript needs — and it wants
+// to *follow* output rather than ask for it, which [`ui_read`] does by holding
+// the call until something arrives. Scoping is identical: a chat sees its
+// session's terminals, so the panel shows exactly what the agent in that chat
+// can see, and a terminal the user opens here is one the agent can list.
+
+/// One terminal as the panel lists it.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalInfo {
+    pub id: String,
+    pub name: String,
+    pub shell: String,
+    pub command: Option<String>,
+    pub cwd: Option<String>,
+    pub running: bool,
+    pub exit_code: Option<i32>,
+    pub cursor: u64,
+    pub idle_ms: u64,
+    pub created_at: u64,
+}
+
+/// What a follow-read hands back.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalRead {
+    /// New output since the cursor asked for (ANSI stripped; `\r` left in so
+    /// the viewer can resolve redraws over the whole transcript, not per chunk).
+    pub output: String,
+    pub cursor: u64,
+    pub running: bool,
+    pub exit_code: Option<i32>,
+    /// The cursor pointed at output that has since scrolled out of the window.
+    pub gap: bool,
+}
+
+async fn info(t: &Terminal) -> TerminalInfo {
+    let (cursor, idle_ms) = {
+        let buf = t.out.lock().await;
+        (buf.total(), now_ms().saturating_sub(buf.last_at))
+    };
+    let exit_code = t.exit_code().await;
+    TerminalInfo {
+        id: t.id.clone(),
+        name: t.name.clone(),
+        shell: t.shell.clone(),
+        command: t.command.clone(),
+        cwd: t.cwd.clone(),
+        running: exit_code.is_none(),
+        exit_code,
+        cursor,
+        idle_ms,
+        created_at: t.created_at,
+    }
+}
+
+/// Strip escapes but keep carriage returns: the panel resolves those itself.
+fn strip_ansi(s: &str) -> String {
+    static RE: OnceLock<regex::Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| {
+        regex::Regex::new(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
+            .expect("static ANSI pattern")
+    });
+    re.replace_all(s, "").into_owned()
+}
+
+fn ui_err(v: Value) -> crate::error::AppError {
+    let msg = v
+        .get("error")
+        .and_then(|e| e.as_str())
+        .unwrap_or("terminal error")
+        .to_string();
+    crate::error::AppError::Other(msg)
+}
+
+pub async fn ui_list(db: &SqlitePool, chat_id: &str) -> AppResult<Vec<TerminalInfo>> {
+    let session = crate::tools::teamwork::session_root(db, chat_id).await?;
+    let mut rows = Vec::new();
+    for t in session_terminals(&session).await {
+        rows.push(info(&t).await);
+    }
+    Ok(rows)
+}
+
+/// Read a terminal for display. With no cursor, the whole retained window is
+/// returned at once. With one, the call waits — up to `timeout_ms` — for output
+/// past it, so a viewer that calls again with each returned cursor follows the
+/// process live without polling on a timer. It returns early when the process
+/// exits, so the viewer learns of that promptly too.
+pub async fn ui_read(
+    db: &SqlitePool,
+    chat_id: &str,
+    terminal_id: &str,
+    cursor: Option<u64>,
+    timeout_ms: Option<u64>,
+) -> AppResult<TerminalRead> {
+    let session = crate::tools::teamwork::session_root(db, chat_id).await?;
+    let term = lookup(terminal_id, &session).await.map_err(ui_err)?;
+
+    let (raw, gap) = match cursor {
+        None => term.out.lock().await.since(0),
+        Some(from) => {
+            let timeout = Duration::from_millis(timeout_ms.unwrap_or(20_000).min(MAX_TIMEOUT_MS));
+            let (text, _) = term.wait_until(from, None, Goal::Output, timeout).await;
+            let gap = term.out.lock().await.since(from).1;
+            (text, gap)
+        }
+    };
+    let exit_code = term.exit_code().await;
+    let cursor = term.out.lock().await.total();
+    Ok(TerminalRead {
+        output: strip_ansi(&raw),
+        cursor,
+        running: exit_code.is_none(),
+        exit_code,
+        gap,
+    })
+}
+
+/// Type into a terminal from the panel. Nothing is waited for: the follow-read
+/// the panel already has open will show whatever the program says back.
+pub async fn ui_write(
+    db: &SqlitePool,
+    chat_id: &str,
+    terminal_id: &str,
+    input: &str,
+    submit: bool,
+) -> AppResult<()> {
+    let session = crate::tools::teamwork::session_root(db, chat_id).await?;
+    let term = lookup(terminal_id, &session).await.map_err(ui_err)?;
+    if !term.running().await {
+        return Err(crate::error::AppError::Other(
+            "the process has exited; nothing is reading its input".into(),
+        ));
+    }
+    let payload = if submit { format!("{input}\n") } else { input.to_string() };
+    let mut guard = term.stdin.lock().await;
+    let Some(pipe) = guard.as_mut() else {
+        return Err(crate::error::AppError::Other("this terminal's input has been closed".into()));
+    };
+    pipe.write_all(payload.as_bytes())
+        .await
+        .map_err(|e| crate::error::AppError::Other(format!("write failed: {e}")))?;
+    pipe.flush()
+        .await
+        .map_err(|e| crate::error::AppError::Other(format!("flush failed: {e}")))?;
+    Ok(())
+}
+
+pub async fn ui_stop(db: &SqlitePool, chat_id: &str, terminal_id: &str) -> AppResult<()> {
+    let session = crate::tools::teamwork::session_root(db, chat_id).await?;
+    let term = lookup(terminal_id, &session).await.map_err(ui_err)?;
+    registry().lock().await.remove(terminal_id);
+    term.kill().await;
+    Ok(())
+}
+
+/// Open a terminal from the panel, in the chat's session, so the agent can see
+/// and use it too. Same limit as the tool: a person can also leave eight
+/// servers running by accident.
+pub async fn ui_start(
+    db: &SqlitePool,
+    chat_id: &str,
+    command: Option<String>,
+    shell: Option<String>,
+    cwd: Option<String>,
+    name: Option<String>,
+) -> AppResult<TerminalInfo> {
+    let session = crate::tools::teamwork::session_root(db, chat_id).await?;
+    let mut live = 0;
+    for t in session_terminals(&session).await {
+        if t.running().await {
+            live += 1;
+        }
+    }
+    if live >= MAX_TERMINALS_PER_SESSION {
+        return Err(crate::error::AppError::Other(format!(
+            "this conversation already has {live} terminals open (the limit); stop one first"
+        )));
+    }
+    let command = command.map(|c| c.trim().to_string()).filter(|c| !c.is_empty());
+    let shell = shell.filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "auto".into());
+    let cwd = cwd.filter(|c| !c.trim().is_empty());
+    let name = name
+        .filter(|n| !n.trim().is_empty())
+        .or_else(|| command.as_ref().map(|c| c.chars().take(40).collect()))
+        .unwrap_or_else(|| "shell".into());
+    let term = spawn_terminal(name, command, &shell, cwd, session)
+        .await
+        .map_err(ui_err)?;
+    registry().lock().await.insert(term.id.clone(), term.clone());
+    Ok(info(&term).await)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

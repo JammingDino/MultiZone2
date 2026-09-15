@@ -1725,3 +1725,28 @@ export interface RenderedRun {
   missing: string[];
   zoneId: string | null;
 }
+
+// ── Terminals (0.17.9) ──────────────────────────────────────────────────────
+
+/** One of the chat's long-lived terminals, as `list_terminals` reports it. */
+export interface TerminalInfo {
+  id: string;
+  name: string;
+  shell: string;
+  command: string | null;
+  cwd: string | null;
+  running: boolean;
+  exitCode: number | null;
+  cursor: number;
+  idleMs: number;
+  createdAt: number;
+}
+
+/** One follow-read of a terminal. */
+export interface TerminalRead {
+  output: string;
+  cursor: number;
+  running: boolean;
+  exitCode: number | null;
+  gap: boolean;
+}

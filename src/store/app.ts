@@ -728,6 +728,17 @@ function appendToolArgs(pending: PendingTool[], index: number, delta: string): P
   return pending.map((t) => (t.index === index ? { ...t, args: t.args + delta } : t));
 }
 
+/** Whether a saved assistant message asked for tools (its `toolCalls` is a JSON array). */
+function hasToolCalls(m: Message): boolean {
+  if (!m.toolCalls) return false;
+  try {
+    const arr = JSON.parse(m.toolCalls);
+    return Array.isArray(arr) && arr.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 function freshStreaming(messageId: string): StreamingState {
   return {
     messageId,
@@ -1375,7 +1386,18 @@ export const useApp = create<AppStore>((set, get) => ({
                 now,
               );
             }
-            delete chatPersp[perspectiveZoneId];
+            // Same rule as the primary: a step that called tools keeps the
+            // perspective live until its tools have answered.
+            if (current && hasToolCalls(event.message)) {
+              chatPersp[perspectiveZoneId] = {
+                ...freshStreaming(current.messageId),
+                phase: "tool_running",
+                startedAt: current.startedAt,
+                firstTokenAt: current.firstTokenAt,
+              };
+            } else {
+              delete chatPersp[perspectiveZoneId];
+            }
             break;
           case "error":
             // Record before tearing down: this zone produced no message, so the
@@ -1586,7 +1608,31 @@ export const useApp = create<AppStore>((set, get) => ({
           if (current) {
             statsByMessage[event.message.id] = statsFromTurn(turnByChat[chatId], current, now);
           }
-          delete streaming[chatId];
+          // An assistant message that asked for tools is a step, not the end
+          // of the turn: the tools run next, and the transcript is not in a
+          // state a new message can follow (the call has no result yet). Keep
+          // the chat busy — with the live buffers emptied, since the saved
+          // message now renders them — so the composer stays in queue mode
+          // until `done`. Only a tool-free answer releases it here.
+          if (current && hasToolCalls(event.message)) {
+            streaming[chatId] = {
+              ...freshStreaming(current.messageId),
+              phase: "tool_running",
+              startedAt: current.startedAt,
+              firstTokenAt: current.firstTokenAt,
+            };
+          } else {
+            delete streaming[chatId];
+          }
+          break;
+
+        // The backend held a send back because a turn was still running (see
+        // `run_send_entry`). Show it as the queued chip it has become.
+        case "pending_queued":
+          pendingByChat[chatId] = [
+            ...(pendingByChat[chatId] ?? []),
+            { id: event.id, text: event.text, mode: "next" },
+          ];
           break;
 
         case "error":

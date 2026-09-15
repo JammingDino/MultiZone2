@@ -649,6 +649,7 @@ export type StreamEvent =
   | { type: "assistant_saved"; message: Message }
   | { type: "steer_delivered"; id: string; message: Message }
   | { type: "pending_cleared"; ids: string[] }
+  | { type: "pending_queued"; id: string; text: string }
   | { type: "cancelled" }
   /** Loop detection stopped the run (0.14.1); one tool-free step still follows. */
   | { type: "runaway"; kind: "repeat" | "stuck_error" | "oscillation" | "handoff"; label: string }

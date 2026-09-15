@@ -235,6 +235,11 @@ pub enum StreamPayload<'a> {
     /// Queued messages that are no longer pending — consumed into the follow-up
     /// turn, or dropped because the turn was cancelled.
     PendingCleared { ids: Vec<String> },
+    /// A send that arrived while this chat's turn was still running was held
+    /// back as a queued follow-up instead (see [`run_send_entry`]). The chip
+    /// the composer shows for it comes from this event, since the composer
+    /// thought it was sending, not queueing.
+    PendingQueued { id: String, text: String },
     Cancelled,
     /// Loop detection stopped the turn (0.14.1). The turn does not end here —
     /// one tool-free step follows so the model can report — but the reason is
@@ -801,6 +806,55 @@ pub async fn run_send_entry(
     // A queued follow-up is a plain user turn against the chat's own zone.
     let mut ov = ov;
     loop {
+        // One turn per chat at a time — enforced here, where every sender
+        // (GUI, HTTP API, sub-agents) passes, rather than trusted to the
+        // composer's idea of whether the chat is busy. The window this closes
+        // is a real one: between the model asking for a tool and the tool
+        // answering, the transcript ends on an assistant message with
+        // `tool_calls`, and a user message persisted there splits the call
+        // from its result. Every provider then rejects the next request
+        // ("assistant message with 'tool_calls' must be followed by tool
+        // messages"), and the chat is wedged until someone deletes the
+        // message. So a send into a running turn is held as a `next` follow-up
+        // — the same thing the composer does on purpose — and delivered when
+        // the turn ends. Only text can be held (the queue carries text), so a
+        // send with attachments is refused with a reason instead.
+        {
+            let held = ctx.active_streams.write().await;
+            if held.contains_key(chat_id) {
+                drop(held);
+                let (text, has_media) = parts.iter().fold(
+                    (Vec::new(), false),
+                    |(mut t, media), p| match p {
+                        InputPart::Text { text } | InputPart::HiddenText { text } => {
+                            t.push(text.as_str());
+                            (t, media)
+                        }
+                        _ => (t, true),
+                    },
+                );
+                if has_media {
+                    return Err(AppError::Other(
+                        "This chat is still working on the previous message. Wait for it to finish before sending attachments."
+                            .into(),
+                    ));
+                }
+                let text = text.join("
+
+");
+                if text.trim().is_empty() {
+                    return Ok(());
+                }
+                let id = crate::commands::pending::push(
+                    chat_id,
+                    None,
+                    text.clone(),
+                    crate::commands::pending::Mode::Next,
+                );
+                sink.emit(chat_id, StreamPayload::PendingQueued { id, text });
+                return Ok(());
+            }
+        }
         let cancel = Arc::new(AtomicBool::new(false));
         ctx.active_streams
             .write()

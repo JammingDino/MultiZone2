@@ -109,6 +109,7 @@ export const ROUTE_MAP: Record<string, RouteBinding> = {
   queue_chat_message: { method: "POST", path: "/api/chats/:id/queue" },
   read_mcp_resource: { method: "POST", path: "/api/mcp/servers/:id/resources/read", unwrap: "text" },
   read_terminal: { method: "GET", path: "/api/chats/:id/terminals/:terminalId" },
+  read_workspace_file: { method: "GET", path: "/api/fs/file" },
   regenerate_participant: { method: "POST", path: "/api/chats/:id/regenerate-participant" },
   regenerate_response: { method: "POST", path: "/api/chats/:id/regenerate" },
   reject_plan: { method: "POST", path: "/api/plans/:id/reject" },
@@ -164,6 +165,7 @@ export const ROUTE_MAP: Record<string, RouteBinding> = {
   upsert_tag: { method: "POST", path: "/api/tags" },
   upsert_zone: { method: "POST", path: "/api/zones" },
   write_terminal: { method: "POST", path: "/api/chats/:id/terminals/:terminalId/input" },
+  write_workspace_file: { method: "PUT", path: "/api/fs/file" },
 };
 
 /**

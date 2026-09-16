@@ -70,3 +70,73 @@ pub async fn list_dir(path: String) -> AppResult<Vec<DirEntry>> {
     });
     Ok(out)
 }
+
+/// What the panel's viewer gets for a file (0.17.9).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileText {
+    pub path: String,
+    pub name: String,
+    pub size: u64,
+    /// Lossy UTF-8 of the whole file, or empty when `binary`.
+    pub content: String,
+    /// True when the first few kilobytes contain a NUL — not text, and not
+    /// something a textarea should be handed.
+    pub binary: bool,
+    pub modified_ms: Option<u64>,
+}
+
+/// The largest file the viewer will load. The editor is for the files an agent
+/// writes — reports, scripts, notes — not for a database dump.
+const MAX_VIEW_BYTES: u64 = 4 * 1024 * 1024;
+
+/// One file's text, for the workspace viewer and editor.
+#[tauri::command]
+pub async fn read_workspace_file(path: String) -> AppResult<FileText> {
+    let p = Path::new(&path);
+    let meta = tokio::fs::metadata(p)
+        .await
+        .map_err(|e| AppError::Other(format!("{path}: {e}")))?;
+    if !meta.is_file() {
+        return Err(AppError::Invalid(format!("{path} is not a file")));
+    }
+    if meta.len() > MAX_VIEW_BYTES {
+        return Err(AppError::Other(format!(
+            "{path} is {} MB; the viewer opens files up to {} MB",
+            meta.len() / 1024 / 1024,
+            MAX_VIEW_BYTES / 1024 / 1024
+        )));
+    }
+    let bytes = tokio::fs::read(p)
+        .await
+        .map_err(|e| AppError::Other(format!("{path}: {e}")))?;
+    let binary = bytes.iter().take(8192).any(|b| *b == 0);
+    let modified_ms = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64);
+    Ok(FileText {
+        name: p.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default(),
+        path,
+        size: meta.len(),
+        content: if binary { String::new() } else { String::from_utf8_lossy(&bytes).into_owned() },
+        binary,
+        modified_ms,
+    })
+}
+
+/// Save the editor's text back over the file. The file must already exist —
+/// the editor edits what the tree shows; creating files is the agent's job —
+/// and it is written whole, the way a text editor does.
+#[tauri::command]
+pub async fn write_workspace_file(path: String, content: String) -> AppResult<FileText> {
+    let p = Path::new(&path);
+    if !p.is_file() {
+        return Err(AppError::Invalid(format!("{path} is not an existing file")));
+    }
+    tokio::fs::write(p, content.as_bytes())
+        .await
+        .map_err(|e| AppError::Other(format!("{path}: {e}")))?;
+    read_workspace_file(path).await
+}

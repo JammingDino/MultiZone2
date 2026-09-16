@@ -52,7 +52,7 @@ const fn open(method: &'static str, path: &'static str, description: &'static st
 
 /// Bumped whenever a route is added, removed or changes shape, so a caller can
 /// tell "the app is older than my script" from "my script is wrong".
-pub const ROUTE_SET_VERSION: u32 = 9;
+pub const ROUTE_SET_VERSION: u32 = 10;
 
 pub const ROUTES: &[RouteDef] = &[
     // Discovery — deliberately unauthenticated. A caller debugging a broken
@@ -141,6 +141,8 @@ pub const ROUTES: &[RouteDef] = &[
     r("DELETE", "/api/chats/:id/terminals/:terminalId", "Stop a terminal and everything it started"),
     r("GET", "/api/chats/:id/working-dir", "The directory the chat's file tools are scoped to"),
     r("GET", "/api/fs/list", "One directory's children (`path`), folders first"),
+    r("GET", "/api/fs/file", "One file's text (`path`), for the workspace viewer"),
+    r("PUT", "/api/fs/file", "Overwrite an existing file's text (`path`, `content`)"),
     r("POST", "/api/chats/:id/fix-diagram", "Ask the model to repair a failed diagram"),
     r("GET", "/api/chats/:id/usage", "Estimated context carried by this chat's session"),
 
@@ -358,6 +360,8 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("terminals::stop_terminal", Route("DELETE /api/chats/:id/terminals/:terminalId")),
     ("workspace::chat_working_dir", Route("GET /api/chats/:id/working-dir -> directory")),
     ("workspace::list_dir", Route("GET /api/fs/list")),
+    ("workspace::read_workspace_file", Route("GET /api/fs/file")),
+    ("workspace::write_workspace_file", Route("PUT /api/fs/file")),
     ("diagram::fix_diagram", Route("POST /api/chats/:id/fix-diagram")),
 
     ("checkpoints::list_checkpoints", Route("GET /api/chats/:id/checkpoints")),
@@ -1062,6 +1066,23 @@ pub async fn list_dir(
 ) -> ApiResult<Response> {
     let path = q.get("path").cloned().unwrap_or_default();
     Ok(Json(commands::workspace::list_dir(path).await?).into_response())
+}
+
+pub async fn read_workspace_file(
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> ApiResult<Response> {
+    let path = q.get("path").cloned().unwrap_or_default();
+    Ok(Json(commands::workspace::read_workspace_file(path).await?).into_response())
+}
+
+#[derive(Deserialize)]
+pub struct WriteFileBody {
+    path: String,
+    content: String,
+}
+
+pub async fn write_workspace_file(Json(body): Json<WriteFileBody>) -> ApiResult<Response> {
+    Ok(Json(commands::workspace::write_workspace_file(body.path, body.content).await?).into_response())
 }
 
 pub async fn fix_diagram(

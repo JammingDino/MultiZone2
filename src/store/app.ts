@@ -644,6 +644,14 @@ interface AppStore {
   /** A section the panel should scroll to and expand; consumed once it has. */
   workspaceFocus: WorkspaceSection | null;
   focusWorkspace: (section: WorkspaceSection | null) => void;
+  /**
+   * The file the panel's Files section is showing (0.17.9) — a preview or an
+   * editor, by type. Set by a click in the tree or by `present_file`, which
+   * opens the panel so the file has room to be looked at.
+   */
+  workspaceFile: string | null;
+  openWorkspaceFile: (path: string) => void;
+  closeWorkspaceFile: () => void;
   /** Signal the active composer to take keyboard focus. */
   focusComposer: () => void;
   /**
@@ -1134,6 +1142,7 @@ export const useApp = create<AppStore>((set, get) => ({
   sidebarOpen: readSidebarOpen(),
   workspaceOpen: readWorkspaceOpen(),
   workspaceFocus: null,
+  workspaceFile: null,
   focusComposerNonce: 0,
   projectsPanelOpen: false,
   projectsPanelInitId: null,
@@ -1297,6 +1306,17 @@ export const useApp = create<AppStore>((set, get) => ({
       } else if (event.type === "tool_call_result" && event.name === "ask_user") {
         const chat = get().chats.find((c) => c.id === chatId);
         void notifyWaiting("A question for you", chat?.title || "A chat is waiting on an answer");
+      }
+    }
+    // A file the model presents opens in the workspace panel's viewer (0.17.9)
+    // — but only for the chat on screen. A sub-agent presenting a report in
+    // another tab should not swap the file the user is reading.
+    if (event.type === "tool_call_result" && event.name === "present_file" && chatId === get().activeChatId) {
+      try {
+        const parsed = JSON.parse(event.result) as { ok?: boolean; path?: string };
+        if (parsed.ok && typeof parsed.path === "string") get().openWorkspaceFile(parsed.path);
+      } catch {
+        /* an error result is not a file */
       }
     }
 
@@ -2185,6 +2205,11 @@ export const useApp = create<AppStore>((set, get) => ({
       set({ workspaceFocus: null });
     }
   },
+  openWorkspaceFile: (path) => {
+    writeWorkspaceOpen(true);
+    set({ workspaceOpen: true, workspaceFocus: "files", workspaceFile: path });
+  },
+  closeWorkspaceFile: () => set({ workspaceFile: null }),
   toggleSidebar: () => {
     const next = !get().sidebarOpen;
     writeSidebarOpen(next);

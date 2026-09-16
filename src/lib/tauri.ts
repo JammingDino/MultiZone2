@@ -2,10 +2,12 @@
 // directly; they are now the transport, which is those two functions on the
 // desktop and HTTP + SSE when this window is a remote for one. Every binding
 // below is unchanged — that was the point of there being a single seam.
-import { invoke, listen, type UnlistenFn } from "@/lib/remote/transport";
+import { invoke, listen, isRemote, type UnlistenFn } from "@/lib/remote/transport";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import type { PdfReadPage } from "@/lib/pdf";
 import type {
   DirEntry,
+  FileText,
   TerminalInfo,
   TerminalRead,
   ThinkingProfile,
@@ -527,6 +529,33 @@ export const cancelPendingMessage = (chatId: string, id: string) =>
 export const chatWorkingDir = (chatId: string) =>
   invoke<string | null>("chat_working_dir", { chatId });
 export const listDir = (path: string) => invoke<DirEntry[]>("list_dir", { path });
+export const readWorkspaceFile = (path: string) =>
+  invoke<FileText>("read_workspace_file", { path });
+export const writeWorkspaceFile = (path: string, content: string) =>
+  invoke<FileText>("write_workspace_file", { path, content });
+/**
+ * A URL the webview can load a local file from, via the app's `mzfile` scheme
+ * (0.17.9) — so an HTML report's relative `src`/`href` find the files beside
+ * it. Null on a remote window, which has no such scheme and gets a `srcdoc`.
+ *
+ * Built by hand rather than with `convertFileSrc(path, "mzfile")`, which
+ * percent-encodes the slashes: to the URL parser that is one long segment,
+ * and a `chart.png` next to it would resolve to the root. Only the host part
+ * is taken from it (`http://mzfile.localhost` on Windows and Android,
+ * `mzfile://localhost` elsewhere); the path keeps its slashes and each
+ * segment is encoded on its own.
+ */
+export function previewUrl(path: string): string | null {
+  if (isRemote()) return null;
+  let base: string;
+  try {
+    base = convertFileSrc("x", "mzfile").replace(/x$/, "");
+  } catch {
+    return null;
+  }
+  const segments = path.replace(/\\/g, "/").split("/").map((s) => encodeURIComponent(s));
+  return base + segments.join("/").replace(/^\/+/, "");
+}
 
 // Terminals (0.17.9): the chat's long-lived processes, shared with the agent.
 export const listTerminals = (chatId: string) =>

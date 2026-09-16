@@ -1768,6 +1768,16 @@ export interface TerminalRead {
 
 // ── Workspace files (0.17.9) ────────────────────────────────────────────────
 
+/** One file's text, as the workspace viewer reads it (0.17.9). */
+export interface FileText {
+  path: string;
+  name: string;
+  size: number;
+  content: string;
+  binary: boolean;
+  modifiedMs: number | null;
+}
+
 export interface DirEntry {
   name: string;
   path: string;

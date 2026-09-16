@@ -3367,6 +3367,7 @@ dependencies = [
  "ocrs",
  "opener",
  "pdf-extract",
+ "percent-encoding",
  "rand 0.9.4",
  "regex",
  "reqwest 0.12.28",

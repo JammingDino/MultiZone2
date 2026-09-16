@@ -330,10 +330,11 @@ pub fn present_file_definitions(project_dir: Option<&str>) -> Vec<Tool> {
         function: ToolFunction {
             name: "present_file".into(),
             description: format!(
-                "Show a file you already wrote to the user, inline in the chat — call this instead \
-                 of pasting the file's contents into your reply. `.html` renders as a live preview \
-                 with an \"open in browser\" button; anything else shows a card that opens it in \
-                 its default app.\n\n{hint}"
+                "Show a file you already wrote to the user — call this instead of pasting the \
+                 file's contents into your reply. It opens in the workspace panel beside the chat: \
+                 `.html` as a live page with its scripts and animations running, `.md` rendered, \
+                 anything else as text in a small editor. The chat also gets a card that opens it \
+                 in its default app.\n\n{hint}"
             ),
             parameters: json!({
                 "type": "object",

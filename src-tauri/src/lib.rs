@@ -37,6 +37,7 @@ mod mcp;
 mod ocr;
 #[cfg(desktop)]
 mod plans;
+mod preview;
 #[cfg(desktop)]
 mod remote;
 #[cfg(desktop)]
@@ -193,6 +194,9 @@ pub fn run() {
         // likely to happen while the user is in another window, since the whole
         // point of a long agentic run is not watching it.
         .plugin(tauri_plugin_notification::init())
+        // Local files by URL, for the workspace viewer's HTML preview (0.17.9)
+        // — see `preview`.
+        .register_uri_scheme_protocol(preview::SCHEME, |_ctx, request| preview::serve(request))
         .setup(|app| {
             let handle = app.handle().clone();
             tauri::async_runtime::block_on(async move {
@@ -387,6 +391,8 @@ pub fn run() {
             commands::terminals::start_terminal,
             commands::workspace::chat_working_dir,
             commands::workspace::list_dir,
+            commands::workspace::read_workspace_file,
+            commands::workspace::write_workspace_file,
             commands::messages::respond_tool_approval,
             pdf_bridge::resolve_pdf_read,
             commands::messages::update_message,

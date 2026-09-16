@@ -18,7 +18,6 @@ import { MathPlotBlock, toMathPlotData } from "@/components/Renderers/MathPlotBl
 import { ChartBlock } from "@/components/Renderers/ChartBlock";
 import { toChartData } from "@/lib/chart";
 import { MermaidBlock, type MermaidAutoFix } from "@/components/Renderers/MermaidBlock";
-import { HtmlReportBlock } from "@/components/Renderers/HtmlReportBlock";
 import { SavedFileChip } from "@/components/Renderers/SavedFileChip";
 import { PlanBlock, PlanProposalBlock, toPlanData, toPlanProposal } from "@/components/Renderers/PlanBlock";
 import { ToolVisual, hasToolVisual } from "./visuals/ToolVisual";
@@ -485,11 +484,7 @@ function renderToolOutput(
       filename: typeof parsed.filename === "string" ? parsed.filename : undefined,
       format: typeof parsed.format === "string" ? parsed.format : undefined,
     };
-    return output.format === "html" || output.format === "htm" ? (
-      <HtmlReportBlock output={output} />
-    ) : (
-      <SavedFileChip output={output} />
-    );
+    return <SavedFileChip output={output} />;
   }
   if (name === "draw_diagram") {
     const source =

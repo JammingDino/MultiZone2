@@ -1,8 +1,8 @@
 {
   "name": "multizone",
   "private": true,
-  "version": "0.17.10",
-  "releaseBuild": true,
+  "version": "0.17.11",
+  "releaseBuild": false,
   "type": "module",
   "scripts": {
     "dev": "vite",

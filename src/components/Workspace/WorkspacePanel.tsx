@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ClipboardList, FolderTree, Gauge, PanelRightClose, TerminalSquare } from "lucide-react";
+import { ClipboardList, FolderTree, Gauge, MessageSquare, PanelRightClose, TerminalSquare } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { useIsNarrow } from "@/lib/useIsNarrow";
@@ -12,6 +12,7 @@ import { TerminalPanel } from "@/components/Chat/TerminalPanel";
 import { Section } from "./Section";
 import { ContextPanel } from "./ContextPanel";
 import { FilesPanel } from "./FilesPanel";
+import { ChatSection } from "./ChatSection";
 
 /**
  * The workspace panel (0.17.9): everything that used to pile up between the
@@ -78,6 +79,22 @@ function PanelBody({ chatId, onClose }: { chatId: string; onClose: () => void })
     }
   }, [pendingPlan, focusWorkspace]);
 
+  // What the collapsed Chat section says: where the chat is filed and how
+  // many voices answer in it, so the row is worth reading closed.
+  const chatBadge = useApp((s) => {
+    const chat = s.chats.find((c) => c.id === chatId);
+    const project = chat?.projectId ? s.projects.find((p) => p.id === chat.projectId) : null;
+    const tags = s.tagsByChat[chatId]?.length ?? 0;
+    const persp = s.chatZonesByChat[chatId]?.length ?? 0;
+    return [
+      project?.name,
+      tags > 0 ? `${tags} tag${tags === 1 ? "" : "s"}` : null,
+      persp > 0 ? `${persp} perspective${persp === 1 ? "" : "s"}` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ") || undefined;
+  });
+
   const livePlans = (plans ?? []).filter((p) => ["approved", "executing", "stopped"].includes(p.status));
   const planBadge = pendingPlan
     ? "waiting for you"
@@ -99,6 +116,9 @@ function PanelBody({ chatId, onClose }: { chatId: string; onClose: () => void })
         </button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <Section id="chat" title="Chat" icon={<MessageSquare size={12} />} badge={chatBadge} defaultOpen={false}>
+          <ChatSection chatId={chatId} />
+        </Section>
         <Section id="plan" title="Plan" icon={<ClipboardList size={12} />} badge={planBadge}>
           {pendingPlan ? (
             <PlanReview

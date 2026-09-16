@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Upload, Tag as TagIcon, X, Zap, Folder, FolderX, ChevronDown, ChevronRight, SplitSquareHorizontal, Plus, ShieldAlert, Eye, Database } from "lucide-react";
+import { Upload, ShieldAlert, Eye } from "lucide-react";
 import { useApp } from "@/store/app";
 import { useShallow } from "zustand/react/shallow";
 import * as api from "@/lib/tauri";
 import { MessageThread } from "./MessageThread";
 import { InputBar, type InputBarHandle } from "./InputBar";
 import { ZonePicker } from "./ZonePicker";
-import { ChatMenu } from "./ChatMenu";
 import { WorkspaceToggle } from "@/components/Workspace/WorkspaceToggle";
 import { ConversationIndicator } from "./ConversationIndicator";
 import { ContextMeter } from "./ContextMeter";
@@ -26,10 +25,7 @@ import { getZoneIcon } from "@/lib/zoneIcons";
 import { AskUserCard } from "@/components/Message/StepBlock";
 import { ReplayView } from "@/components/Chat/ReplayView";
 import { resolveBaseModel } from "@/lib/baseZone";
-import { CHROME_ACTIVE, CHROME_OUTLINED, CHROME_QUIET, HEADER_ICON, PRIMARY_ACTION } from "@/lib/chrome";
-import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
-import { Popover } from "@/components/common/Popover";
-import { usePersistentBool } from "@/lib/uiState";
+import { PRIMARY_ACTION } from "@/lib/chrome";
 import type { FileDiff, StreamEnvelope } from "@/lib/types";
 
 /** How long stream events are collected before being applied as one batch. */
@@ -40,10 +36,6 @@ export function ChatPanel() {
     activeChatId,
     chats,
     zones,
-    projects,
-    tags,
-    tagsByChat,
-    chatZonesByChat,
     settingsOpen,
     zoneLibraryOpen,
     projectsPanelOpen,
@@ -54,26 +46,12 @@ export function ChatPanel() {
     refreshTags,
     loadChatTags,
     loadChatZones,
-    setChatProject,
-    toggleProjectContext,
-    toggleKnowledge,
-    addChatTag,
-    removeChatTag,
-    toggleChatTagContext,
-    addPerspectiveZone,
-    removePerspectiveZone,
-    setChatPerspectiveMode,
     respondApproval,
-    openZoneEditor,
   } = useApp(
     useShallow((s) => ({
       activeChatId: s.activeChatId,
       chats: s.chats,
       zones: s.zones,
-      projects: s.projects,
-      tags: s.tags,
-      tagsByChat: s.tagsByChat,
-      chatZonesByChat: s.chatZonesByChat,
       settingsOpen: s.settingsOpen,
       zoneLibraryOpen: s.zoneLibraryOpen,
       projectsPanelOpen: s.projectsPanelOpen,
@@ -84,20 +62,9 @@ export function ChatPanel() {
       refreshTags: s.refreshTags,
       loadChatTags: s.loadChatTags,
       loadChatZones: s.loadChatZones,
-      setChatProject: s.setChatProject,
-      toggleProjectContext: s.toggleProjectContext,
-      toggleKnowledge: s.toggleKnowledge,
-      addChatTag: s.addChatTag,
-      removeChatTag: s.removeChatTag,
-      toggleChatTagContext: s.toggleChatTagContext,
-      addPerspectiveZone: s.addPerspectiveZone,
-      removePerspectiveZone: s.removePerspectiveZone,
-      setChatPerspectiveMode: s.setChatPerspectiveMode,
       respondApproval: s.respondApproval,
-      openZoneEditor: s.openZoneEditor,
     })),
   );
-  const globalPerspectiveMode = useApp((s) => s.appSettings.perspectiveMode);
   const providers = useApp((s) => s.providers);
   const baseZoneId = useApp((s) => s.appSettings.baseZoneId);
 
@@ -186,10 +153,6 @@ export function ChatPanel() {
   // it for a chat that isn't the one on screen (#13).
   const replayChatId = useApp((s) => s.replayChatId);
   const closeReplay = useApp((s) => s.closeReplay);
-  // Whether the project/tag strip is showing. Persisted per install rather than
-  // per chat: someone who files every conversation wants the row up permanently,
-  // and someone who never does should not have to close it again tomorrow.
-  const [metaOpen, setMetaOpen] = usePersistentBool("chatMetaStrip", false);
 
   useEffect(() => {
     if (activeChatId) void loadPendingPlan(activeChatId);
@@ -409,37 +372,14 @@ export function ChatPanel() {
                 nothing, and no ceiling: it takes whatever they leave. */}
             <div className="min-w-[5rem] flex-1 truncate text-sm font-medium" title={activeChat.title}>{activeChat.title}</div>
             <ConversationIndicator chatId={activeChat.id} />
-            <PerspectiveZoneChips
-              zones={(chatZonesByChat[activeChat.id] ?? [])
-                .map((cz) => zones.find((z) => z.id === cz.zoneId))
-                .filter((z): z is Zone => !!z)}
-              onOpen={(zoneId) => openZoneEditor(zoneId)}
-            />
             {/* The controls scroll sideways when there is not room for them
                 all, rather than pushing the panel past the window. Each stays
                 its natural size (`shrink-0` on the children) so nothing
-                collapses into an unreadable sliver. */}
+                collapses into an unreadable sliver. Project, tags,
+                perspectives and export live in the workspace panel now
+                (0.17.9); what is left is what gets read every message. */}
             <div className="hide-scrollbar flex min-w-0 shrink items-center gap-2 overflow-x-auto [&>*]:shrink-0">
             <ContextMeter chatId={activeChat.id} />
-            <MetaStripToggle
-              open={metaOpen}
-              onToggle={() => setMetaOpen(!metaOpen)}
-              project={projects.find((p) => p.id === activeChat.projectId) ?? null}
-              tagCount={(tagsByChat[activeChat.id] ?? []).length}
-            />
-            <ChatMenu chatId={activeChat.id} />
-            <WorkspaceToggle />
-            <PerspectiveZonePicker
-              chatId={activeChat.id}
-              primaryZoneId={activeChat.zoneId}
-              perspectiveZones={chatZonesByChat[activeChat.id] ?? []}
-              allZones={zones}
-              mode={activeChat.perspectiveMode}
-              globalMode={globalPerspectiveMode}
-              onAdd={(zoneId) => addPerspectiveZone(activeChat.id, zoneId)}
-              onRemove={(zoneId) => removePerspectiveZone(activeChat.id, zoneId)}
-              onSetMode={(m) => setChatPerspectiveMode(activeChat.id, m)}
-            />
             <ZonePicker
               chatId={activeChat.id}
               currentZoneId={activeChat.zoneId}
@@ -452,32 +392,10 @@ export function ChatPanel() {
               </span>
             )}
             </div>
+            {/* Always the rightmost thing in the row: it opens the panel on
+                the right, and a control for the edge belongs at the edge. */}
+            <WorkspaceToggle />
           </header>
-
-          {/* Project + tag strip, on request rather than always (0.12.3).
-              It was a permanent second bar under the header, and for the common
-              case — no project, no tags — it said so in italics and cost a row of
-              the window to do it. The sidebar already groups chats by project and
-              filters by tag, so the strip is where you *change* those, not where
-              you read them: the header chip above carries the state, and opening
-              it is one click when the answer is "put this one somewhere". */}
-          {metaOpen && (
-          <ProjectTagStrip
-            chatId={activeChat.id}
-            projectId={activeChat.projectId}
-            projectContextEnabled={activeChat.projectContextEnabled}
-            knowledgeEnabled={activeChat.knowledgeEnabled}
-            projects={projects}
-            chatTags={tagsByChat[activeChat.id] ?? []}
-            allTags={tags}
-            onSetProject={(projectId) => setChatProject(activeChat.id, projectId)}
-            onToggleProjectContext={(e) => toggleProjectContext(activeChat.id, e)}
-            onToggleKnowledge={(e) => toggleKnowledge(activeChat.id, e)}
-            onAddTag={(tagId) => addChatTag(activeChat.id, tagId)}
-            onRemoveTag={(tagId) => removeChatTag(activeChat.id, tagId)}
-            onToggleTagContext={(tagId, e) => toggleChatTagContext(activeChat.id, tagId, e)}
-          />
-          )}
 
           {/* Keyed by chat id so switching chats remounts the thread instead of
               reusing the previous chat's component instances. Turns and text
@@ -596,7 +514,7 @@ export function ChatPanel() {
   );
 }
 
-import type { ChatTagEntry, ChatZone, Project, Tag, Zone } from "@/lib/types";
+import type { Zone } from "@/lib/types";
 import { claimSettingsDrop } from "@/lib/importSettings";
 
 /**
@@ -633,524 +551,6 @@ function SubchatBanner({ zone }: { zone: Zone | null }) {
         <span className="truncate">Sub-agent conversation — you can reply here directly.</span>
       )}
     </div>
-  );
-}
-
-/**
- * The header's stand-in for the project/tag strip (0.12.3).
- *
- * Carries the state the strip used to spend a whole row displaying — which
- * project this chat is filed under, and how many tags it has — and opens the
- * strip when the user wants to change it. Unfiled chats, which are most of them,
- * get a single muted folder glyph instead of a bar reading "no tags yet".
- */
-function MetaStripToggle({
-  open,
-  onToggle,
-  project,
-  tagCount,
-}: {
-  open: boolean;
-  onToggle: () => void;
-  project: Project | null;
-  tagCount: number;
-}) {
-  const Icon = project ? getZoneIcon(project.icon) : Folder;
-  const color = project?.accentColor ?? "var(--color-accent)";
-  return (
-    <button
-      onClick={onToggle}
-      title={
-        open
-          ? "Hide the project and tag row"
-          : `${project ? `Project: ${project.name}` : "No project"}${
-              tagCount > 0 ? ` · ${tagCount} tag${tagCount === 1 ? "" : "s"}` : ""
-            } — click to change`
-      }
-      className={`flex max-w-[180px] items-center gap-1.5 rounded px-1.5 py-1 text-xs ${
-        open ? CHROME_ACTIVE : CHROME_QUIET
-      }`}
-    >
-      {project ? (
-        <span
-          className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded"
-          style={{ background: color }}
-        >
-          <Icon size={11} color="white" />
-        </span>
-      ) : (
-        <Folder size={HEADER_ICON} className="shrink-0" />
-      )}
-      {project && <span className="truncate">{project.name}</span>}
-      {tagCount > 0 && (
-        <span className="flex shrink-0 items-center gap-1">
-          <TagIcon size={HEADER_ICON} />
-          {tagCount}
-        </span>
-      )}
-    </button>
-  );
-}
-
-function ProjectTagStrip({
-  chatId,
-  projectId,
-  projectContextEnabled,
-  knowledgeEnabled,
-  projects,
-  chatTags,
-  allTags,
-  onSetProject,
-  onToggleProjectContext,
-  onToggleKnowledge,
-  onAddTag,
-  onRemoveTag,
-  onToggleTagContext,
-}: {
-  chatId: string;
-  projectId: string | null;
-  projectContextEnabled: boolean;
-  knowledgeEnabled: boolean;
-  projects: Project[];
-  chatTags: ChatTagEntry[];
-  allTags: Tag[];
-  onSetProject: (projectId: string | null) => void;
-  onToggleProjectContext: (enabled: boolean) => void;
-  onToggleKnowledge: (enabled: boolean) => void;
-  onAddTag: (tagId: string) => void;
-  onRemoveTag: (tagId: string) => void;
-  onToggleTagContext: (tagId: string, enabled: boolean) => void;
-}) {
-  const [showTagPicker, setShowTagPicker] = useState(false);
-  const [showProjectPicker, setShowProjectPicker] = useState(false);
-  const projectBtnRef = useRef<HTMLButtonElement>(null);
-  const tagBtnRef = useRef<HTMLButtonElement>(null);
-  const [showContext, setShowContext] = useState(false);
-  useDismissOnEscape(showContext, () => setShowContext(false));
-  const project = projects.find((p) => p.id === projectId) ?? null;
-  const ProjectIcon = project ? getZoneIcon(project.icon) : null;
-  const projectColor = project?.accentColor ?? "var(--color-accent)";
-  const unassignedTags = allTags.filter((t) => !chatTags.some((ct) => ct.tagId === t.id));
-  const projectHasSnippet = !!project?.contextSnippet?.trim();
-  // The project has a knowledge index built (set after a successful index run).
-  // Only then is the search_local_files tool useful, so we only show the toggle then.
-  const projectIndexed = !!project?.kbIndexedAt;
-
-  // Everything currently being prepended to the system prompt for this chat:
-  // the project snippet (when its context is on) and each enabled tag snippet.
-  // Surfaced in an expandable panel so the user can see exactly what's injected.
-  const injectedContext: { label: string; color: string; text: string }[] = [];
-  if (projectContextEnabled && project?.contextSnippet?.trim()) {
-    injectedContext.push({ label: project.name, color: projectColor, text: project.contextSnippet.trim() });
-  }
-  for (const ct of chatTags) {
-    if (ct.contextEnabled && ct.contextSnippet?.trim()) {
-      injectedContext.push({ label: ct.name, color: ct.color ?? "var(--color-accent)", text: ct.contextSnippet.trim() });
-    }
-  }
-
-  return (
-    <div className="border-b border-[var(--color-border)]">
-    <div className="flex flex-wrap items-center gap-1.5 px-4 py-1.5">
-      {/* Project selector */}
-      <div>
-        <button
-          ref={projectBtnRef}
-          onClick={() => setShowProjectPicker((v) => !v)}
-          title="Set the project this chat belongs to"
-          className="flex items-center gap-1.5 rounded-full border border-[var(--color-border)] px-2 py-0.5 text-xs text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
-        >
-          {project ? (
-            <>
-              {ProjectIcon && (
-                <span className="flex h-3.5 w-3.5 items-center justify-center rounded" style={{ background: projectColor }}>
-                  <ProjectIcon size={9} color="white" />
-                </span>
-              )}
-              {project.name}
-            </>
-          ) : (
-            <>
-              <Folder size={11} /> No project
-            </>
-          )}
-          <ChevronDown size={11} />
-        </button>
-        <Popover
-          open={showProjectPicker}
-          onClose={() => setShowProjectPicker(false)}
-          anchorRef={projectBtnRef}
-          zIndex={30}
-          className="min-w-[180px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg"
-        >
-            <div>
-              <button
-                onClick={() => { onSetProject(null); setShowProjectPicker(false); }}
-                className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)] ${!project ? "text-[var(--color-accent)]" : ""}`}
-              >
-                <FolderX size={12} /> No project
-              </button>
-              <div className="my-1 border-t border-[var(--color-border)]" />
-              {projects.length === 0 && (
-                <div className="px-3 py-1.5 text-xs text-[var(--color-text-muted)]">No projects yet.</div>
-              )}
-              {projects.map((p) => {
-                const Icon = getZoneIcon(p.icon);
-                const c = p.accentColor ?? "var(--color-accent)";
-                return (
-                  <button
-                    key={p.id}
-                    onClick={() => { onSetProject(p.id); setShowProjectPicker(false); }}
-                    className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)] ${p.id === projectId ? "text-[var(--color-accent)]" : ""}`}
-                  >
-                    <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded" style={{ background: c }}>
-                      <Icon size={10} color="white" />
-                    </span>
-                    {p.name}
-                  </button>
-                );
-              })}
-            </div>
-        </Popover>
-      </div>
-
-      {/* Project context toggle (only meaningful when a project is set) */}
-      {project && (
-        <>
-          <button
-            onClick={() => onToggleProjectContext(!projectContextEnabled)}
-            title={
-              !projectHasSnippet
-                ? "This project has no context snippet, so enabling does nothing. Add one in Manage Projects."
-                : projectContextEnabled
-                  ? "Project context ON — its snippet is added to the system prompt. Click to disable."
-                  : "Project context OFF — click to enable and inject the project's snippet."
-            }
-            className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition ${
-              projectContextEnabled
-                ? "border-transparent text-white"
-                : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-accent)]"
-            }`}
-            style={projectContextEnabled ? { background: projectColor } : undefined}
-          >
-            <Zap size={9} />
-            {projectContextEnabled ? "Context on" : "Context off"}
-          </button>
-          {projectContextEnabled && !projectHasSnippet && (
-            <span className="text-[10px] italic text-[var(--color-text-muted)]">
-              no context snippet set
-            </span>
-          )}
-          {projectIndexed && (
-            <button
-              onClick={() => onToggleKnowledge(!knowledgeEnabled)}
-              title={
-                knowledgeEnabled
-                  ? "Knowledge ON — the assistant can search this project's indexed documents. Click to disable."
-                  : "Knowledge OFF — click to let the assistant search this project's documents (the search_local_files tool)."
-              }
-              className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition ${
-                knowledgeEnabled
-                  ? "border-transparent text-white"
-                  : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-accent)]"
-              }`}
-              style={knowledgeEnabled ? { background: projectColor } : undefined}
-            >
-              <Database size={9} />
-              {knowledgeEnabled ? "Knowledge on" : "Knowledge off"}
-            </button>
-          )}
-        </>
-      )}
-
-      <div className="mx-1 h-4 w-px bg-[var(--color-border)]" />
-
-      {/* Tag chips */}
-      {chatTags.map((ct) => (
-        <div
-          key={ct.tagId}
-          className="group flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition"
-          style={
-            ct.contextEnabled
-              ? { background: ct.color ?? "var(--color-accent)", borderColor: "transparent", color: "white" }
-              : { borderColor: ct.color ?? "var(--color-border)" }
-          }
-        >
-          <button
-            onClick={() => onToggleTagContext(ct.tagId, !ct.contextEnabled)}
-            title={ct.contextEnabled ? "Context ON — click to disable" : "Context OFF — click to enable"}
-            className="flex items-center gap-1"
-          >
-            <span className="h-2 w-2 rounded-full" style={{ background: ct.contextEnabled ? "white" : (ct.color ?? "var(--color-text-muted)") }} />
-            {ct.name}
-          </button>
-          <button
-            onClick={() => onRemoveTag(ct.tagId)}
-            className="ml-0.5 opacity-0 transition group-hover:opacity-70 hover:!opacity-100"
-            title="Remove tag"
-          >
-            <X size={9} />
-          </button>
-        </div>
-      ))}
-
-      {/* Add tag */}
-      {unassignedTags.length > 0 && (
-        <div>
-          <button
-            ref={tagBtnRef}
-            onClick={() => setShowTagPicker((v) => !v)}
-            className="flex items-center gap-1 rounded-full border border-dashed border-[var(--color-border)] px-2 py-0.5 text-xs text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
-          >
-            <TagIcon size={10} /> Add tag
-          </button>
-          <Popover
-            open={showTagPicker}
-            onClose={() => setShowTagPicker(false)}
-            anchorRef={tagBtnRef}
-            zIndex={30}
-            className="min-w-[160px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg"
-          >
-              <div>
-                {unassignedTags.map((t) => (
-                  <button
-                    key={t.id}
-                    onClick={() => { onAddTag(t.id); setShowTagPicker(false); }}
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)]"
-                  >
-                    <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: t.color ?? "var(--color-text-muted)" }} />
-                    {t.name}
-                  </button>
-                ))}
-              </div>
-          </Popover>
-        </div>
-      )}
-
-      {allTags.length === 0 && (
-        <span className="text-[10px] italic text-[var(--color-text-muted)]">
-          no tags yet — create them in Manage Projects
-        </span>
-      )}
-
-      {/* Injected-context preview toggle */}
-      {injectedContext.length > 0 && (
-        <button
-          onClick={() => setShowContext((v) => !v)}
-          title="Show the context being prepended to this chat's system prompt"
-          className="ml-auto flex items-center gap-1 rounded-full border border-[var(--color-border)] px-2 py-0.5 text-xs text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
-        >
-          {showContext ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-          <Eye size={11} />
-          Context ({injectedContext.length})
-        </button>
-      )}
-    </div>
-
-    {showContext && injectedContext.length > 0 && (
-      <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-2">
-        <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-          Prepended to the system prompt
-        </div>
-        <div className="flex flex-col gap-2">
-          {injectedContext.map((item, i) => (
-            <div key={i} className="rounded border border-[var(--color-border)] bg-[var(--color-panel)] p-2">
-              <div className="mb-1 flex items-center gap-1.5 text-xs font-medium" style={{ color: item.color }}>
-                <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: item.color }} />
-                {item.label}
-              </div>
-              <div className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-[var(--color-text-muted)]">
-                {item.text}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    )}
-    </div>
-  );
-}
-
-/** Avatar + name chips for the chat's active perspective zones. Clicking a chip
- * opens that zone's editor (its details). */
-function PerspectiveZoneChips({
-  zones,
-  onOpen,
-}: {
-  zones: Zone[];
-  onOpen: (zoneId: string) => void;
-}) {
-  if (zones.length === 0) return null;
-  return (
-    <div className="flex min-w-0 shrink items-center gap-1.5 overflow-x-auto">
-      {zones.map((z) => {
-        const Icon = getZoneIcon(z.icon);
-        const color = z.accentColor ?? "var(--color-accent)";
-        return (
-          <button
-            key={z.id}
-            onClick={() => onOpen(z.id)}
-            title={`${z.name} — open zone details`}
-            className="flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--color-border)] py-0.5 pl-0.5 pr-2 text-xs text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]"
-          >
-            <span
-              className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full"
-              style={{ background: color }}
-            >
-              <Icon size={10} color="white" />
-            </span>
-            <span className="max-w-[120px] truncate">{z.name}</span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function PerspectiveZonePicker({
-  chatId,
-  primaryZoneId,
-  perspectiveZones,
-  allZones,
-  mode,
-  globalMode,
-  onAdd,
-  onRemove,
-  onSetMode,
-}: {
-  chatId: string;
-  primaryZoneId: string | null;
-  perspectiveZones: ChatZone[];
-  allZones: Zone[];
-  mode: "sequential" | "parallel" | null;
-  globalMode: "sequential" | "parallel";
-  onAdd: (zoneId: string) => void;
-  onRemove: (zoneId: string) => void;
-  onSetMode: (mode: "sequential" | "parallel" | null) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const perspZoneIds = new Set(perspectiveZones.map((z) => z.zoneId));
-  const addable = allZones.filter((z) => z.id !== primaryZoneId && !perspZoneIds.has(z.id));
-  const count = perspectiveZones.length;
-  // The toggle has three states: inherit (null) and the two explicit modes.
-  const modeOptions: { value: "sequential" | "parallel" | null; label: string }[] = [
-    { value: null, label: `Default (${globalMode})` },
-    { value: "parallel", label: "Parallel" },
-    { value: "sequential", label: "Sequential" },
-  ];
-
-  return (
-    <>
-      <button
-        ref={buttonRef}
-        onClick={() => setOpen((v) => !v)}
-        title="Perspective zones — get responses from multiple zones simultaneously"
-        className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs ${
-          count > 0 ? CHROME_ACTIVE : CHROME_OUTLINED
-        }`}
-      >
-        <SplitSquareHorizontal size={HEADER_ICON} />
-        {count > 0 ? `${count} perspective${count > 1 ? "s" : ""}` : "Perspectives"}
-      </button>
-
-      <Popover
-        open={open}
-        onClose={() => setOpen(false)}
-        anchorRef={buttonRef}
-        align="end"
-        zIndex={30}
-        className="min-w-[220px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg"
-      >
-          <div>
-            <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-              Active perspectives
-            </div>
-            {perspectiveZones.length === 0 && (
-              <div className="px-3 py-2 text-xs text-[var(--color-text-muted)]">
-                No perspective zones yet.
-              </div>
-            )}
-            {perspectiveZones.map((pz) => {
-              const zone = allZones.find((z) => z.id === pz.zoneId);
-              return (
-                <div
-                  key={pz.zoneId}
-                  className="flex items-center justify-between gap-2 px-3 py-1.5 text-sm"
-                >
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span
-                      className="h-2 w-2 shrink-0 rounded-full"
-                      style={{ background: zone?.accentColor ?? "var(--color-accent)" }}
-                    />
-                    <span className="truncate">{zone?.name ?? pz.zoneId}</span>
-                  </div>
-                  <button
-                    onClick={() => onRemove(pz.zoneId)}
-                    className="shrink-0 text-[var(--color-text-muted)] hover:text-[var(--color-danger)]"
-                    title="Remove perspective"
-                  >
-                    <X size={12} />
-                  </button>
-                </div>
-              );
-            })}
-
-            {addable.length > 0 && (
-              <>
-                <div className="mx-2 my-1 border-t border-[var(--color-border)]" />
-                <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-                  Add perspective
-                </div>
-                {addable.map((z) => (
-                  <button
-                    key={z.id}
-                    onClick={() => { onAdd(z.id); setOpen(false); }}
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)]"
-                  >
-                    <span
-                      className="h-2 w-2 shrink-0 rounded-full"
-                      style={{ background: z.accentColor ?? "var(--color-accent)" }}
-                    />
-                    <span className="flex-1 truncate">{z.name}</span>
-                    <Plus size={11} className="shrink-0 text-[var(--color-text-muted)]" />
-                  </button>
-                ))}
-              </>
-            )}
-
-            <div className="mx-2 my-1 border-t border-[var(--color-border)]" />
-            <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-              Run mode
-            </div>
-            <div className="flex gap-1 px-3 pb-2 pt-0.5">
-              {modeOptions.map((opt) => {
-                const active = mode === opt.value;
-                return (
-                  <button
-                    key={opt.label}
-                    onClick={() => onSetMode(opt.value)}
-                    title={
-                      opt.value === null
-                        ? "Use the global default set in Settings → Chat"
-                        : opt.value === "sequential"
-                          ? "Run perspective zones one at a time (gentler on local model VRAM)"
-                          : "Run all perspective zones at once"
-                    }
-                    className={`flex-1 whitespace-nowrap rounded border px-2 py-1 text-[11px] transition ${
-                      active
-                        ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)] text-[var(--color-text)]"
-                        : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-accent)]"
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-      </Popover>
-    </>
   );
 }
 

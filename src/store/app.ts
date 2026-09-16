@@ -49,7 +49,7 @@ function writeWorkspaceOpen(open: boolean) {
 }
 
 /** The sections of the workspace panel, for "open the panel on this one". */
-export type WorkspaceSection = "plan" | "terminals" | "files" | "context";
+export type WorkspaceSection = "chat" | "plan" | "terminals" | "files" | "context";
 
 export type StreamPhase =
   | "thinking"

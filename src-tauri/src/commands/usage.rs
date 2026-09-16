@@ -99,6 +99,13 @@ pub struct AgentUsage {
     /// What the chat has actually spent, measured on the requests themselves
     /// rather than estimated from the transcript. Zero until it sends one.
     pub spent: SpentUsage,
+    /// The model this chat's turns go to, when its zone resolves.
+    pub model: Option<String>,
+    /// How much that model can carry, when anything knows (0.17.9) — see
+    /// `llm::context_window` for who is asked and in what order. `None` when
+    /// the zone does not resolve or nothing has an answer; the meter then
+    /// shows the load without a ceiling, as it always did.
+    pub context_window: Option<crate::llm::context_window::ContextWindow>,
 }
 
 /// Tokens a chat has actually sent and received, accumulated one request at a
@@ -344,7 +351,31 @@ pub async fn session_context_usage(
     state: State<'_, AppState>,
     chat_id: String,
 ) -> AppResult<SessionUsage> {
-    session_usage(&state.db, &chat_id).await
+    let mut usage = session_usage(&state.db, &chat_id).await?;
+    attach_context_windows(&state, &mut usage).await;
+    Ok(usage)
+}
+
+/// Fill in each agent's model and its context ceiling. Separate from
+/// [`session_usage`] because it needs the HTTP client and the data dir, and
+/// because it is the one part of the readout that may go to the network —
+/// once, then from cache for an hour.
+async fn attach_context_windows(state: &AppState, usage: &mut SessionUsage) {
+    for agent in usage.agents.iter_mut() {
+        let Ok((zone, provider)) =
+            crate::commands::messages::effective_zone_and_provider(&state.db, &agent.chat_id).await
+        else {
+            continue;
+        };
+        agent.context_window = crate::llm::context_window::lookup(
+            &state.http,
+            &state.app_data_dir,
+            &provider,
+            &zone.model,
+        )
+        .await;
+        agent.model = Some(zone.model);
+    }
 }
 
 /// Billed tokens across this chat's whole sub-agent session (0.14.1).
@@ -459,6 +490,8 @@ pub async fn session_usage(db: &SqlitePool, chat_id: &str) -> AppResult<SessionU
             overhead_parts,
             total_tokens: input + output + overhead_tokens,
             spent,
+            model: None,
+            context_window: None,
         });
     }
 

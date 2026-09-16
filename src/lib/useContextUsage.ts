@@ -133,6 +133,14 @@ export function useContextUsage(chatId: string, live: boolean) {
 
   const empty = messages.length === 0 && baseline === 0;
 
+  // The model's ceiling, when the backend found one (0.17.9). Discovered from
+  // the provider, the local server, the models.dev catalogue or the name —
+  // see `llm::context_window` — and labelled with which, because a figure
+  // from a catalogue is a claim about the model and one from the server is a
+  // fact about this deployment.
+  const contextWindow = current?.contextWindow ?? null;
+  const windowFraction = contextWindow ? Math.min(1, chatTotal / contextWindow.tokens) : null;
+
   return {
     est,
     usage,
@@ -153,6 +161,9 @@ export function useContextUsage(chatId: string, live: boolean) {
     limitPct,
     limitState,
     empty,
+    model: current?.model ?? null,
+    contextWindow,
+    windowFraction,
   };
 }
 

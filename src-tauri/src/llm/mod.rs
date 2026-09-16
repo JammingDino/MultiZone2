@@ -1,4 +1,5 @@
 pub mod client;
+pub mod context_window;
 pub mod continuity;
 pub mod responses;
 pub mod runaway;

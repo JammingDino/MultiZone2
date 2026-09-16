@@ -1,6 +1,6 @@
 import { useApp } from "@/store/app";
 import { formatTokens } from "@/lib/format";
-import { hitRate, useContextUsage } from "@/lib/useContextUsage";
+import { hitRate, useContextUsage, type ContextUsage } from "@/lib/useContextUsage";
 
 /**
  * The context readout as bars (0.17.9).
@@ -33,8 +33,58 @@ export function ContextPanel({ chatId }: { chatId: string }) {
     { key: "output", label: "Output (answers, thinking)", value: u.est.outputTokens, color: "var(--viz-4)" },
   ];
 
+  const win = u.contextWindow;
+  const winPct = u.windowFraction ?? 0;
+  const winTone = winPct >= 0.95 ? "var(--color-danger)" : winPct >= 0.8 ? "#f59e0b" : "var(--color-accent)";
+
   return (
     <div className="flex flex-col gap-3 text-xs">
+      {/* ── Window ────────────────────────────────────────────────────── */}
+      <div>
+        <Heading
+          title="Model window"
+          right={
+            win ? (
+              <span className="font-mono" style={{ color: winPct >= 0.8 ? winTone : "var(--color-text)" }}>
+                {Math.round(winPct * 100)}%
+              </span>
+            ) : (
+              <span className="font-mono text-[var(--color-text-muted)]">unknown</span>
+            )
+          }
+          sub={u.model ?? undefined}
+        />
+        {win ? (
+          <>
+            {/* The one bar with an end: the composition below, on the model's scale. */}
+            <div className="flex h-2.5 w-full gap-[2px] overflow-hidden rounded-[4px] bg-[var(--color-border)]" role="img" aria-label="Share of the model's context window in use">
+              {composition
+                .filter((s) => s.value > 0)
+                .map((s) => (
+                  <div
+                    key={s.key}
+                    title={`${s.label}: ${formatTokens(s.value)}`}
+                    className="h-full"
+                    style={{ width: `${(s.value / win.tokens) * 100}%`, background: s.color, minWidth: 1 }}
+                  />
+                ))}
+            </div>
+            <div className="mt-1 flex items-baseline justify-between font-mono text-[10px] text-[var(--color-text-muted)]">
+              <span>{formatTokens(u.chatTotal)} in use</span>
+              <span>{formatTokens(win.tokens)} window</span>
+            </div>
+            <p className="mt-1 text-[10px] leading-relaxed text-[var(--color-text-muted)]">
+              {WINDOW_SOURCE[win.source]}
+              {winPct >= 0.8 && " Compaction or a fresh chat will be needed soon."}
+            </p>
+          </>
+        ) : (
+          <p className="text-[10px] leading-relaxed text-[var(--color-text-muted)]">
+            Neither the provider, the models.dev catalogue nor the model's name says how much it can carry.
+          </p>
+        )}
+      </div>
+
       {/* ── Next request ──────────────────────────────────────────────── */}
       <div>
         <Heading
@@ -193,6 +243,16 @@ export function ContextPanel({ chatId }: { chatId: string }) {
     </div>
   );
 }
+
+/** Where the ceiling came from, said in the panel so a catalogue figure is
+ *  not mistaken for something the server promised. */
+const WINDOW_SOURCE: Record<NonNullable<ContextUsage["contextWindow"]>["source"], string> = {
+  provider: "Reported by the provider's models endpoint.",
+  ollama: "Reported by Ollama for this model — a Modelfile num_ctx if it has one, else the architecture's limit.",
+  lmstudio: "Reported by LM Studio for this model.",
+  catalog: "From the models.dev catalogue; the provider itself does not say.",
+  heuristic: "Guessed from the model's name — the usual figure for its family.",
+};
 
 function Heading({ title, right, sub }: { title: string; right?: React.ReactNode; sub?: string }) {
   return (

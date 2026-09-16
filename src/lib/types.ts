@@ -695,6 +695,10 @@ export interface AgentUsage {
   overheadTokens: number;
   /** The system prompt by what put each piece there, largest first. */
   overheadParts: OverheadPart[];
+  /** The model this chat's turns go to, when its zone resolves. */
+  model: string | null;
+  /** How much that model can carry, when anything knows (0.17.9). */
+  contextWindow: ContextWindow | null;
   totalTokens: number;
   /** What this chat has actually sent, measured on the requests themselves. */
   spent: SpentUsage;
@@ -742,6 +746,12 @@ export interface LifetimeUsage {
 }
 
 /** Context carried by every chat in one sub-agent family. */
+/** A model's context ceiling and where the figure came from. */
+export interface ContextWindow {
+  tokens: number;
+  source: "provider" | "ollama" | "lmstudio" | "catalog" | "heuristic";
+}
+
 export interface SessionUsage {
   rootChatId: string;
   /** Root first, then descendants in creation order. */

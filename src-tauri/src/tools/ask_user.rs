@@ -69,11 +69,7 @@ pub async fn run(args: &Value) -> AppResult<String> {
             .iter()
             .map(|q| {
                 let question = q.get("question").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let options = q
-                    .get("options")
-                    .and_then(|v| v.as_array())
-                    .cloned()
-                    .unwrap_or_default();
+                let options = option_labels(q.get("options"));
                 let allow_free_text = q
                     .get("allow_free_text")
                     .and_then(|v| v.as_bool())
@@ -99,11 +95,7 @@ pub async fn run(args: &Value) -> AppResult<String> {
     if question.is_empty() {
         return Ok(json!({ "error": "ask_user requires a question" }).to_string());
     }
-    let options = args
-        .get("options")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
+    let options = option_labels(args.get("options"));
     let allow_free_text = args
         .get("allow_free_text")
         .and_then(|v| v.as_bool())
@@ -118,4 +110,60 @@ pub async fn run(args: &Value) -> AppResult<String> {
         "status": "waiting_for_user"
     })
     .to_string())
+}
+
+/// The options as strings, whatever shape the model sent them in (0.17.9).
+///
+/// The schema says `string[]`, and models mostly comply — but a model that
+/// has seen enough form libraries will send `{label, value}` objects, and
+/// the card used to hand each one to React as a child, which took the whole
+/// chat panel down with "objects are not valid as a React child". An object
+/// is read for its `label`, `value`, `text` or `title`; a number is written
+/// out; anything else is dropped rather than shown as `[object Object]`.
+fn option_labels(raw: Option<&Value>) -> Vec<String> {
+    raw.and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|o| match o {
+                    Value::String(s) => Some(s.clone()),
+                    Value::Number(n) => Some(n.to_string()),
+                    Value::Bool(b) => Some(b.to_string()),
+                    Value::Object(m) => ["label", "value", "text", "title", "option"]
+                        .iter()
+                        .find_map(|k| m.get(*k))
+                        .and_then(|v| match v {
+                            Value::String(s) => Some(s.clone()),
+                            Value::Number(n) => Some(n.to_string()),
+                            _ => None,
+                        }),
+                    _ => None,
+                })
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn options_come_out_as_strings_whatever_went_in() {
+        let raw = json!(["Yes", { "label": "No", "value": "n" }, { "value": "maybe" }, 3, null, { "x": 1 }, "  "]);
+        assert_eq!(option_labels(Some(&raw)), vec!["Yes", "No", "maybe", "3"]);
+        assert!(option_labels(None).is_empty());
+        assert!(option_labels(Some(&json!("not a list"))).is_empty());
+    }
+
+    #[tokio::test]
+    async fn object_options_reach_the_card_as_labels() {
+        let out = run(&json!({ "question": "Which?", "options": [{ "label": "A", "value": "a" }, "B"] })).await.unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["options"], json!(["A", "B"]));
+        let out = run(&json!({ "questions": [{ "question": "Q1", "options": [{ "label": "A", "value": "a" }] }] })).await.unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["questions"][0]["options"], json!(["A"]));
+    }
 }

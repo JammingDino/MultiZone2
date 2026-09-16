@@ -508,8 +508,22 @@ function renderToolOutput(
 
 interface AskQuestion {
   question: string;
-  options?: string[];
+  options?: unknown[];
   allow_free_text?: boolean;
+}
+
+/** One option as text, whether it arrived as a string or as an object. */
+function optionLabel(o: unknown): string | null {
+  if (typeof o === "string") return o.trim() || null;
+  if (typeof o === "number" || typeof o === "boolean") return String(o);
+  if (o && typeof o === "object") {
+    for (const k of ["label", "value", "text", "title", "option"]) {
+      const v = (o as Record<string, unknown>)[k];
+      if (typeof v === "string" && v.trim()) return v.trim();
+      if (typeof v === "number") return String(v);
+    }
+  }
+  return null;
 }
 
 export function AskUserCard({
@@ -530,7 +544,10 @@ export function AskUserCard({
   const isLast = idx === total - 1;
   const q = questions[idx];
   const allowFreeText = q.allow_free_text !== false;
-  const opts = q.options ?? [];
+  // Old transcripts hold results from before the backend normalised these
+  // (0.17.9), and a model may yet send `{label, value}` objects: read a
+  // string out of whatever is there rather than hand React an object.
+  const opts = (q.options ?? []).map(optionLabel).filter((o): o is string => !!o);
   const currentAnswer = answers[idx] ?? "";
 
   // Shaped like a useState setter so `useDictation` can splice a transcript into

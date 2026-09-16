@@ -132,7 +132,7 @@ what was forgotten. Reads show the matched entries with their scopes.
 Name, one-line description, the tools it enables as chips, and the body
 collapsed. An update diffs against the previous version using family 1.
 
-### 13 · State change — `change_zone`, `list_zones`, `tag_chat`, `app_control`, `app_read`, `compact_context`, `get_current_datetime`, `enter_plan_mode`
+### 13 · State change — `change_zone`, `list_zones`, `tag_chat`, `app_control`, `app_read`, `compact_context`, `read_context`, `get_current_datetime`, `enter_plan_mode`
 Before → after, stated in one line with the two states as chips: zone A → zone
 B, theme dark → light, tags + `research`. `compact_context` gets a token bar —
 before, after, what fraction of the window is now free — which is the one number
@@ -200,6 +200,7 @@ use it to label columns.
 | `app_control` | 13 State | Setting: before → after |
 | `app_read` | 13 State | Setting and its value |
 | `compact_context` | 13 State | Token bar before/after, freed % |
+| `read_context` | 13 State | Key/value readout: next request, prompt, schemas, conversation, spend |
 | `get_current_datetime` | 13 State | Inline line, no card |
 | `enter_plan_mode` | 13 State | Mode chip |
 | `plot_function` | 14 Existing | `MathPlotBlock` |

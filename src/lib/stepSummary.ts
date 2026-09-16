@@ -31,6 +31,7 @@ const TOOL_LABELS: Record<string, string> = {
   exit_plan_mode: "Proposing a plan",
   change_zone: "Switching zone",
   compact_context: "Compacting context",
+  read_context: "Reading context usage",
   copy_file: "Copying file",
   create_file: "Writing file",
   create_folder: "Creating folder",

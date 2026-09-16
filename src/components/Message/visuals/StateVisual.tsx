@@ -1,5 +1,6 @@
-import { Brain, BookOpen, Settings2, ArrowRight, Clock, Layers, Check, AlertCircle } from "lucide-react";
+import { Brain, BookOpen, Settings2, ArrowRight, Clock, Layers, Check, AlertCircle, Gauge } from "lucide-react";
 import { Shaped } from "./Shaped";
+import { formatTokens } from "@/lib/format";
 
 /**
  * Families 11, 12 and 13 — memory, skills, and things that changed (0.13.3).
@@ -172,6 +173,10 @@ export function ChangeVisual({
     );
   }
 
+  if (name === "read_context") {
+    return <ContextReadout result={result} />;
+  }
+
   if (name === "change_zone") {
     const to = str(result.switched_to) || str(result.zone) || str(args?.zone_id);
     return (
@@ -335,6 +340,55 @@ function Frame({
       <div className="max-h-[320px] overflow-auto">{children}</div>
     </div>
   );
+}
+
+/**
+ * `read_context` (0.17.10): the model's own reading of the meter, as a few
+ * lines rather than the JSON it was handed. The workspace panel has the bars;
+ * this only needs to show the user which figures the model is reasoning from.
+ */
+function ContextReadout({ result }: { result: Record<string, unknown> }) {
+  const next = obj(result.next_request);
+  const win = obj(result.context_window);
+  const spent = obj(result.spent_this_chat);
+  const limit = obj(result.session_limit);
+  const total = num(next.total_tokens_est);
+  const system = num(obj(next.system_prompt).tokens_est);
+  const tools = obj(next.tool_schemas);
+  const conv = obj(next.conversation);
+  const rows: Array<[string, string]> = [
+    ["Next request", `${formatTokens(total)}${win.tokens ? ` of ${formatTokens(num(win.tokens))} (${num(win.used_pct)}%)` : ""}`],
+    ["System prompt", formatTokens(system)],
+    ["Tool schemas", `${formatTokens(num(tools.tokens_est))} · ${num(tools.count)} tools`],
+    ["Conversation", `${formatTokens(num(conv.tokens_est))} · ${num(conv.messages)} messages`],
+  ];
+  if (num(spent.requests) > 0) {
+    const hit = spent.cache_hit_pct != null ? ` · ${num(spent.cache_hit_pct)}% cached` : "";
+    rows.push(["Spent", `${formatTokens(num(spent.total_tokens))} over ${num(spent.requests)} requests${hit}`]);
+  }
+  if (limit.limit_tokens) {
+    rows.push(["Session limit", `${num(limit.used_pct)}% of ${formatTokens(num(limit.limit_tokens))}`]);
+  }
+  return (
+    <Frame icon={Gauge} title="Context read" count={str(result.model)}>
+      <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 px-2 py-1.5 text-[11px]">
+        {rows.map(([k, v]) => (
+          <div key={k} className="contents">
+            <span className="text-[var(--color-text-muted)]">{k}</span>
+            <span className="font-mono text-[var(--color-text)]">{v}</span>
+          </div>
+        ))}
+      </div>
+    </Frame>
+  );
+}
+
+function obj(v: unknown): Record<string, any> {
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, any>) : {};
+}
+
+function num(v: unknown): number {
+  return typeof v === "number" && Number.isFinite(v) ? v : 0;
 }
 
 /** No border, no panel — some results are one sentence and should look it. */

@@ -87,6 +87,7 @@ export const FAMILY: Record<string, Family> = {
   app_control: "state",
   app_read: "state",
   compact_context: "state",
+  read_context: "state",
   get_current_datetime: "state",
   enter_plan_mode: "state",
   // 14 · the renderers that already existed

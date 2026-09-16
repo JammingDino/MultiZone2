@@ -413,6 +413,7 @@ const LABELS: Record<string, { label: string; icon: ToolIcon }> = {
   create_skill: { label: "Wrote skill", icon: "brain" },
   update_skill: { label: "Updated skill", icon: "brain" },
   compact_context: { label: "Condensed the conversation", icon: "brain" },
+  read_context: { label: "Read context usage", icon: "brain" },
   spawn_subagent: { label: "Delegated to a zone", icon: "users" },
   send_subchat_message: { label: "Messaged subagent", icon: "users" },
   read_subchat: { label: "Read subagent transcript", icon: "users" },

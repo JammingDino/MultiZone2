@@ -60,6 +60,27 @@ struct Cached {
     value: Option<ContextWindow>,
 }
 
+/// Where the models.dev catalogue is cached on disk, for callers that have no
+/// `AppState` in hand — a tool running inside a turn, say. Set once at startup;
+/// `None` before that (and in tests), in which case only the sources that need
+/// no disk are consulted.
+static DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+pub fn set_data_dir(dir: PathBuf) {
+    let _ = DATA_DIR.set(dir);
+}
+
+/// [`lookup`] using the startup data dir. `None` when nothing knows — or when
+/// no data dir has been set, since the catalogue then has nowhere to live.
+pub async fn lookup_default(
+    http: &reqwest::Client,
+    provider: &Provider,
+    model: &str,
+) -> Option<ContextWindow> {
+    let dir = DATA_DIR.get()?;
+    lookup(http, dir, provider, model).await
+}
+
 fn lookup_cache() -> &'static Mutex<HashMap<String, Cached>> {
     static CACHE: OnceLock<Mutex<HashMap<String, Cached>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))

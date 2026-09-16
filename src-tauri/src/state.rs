@@ -62,6 +62,10 @@ impl AppState {
         // so an edit the user dislikes can be put back (0.10.0).
         crate::checkpoints::set_store_root(app_data_dir.join("checkpoints"));
 
+        // Where the model-window catalogue is cached, for the `read_context`
+        // tool, which measures a chat from inside a turn with no AppState in reach.
+        crate::llm::context_window::set_data_dir(app_data_dir.clone());
+
         // Where a plan is written as a Markdown document (0.14.6), so a plan
         // outlives the context that produced it and can be opened as a file.
         // Deliberately here rather than in the user's project: a plan is the

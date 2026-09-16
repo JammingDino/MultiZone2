@@ -89,7 +89,7 @@ async fn repo_map_tokens(db: &SqlitePool) -> usize {
 /// seven-member panel is spending it unattended, and the number belongs to
 /// whoever is paying. Loop detection, which is on for everyone, is what catches
 /// the runaway *shape*.
-async fn max_session_tokens(db: &SqlitePool, chat_id: &str) -> i64 {
+pub(crate) async fn max_session_tokens(db: &SqlitePool, chat_id: &str) -> i64 {
     // `Some(0)` is a real answer — "this session runs unmetered" — so it has to
     // beat the global default rather than read as unset.
     if let Ok(root) = crate::tools::teamwork::session_root(db, chat_id).await {

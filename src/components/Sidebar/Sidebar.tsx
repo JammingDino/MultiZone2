@@ -11,6 +11,8 @@ import { usePersistentSet } from "@/lib/uiState";
 import { resolveBaseModel } from "@/lib/baseZone";
 import type { Project } from "@/lib/types";
 import { CHROME_QUIET } from "@/lib/chrome";
+import { ResizeHandle, usePanelWidth } from "@/components/common/ResizeHandle";
+import { useIsNarrow } from "@/lib/useIsNarrow";
 
 export function Sidebar() {
   const {
@@ -173,6 +175,11 @@ export function Sidebar() {
   const ungroupedChats = chats.filter((c) => !c.projectId && matchesTagFilter(c.id));
   const filtering = tagFilter.size > 0;
 
+  // The expanded width is the user's (0.17.10). On a phone the sidebar is a
+  // drawer capped by the viewport, so the handle is left out there.
+  const narrow = useIsNarrow();
+  const size = usePanelWidth("ui.sidebarWidth", 288, 200, 560);
+
   if (!sidebarOpen) {
     return (
       <aside className="flex h-full w-12 flex-shrink-0 flex-col overflow-hidden border-r border-[var(--color-border)] bg-[var(--color-panel)] transition-[width] duration-200 ease-in-out">
@@ -235,7 +242,22 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="flex h-full w-72 flex-shrink-0 flex-col overflow-hidden border-r border-[var(--color-border)] bg-[var(--color-panel)] transition-[width] duration-200 ease-in-out">
+    <aside
+      className={`relative flex h-full flex-shrink-0 flex-col overflow-hidden border-r border-[var(--color-border)] bg-[var(--color-panel)] ${
+        size.dragging ? "" : "transition-[width] duration-200 ease-in-out"
+      }`}
+      style={{ width: narrow ? 288 : size.width }}
+    >
+      {!narrow && (
+        <ResizeHandle
+          side="right"
+          width={size.width}
+          onResize={size.set}
+          onDragging={size.setDragging}
+          onReset={size.reset}
+          label="Resize sidebar"
+        />
+      )}
       {/* Header */}
       <div className="flex h-12 items-center justify-between border-b border-[var(--color-border)] px-3">
         <div className="flex items-center gap-2 font-semibold">

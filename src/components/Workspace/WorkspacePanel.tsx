@@ -3,6 +3,7 @@ import { ClipboardList, FolderTree, Gauge, MessageSquare, PanelRightClose, Termi
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { useIsNarrow } from "@/lib/useIsNarrow";
+import { ResizeHandle, usePanelWidth } from "@/components/common/ResizeHandle";
 import { useBackDismiss } from "@/lib/useBackDismiss";
 import { PLAN_APPROVED, systemTurnParts } from "@/lib/systemTurn";
 import { TaskPanel } from "@/components/Chat/TaskPanel";
@@ -37,6 +38,9 @@ export function WorkspacePanel() {
   const setOpen = useApp((s) => s.setWorkspaceOpen);
   const narrow = useIsNarrow();
   useBackDismiss(narrow && open, () => setOpen(false));
+  // The column's width is the user's (0.17.10); a file open in the viewer wants
+  // more than the 340px it started at.
+  const size = usePanelWidth("ui.workspaceWidth", 360, 260, 720);
 
   if (!chatId || !open) return null;
 
@@ -53,7 +57,18 @@ export function WorkspacePanel() {
     );
   }
   return (
-    <aside className="flex w-[340px] shrink-0 flex-col border-l border-[var(--color-border)] bg-[var(--color-panel)] xl:w-[380px]">
+    <aside
+      className="relative flex shrink-0 flex-col border-l border-[var(--color-border)] bg-[var(--color-panel)]"
+      style={{ width: size.width }}
+    >
+      <ResizeHandle
+        side="left"
+        width={size.width}
+        onResize={size.set}
+        onDragging={size.setDragging}
+        onReset={size.reset}
+        label="Resize workspace panel"
+      />
       {body}
     </aside>
   );

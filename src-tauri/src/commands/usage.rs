@@ -48,10 +48,10 @@ use crate::error::AppResult;
 use crate::state::AppState;
 
 /// Flat per-image cost, matching `IMAGE_TOKEN_ESTIMATE` in the frontend.
-const IMAGE_TOKEN_ESTIMATE: i64 = 1000;
+pub(crate) const IMAGE_TOKEN_ESTIMATE: i64 = 1000;
 
 /// Chars → tokens, matching `estimateTokens` in the frontend.
-fn estimate_tokens(chars: i64) -> i64 {
+pub(crate) fn estimate_tokens(chars: i64) -> i64 {
     if chars <= 0 {
         return 0;
     }
@@ -196,7 +196,7 @@ pub struct SessionUsage {
 /// Text and image content of one stored message, split the way the meter
 /// reports it. `chars` counts characters rather than bytes so the number tracks
 /// the frontend's UTF-16 `String.length` on ordinary prose.
-fn content_chars(json: &str) -> (i64, i64) {
+pub(crate) fn content_chars(json: &str) -> (i64, i64) {
     let Ok(Value::Array(parts)) = serde_json::from_str::<Value>(json) else {
         return (json.chars().count() as i64, 0);
     };
@@ -216,7 +216,7 @@ fn content_chars(json: &str) -> (i64, i64) {
 
 /// Name + argument characters of a message's tool calls — what the model
 /// generated to make them, which is output, not input.
-fn tool_call_chars(json: Option<&str>) -> i64 {
+pub(crate) fn tool_call_chars(json: Option<&str>) -> i64 {
     let Some(json) = json else { return 0 };
     let Ok(Value::Array(calls)) = serde_json::from_str::<Value>(json) else {
         return json.chars().count() as i64;

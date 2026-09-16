@@ -21,6 +21,7 @@ pub mod plan_mode;
 pub mod http;
 pub mod citations;
 pub mod compact;
+pub mod context_usage;
 pub mod wsl;
 pub mod terminal;
 pub mod app_control;
@@ -149,6 +150,9 @@ pub enum ToolId {
     HttpRequest,
     /// 0.9.3 — the model summarizes its own older turns when a chat grows long.
     Compact,
+    /// 0.17.10 — the model reads its own context meter: what the next request
+    /// carries, what the chat has spent, how full the window is.
+    ContextUsage,
     /// 0.9.5 — run Linux commands in WSL, optionally in a shell that persists
     /// across calls so multi-step work can build up state.
     Wsl,
@@ -196,6 +200,7 @@ impl ToolId {
             "plan" => Some(Self::Plan),
             "http_request" => Some(Self::HttpRequest),
             "compact" => Some(Self::Compact),
+            "context_usage" => Some(Self::ContextUsage),
             "wsl_exec" => Some(Self::Wsl),
             "teamwork" => Some(Self::Teamwork),
             "terminal" => Some(Self::Terminal),
@@ -229,6 +234,7 @@ impl ToolId {
             Self::Plan => "plan",
             Self::HttpRequest => "http_request",
             Self::Compact => "compact",
+            Self::ContextUsage => "context_usage",
             Self::Wsl => "wsl_exec",
             Self::Teamwork => "teamwork",
             Self::Terminal => "terminal",
@@ -270,6 +276,7 @@ impl ToolId {
             Self::Plan => vec![plan::definition()],
             Self::HttpRequest => vec![http::definition()],
             Self::Compact => vec![compact::definition()],
+            Self::ContextUsage => vec![context_usage::definition()],
             Self::Teamwork => teamwork::definitions(),
             Self::Terminal => terminal::definitions(),
             Self::AppControl => app_control::definitions(),
@@ -286,9 +293,10 @@ impl ToolId {
             // still prompting before an agent rewrites an existing skill.
             // Teamwork only writes coordination metadata — claims and notes the
             // other agents read. Nothing it does reaches the user's files.
+            // ContextUsage reads the app's own bookkeeping about this chat.
             Self::DateTime | Self::AskUser | Self::ManageTags | Self::RenderGraph
             | Self::Memory | Self::Skills | Self::PresentFile | Self::Plan
-            | Self::Teamwork => 0,
+            | Self::Teamwork | Self::ContextUsage => 0,
             // Subchat groups reads (read/list/collect: safe) + spawn/send (moderate); classed moderate
             // here so it isn't in the safe default set. Per-call gating uses the
             // function name (see `tool_safety_by_name`). FileSearch reads file
@@ -324,7 +332,7 @@ impl ToolId {
 /// Every built-in tool group. The single source of truth for enumerating tools
 /// (e.g. `list_tool_functions`, which flattens each group into the functions the
 /// model actually sees). Keep in step with the `ToolId` variants.
-pub const ALL_TOOL_IDS: [ToolId; 23] = [
+pub const ALL_TOOL_IDS: [ToolId; 24] = [
     ToolId::DateTime,
     ToolId::SmartSearch,
     ToolId::SmartFetch,
@@ -343,6 +351,7 @@ pub const ALL_TOOL_IDS: [ToolId; 23] = [
     ToolId::Memory,
     ToolId::Skills,
     ToolId::Compact,
+    ToolId::ContextUsage,
     ToolId::Plan,
     ToolId::Subchat,
     ToolId::Teamwork,
@@ -366,6 +375,7 @@ pub fn safe_tool_ids() -> Vec<&'static str> {
         ToolId::Memory,
         ToolId::Skills,
         ToolId::Plan,
+        ToolId::ContextUsage,
     ]
     .into_iter()
     .filter(|t| t.safety_level() == 0)
@@ -397,6 +407,8 @@ pub fn tool_safety_by_name(name: &str) -> u8 {
         // changes nothing an agent can act on — safe. Revising an existing skill
         // does, so `update_skill` is moderate below.
         | "create_skill"
+        // The context meter is a read of the app's own accounting.
+        | "read_context"
         // `search_knowledge` is the pre-0.9.0 name for `search_local_files`;
         // stored tool-call history still carries it.
         | "search_local_files" | "search_knowledge" => 0,
@@ -609,6 +621,7 @@ async fn dispatch_inner(
         "read_plan" => plan_mode::read(args, db, chat_id).await,
         "http_request" => http::run(args, http).await,
         "compact_context" => compact::run(args, db, chat_id).await,
+        "read_context" => context_usage::run(args, db, chat_id, http).await,
         "spawn_subagent" => subchat::spawn(args, ctx, sink, caller_zone_id, chat_id).await,
         "send_subchat_message" => subchat::send(args, ctx, sink).await,
         "collect_subagents" => subchat::collect(args, db, chat_id).await,
@@ -718,7 +731,12 @@ mod tests {
         // once in the enum and again in the prose beside it. Trimmed to one
         // explanation each, the group is back to third-largest. Ceiling raised
         // for the capability and no further, on the same slack as before.
-        const BUDGET_BYTES: usize = 42_300;
+        // 0.17.10 adds `read_context`, the model's view of the context meter,
+        // taking it to 43,010. One function, one optional argument; the
+        // description spends its bytes on when to call it and on which of the
+        // figures are estimates, because a model that reads an estimate as the
+        // provider's word draws the wrong conclusion from it. Same slack.
+        const BUDGET_BYTES: usize = 43_300;
 
         let ctx = ToolContext {
             project_dir: Some(r"C:\Users\me\project".to_string()),

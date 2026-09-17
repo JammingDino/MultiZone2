@@ -28,8 +28,8 @@ pub fn definition() -> Tool {
             description:
                 "Condense the earlier part of this conversation into a summary, so a long chat \
                  keeps working instead of quietly losing its oldest messages as it outgrows your \
-                 context window. Call this when the conversation has grown long — you will be \
-                 told in the system prompt when it has.\n\n\
+                 context window. Call this when the user asks you to, or when the conversation \
+                 has clearly grown long.\n\n\
                  From your next turn on, the turns you are summarizing are replaced by your \
                  summary. So the summary must be able to stand in for them: carry over the user's \
                  goal, every decision and constraint agreed so far, key facts established, what \
@@ -163,59 +163,10 @@ pub async fn compacted_prefix(db: &SqlitePool, chat_id: &str) -> Option<(String,
     }
 }
 
-/// Roughly how many characters of history to tolerate before nudging the model to
-/// compact. ~4 chars/token puts this near 12k tokens — comfortably inside even a
-/// small local model's window, so the nudge lands well before anything is lost.
-pub const COMPACT_HINT_CHARS: usize = 48_000;
-
-/// The nudge appended to the system prompt once the history is long and this zone
-/// actually has the tool to do something about it.
-///
-/// The size is deliberately *not* stated precisely. This string lives in the
-/// system prompt, which is the front of the request, and prefix caches match on
-/// a byte-exact prefix — so a number that ticks up every turn invalidates the
-/// cache for the entire conversation behind it, on exactly the long chats where
-/// the cache is worth the most. Bucketing to the nearest 25% of the window keeps
-/// the string stable across most turns while still telling the model whether
-/// this is "soon" or "now". `approx_chars` is a ~4 chars/token estimate.
-pub fn compact_hint(approx_chars: usize) -> String {
-    // Buckets, not a reading. Each only changes when the history crosses a
-    // threshold, so a typical turn leaves the prompt byte-identical.
-    let urgency = if approx_chars >= COMPACT_HINT_CHARS * 2 {
-        "very long"
-    } else if approx_chars >= COMPACT_HINT_CHARS * 3 / 2 {
-        "long"
-    } else {
-        "getting long"
-    };
-    format!(
-        "# Context length\nThis conversation is {urgency}. Call `compact_context` with a \
-         thorough summary soon, before the oldest turns start falling out of your context window."
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use sqlx::sqlite::SqlitePoolOptions;
-
-    /// The hint sits in the system prompt, so any per-turn churn in it costs the
-    /// prefix cache for the whole conversation behind it. Growing the history
-    /// without crossing a bucket boundary must leave the string untouched.
-    #[test]
-    fn the_hint_does_not_change_as_the_history_grows_within_a_bucket() {
-        let baseline = compact_hint(COMPACT_HINT_CHARS);
-        for extra in [1, 500, 5_000, COMPACT_HINT_CHARS / 2 - 1] {
-            assert_eq!(
-                baseline,
-                compact_hint(COMPACT_HINT_CHARS + extra),
-                "hint changed at +{extra} chars without crossing a bucket"
-            );
-        }
-        // It still has to say something different once things get serious,
-        // otherwise the bucketing has flattened the signal away entirely.
-        assert_ne!(baseline, compact_hint(COMPACT_HINT_CHARS * 2));
-    }
 
     async fn pool_with_chat() -> sqlx::SqlitePool {
         let pool = SqlitePoolOptions::new()

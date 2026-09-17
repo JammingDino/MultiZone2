@@ -3122,7 +3122,6 @@ pub enum SnippetKind {
     Leader,
     Identity,
     Memory,
-    CompactHint,
     /// Plan mode is on: what planning means and how to end it (0.12.0).
     PlanMode,
     /// The plan the user approved, as this turn's task list (0.12.0).
@@ -3147,7 +3146,6 @@ impl SnippetKind {
             Self::Leader => "Sub-agent roster",
             Self::Memory => "Memories",
             Self::Identity => "Multi-zone identity",
-            Self::CompactHint => "Compaction hint",
             Self::PlanMode => "Plan mode",
             Self::TaskList => "Approved plan",
             Self::PlanOffer => "Planning available",
@@ -3205,7 +3203,7 @@ pub async fn build_system_snippets(
     // So the pieces that never move within a session go first (zone prompt,
     // agent-loop preamble, skills catalog), the ones that change when the user
     // fiddles with a chat go next (project/tag context, roster, identity), and
-    // the ones that can change on any turn go last (memory, compaction hint).
+    // the ones that can change on any turn go last (memory).
     // Reordering is free to do here because nothing downstream depends on the
     // order — the context meter labels each piece independently.
 
@@ -3380,28 +3378,6 @@ pub async fn build_system_snippets(
     // point loses its cache when it does.
     if let Some(block) = crate::tools::memory::build_memory_block(db, chat_id).await? {
         snippets.push((SnippetKind::Memory, block));
-    }
-
-    // Context compaction (0.9.3): once the history is long, nudge the model to
-    // summarize it — but only if this zone actually has the tool to do so,
-    // otherwise the nudge is noise it can't act on.
-    if serde_json::from_str::<Vec<String>>(&zone.tools_enabled)
-        .map_or(false, |t| t.iter().any(|id| id == "compact"))
-    {
-        let history_chars: i64 = sqlx::query_scalar(
-            "SELECT COALESCE(SUM(LENGTH(content)), 0) FROM messages
-             WHERE chat_id = ?1 AND zone_id IS NULL",
-        )
-        .bind(chat_id)
-        .fetch_one(db)
-        .await
-        .unwrap_or(0);
-        if history_chars as usize >= crate::tools::compact::COMPACT_HINT_CHARS {
-            snippets.push((
-                SnippetKind::CompactHint,
-                crate::tools::compact::compact_hint(history_chars as usize),
-            ));
-        }
     }
 
     Ok(snippets)
@@ -4414,10 +4390,9 @@ mod tests {
         pool
     }
 
-    /// Push the chat's history past `COMPACT_HINT_CHARS` by `extra` characters,
-    /// which is what makes the compaction hint appear in the system prompt.
+    /// Give the chat a long history: 48k characters plus `extra`.
     async fn grow_history(pool: &SqlitePool, extra: usize) {
-        let filler = "x".repeat(crate::tools::compact::COMPACT_HINT_CHARS + extra);
+        let filler = "x".repeat(48_000 + extra);
         sqlx::query(
             "INSERT INTO messages (id, chat_id, role, content, created_at)
              VALUES ('grow', 'c1', 'user', ?1, 1)",
@@ -4463,13 +4438,12 @@ mod tests {
             .join("\n\n")
     }
 
-    /// The regression this whole exercise was about.
-    ///
     /// The system prompt is the front of every request and prefix caches match
     /// a byte-exact prefix, so anything in here that changes as the history
     /// grows invalidates the cache for the entire conversation behind it — on
-    /// every turn, on exactly the long chats where caching is worth most. The
-    /// compaction hint used to embed a live token count and did precisely that.
+    /// every turn, on exactly the long chats where caching is worth most. A
+    /// since-removed compaction hint used to embed a live token count and did
+    /// precisely that.
     ///
     /// Growing the history must leave the system prompt byte-identical.
     #[tokio::test]
@@ -4479,12 +4453,6 @@ mod tests {
 
         grow_history(&pool, 0).await;
         let first = system_prompt_for(&pool, &zone).await;
-
-        // Sanity: the hint really is present, or this test proves nothing.
-        assert!(
-            first.contains("# Context length"),
-            "the compaction hint should be in play for this fixture",
-        );
 
         // A few more turns' worth of conversation.
         sqlx::query("DELETE FROM messages WHERE id = 'grow'").execute(&pool).await.unwrap();
@@ -4498,30 +4466,4 @@ mod tests {
         );
     }
 
-    /// Ordering is load-bearing, not cosmetic: the cache is valid up to the
-    /// first differing byte, so when a volatile piece *does* change, everything
-    /// declared before it still hits. Pin the invariant that the volatile
-    /// snippets sort last.
-    #[tokio::test]
-    async fn volatile_snippets_come_last_in_the_system_prompt() {
-        let pool = pool_with_long_chat().await;
-        grow_history(&pool, 0).await;
-        let snippets = build_system_snippets(&pool, "c1", &zone_with_compact_tool(), None, false)
-            .await
-            .unwrap();
-
-        let kinds: Vec<SnippetKind> = snippets.iter().map(|(k, _)| *k).collect();
-        let pos = |k: SnippetKind| kinds.iter().position(|x| *x == k);
-
-        let (Some(prompt), Some(hint)) = (pos(SnippetKind::ZonePrompt), pos(SnippetKind::CompactHint))
-        else {
-            panic!("fixture should produce both a zone prompt and a compaction hint: {kinds:?}");
-        };
-        assert!(prompt < hint, "the stable zone prompt must precede the volatile hint: {kinds:?}");
-        assert_eq!(
-            hint,
-            kinds.len() - 1,
-            "the compaction hint is the most volatile piece and must sort last: {kinds:?}",
-        );
-    }
 }

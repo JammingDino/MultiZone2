@@ -620,7 +620,14 @@ async fn dispatch_inner(
         "draft_plan_step" => plan_mode::draft_step(args, db, chat_id, caller_zone_id).await,
         "read_plan" => plan_mode::read(args, db, chat_id).await,
         "http_request" => http::run(args, http).await,
-        "compact_context" => compact::run(args, db, chat_id).await,
+        "compact_context" => {
+            let out = compact::run(args, db, chat_id).await;
+            // The summary lives on the chat row, and the context meter reads it
+            // from the store's copy of that row — re-pull it or the meter keeps
+            // showing the pre-compaction figure.
+            sink.notify_chats_changed();
+            out
+        }
         "read_context" => context_usage::run(args, db, chat_id, http).await,
         "spawn_subagent" => subchat::spawn(args, ctx, sink, caller_zone_id, chat_id).await,
         "send_subchat_message" => subchat::send(args, ctx, sink).await,

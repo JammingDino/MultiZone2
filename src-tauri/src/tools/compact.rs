@@ -207,6 +207,29 @@ pub fn should_compact(context_tokens: i64, window: i64) -> bool {
     window > RESERVE_TOKENS * 2 && context_tokens >= window - RESERVE_TOKENS
 }
 
+/// Whether a provider error is the request being too long for the model.
+/// Wording varies by server — OpenAI, vLLM, llama.cpp, LM Studio, Ollama and
+/// Anthropic-compatible shims all say it differently — so this is a phrase
+/// list, kept short and lower-case.
+pub fn is_context_overflow(error: &str) -> bool {
+    let e = error.to_lowercase();
+    [
+        "context length",
+        "context_length",
+        "context window",
+        "maximum context",
+        "too many tokens",
+        "prompt is too long",
+        "prompt too long",
+        "input is too long",
+        "reduce the length",
+        "exceeds the limit",
+        "request too large",
+    ]
+    .iter()
+    .any(|p| e.contains(p))
+}
+
 /// The summarisation instruction. pi's template: structured, and explicit that
 /// exact names, paths and error text must survive.
 const SUMMARY_INSTRUCTION: &str = "The conversation above is being condensed so it fits in your \
@@ -379,5 +402,14 @@ mod tests {
         assert!(should_compact(140_000, 128_000));
         // A window smaller than two reserves cannot be compacted into.
         assert!(!should_compact(30_000, 20_000));
+    }
+
+    #[test]
+    fn overflow_errors_are_recognised_and_ordinary_ones_are_not() {
+        assert!(is_context_overflow("This model's maximum context length is 32768 tokens. However, you requested 40011 tokens"));
+        assert!(is_context_overflow("400: prompt is too long: 210000 tokens > 200000 maximum"));
+        assert!(is_context_overflow("the request exceeds the model's context window"));
+        assert!(!is_context_overflow("401 Unauthorized"));
+        assert!(!is_context_overflow("connection refused"));
     }
 }

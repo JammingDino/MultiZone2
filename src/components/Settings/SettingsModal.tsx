@@ -1085,7 +1085,7 @@ function ChatTab() {
           How many tokens your models can hold. The API does not say, so this is yours to set: when
           a turn's last request comes within about 16k of it, the earlier part of the chat is
           condensed into a summary before the next turn — you still see everything, only what the
-          model re-reads is condensed. <strong>0 is off.</strong> Lower it for a small local model.
+          model re-reads is condensed. A model that rejects a request as too long is condensed and retried regardless, so this only decides how early it happens. <strong>0 is off.</strong>
         </p>
         <div className="flex items-center gap-3">
           <input

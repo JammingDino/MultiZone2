@@ -1816,6 +1816,9 @@ async fn run_participant_turn(
     let mut loop_guard = crate::llm::runaway::LoopGuard::new();
     // Whether this turn has already spent its one fallback zone (0.14.1).
     let mut used_fallback = false;
+    // Overflow recovery (0.18): a provider refusing the request as too long is
+    // compacted and retried once per turn, whatever the configured window says.
+    let mut compacted_for_overflow = false;
     // Citation numbering for this turn. Every citing tool numbers its own
     // results from 1, so without a shared counter a search and a `read` in
     // the same turn would both tell the model to write `[1]`. See
@@ -2005,6 +2008,41 @@ async fn run_participant_turn(
 
         let response = match client.chat_stream(&req).await {
             Ok(res) => res,
+            Err(e)
+                if !compacted_for_overflow
+                    && persp.is_none()
+                    && crate::tools::compact::is_context_overflow(&e.to_string()) =>
+            {
+                // The window setting was too generous for this model (or unset
+                // for a small one): the provider has just told us the real
+                // limit. Condense and retry with the same step budget — what
+                // opencode does on overflow, and the reason the window never
+                // has to be typed in for compaction to happen at all.
+                compacted_for_overflow = true;
+                tracing::info!("{} refused the request as too long ({e}); condensing and retrying", zone.name);
+                match crate::tools::compact::auto_compact(&ctx.db, &ctx.http, chat_id, &zone, &provider).await {
+                    Ok(Some(n)) => {
+                        crate::events::record(
+                            &ctx.db,
+                            chat_id,
+                            Some(&turn_id),
+                            persp,
+                            "compacted",
+                            format!("The model's context window overflowed; condensed {n} earlier messages and retried"),
+                            None,
+                        )
+                        .await;
+                        sink.notify_chats_changed();
+                        api_messages = build_message_history(&ctx.db, chat_id, &zone, false).await?;
+                        continue;
+                    }
+                    Ok(None) => return Err(e),
+                    Err(ce) => {
+                        tracing::warn!("compaction after overflow failed: {ce}");
+                        return Err(e);
+                    }
+                }
+            }
             Err(e) => {
                 // The zone's provider will not serve this turn — rate limited
                 // past its cooldown, host down, key rejected. If the zone names

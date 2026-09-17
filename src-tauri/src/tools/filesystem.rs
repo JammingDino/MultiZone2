@@ -129,6 +129,67 @@ fn window_note(w: &LineWindow, path: &str) -> Option<String> {
     Some(note)
 }
 
+/// What each chat has read, and the modified-time it saw — the basis of
+/// read-before-edit (0.18, opencode's rule). Keyed by chat so every agent in a
+/// team has to look before it writes, which is the whole point when several of
+/// them share one tree: an edit against a file another agent changed since is
+/// refused with "read it again", not applied over the top.
+///
+/// In memory only. After a restart the model's context may still hold a file it
+/// read, but the file may not be what it was; one extra read is the cheap side
+/// of that trade.
+static SEEN: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, std::collections::HashMap<PathBuf, std::time::SystemTime>>>> =
+    std::sync::OnceLock::new();
+
+fn seen_map() -> &'static std::sync::Mutex<std::collections::HashMap<String, std::collections::HashMap<PathBuf, std::time::SystemTime>>> {
+    SEEN.get_or_init(Default::default)
+}
+
+fn mtime(path: &Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(path).and_then(|m| m.modified()).ok()
+}
+
+/// Record that `chat_id` has seen `path` as it is on disk right now.
+pub(crate) fn note_seen(chat_id: &str, path: &Path) {
+    if let Some(t) = mtime(path) {
+        seen_map()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(chat_id.to_string())
+            .or_default()
+            .insert(path.to_path_buf(), t);
+    }
+}
+
+/// Whether `chat_id` may write to an existing `path`: it has read it, and the
+/// file has not changed since. `Err` is the tool's JSON error string.
+fn check_seen(chat_id: &str, path: &Path) -> Result<(), String> {
+    let Some(now) = mtime(path) else { return Ok(()) }; // does not exist yet
+    let seen = seen_map()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(chat_id)
+        .and_then(|m| m.get(path).copied());
+    match seen {
+        None => Err(json!({
+            "error": format!("Read {} before changing it.", path.to_string_lossy()),
+            "error_kind": "unread",
+            "next": "Call `read` on the file, then make the edit against what it actually contains.",
+        })
+        .to_string()),
+        Some(t) if t != now => Err(json!({
+            "error": format!(
+                "{} has changed since you read it — possibly by another agent. Read it again \
+                 and redo the edit against the current contents.",
+                path.to_string_lossy()
+            ),
+            "error_kind": "stale",
+        })
+        .to_string()),
+        Some(_) => Ok(()),
+    }
+}
+
 fn image_mime(path: &Path) -> Option<&'static str> {
     match path
         .extension()
@@ -256,8 +317,9 @@ pub fn definitions(_project_dir: Option<&str>, vision_capable: bool) -> Vec<Tool
                 name: "write".into(),
                 description: format!(
                     "Write a whole file, creating it or overwriting it. Use for new files; use \
-                     `edit` to change part of an existing one. Missing parent directories \
-                     are created."
+                     `edit` to change part of an existing one. Overwriting requires that you \
+                     `read` the file first in this chat. Missing parent directories are created. \
+                     Never create documentation or README files unless asked."
                 ),
                 parameters: json!({
                     "type": "object",
@@ -274,8 +336,10 @@ pub fn definitions(_project_dir: Option<&str>, vision_capable: bool) -> Vec<Tool
             function: ToolFunction {
                 name: "edit".into(),
                 description: format!(
-                    "Change part of an existing file by replacing a block of text. Read the file \
-                     first. `old_text` must identify exactly one place in the file: if it appears \
+                    "Change part of an existing file by replacing a block of text. You must have \
+                     `read` the file in this chat first, and it must not have changed since — an \
+                     edit against a file you have not read, or that another agent changed, is \
+                     refused. `old_text` must identify exactly one place in the file: if it appears \
                      more than once the edit is refused with the count, so include enough \
                      surrounding lines to make it unique (or set `replace_all` when you really do \
                      mean every occurrence). Indentation and trailing whitespace are matched \
@@ -678,6 +742,7 @@ pub async fn read_file(
     args: &Value,
     zone_config: &Value,
     project_dir: Option<&str>,
+    chat_id: &str,
     sink: &StreamSink,
 ) -> AppResult<String> {
     let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
@@ -788,6 +853,7 @@ pub async fn read_file(
 
     match tokio::fs::read(&p).await {
         Ok(bytes) => {
+            note_seen(chat_id, &p);
             let path_str = p.to_string_lossy().to_string();
             let text = bytes_to_string(bytes);
             Ok(text_read_result(&path_str, &text, args).to_string())
@@ -1107,6 +1173,7 @@ pub async fn create_file(
     args: &Value,
     zone_config: &Value,
     project_dir: Option<&str>,
+    chat_id: &str,
 ) -> AppResult<String> {
     let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
     let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
@@ -1114,6 +1181,10 @@ pub async fn create_file(
         Ok(p) => p,
         Err(e) => return Ok(e),
     };
+    // Overwriting is an edit of everything: the same rule applies.
+    if let Err(e) = check_seen(chat_id, &p) {
+        return Ok(e);
+    }
     // Create parent directories if needed
     if let Some(parent) = p.parent() {
         if let Err(e) = tokio::fs::create_dir_all(parent).await {
@@ -1121,12 +1192,15 @@ pub async fn create_file(
         }
     }
     match tokio::fs::write(&p, content.as_bytes()).await {
-        Ok(_) => Ok(json!({
-            "path": p.to_string_lossy(),
-            "bytes_written": content.len(),
-            "ok": true
-        })
-        .to_string()),
+        Ok(_) => {
+            note_seen(chat_id, &p);
+            Ok(json!({
+                "path": p.to_string_lossy(),
+                "bytes_written": content.len(),
+                "ok": true
+            })
+            .to_string())
+        }
         Err(e) => Ok(json!({ "error": e.to_string() }).to_string()),
     }
 }
@@ -1940,6 +2014,7 @@ pub async fn edit_file(
     args: &Value,
     zone_config: &Value,
     project_dir: Option<&str>,
+    chat_id: &str,
 ) -> AppResult<String> {
     let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
     let old_text = args.get("old_text").and_then(|v| v.as_str()).unwrap_or("");
@@ -1949,6 +2024,9 @@ pub async fn edit_file(
         Ok(p) => p,
         Err(e) => return Ok(e),
     };
+    if let Err(e) = check_seen(chat_id, &p) {
+        return Ok(e);
+    }
     let bytes = match tokio::fs::read(&p).await {
         Ok(b) => b,
         Err(e) => return Ok(json!({ "error": format!("failed to read file: {e}") }).to_string()),
@@ -1969,6 +2047,7 @@ pub async fn edit_file(
     // version.
     if let Some(why) = syntax_regression(&p, &current, &resolved.updated) {
         let restored = tokio::fs::write(&p, current.as_bytes()).await.is_ok();
+        note_seen(chat_id, &p);
         return Ok(json!({
             "error": format!("edit reverted — {why}"),
             "reverted": restored,
@@ -1976,6 +2055,7 @@ pub async fn edit_file(
         })
         .to_string());
     }
+    note_seen(chat_id, &p);
 
     Ok(json!({
         "path": p.to_string_lossy(),
@@ -1989,6 +2069,9 @@ pub async fn edit_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The chat every test acts as.
+    const CHAT: &str = "test-chat";
 
     /// A scratch directory that is also the only allowed root, so the tests
     /// exercise the same scoping the tools enforce in the app.
@@ -2013,12 +2096,15 @@ mod tests {
             json!({ "file_system": { "allowed_roots": [self.root.to_string_lossy()] } })
         }
 
+        /// Writes the fixture *and* records it as read by the test chat, so a
+        /// test about editing is not also a test about read-before-edit.
         fn write(&self, rel: &str, content: &str) {
             let p = self.root.join(rel);
             if let Some(parent) = p.parent() {
                 std::fs::create_dir_all(parent).unwrap();
             }
-            std::fs::write(p, content).unwrap();
+            std::fs::write(&p, content).unwrap();
+            note_seen(CHAT, &p);
         }
 
         fn dir(&self) -> Option<&str> {
@@ -2296,6 +2382,7 @@ mod tests {
             &json!({ "path": "m.rs", "old_text": "}\n", "new_text": "" }),
             &sb.zone_config(),
             sb.dir(),
+            CHAT,
         )
         .await
         .unwrap();
@@ -2319,6 +2406,7 @@ mod tests {
             &json!({ "path": "t.txt", "old_text": "beta  ", "new_text": "delta" }),
             &sb.zone_config(),
             sb.dir(),
+            CHAT,
         )
         .await
         .unwrap();
@@ -2527,6 +2615,7 @@ mod tests {
                 &json!({ "path": given, "content": given }),
                 &sb.zone_config(),
                 sb.dir(),
+                CHAT,
             )
             .await
             .unwrap();
@@ -2545,6 +2634,7 @@ mod tests {
             &json!({ "path": format!("{folder}/notes.md"), "content": "rewritten" }),
             &sb.zone_config(),
             sb.dir(),
+            CHAT,
         )
         .await
         .unwrap();
@@ -2566,6 +2656,7 @@ mod tests {
             &json!({ "path": "../escaped.md", "content": "nope" }),
             &sb.zone_config(),
             sb.dir(),
+            CHAT,
         )
         .await
         .unwrap();
@@ -2601,5 +2692,41 @@ mod tests {
         let read = defs.iter().find(|t| t.function.name == "read").unwrap();
         assert!(read.function.parameters["properties"]["as_image"].is_object());
         assert!(read.function.description.contains("as_image"));
+    }
+
+    // ─── Read before edit (0.18) ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn an_edit_needs_a_read_first_and_a_fresh_one() {
+        let sb = Sandbox::new("seen");
+        let p = sb.root.join("x.txt");
+        std::fs::write(&p, "one\n").unwrap();
+
+        let args = json!({ "path": "x.txt", "old_text": "one", "new_text": "two" });
+        let out = edit_file(&args, &sb.zone_config(), sb.dir(), CHAT).await.unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["error_kind"], "unread", "{v}");
+
+        note_seen(CHAT, &p);
+        // Another agent (or the user) touches the file after the read.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(&p, "one\nand more\n").unwrap();
+        let far = std::time::SystemTime::now() - std::time::Duration::from_secs(60);
+        std::fs::File::options().write(true).open(&p).unwrap().set_modified(far).unwrap();
+        let out = edit_file(&args, &sb.zone_config(), sb.dir(), CHAT).await.unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["error_kind"], "stale", "{v}");
+
+        note_seen(CHAT, &p);
+        let out = edit_file(&args, &sb.zone_config(), sb.dir(), CHAT).await.unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["ok"], true, "{v}");
+
+        // A write over an existing file is held to the same rule, and a fresh
+        // file is not.
+        let out = create_file(&json!({ "path": "new.txt", "content": "n" }), &sb.zone_config(), sb.dir(), "other-chat").await.unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&out).unwrap()["ok"], true);
+        let out = create_file(&json!({ "path": "x.txt", "content": "n" }), &sb.zone_config(), sb.dir(), "other-chat").await.unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&out).unwrap()["error_kind"], "unread");
     }
 }

@@ -604,9 +604,9 @@ async fn dispatch_inner(
         "execute_code" => code_exec::run(args, zone_config).await,
         // `sink` carries the window handle: a PDF's pages are rasterized by the
         // frontend's PDF.js (see `pdf_bridge`).
-        "read" => filesystem::read_file(args, zone_config, project_dir, sink).await,
-        "write" => filesystem::create_file(args, zone_config, project_dir).await,
-        "edit" => filesystem::edit_file(args, zone_config, project_dir).await,
+        "read" => filesystem::read_file(args, zone_config, project_dir, chat_id, sink).await,
+        "write" => filesystem::create_file(args, zone_config, project_dir, chat_id).await,
+        "edit" => filesystem::edit_file(args, zone_config, project_dir, chat_id).await,
         "present_file" => filesystem::present_file(args, project_dir).await,
         "plot_function" => render_graph::plot(args).await,
         "render_chart" => render_graph::chart(args).await,

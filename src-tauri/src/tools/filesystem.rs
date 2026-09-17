@@ -343,7 +343,8 @@ pub fn definitions(_project_dir: Option<&str>, vision_capable: bool) -> Vec<Tool
                      more than once the edit is refused with the count, so include enough \
                      surrounding lines to make it unique (or set `replace_all` when you really do \
                      mean every occurrence). Indentation and trailing whitespace are matched \
-                     leniently when an exact match fails."
+                     leniently when an exact match fails. To change several places in one file, \
+                     pass them all in `edits` in one call rather than calling once per place."
                 ),
                 parameters: json!({
                     "type": "object",
@@ -354,9 +355,21 @@ pub fn definitions(_project_dir: Option<&str>, vision_capable: bool) -> Vec<Tool
                         "replace_all": {
                             "type": "boolean",
                             "description": "Replace every occurrence instead of refusing an ambiguous match. Default false."
+                        },
+                        "edits": {
+                            "type": "array",
+                            "description": "Several replacements in one call, applied in order, instead of old_text/new_text. Use this when changing more than one place in a file. If any one fails nothing is written.",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "old_text": { "type": "string" },
+                                    "new_text": { "type": "string" }
+                                },
+                                "required": ["old_text", "new_text"]
+                            }
                         }
                     },
-                    "required": ["path", "old_text", "new_text"]
+                    "required": ["path"]
                 }),
             },
         },
@@ -1752,6 +1765,39 @@ pub struct ResolvedEdit {
     pub occurrences: usize,
 }
 
+/// Resolve an `edit` call's arguments against the file as it is: either one
+/// `old_text`/`new_text` pair, or several in `edits[]` (pi's shape). Used by the
+/// tool and by the approval preview, so the diff the user sees is the one that
+/// lands.
+///
+/// ponytail: `edits[]` are applied in order, each against the result of the
+/// one before, so a later edit may match text an earlier one introduced. pi
+/// matches every edit against the original and forbids overlap; do that if it
+/// ever bites.
+pub fn resolve_edit_args(current: &str, args: &Value) -> Result<ResolvedEdit, String> {
+    let Some(edits) = args.get("edits").and_then(|v| v.as_array()).filter(|a| !a.is_empty()) else {
+        let old_text = args.get("old_text").and_then(|v| v.as_str()).unwrap_or("");
+        let new_text = args.get("new_text").and_then(|v| v.as_str()).unwrap_or("");
+        let replace_all = args.get("replace_all").and_then(|v| v.as_bool()).unwrap_or(false);
+        return resolve_edit(current, old_text, new_text, replace_all);
+    };
+    let mut text = current.to_string();
+    let mut matched = EditMatch::Exact;
+    let mut occurrences = 0;
+    for (i, e) in edits.iter().enumerate() {
+        let old_text = e.get("old_text").and_then(|v| v.as_str()).unwrap_or("");
+        let new_text = e.get("new_text").and_then(|v| v.as_str()).unwrap_or("");
+        let r = resolve_edit(&text, old_text, new_text, false)
+            .map_err(|why| format!("edits[{i}]: {why} Nothing was written — fix that edit and resend all of them."))?;
+        if r.matched != EditMatch::Exact {
+            matched = r.matched;
+        }
+        occurrences += r.occurrences;
+        text = r.updated;
+    }
+    Ok(ResolvedEdit { updated: text, matched, occurrences })
+}
+
 /// Work out what an edit would leave in the file, or why it cannot be applied.
 ///
 /// The refusals are written for the model that has to act on them: they say
@@ -2017,9 +2063,6 @@ pub async fn edit_file(
     chat_id: &str,
 ) -> AppResult<String> {
     let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
-    let old_text = args.get("old_text").and_then(|v| v.as_str()).unwrap_or("");
-    let new_text = args.get("new_text").and_then(|v| v.as_str()).unwrap_or("");
-    let replace_all = args.get("replace_all").and_then(|v| v.as_bool()).unwrap_or(false);
     let p = match checked_path(path, zone_config, project_dir) {
         Ok(p) => p,
         Err(e) => return Ok(e),
@@ -2033,7 +2076,7 @@ pub async fn edit_file(
     };
     let current = bytes_to_string(bytes);
 
-    let resolved = match resolve_edit(&current, old_text, new_text, replace_all) {
+    let resolved = match resolve_edit_args(&current, args) {
         Ok(r) => r,
         Err(why) => return Ok(json!({ "error": why }).to_string()),
     };
@@ -2728,5 +2771,30 @@ mod tests {
         assert_eq!(serde_json::from_str::<Value>(&out).unwrap()["ok"], true);
         let out = create_file(&json!({ "path": "x.txt", "content": "n" }), &sb.zone_config(), sb.dir(), "other-chat").await.unwrap();
         assert_eq!(serde_json::from_str::<Value>(&out).unwrap()["error_kind"], "unread");
+    }
+
+    // ─── Several edits per call (0.18) ───────────────────────────────────────
+
+    #[test]
+    fn edits_apply_in_order_and_an_ambiguous_one_writes_nothing() {
+        let args = json!({ "edits": [
+            { "old_text": "a", "new_text": "b" },
+            { "old_text": "c", "new_text": "d" },
+        ]});
+        let r = resolve_edit_args("a c\n", &args).unwrap();
+        assert_eq!(r.updated, "b d\n");
+        assert_eq!(r.occurrences, 2);
+
+        let bad = json!({ "edits": [
+            { "old_text": "a", "new_text": "b" },
+            { "old_text": "x", "new_text": "y" },
+        ]});
+        let why = resolve_edit_args("a x x\n", &bad).unwrap_err();
+        assert!(why.starts_with("edits[1]:"), "{why}");
+        assert!(why.contains("Nothing was written"), "{why}");
+
+        // The single-pair shape still works and honours replace_all.
+        let single = json!({ "old_text": "x", "new_text": "y", "replace_all": true });
+        assert_eq!(resolve_edit_args("x x\n", &single).unwrap().updated, "y y\n");
     }
 }

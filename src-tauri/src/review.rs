@@ -109,26 +109,17 @@ pub async fn proposal(
             Some(Ok(Proposal { path, display, before, after }))
         }
         "edit" => {
-            let old_text = args.get("old_text").and_then(|v| v.as_str()).unwrap_or("");
-            let new_text = args.get("new_text").and_then(|v| v.as_str()).unwrap_or("");
             let current = match base {
                 Current::Text(s) => s,
                 Current::Absent => return Some(Err("the file does not exist yet".into())),
                 Current::Binary => return Some(Err("binary".into())),
             };
-            let replace_all =
-                args.get("replace_all").and_then(|v| v.as_bool()).unwrap_or(false);
             // Resolved by the tool's own function rather than a second copy of
             // the rule: the diff shown here is the one that will land, down to
             // the tolerant match and the re-indentation. A refusal is surfaced
             // in the tool's own words, so the user isn't asked to approve
             // something that cannot work.
-            match crate::tools::filesystem::resolve_edit(
-                &current,
-                old_text,
-                new_text,
-                replace_all,
-            ) {
+            match crate::tools::filesystem::resolve_edit_args(&current, args) {
                 Ok(r) => Some(Ok(Proposal {
                     path,
                     display,
@@ -186,6 +177,12 @@ pub fn narrow_arguments(name: &str, args: &Value, p: &Proposal, hunks: &[usize])
         "edit" => {
             out["old_text"] = json!(before);
             out["new_text"] = json!(narrowed);
+            // The whole-text pair above *is* the narrowed change; a leftover
+            // `edits` list would be applied instead of it.
+            if let Some(o) = out.as_object_mut() {
+                o.remove("edits");
+                o.remove("replace_all");
+            }
         }
         _ => {}
     }

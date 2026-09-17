@@ -27,11 +27,17 @@ export function EditVisual({
     (typeof args?.path === "string" && args.path) ||
     "";
 
-  const diff = path
-    ? name === "write"
-      ? creationDiff(path, String(args?.content ?? ""))
-      : editDiff(path, String(args?.old_text ?? ""), String(args?.new_text ?? ""))
-    : null;
+  // `edits[]` is several replacements in one call; each draws as its own diff.
+  const edits: { old_text?: unknown; new_text?: unknown }[] | null =
+    Array.isArray(args?.edits) && args.edits.length > 0 ? args.edits : null;
+  const diffs: FileDiff[] = !path
+    ? []
+    : name === "write"
+      ? [creationDiff(path, String(args?.content ?? ""))].filter((d): d is FileDiff => !!d)
+      : (edits ?? [args ?? {}])
+          .map((e) => editDiff(path, String(e?.old_text ?? ""), String(e?.new_text ?? "")))
+          .filter((d): d is FileDiff => !!d);
+  const diff = diffs[0] ?? null;
 
   // A write with no path, or an edit whose arguments never arrived, is a shape
   // this component cannot draw — but the tab has already been offered, so it
@@ -47,7 +53,9 @@ export function EditVisual({
 
   return (
     <div className="space-y-1">
-      <DiffView diff={diff} maxHeight="max-h-[320px]" />
+      {diffs.map((d, i) => (
+        <DiffView key={i} diff={d} maxHeight="max-h-[320px]" />
+      ))}
       {note && <div className="text-[10px] text-[var(--color-text-muted)]">{note}</div>}
     </div>
   );

@@ -130,11 +130,16 @@ function PanelBody({ chatId, onClose }: { chatId: string; onClose: () => void })
           <PanelRightClose size={16} />
         </button>
       </div>
+      {/* Every section starts closed (0.18): an empty chat used to open on
+          "No plan in progress", an empty terminal strip and the full context
+          breakdown at once, which is a lot of panel for nothing yet. A filed
+          plan opens Plan itself, the header meter opens Context, and the
+          badges say what a closed section holds. */}
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <Section id="chat" title="Chat" icon={<MessageSquare size={12} />} badge={chatBadge} defaultOpen={false}>
           <ChatSection chatId={chatId} />
         </Section>
-        <Section id="plan" title="Plan" icon={<ClipboardList size={12} />} badge={planBadge}>
+        <Section id="plan" title="Plan" icon={<ClipboardList size={12} />} badge={planBadge} defaultOpen={false}>
           {pendingPlan ? (
             <PlanReview
               plan={pendingPlan}
@@ -173,13 +178,13 @@ function PanelBody({ chatId, onClose }: { chatId: string; onClose: () => void })
             </p>
           )}
         </Section>
-        <Section id="terminals" title="Terminals" icon={<TerminalSquare size={12} />}>
+        <Section id="terminals" title="Terminals" icon={<TerminalSquare size={12} />} defaultOpen={false}>
           <TerminalPanel chatId={chatId} embedded />
         </Section>
         <Section id="files" title="Files" icon={<FolderTree size={12} />} defaultOpen={false}>
           <FilesPanel chatId={chatId} />
         </Section>
-        <Section id="context" title="Context" icon={<Gauge size={12} />}>
+        <Section id="context" title="Context" icon={<Gauge size={12} />} defaultOpen={false}>
           <ContextPanel chatId={chatId} />
         </Section>
       </div>

@@ -29,7 +29,7 @@ pub fn definition() -> Tool {
             description: "Call this whenever the user's question might be answered by their own \
 indexed documents, or to ground an answer in them. Semantic search — describe what you want in \
 plain language rather than guessing exact wording; for an exact string or symbol use \
-`search_file_text` instead. Returns passages with the file each came from."
+`grep` instead. Returns passages with the file each came from."
                 .into(),
             parameters: json!({
                 "type": "object",

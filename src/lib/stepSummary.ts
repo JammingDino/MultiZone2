@@ -1,3 +1,4 @@
+import { canonicalToolName } from "@/components/Message/visuals/families";
 import type { Step, ToolStep } from "@/lib/grouping";
 import type { ContentPart } from "@/lib/types";
 
@@ -33,7 +34,7 @@ const TOOL_LABELS: Record<string, string> = {
   compact_context: "Compacting context",
   read_context: "Reading context usage",
   copy_file: "Copying file",
-  create_file: "Writing file",
+  write: "Writing file",
   create_folder: "Creating folder",
   claim_files: "Claiming files",
   collect_subagents: "Collecting sub-agents",
@@ -42,13 +43,12 @@ const TOOL_LABELS: Record<string, string> = {
   delete_memory: "Forgetting",
   draw_diagram: "Drawing diagram",
   render_chart: "Drawing chart",
-  edit_file: "Editing file",
+  edit: "Editing file",
   execute_code: "Running code",
   extract_url: "Reading page",
-  find_files: "Finding files",
+  glob: "Finding files",
   get_current_datetime: "Checking the time",
   http_request: "Calling API",
-  list_directory: "Listing folder",
   list_subchats: "Listing sub-agents",
   list_zones: "Listing zones",
   load_skill: "Loading skill",
@@ -56,13 +56,13 @@ const TOOL_LABELS: Record<string, string> = {
   plot_function: "Plotting",
   post_note: "Posting to the team board",
   present_file: "Presenting file",
-  read_file: "Reading file",
+  read: "Reading file",
   read_memory: "Recalling",
   read_subchat: "Reading sub-agent",
   release_files: "Releasing files",
-  run_command: "Running command",
+  bash: "Running command",
   save_memory: "Remembering",
-  search_file_text: "Searching files",
+  grep: "Searching files",
   search_local_files: "Searching files",
   send_subchat_message: "Messaging sub-agent",
   smart_crawl: "Crawling site",
@@ -187,7 +187,7 @@ export function toolLabel(name: string): string {
   if (name === "…" || name === "unknown tool") return "Calling a tool";
   // MCP tools arrive namespaced (`server__tool`); label off the tool part.
   const bare = name.includes("__") ? name.slice(name.lastIndexOf("__") + 2) : name;
-  return TOOL_LABELS[bare] ?? humanize(bare);
+  return TOOL_LABELS[canonicalToolName(bare)] ?? humanize(bare);
 }
 
 /** A short, single-line "what it acted on" for the rail, or null. */

@@ -4,9 +4,9 @@ import { Shaped } from "./Shaped";
 /**
  * Family 3 — a directory listing as a tree (0.13.1).
  *
- * `list_directory` returns a nested object where a folder maps to its children
+ * `read` returns a nested object where a folder maps to its children
  * and a file maps to its extension, which is compact to send and unreadable to
- * look at. `find_files` returns a flat list, grouped here by folder so a
+ * look at. `glob` returns a flat list, grouped here by folder so a
  * hundred matches read as a handful of places rather than a hundred lines.
  *
  * Truncation is always stated. A listing that silently stopped at the limit is
@@ -24,7 +24,7 @@ export function TreeVisual({
   args: any;
   result: Record<string, unknown>;
 }) {
-  if (name === "find_files") {
+  if (name === "glob") {
     const files = Array.isArray(result.files) ? (result.files as unknown[]).map(String) : [];
     return (
       <Frame
@@ -38,7 +38,7 @@ export function TreeVisual({
     );
   }
 
-  // list_directory: the whole result *is* the tree.
+  // read: the whole result *is* the tree.
   const entries = Object.entries(result);
   if (entries.length === 0) {
     return (

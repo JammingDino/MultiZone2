@@ -289,7 +289,7 @@ mod tests {
     fn varied_work_is_never_a_loop() {
         let mut g = guard();
         for i in 0..20 {
-            let v = g.observe("read_file", &format!("{{\"path\":\"f{i}.rs\"}}"), &format!("body {i}"), false);
+            let v = g.observe("read", &format!("{{\"path\":\"f{i}.rs\"}}"), &format!("body {i}"), false);
             assert_eq!(v, Runaway::None, "step {i}");
         }
     }
@@ -299,11 +299,11 @@ mod tests {
     fn four_identical_calls_stop_the_turn() {
         let mut g = guard();
         for _ in 0..3 {
-            assert_eq!(g.observe("read_file", "{\"path\":\"a\"}", "same", false), Runaway::None);
+            assert_eq!(g.observe("read", "{\"path\":\"a\"}", "same", false), Runaway::None);
         }
-        match g.observe("read_file", "{\"path\":\"a\"}", "same", false) {
+        match g.observe("read", "{\"path\":\"a\"}", "same", false) {
             Runaway::Repeat { tool, times } => {
-                assert_eq!(tool, "read_file");
+                assert_eq!(tool, "read");
                 assert_eq!(times, 4);
             }
             other => panic!("expected a repeat, got {other:?}"),
@@ -316,7 +316,7 @@ mod tests {
     fn the_same_call_with_changing_results_is_progress() {
         let mut g = guard();
         for i in 0..8 {
-            let v = g.observe("run_command", "{\"cmd\":\"ls\"}", &format!("{i} files"), false);
+            let v = g.observe("bash", "{\"cmd\":\"ls\"}", &format!("{i} files"), false);
             assert_eq!(v, Runaway::None);
         }
     }
@@ -325,11 +325,11 @@ mod tests {
     fn three_identical_errors_in_a_row_stop_the_turn_with_the_error() {
         let mut g = guard();
         let err = "{\"error\":\"cargo: command not found\"}";
-        assert_eq!(g.observe("run_command", "{\"cmd\":\"cargo b\"}", err, true), Runaway::None);
-        assert_eq!(g.observe("run_command", "{\"cmd\":\"cargo t\"}", err, true), Runaway::None);
-        match g.observe("run_command", "{\"cmd\":\"cargo r\"}", err, true) {
+        assert_eq!(g.observe("bash", "{\"cmd\":\"cargo b\"}", err, true), Runaway::None);
+        assert_eq!(g.observe("bash", "{\"cmd\":\"cargo t\"}", err, true), Runaway::None);
+        match g.observe("bash", "{\"cmd\":\"cargo r\"}", err, true) {
             Runaway::StuckError { tool, error, times } => {
-                assert_eq!(tool, "run_command");
+                assert_eq!(tool, "bash");
                 assert_eq!(times, 3);
                 assert!(error.contains("command not found"));
             }
@@ -343,10 +343,10 @@ mod tests {
     fn a_successful_call_between_failures_resets_the_error_run() {
         let mut g = guard();
         let err = "{\"error\":\"nope\"}";
-        g.observe("run_command", "a", err, true);
-        g.observe("run_command", "b", err, true);
-        g.observe("read_file", "c", "fine", false);
-        assert_eq!(g.observe("run_command", "d", err, true), Runaway::None);
+        g.observe("bash", "a", err, true);
+        g.observe("bash", "b", err, true);
+        g.observe("read", "c", "fine", false);
+        assert_eq!(g.observe("bash", "d", err, true), Runaway::None);
     }
 
     /// Two different errors alternating are not a stuck error — the agent is
@@ -354,21 +354,21 @@ mod tests {
     #[test]
     fn different_errors_are_not_a_stuck_error() {
         let mut g = guard();
-        g.observe("run_command", "a", "{\"error\":\"one\"}", true);
-        g.observe("run_command", "b", "{\"error\":\"two\"}", true);
-        assert_eq!(g.observe("run_command", "c", "{\"error\":\"three\"}", true), Runaway::None);
+        g.observe("bash", "a", "{\"error\":\"one\"}", true);
+        g.observe("bash", "b", "{\"error\":\"two\"}", true);
+        assert_eq!(g.observe("bash", "c", "{\"error\":\"three\"}", true), Runaway::None);
     }
 
     #[test]
     fn an_alternating_pair_is_caught() {
         let mut g = guard();
-        g.observe("edit_file", "x", "wrote", false);
-        g.observe("run_command", "test", "failed", false);
-        g.observe("edit_file", "x", "wrote", false);
-        match g.observe("run_command", "test", "failed", false) {
+        g.observe("edit", "x", "wrote", false);
+        g.observe("bash", "test", "failed", false);
+        g.observe("edit", "x", "wrote", false);
+        match g.observe("bash", "test", "failed", false) {
             Runaway::Oscillation { a, b } => {
-                assert_eq!(a, "edit_file");
-                assert_eq!(b, "run_command");
+                assert_eq!(a, "edit");
+                assert_eq!(b, "bash");
             }
             other => panic!("expected an oscillation, got {other:?}"),
         }
@@ -379,10 +379,10 @@ mod tests {
     #[test]
     fn an_edit_test_cycle_that_makes_progress_is_left_alone() {
         let mut g = guard();
-        g.observe("edit_file", "x", "wrote", false);
-        g.observe("run_command", "test", "3 failed", false);
-        g.observe("edit_file", "y", "wrote", false);
-        assert_eq!(g.observe("run_command", "test", "1 failed", false), Runaway::None);
+        g.observe("edit", "x", "wrote", false);
+        g.observe("bash", "test", "3 failed", false);
+        g.observe("edit", "y", "wrote", false);
+        assert_eq!(g.observe("bash", "test", "1 failed", false), Runaway::None);
     }
 
     /// The window slides: four repeats spread far enough apart are not a loop.
@@ -390,7 +390,7 @@ mod tests {
     fn repeats_outside_the_window_do_not_accumulate() {
         let mut g = guard();
         for round in 0..4 {
-            g.observe("read_file", "a", "same", false);
+            g.observe("read", "a", "same", false);
             for i in 0..5 {
                 g.observe("other", &format!("{round}-{i}"), "x", false);
             }
@@ -444,7 +444,7 @@ mod tests {
     fn reading_a_sub_agent_is_not_delegating_to_it() {
         assert!(delegation_target("read_subchat", "{\"subchat_id\":\"a\"}").is_none());
         assert!(delegation_target("collect_subagents", "{}").is_none());
-        assert!(delegation_target("read_file", "{\"path\":\"a\"}").is_none());
+        assert!(delegation_target("read", "{\"path\":\"a\"}").is_none());
         assert_eq!(
             delegation_target("send_subchat_message", "{\"subchat_id\":\"a\"}"),
             Some("a".to_string())
@@ -453,11 +453,11 @@ mod tests {
 
     #[test]
     fn the_note_states_the_evidence_and_forbids_another_attempt() {
-        let r = Runaway::Repeat { tool: "read_file".into(), times: 4 };
+        let r = Runaway::Repeat { tool: "read".into(), times: 4 };
         let note = r.note();
-        assert!(note.contains("`read_file` 4 times"), "{note}");
+        assert!(note.contains("`read` 4 times"), "{note}");
         assert!(note.contains("Do not try again"), "{note}");
-        assert!(r.label().contains("read_file"));
+        assert!(r.label().contains("read"));
     }
 
     #[test]

@@ -78,7 +78,7 @@ Grouped as Files, Web, Knowledge, Agents, System, and enabled per zone. Notes th
 
 - **Every enabled tool costs context on every single turn**, used or not. A focused toolset makes a zone both cheaper and more accurate. Per-zone usage counters in the zone editor show which ones actually earn their place.
 - Web research is keyless out of the box — \`smart_search\` queries several engines at once and merges them.
-- \`run_command\` runs a command and waits for it to finish. For something that keeps running — a dev server, a REPL, a program that prompts part-way through — the **terminal** tools start it and stay attached, so you can read its output and type into it across several turns.
+- \`bash\` runs a command and waits for it to finish. For something that keeps running — a dev server, a REPL, a program that prompts part-way through — the **terminal** tools start it and stay attached, so you can read its output and type into it across several turns.
 - Tools are classified safe / moderate / dangerous, and **Settings → Chat → Tool auto-approval** decides which prompt first.
 - **Task length** caps how many steps one turn may take before the model must answer. Raise it for long agentic work; the default suits ordinary chat.
 

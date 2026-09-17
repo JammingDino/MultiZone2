@@ -861,10 +861,10 @@ mod tests {
     fn tool_calls_measure_name_and_arguments_only() {
         let calls = json!([
             { "id": "call_1", "type": "function",
-              "function": { "name": "read_file", "arguments": "{\"path\":\"a.rs\"}" } },
+              "function": { "name": "read", "arguments": "{\"path\":\"a.rs\"}" } },
         ])
         .to_string();
-        assert_eq!(tool_call_chars(Some(&calls)), 9 + 15);
+        assert_eq!(tool_call_chars(Some(&calls)), 4 + 15);
         assert_eq!(tool_call_chars(None), 0);
     }
 

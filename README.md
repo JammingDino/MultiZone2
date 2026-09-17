@@ -83,7 +83,7 @@ The original single-engine tools are still available, mainly for the key-based p
 
 ## Terminals that stay open
 
-`run_command` runs a command and waits for it to exit, which cannot express *starting* something — a dev server, a REPL, a log to follow, a program that asks a question part-way through. The **terminal** tool group (0.9.11) keeps a process alive between calls instead:
+`bash` runs a command and waits for it to exit, which cannot express *starting* something — a dev server, a REPL, a log to follow, a program that asks a question part-way through. The **terminal** tool group (0.9.11) keeps a process alive between calls instead:
 
 | Tool | What it does |
 |------|--------------|
@@ -293,7 +293,7 @@ API-driven activity also updates any matching chat open in the app live — and 
 
 *0.17.x.* MultiZone on a phone is **a remote for your computer, not a second app**. Same chats, same zones, same projects — you send from the phone and the machine at home runs the turn, with its providers, its models, its files, its MCP servers. Nothing infers on the phone and nothing is stored there.
 
-That shape is deliberate, and the alternative is the tempting one. A phone cannot run a 30B local model, which is the premise of the product. Every tool that matters — `read_file`, the shell, the knowledge index, an `npx` MCP server — is meaningless without your computer's filesystem. And two independent stores would have to sync, which is the cloud-sync feature this app refuses; a remote client has no second copy, so the hard problem is deleted rather than solved.
+That shape is deliberate, and the alternative is the tempting one. A phone cannot run a 30B local model, which is the premise of the product. Every tool that matters — `read`, the shell, the knowledge index, an `npx` MCP server — is meaningless without your computer's filesystem. And two independent stores would have to sync, which is the cloud-sync feature this app refuses; a remote client has no second copy, so the hard problem is deleted rather than solved.
 
 **Getting the app.** Every release carries an `.apk` alongside the desktop installers, built and signed by CI from the same commit as the Windows installer. There is no store listing; sideload it, and the in-app updater does not apply to it — a new version means downloading the new APK.
 

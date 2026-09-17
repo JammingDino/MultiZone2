@@ -598,7 +598,7 @@ export type InputPart =
 
 /**
  * What kind of work a tool does, from the user's point of view — a different
- * axis from how dangerous it is (0.14.2). `delete_file` and `run_command` are
+ * axis from how dangerous it is (0.14.2). `delete_file` and `bash` are
  * both dangerous and belong in different categories: letting an agent edit a
  * repo is not agreeing to let it run anything.
  */
@@ -1039,7 +1039,7 @@ export interface AppSettings {
    */
   checkpointRetentionDays: number;
   /**
-   * Review before apply (0.10.2). When on, a zone's `create_file` / `edit_file`
+   * Review before apply (0.10.2). When on, a zone's `write` / `edit`
    * writes stage in a review queue instead of landing, and the user applies the
    * batch after reading it. Reads are served the staged version, so an agent
    * editing one file repeatedly works against its own last version rather than
@@ -1298,7 +1298,7 @@ export type ToolSafety = 0 | 1 | 2;
 
 /**
  * One callable function inside a tool group, as reported by Rust (0.9.3). A group
- * (`file_system`) can expose several functions (`read_file`, `edit_file`, …), and
+ * (`file_system`) can expose several functions (`read`, `edit`, …), and
  * a per-zone description override is keyed by function name.
  */
 export interface ToolFunctionInfo {
@@ -1316,7 +1316,7 @@ export interface ToolFunctionInfo {
  */
 export interface ToolUsage {
   zoneId: string;
-  /** The function name the model called, e.g. "read_file". */
+  /** The function name the model called, e.g. "read". */
   toolName: string;
   calls: number;
   errors: number;
@@ -1405,7 +1405,7 @@ export interface StagedEdit {
   zoneId: string | null;
   path: string;
   displayPath: string;
-  /** The tool that proposed it: `create_file` or `edit_file`. */
+  /** The tool that proposed it: `write` or `edit`. */
   tool: string;
   createdAt: number;
   /** The file changed on disk after this was queued — applying discards that. */

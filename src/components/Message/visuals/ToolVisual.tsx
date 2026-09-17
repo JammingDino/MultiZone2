@@ -1,4 +1,4 @@
-import { familyOf } from "./families";
+import { canonicalToolName, familyOf } from "./families";
 import { Shaped } from "./Shaped";
 import { EditVisual } from "./EditVisual";
 import { TerminalVisual } from "./TerminalVisual";
@@ -61,7 +61,13 @@ export function ToolVisual({
     case "terminal":
       return record ? <TerminalVisual name={name} args={args} result={record} /> : null;
     case "file":
-      return record ? <FileVisual name={name} args={args} result={record} /> : null;
+      if (!record) return null;
+      // `read` on a directory answers with the tree itself rather than a
+      // `{ path, content }` record.
+      if (familyOf(name) === "file" && canonicalToolName(name) === "read" && !("content" in record)) {
+        return <TreeVisual name={name} args={args} result={record} />;
+      }
+      return <FileVisual name={name} args={args} result={record} />;
     case "tree":
       return record ? <TreeVisual name={name} args={args} result={record} /> : null;
     case "match":

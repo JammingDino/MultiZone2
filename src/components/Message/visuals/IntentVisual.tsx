@@ -201,13 +201,13 @@ export function rulePrefixes(command: string): string[] {
  * should be written about: it is where the bytes end up.
  */
 export function editPathOf(name: string, args: any): string | null {
-  // By name rather than by family: `read_file` shares the file card with
+  // By name rather than by family: `read` shares the file card with
   // `delete_file`, and offering a rule about where edits may land from a read
   // prompt would write a rule the user was never asked about. This list is the
   // frontend's copy of the backend's edit category (`approvals::category_for`).
   const EDITS = [
-    "create_file",
-    "edit_file",
+    "write",
+    "edit",
     "delete_file",
     "move_file",
     "copy_file",

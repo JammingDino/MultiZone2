@@ -96,7 +96,7 @@ export default function App() {
 
   // App-wide keyboard shortcuts (new chat, settings, sidebar, navigation, …).
   useGlobalShortcuts();
-  // Answers `read_file`'s PDF page requests — the rasterizer is PDF.js, and it
+  // Answers `read`'s PDF page requests — the rasterizer is PDF.js, and it
   // lives in the window (see lib/usePdfReadBridge.ts).
   usePdfReadBridge();
   // Guard against concurrent invocations of the one-time seeders.

@@ -256,7 +256,7 @@ const PACK_NOTE: &str = "This skill is a folder of files. Its instructions refer
      that folder — read each one by calling `load_skill` again with this same `name` and the \
      `file` path, at the point the instructions call for it (not all up front). Paths written \
      against another tool's layout (e.g. `.claude/skills/<skill>/reference/x.md`) work as-is. \
-     `base_dir` is the folder's real location on disk: if you have `run_command` or \
+     `base_dir` is the folder's real location on disk: if you have `bash` or \
      `execute_code`, run any scripts the instructions mention from there; if you do not, say so \
      rather than pretending a step ran.";
 

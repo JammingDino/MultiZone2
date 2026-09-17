@@ -392,7 +392,7 @@ mod tests {
                 msg("system", &"You are a careful engineer. ".repeat(40)),
                 msg("user", "fix the parser"),
             ],
-            Some(vec![tool("read_file"), tool("write_file")]),
+            Some(vec![tool("read"), tool("write_file")]),
         );
         let m = measure_request(&req, DEFAULT_CHARS_PER_TOKEN);
 
@@ -429,7 +429,7 @@ mod tests {
             id: "call_1".into(),
             call_type: "function".into(),
             function: FunctionCall {
-                name: "read_file".into(),
+                name: "read".into(),
                 arguments: json!({ "path": "src/main.rs" }).to_string(),
             },
         }]);

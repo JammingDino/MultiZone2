@@ -25,7 +25,7 @@ Every tool step becomes two layers:
 
 ```
 ┌─────────────────────────────────────────────────┐
-│ ▸ Step 4 · edit_file          src/lib/parse.rs ✓│   collapsed: one line
+│ ▸ Step 4 · edit          src/lib/parse.rs ✓│   collapsed: one line
 ├─────────────────────────────────────────────────┤
 │  ┌───────────────────────────────────────────┐  │
 │  │  + 12  − 3   src/lib/parse.rs             │  │   the visual
@@ -56,33 +56,33 @@ Every tool step becomes two layers:
 
 ## Families
 
-### 1 · Diff — `create_file`, `edit_file`
+### 1 · Diff — `write`, `edit`
 `DiffView` unchanged, read-only mode (no hunk checkboxes — the decision was
 already made). Header carries `+n / −n` and the path; the path is clickable and
 reveals in the OS file manager. A create shows the whole file as added, capped
 with a "show all" affordance. **Component exists** — this is wiring, not building.
 
-### 2 · File card — `read_file`, `present_file`, `create_folder`, `move_file`, `copy_file`, `delete_file`
+### 2 · File card — `read`, `present_file`, `create_folder`, `move_file`, `copy_file`, `delete_file`
 Path chip, size, line count, detected language, and for a read the first ~15
 lines syntax-highlighted with a fade-out. Move and copy show `from → to` on one
 line. Delete shows the path struck through with what was removed (bytes, lines).
 `present_file` keeps its existing `SavedFileChip` / `HtmlReportBlock` treatment.
-For a PDF read, show page count and which pages were extracted — `read_file`
+For a PDF read, show page count and which pages were extracted — `read`
 already reports that.
 
-### 3 · Tree — `list_directory`, `find_files`
+### 3 · Tree — `read`, `glob`
 Indented tree with folder/file icons, entry counts per folder, truncation marked
 explicitly ("+ 41 more") rather than silently. Respects the `depth` argument
 visually. Rows are click-to-copy path.
 
-### 4 · Match list — `search_file_text`, `search_local_files`
+### 4 · Match list — `grep`, `search_local_files`
 Grouped by file, each hit as `line №` plus the line with the match highlighted.
 File header shows the hit count. Collapsed to the first 3 files with the rest
 behind a disclosure. For `search_local_files` (knowledge base) each hit carries
 its similarity score and its source document, which is also what the citation
 UI wants.
 
-### 5 · Terminal — `run_command`, `execute_code`, `wsl_exec`, `terminal_start`, `terminal_write`, `terminal_read`, `terminal_stop`, `terminal_list`
+### 5 · Terminal — `bash`, `execute_code`, `wsl_exec`, `terminal_start`, `terminal_write`, `terminal_read`, `terminal_stop`, `terminal_list`
 Monospace block: the command on a prompt line, then stdout/stderr with stderr
 tinted, then an exit-code pill (green 0, red non-zero) and duration. ANSI colour
 parsed rather than shown as escapes. Long output tail-anchored — the last 200
@@ -155,21 +155,21 @@ use it to label columns.
 
 | Tool | Family | Visual in one line |
 | --- | --- | --- |
-| `create_file` | 1 Diff | Whole file as an addition, path clickable |
-| `edit_file` | 1 Diff | `+n/−n` hunks, read-only `DiffView` |
-| `read_file` | 2 File | Path, size, lines, first 15 lines highlighted |
+| `write` | 1 Diff | Whole file as an addition, path clickable |
+| `edit` | 1 Diff | `+n/−n` hunks, read-only `DiffView` |
+| `read` | 2 File | Path, size, lines, first 15 lines highlighted |
 | `present_file` | 2 File | Existing file chip / HTML report card |
 | `create_folder` | 2 File | Path created, parent shown |
 | `move_file` | 2 File | `from → to` |
 | `copy_file` | 2 File | `from → to`, copy icon |
 | `delete_file` | 2 File | Struck path, bytes/lines removed |
-| `list_directory` | 3 Tree | Indented tree, counts, explicit truncation |
-| `find_files` | 3 Tree | Matched paths grouped by folder |
-| `search_file_text` | 4 Match | Hits grouped by file, term highlighted |
+| `read` | 3 Tree | Indented tree, counts, explicit truncation |
+| `glob` | 3 Tree | Matched paths grouped by folder |
+| `grep` | 4 Match | Hits grouped by file, term highlighted |
 | `search_local_files` | 4 Match | Chunk hits with score and source doc |
-| `run_command` | 5 Terminal | Command, output, exit pill, duration |
+| `bash` | 5 Terminal | Command, output, exit pill, duration |
 | `execute_code` | 5 Terminal | Language chip, source collapsed, output |
-| `wsl_exec` | 5 Terminal | Distro chip, otherwise as `run_command` |
+| `wsl_exec` | 5 Terminal | Distro chip, otherwise as `bash` |
 | `terminal_start` | 5 Terminal | Session id, shell, cwd, alive dot |
 | `terminal_write` | 5 Terminal | Input echoed, resulting output |
 | `terminal_read` | 5 Terminal | Tail of the buffer, tail-anchored |

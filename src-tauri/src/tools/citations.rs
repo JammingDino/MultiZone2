@@ -3,7 +3,7 @@
 //! Every citing tool numbers its own results from 1 and tells the model to write
 //! `[ref]` after a claim that result supports. On its own that is ambiguous the
 //! moment a turn calls more than one of them: a search returns `ref: 1`, a
-//! `read_file` after it also returns `ref: 1`, and the `[1]` in the answer now
+//! `read` after it also returns `ref: 1`, and the `[1]` in the answer now
 //! names two different sources. The frontend cannot tell them apart either — it
 //! matches a marker against the numbers the tools reported — so it would either
 //! attribute the sentence to the wrong source or list both, and a citation that
@@ -21,7 +21,7 @@ use serde_json::Value;
 /// numbering, advancing `next` past them.
 ///
 /// Handles both shapes a citing tool returns: a `results` array whose entries
-/// carry a `ref` (the searches), and a single top-level `ref` (`read_file`).
+/// carry a `ref` (the searches), and a single top-level `ref` (`read`).
 /// Anything else — a non-citing tool, an error, a non-JSON payload — is returned
 /// untouched, so this is safe to run over every tool result.
 pub fn renumber_refs(result: String, next: &mut u32) -> String {

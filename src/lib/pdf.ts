@@ -154,7 +154,7 @@ export interface PdfReadResult {
 }
 
 /**
- * Read selected pages of a PDF on behalf of the backend's `read_file` tool
+ * Read selected pages of a PDF on behalf of the backend's `read` tool
  * (1.0). The model names the pages it wants and gets images by default; the
  * document's real page count always comes back, so one cheap read tells it how
  * long the document is and what else there is to ask for.

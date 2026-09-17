@@ -4,7 +4,7 @@
 //! There is no pure-Rust PDF rasterizer worth shipping — every option pulls in a
 //! native library (pdfium, mupdf), which this codebase deliberately avoids (see
 //! the notes beside `ocrs` and `pdf-extract` in Cargo.toml). PDF.js is already in
-//! the app and already rasterizes attached PDFs, so `read_file` borrows it: the
+//! the app and already rasterizes attached PDFs, so `read` borrows it: the
 //! backend emits a request, the window renders the pages it asked for, and a
 //! command hands the results back. Same shape as the tool-approval gate — emit,
 //! then wait on a oneshot keyed by request id.

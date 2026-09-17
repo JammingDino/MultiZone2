@@ -1,9 +1,9 @@
 //! `terminal` — long-lived terminals an agent can start, watch, and type into.
 //!
-//! `run_command` and `wsl_exec` both answer the same shape of question: run this,
+//! `bash` and `wsl_exec` both answer the same shape of question: run this,
 //! tell me what it printed. Neither can express *starting something and leaving it
 //! running* — a dev server, a REPL, a docker log follow, a program that asks a
-//! question part-way through. `run_command` blocks until the process exits, so a
+//! question part-way through. `bash` blocks until the process exits, so a
 //! server either times out or hangs the turn; `wsl_exec`'s persistent shell reads
 //! until a sentinel marker, so a command that never finishes never returns.
 //!
@@ -150,7 +150,7 @@ fn wait_props() -> Value {
 fn start_definition() -> Tool {
     tool(
         "terminal_start",
-        "Start a process that keeps running after this call returns — a server, a REPL, a log to follow, anything you must type into later. For a command that finishes on its own use `run_command`, or start it here with `until: \"exit\"` if it outlives that timeout. Pipes, not a TTY: pass `sudo -S`, and unbuffer output (`python -u`).",
+        "Start a process that keeps running after this call returns — a server, a REPL, a log to follow, anything you must type into later. For a command that finishes on its own use `bash`, or start it here with `until: \"exit\"` if it outlives that timeout. Pipes, not a TTY: pass `sudo -S`, and unbuffer output (`python -u`).",
         {
             let mut props = json!({
                 "command": {

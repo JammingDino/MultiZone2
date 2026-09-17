@@ -8,7 +8,7 @@
 //!
 //! - A phone cannot run a 30B local model, so whatever ran here would be a
 //!   different, worse app wearing the same icon.
-//! - Every tool that matters needs the desktop's filesystem. `read_file`, the
+//! - Every tool that matters needs the desktop's filesystem. `read`, the
 //!   shell, an `npx` MCP server: none of them mean anything against a phone's
 //!   sandbox.
 //! - Two stores would have to sync, and cloud sync is a stated non-goal. A

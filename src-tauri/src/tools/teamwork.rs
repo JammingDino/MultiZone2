@@ -378,7 +378,7 @@ fn guarded_paths(name: &str, args: &Value) -> Vec<String> {
             .collect()
     };
     match name {
-        "create_file" | "edit_file" | "delete_file" => pick(&["path", "file_path"]),
+        "write" | "edit" | "delete_file" => pick(&["path", "file_path"]),
         "move_file" => pick(&["source_path", "destination_path", "from", "to"]),
         "copy_file" => pick(&["destination_path", "to"]),
         _ => Vec::new(),
@@ -679,13 +679,13 @@ mod tests {
     #[test]
     fn guarded_paths_covers_the_write_tools_only() {
         let args = json!({ "path": "src/a.ts", "content": "x" });
-        assert_eq!(guarded_paths("create_file", &args), vec!["src/a.ts"]);
-        assert_eq!(guarded_paths("edit_file", &args), vec!["src/a.ts"]);
+        assert_eq!(guarded_paths("write", &args), vec!["src/a.ts"]);
+        assert_eq!(guarded_paths("edit", &args), vec!["src/a.ts"]);
         assert_eq!(guarded_paths("delete_file", &args), vec!["src/a.ts"]);
         // Reads and searches are never blocked.
-        assert!(guarded_paths("read_file", &args).is_empty());
-        assert!(guarded_paths("list_directory", &args).is_empty());
-        assert!(guarded_paths("search_file_text", &args).is_empty());
+        assert!(guarded_paths("read", &args).is_empty());
+        assert!(guarded_paths("read", &args).is_empty());
+        assert!(guarded_paths("grep", &args).is_empty());
         // A move touches both ends; a copy only writes its destination.
         let mv = json!({ "source_path": "a.ts", "destination_path": "b.ts" });
         assert_eq!(guarded_paths("move_file", &mv), vec!["a.ts", "b.ts"]);

@@ -164,7 +164,7 @@ pub fn render(files: &[InstructionFile], header: Header) -> Option<String> {
     }
     if !cut.is_empty() {
         out.push_str(&format!(
-            "\nNot included, for the same reason: {}. Read them with `read_file` if the work goes \
+            "\nNot included, for the same reason: {}. Read them with `read` if the work goes \
              near what they cover.\n",
             cut.join(", ")
         ));
@@ -175,10 +175,10 @@ pub fn render(files: &[InstructionFile], header: Header) -> Option<String> {
 /// Tools whose arguments name one file the model is working on, and therefore
 /// a directory whose conventions have just become relevant.
 ///
-/// Reads and writes, not searches: `find_files` sweeping a tree is not the
+/// Reads and writes, not searches: `glob` sweeping a tree is not the
 /// model deciding to work in a directory, and treating it as such would fire
 /// every rule in the repository on one glob.
-const TRIGGERING_TOOLS: [&str; 3] = ["read_file", "edit_file", "create_file"];
+const TRIGGERING_TOOLS: [&str; 3] = ["read", "edit", "write"];
 
 /// Instructions for the directory a tool call just touched, the first time it
 /// is touched.
@@ -408,7 +408,7 @@ mod tests {
         t.write("src/generated/AGENTS.md", "Never edit these by hand.");
         let dir = t.0.to_string_lossy().to_string();
         let mut seen = HashSet::new();
-        let note = triggered("read_file", &read("src/generated/api.ts"), Some(&dir), &mut seen)
+        let note = triggered("read", &read("src/generated/api.ts"), Some(&dir), &mut seen)
             .expect("expected the directory's rules");
         assert!(note.contains("Never edit these by hand."));
         assert!(note.contains("Directory instructions"));
@@ -422,8 +422,8 @@ mod tests {
         t.write("src/generated/AGENTS.md", "Never edit these by hand.");
         let dir = t.0.to_string_lossy().to_string();
         let mut seen = HashSet::new();
-        assert!(triggered("read_file", &read("src/generated/a.ts"), Some(&dir), &mut seen).is_some());
-        assert!(triggered("read_file", &read("src/generated/b.ts"), Some(&dir), &mut seen).is_none());
+        assert!(triggered("read", &read("src/generated/a.ts"), Some(&dir), &mut seen).is_some());
+        assert!(triggered("read", &read("src/generated/b.ts"), Some(&dir), &mut seen).is_none());
     }
 
     /// A directory with no rules is remembered too, so twenty reads of an
@@ -434,7 +434,7 @@ mod tests {
         t.dir("src");
         let dir = t.0.to_string_lossy().to_string();
         let mut seen = HashSet::new();
-        assert!(triggered("read_file", &read("src/a.ts"), Some(&dir), &mut seen).is_none());
+        assert!(triggered("read", &read("src/a.ts"), Some(&dir), &mut seen).is_none());
         assert!(seen.contains(&t.0.join("src")));
     }
 
@@ -447,7 +447,7 @@ mod tests {
         t.write("AGENTS.md", "Root rules.");
         let dir = t.0.to_string_lossy().to_string();
         let mut seen = HashSet::new();
-        assert!(triggered("read_file", &read("a.ts"), Some(&dir), &mut seen).is_none());
+        assert!(triggered("read", &read("a.ts"), Some(&dir), &mut seen).is_none());
     }
 
     /// Nested directories fire in reading order, outermost first.
@@ -458,7 +458,7 @@ mod tests {
         t.write("src/generated/AGENTS.md", "Generated rules.");
         let dir = t.0.to_string_lossy().to_string();
         let mut seen = HashSet::new();
-        let note = triggered("read_file", &read("src/generated/a.ts"), Some(&dir), &mut seen).unwrap();
+        let note = triggered("read", &read("src/generated/a.ts"), Some(&dir), &mut seen).unwrap();
         let src = note.find("Src rules.").expect("src rules missing");
         let gen = note.find("Generated rules.").expect("generated rules missing");
         assert!(src < gen, "the nearer rules should be read last");
@@ -471,8 +471,8 @@ mod tests {
         t.write("src/generated/AGENTS.md", "Never edit these by hand.");
         let dir = t.0.to_string_lossy().to_string();
         let mut seen = HashSet::new();
-        assert!(triggered("find_files", &read("src/generated/a.ts"), Some(&dir), &mut seen).is_none());
-        assert!(triggered("search_file_text", &read("src/generated/a.ts"), Some(&dir), &mut seen).is_none());
+        assert!(triggered("glob", &read("src/generated/a.ts"), Some(&dir), &mut seen).is_none());
+        assert!(triggered("grep", &read("src/generated/a.ts"), Some(&dir), &mut seen).is_none());
     }
 
     /// A path outside the working directory has no directory chain to walk,
@@ -485,6 +485,6 @@ mod tests {
         let dir = inside.to_string_lossy().to_string();
         let mut seen = HashSet::new();
         let path = t.0.join("elsewhere/a.ts").to_string_lossy().to_string();
-        assert!(triggered("read_file", &read(&path), Some(&dir), &mut seen).is_none());
+        assert!(triggered("read", &read(&path), Some(&dir), &mut seen).is_none());
     }
 }

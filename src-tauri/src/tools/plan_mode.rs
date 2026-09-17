@@ -186,7 +186,7 @@ pub fn draft_step_definition() -> Tool {
 /// Plan mode's own output outlives the context that produced it: the plan is a
 /// row and a Markdown file, and by the time step 6 of it is running, the turn
 /// that wrote step 6's specification may have been compacted away. This is how
-/// the model gets it back, and it is deliberately not `read_file` — the plan
+/// the model gets it back, and it is deliberately not `read` — the plan
 /// document lives in the app data directory, which is outside every zone's
 /// allowed roots and should stay that way.
 pub fn read_plan_definition() -> Tool {

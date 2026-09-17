@@ -166,7 +166,7 @@ class CitationSink {
   }
 
   /** A knowledge/file citation for a local path (local-search hits and
-   *  `read_file` reads), de-duplicated by path. */
+   *  `read` reads), de-duplicated by path. */
   private pushPath(
     path: string,
     title: string | undefined,
@@ -199,7 +199,7 @@ class CitationSink {
     // `smart_search` returns the same `{ results: [{ ref, url, title, snippet }] }`
     // shape as `web_search`, so it feeds the citation list identically.
     const isWebSearch = name === "web_search" || name === "smart_search";
-    if (!isWebSearch && !isLocalSearch && name !== "read_file") return;
+    if (!isWebSearch && !isLocalSearch && name !== "read") return;
 
     let data: any;
     try {
@@ -233,10 +233,10 @@ class CitationSink {
         );
       }
     } else {
-      // read_file — the file the model read. Carries its own `ref` (renumbered
+      // read — the file the model read. Carries its own `ref` (renumbered
       // per turn on the backend), so a read is citable exactly like a search
       // hit. Image and error results have no source path and are skipped.
-      // read_file's `source` is already absolute, so it is both.
+      // read's `source` is already absolute, so it is both.
       const source = typeof data?.source === "string" ? data.source : "";
       this.pushPath(source, undefined, refOf(data), source || undefined);
     }

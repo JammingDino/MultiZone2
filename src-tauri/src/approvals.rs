@@ -80,7 +80,7 @@ impl Category {
 /// Which category a tool call belongs to.
 ///
 /// Deliberately exhaustive over the built-ins rather than derived from the
-/// danger level: the two disagree on purpose. `delete_file` and `run_command`
+/// danger level: the two disagree on purpose. `delete_file` and `bash`
 /// are both danger 2 and belong in different categories, because someone who
 /// lets an agent edit a repo has not thereby agreed to let it run anything.
 pub fn category_for(tool: &str) -> Category {
@@ -89,7 +89,7 @@ pub fn category_for(tool: &str) -> Category {
     }
     match tool {
         // Reads of local state.
-        "read_file" | "list_directory" | "find_files" | "search_file_text"
+        "read" | "read" | "glob" | "grep"
         | "search_local_files" | "search_knowledge" | "read_memory" | "read_subchat"
         | "list_subchats" | "collect_subagents" | "list_zones" | "team_status"
         | "terminal_read" | "terminal_list" | "app_read" | "get_current_datetime"
@@ -97,11 +97,11 @@ pub fn category_for(tool: &str) -> Category {
         | "ask_user" => Category::Read,
 
         // Writes to the filesystem.
-        "create_file" | "edit_file" | "delete_file" | "move_file" | "copy_file"
+        "write" | "edit" | "delete_file" | "move_file" | "copy_file"
         | "create_folder" => Category::Edit,
 
         // Running things.
-        "run_command" | "execute_code" | "terminal_start" | "terminal_write"
+        "bash" | "execute_code" | "terminal_start" | "terminal_write"
         | "terminal_stop" => Category::Shell,
 
         // The network.
@@ -431,7 +431,7 @@ fn rule_keys(rules: &[String], project_dir: Option<&str>) -> Vec<String> {
 /// Canonicalized where the filesystem can answer — which is what resolves
 /// symlinks, `8.3` short names and the case a file was really created with —
 /// then lexically normalized for the part that does not exist yet, since
-/// `create_file` names a path precisely when it is absent. Separators are
+/// `write` names a path precisely when it is absent. Separators are
 /// unified and Windows is case-folded, because on Windows `C:\Src` and `c:\src`
 /// are the same directory and a rule that missed one would be a rule in name
 /// only.
@@ -613,9 +613,9 @@ mod tests {
 
     #[test]
     fn tools_land_in_the_category_a_person_would_put_them_in() {
-        assert_eq!(category_for("read_file"), Category::Read);
-        assert_eq!(category_for("edit_file"), Category::Edit);
-        assert_eq!(category_for("run_command"), Category::Shell);
+        assert_eq!(category_for("read"), Category::Read);
+        assert_eq!(category_for("edit"), Category::Edit);
+        assert_eq!(category_for("bash"), Category::Shell);
         assert_eq!(category_for("execute_code"), Category::Shell);
         assert_eq!(category_for("smart_search"), Category::Web);
         assert_eq!(category_for("spawn_subagent"), Category::Spawn);
@@ -629,7 +629,7 @@ mod tests {
     #[test]
     fn deleting_a_file_and_running_a_command_are_different_decisions() {
         assert_eq!(category_for("delete_file"), Category::Edit);
-        assert_eq!(category_for("run_command"), Category::Shell);
+        assert_eq!(category_for("bash"), Category::Shell);
     }
 
     /// A tool this build does not know about is the last thing to wave through.
@@ -641,8 +641,8 @@ mod tests {
     #[test]
     fn a_decided_category_ignores_the_danger_level_entirely() {
         let p = policy(&[("read", true), ("shell", false)], &[], &[]);
-        assert_eq!(p.decide("read_file", "{}", 1, None), Decision::Auto);
-        assert_eq!(p.decide("run_command", "{\"command\":\"ls\"}", 2, None), Decision::Ask);
+        assert_eq!(p.decide("read", "{}", 1, None), Decision::Auto);
+        assert_eq!(p.decide("bash", "{\"command\":\"ls\"}", 2, None), Decision::Ask);
     }
 
     /// An install that never opens the new panel must behave exactly as it did.
@@ -650,18 +650,18 @@ mod tests {
     fn an_undecided_category_falls_back_to_the_old_slider() {
         let mut p = policy(&[], &[], &[]);
         p.level = "safe".into();
-        assert_eq!(p.decide("read_file", "{}", 0, None), Decision::Auto, "safe tool");
-        assert_eq!(p.decide("edit_file", "{}", 1, None), Decision::Ask, "moderate tool");
+        assert_eq!(p.decide("read", "{}", 0, None), Decision::Auto, "safe tool");
+        assert_eq!(p.decide("edit", "{}", 1, None), Decision::Ask, "moderate tool");
 
         p.level = "all".into();
-        assert_eq!(p.decide("run_command", "{\"command\":\"ls\"}", 2, None), Decision::Auto);
+        assert_eq!(p.decide("bash", "{\"command\":\"ls\"}", 2, None), Decision::Auto);
     }
 
     #[test]
     fn longest_match_wins_so_allow_git_deny_git_push_reads_correctly() {
         let p = policy(&[("shell", false)], &["git"], &["git push"]);
-        assert_eq!(p.decide("run_command", "{\"command\":\"git status\"}", 2, None), Decision::Auto);
-        match p.decide("run_command", "{\"command\":\"git push origin main\"}", 2, None) {
+        assert_eq!(p.decide("bash", "{\"command\":\"git status\"}", 2, None), Decision::Auto);
+        match p.decide("bash", "{\"command\":\"git push origin main\"}", 2, None) {
             Decision::Deny { reason, .. } => assert!(reason.contains("git push origin main"), "{reason}"),
             other => panic!("expected a refusal, got {other:?}"),
         }
@@ -672,15 +672,15 @@ mod tests {
     #[test]
     fn a_prefix_matches_whole_words() {
         let p = policy(&[("shell", false)], &["git"], &[]);
-        assert_eq!(p.decide("run_command", "{\"command\":\"gitleaks detect\"}", 2, None), Decision::Ask);
-        assert_eq!(p.decide("run_command", "{\"command\":\"git\"}", 2, None), Decision::Auto);
+        assert_eq!(p.decide("bash", "{\"command\":\"gitleaks detect\"}", 2, None), Decision::Ask);
+        assert_eq!(p.decide("bash", "{\"command\":\"git\"}", 2, None), Decision::Auto);
     }
 
     #[test]
     fn spacing_and_case_do_not_defeat_a_rule() {
         let p = policy(&[], &[], &["RM -RF"]);
         assert!(matches!(
-            p.decide("run_command", "{\"command\":\"rm   -rf /\"}", 2, None),
+            p.decide("bash", "{\"command\":\"rm   -rf /\"}", 2, None),
             Decision::Deny { .. }
         ));
     }
@@ -691,7 +691,7 @@ mod tests {
     fn a_tie_goes_to_deny() {
         let p = policy(&[("shell", true)], &["npm run"], &["npm run"]);
         assert!(matches!(
-            p.decide("run_command", "{\"command\":\"npm run build\"}", 2, None),
+            p.decide("bash", "{\"command\":\"npm run build\"}", 2, None),
             Decision::Deny { .. }
         ));
     }
@@ -702,24 +702,24 @@ mod tests {
     fn a_deny_overrides_an_auto_approved_category() {
         let p = policy(&[("shell", true)], &[], &["rm"]);
         assert!(matches!(
-            p.decide("run_command", "{\"command\":\"rm -rf build\"}", 2, None),
+            p.decide("bash", "{\"command\":\"rm -rf build\"}", 2, None),
             Decision::Deny { .. }
         ));
-        assert_eq!(p.decide("run_command", "{\"command\":\"ls\"}", 2, None), Decision::Auto);
+        assert_eq!(p.decide("bash", "{\"command\":\"ls\"}", 2, None), Decision::Auto);
     }
 
     /// The lists only speak about shell. A file named `rm` is not a command.
     #[test]
     fn the_prefix_lists_do_not_apply_outside_shell() {
         let p = policy(&[("edit", true)], &[], &["rm"]);
-        assert_eq!(p.decide("edit_file", "{\"path\":\"rm\"}", 1, None), Decision::Auto);
+        assert_eq!(p.decide("edit", "{\"path\":\"rm\"}", 1, None), Decision::Auto);
     }
 
     #[test]
     fn a_command_that_cannot_be_read_falls_through_to_the_category() {
         let p = policy(&[("shell", false)], &["ls"], &[]);
-        assert_eq!(p.decide("run_command", "not json", 2, None), Decision::Ask);
-        assert_eq!(p.decide("run_command", "{}", 2, None), Decision::Ask);
+        assert_eq!(p.decide("bash", "not json", 2, None), Decision::Ask);
+        assert_eq!(p.decide("bash", "{}", 2, None), Decision::Ask);
     }
 
     // ── Edit path lists (0.14.5) ─────────────────────────────────────────────
@@ -730,8 +730,8 @@ mod tests {
     fn the_project_token_becomes_the_chats_own_directory() {
         let p = path_policy(&[("edit", false)], &["{project}"], &[]);
         let dir = root();
-        assert_eq!(p.decide("edit_file", &edit("src/a.rs"), 1, Some(&dir)), Decision::Auto);
-        assert_eq!(p.decide("edit_file", &edit(&abs("src/a.rs")), 1, Some(&dir)), Decision::Auto);
+        assert_eq!(p.decide("edit", &edit("src/a.rs"), 1, Some(&dir)), Decision::Auto);
+        assert_eq!(p.decide("edit", &edit(&abs("src/a.rs")), 1, Some(&dir)), Decision::Auto);
     }
 
     /// The point of the whole item: an allow list is a boundary, so a path
@@ -741,9 +741,9 @@ mod tests {
     fn an_allow_list_asks_about_everything_outside_it() {
         let p = path_policy(&[("edit", true)], &["{project}"], &[]);
         let dir = root();
-        assert_eq!(p.decide("edit_file", &edit("src/a.rs"), 1, Some(&dir)), Decision::Auto);
+        assert_eq!(p.decide("edit", &edit("src/a.rs"), 1, Some(&dir)), Decision::Auto);
         let outside = if cfg!(windows) { "C:\\elsewhere\\a.rs" } else { "/elsewhere/a.rs" };
-        assert_eq!(p.decide("edit_file", &edit(outside), 1, Some(&dir)), Decision::Ask);
+        assert_eq!(p.decide("edit", &edit(outside), 1, Some(&dir)), Decision::Ask);
     }
 
     /// A deny list on its own is an exception list, not a grant: everything it
@@ -752,9 +752,9 @@ mod tests {
     fn a_deny_list_alone_does_not_grant_anything() {
         let p = path_policy(&[("edit", false)], &[], &["{project}/.git"]);
         let dir = root();
-        assert_eq!(p.decide("edit_file", &edit("src/a.rs"), 1, Some(&dir)), Decision::Ask);
+        assert_eq!(p.decide("edit", &edit("src/a.rs"), 1, Some(&dir)), Decision::Ask);
         assert!(matches!(
-            p.decide("edit_file", &edit(".git/config"), 1, Some(&dir)),
+            p.decide("edit", &edit(".git/config"), 1, Some(&dir)),
             Decision::Deny { rule: "editDeny", .. }
         ));
     }
@@ -765,8 +765,8 @@ mod tests {
     fn a_denied_subdirectory_beats_an_allowed_parent() {
         let p = path_policy(&[("edit", true)], &["{project}"], &["{project}/.git"]);
         let dir = root();
-        assert_eq!(p.decide("edit_file", &edit("src/a.rs"), 1, Some(&dir)), Decision::Auto);
-        match p.decide("edit_file", &edit(".git/hooks/pre-commit"), 1, Some(&dir)) {
+        assert_eq!(p.decide("edit", &edit("src/a.rs"), 1, Some(&dir)), Decision::Auto);
+        match p.decide("edit", &edit(".git/hooks/pre-commit"), 1, Some(&dir)) {
             Decision::Deny { reason, rule } => {
                 assert_eq!(rule, "editDeny");
                 assert!(reason.contains(".git/hooks/pre-commit"), "{reason}");
@@ -782,8 +782,8 @@ mod tests {
         let p = path_policy(&[("edit", true)], &["{project}"], &[]);
         let dir = root();
         let sibling = if cfg!(windows) { "C:\\work-backup\\a.rs" } else { "/work-backup/a.rs" };
-        assert_eq!(p.decide("edit_file", &edit(sibling), 1, Some(&dir)), Decision::Ask);
-        assert_eq!(p.decide("edit_file", &edit(&root()), 1, Some(&dir)), Decision::Auto);
+        assert_eq!(p.decide("edit", &edit(sibling), 1, Some(&dir)), Decision::Ask);
+        assert_eq!(p.decide("edit", &edit(&root()), 1, Some(&dir)), Decision::Auto);
     }
 
     /// `..` is resolved before the comparison, so climbing out of an allowed
@@ -792,8 +792,8 @@ mod tests {
     fn dot_dot_cannot_walk_out_of_an_allowed_path() {
         let p = path_policy(&[("edit", true)], &["{project}/src"], &[]);
         let dir = root();
-        assert_eq!(p.decide("edit_file", &edit("src/a.rs"), 1, Some(&dir)), Decision::Auto);
-        assert_eq!(p.decide("edit_file", &edit("src/../secrets.env"), 1, Some(&dir)), Decision::Ask);
+        assert_eq!(p.decide("edit", &edit("src/a.rs"), 1, Some(&dir)), Decision::Auto);
+        assert_eq!(p.decide("edit", &edit("src/../secrets.env"), 1, Some(&dir)), Decision::Ask);
     }
 
     /// Both ends of a move are checked. Moving a file out of the allowed area
@@ -815,10 +815,10 @@ mod tests {
     fn an_unreadable_path_is_asked_about_when_a_boundary_exists() {
         let dir = root();
         let bounded = path_policy(&[("edit", true)], &["{project}"], &[]);
-        assert_eq!(bounded.decide("edit_file", "not json", 1, Some(&dir)), Decision::Ask);
+        assert_eq!(bounded.decide("edit", "not json", 1, Some(&dir)), Decision::Ask);
         // With no path rules at all, nothing has changed: the category decides.
         let plain = path_policy(&[("edit", true)], &[], &[]);
-        assert_eq!(plain.decide("edit_file", "not json", 1, Some(&dir)), Decision::Auto);
+        assert_eq!(plain.decide("edit", "not json", 1, Some(&dir)), Decision::Auto);
     }
 
     /// A rule that cannot be anchored is dropped rather than widened. An
@@ -831,7 +831,7 @@ mod tests {
         // No project directory: the allow list is empty, so no boundary exists
         // and the category decides — it does not become a boundary that nothing
         // can satisfy, and it does not become a rule about everything.
-        assert_eq!(p.decide("edit_file", &edit(&abs("a.rs")), 1, None), Decision::Auto);
+        assert_eq!(p.decide("edit", &edit(&abs("a.rs")), 1, None), Decision::Auto);
         assert!(rule_keys(&["{project}/src".to_string()], None).is_empty());
         assert!(rule_keys(&["src".to_string()], None).is_empty());
     }
@@ -843,7 +843,7 @@ mod tests {
         let p = path_policy(&[("edit", false), ("read", true)], &[], &[&abs("secrets")]);
         let dir = root();
         assert_eq!(
-            p.decide("read_file", &edit(&abs("secrets/key.pem")), 0, Some(&dir)),
+            p.decide("read", &edit(&abs("secrets/key.pem")), 0, Some(&dir)),
             Decision::Auto
         );
     }
@@ -853,11 +853,11 @@ mod tests {
         let p = path_policy(&[("edit", true)], &[], &["{project}/.git"]);
         let dir = root();
         assert!(matches!(
-            p.decide("edit_file", &edit(".git\\config"), 1, Some(&dir)),
+            p.decide("edit", &edit(".git\\config"), 1, Some(&dir)),
             Decision::Deny { .. }
         ));
         assert!(matches!(
-            p.decide("edit_file", &edit(".git/config"), 1, Some(&dir)),
+            p.decide("edit", &edit(".git/config"), 1, Some(&dir)),
             Decision::Deny { .. }
         ));
     }
@@ -869,7 +869,7 @@ mod tests {
     fn windows_paths_compare_without_case() {
         let p = path_policy(&[("edit", true)], &[], &["C:\\Work\\Secrets"]);
         assert!(matches!(
-            p.decide("edit_file", &edit("c:\\work\\secrets\\key.pem"), 1, None),
+            p.decide("edit", &edit("c:\\work\\secrets\\key.pem"), 1, None),
             Decision::Deny { .. }
         ));
     }
@@ -880,9 +880,9 @@ mod tests {
     #[cfg(not(windows))]
     fn unix_paths_keep_their_case() {
         let p = path_policy(&[("edit", true)], &[], &["/work/Secrets"]);
-        assert_eq!(p.decide("edit_file", &edit("/work/secrets/key.pem"), 1, None), Decision::Auto);
+        assert_eq!(p.decide("edit", &edit("/work/secrets/key.pem"), 1, None), Decision::Auto);
         assert!(matches!(
-            p.decide("edit_file", &edit("/work/Secrets/key.pem"), 1, None),
+            p.decide("edit", &edit("/work/Secrets/key.pem"), 1, None),
             Decision::Deny { .. }
         ));
     }
@@ -911,8 +911,8 @@ mod tests {
 
         let dir = inside.to_string_lossy().to_string();
         let p = path_policy(&[("edit", true)], &["{project}"], &[]);
-        assert_eq!(p.decide("edit_file", &edit("src/a.rs"), 1, Some(&dir)), Decision::Auto);
-        assert_eq!(p.decide("edit_file", &edit("escape/a.rs"), 1, Some(&dir)), Decision::Ask);
+        assert_eq!(p.decide("edit", &edit("src/a.rs"), 1, Some(&dir)), Decision::Auto);
+        assert_eq!(p.decide("edit", &edit("escape/a.rs"), 1, Some(&dir)), Decision::Ask);
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

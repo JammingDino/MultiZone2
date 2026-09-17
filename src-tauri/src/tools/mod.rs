@@ -414,18 +414,18 @@ pub fn tool_safety_by_name(name: &str) -> u8 {
         | "search_local_files" | "search_knowledge" => 0,
         "web_search" | "extract_url"
         | "smart_search" | "smart_fetch" | "smart_crawl"
-        | "read_file" | "list_directory"
-        | "create_file" | "edit_file" | "list_zones" | "change_zone"
+        | "read"
+        | "write" | "edit" | "list_zones" | "change_zone"
         | "spawn_subagent" | "send_subchat_message"
         | "update_skill"
-        | "find_files" | "search_file_text"
+        | "glob" | "grep"
         | "move_file" | "copy_file" | "create_folder"
         | "compact_context"
         // Reading the app's own state is a read like any other; changing it is
         // the user's app being rewritten, so it prompts.
         | "app_read"
         | "terminal_stop" => 1,
-        "execute_code" | "run_command" | "delete_file" | "http_request"
+        "execute_code" | "bash" | "delete_file" | "http_request"
         | "app_control"
         | "terminal_start" | "terminal_write" => 2,
         _ => 1,
@@ -460,6 +460,25 @@ pub fn definition_sizes(ctx: &ToolContext) -> Vec<(&'static str, usize)> {
 /// `turn_id` groups every call of one turn, so the checkpoint taken before the
 /// turn's first file change is the one every later change in that turn extends —
 /// "revert this turn" is then one action however many files it touched.
+/// The current name of a tool function, given any name it has ever had.
+///
+/// The file and shell tools took Claude Code / opencode's names in 0.18 (`read`,
+/// `write`, `edit`, `glob`, `grep`, `bash`) — the names most models were trained
+/// on. A model can still emit an old name it saw earlier in the same chat, and
+/// stored history carries them, so every consumer of a tool name goes through
+/// here first.
+pub fn canonical_name(name: &str) -> &str {
+    match name {
+        "read_file" | "list_directory" => "read",
+        "create_file" => "write",
+        "edit_file" => "edit",
+        "find_files" => "glob",
+        "search_file_text" => "grep",
+        "run_command" => "bash",
+        other => other,
+    }
+}
+
 pub async fn dispatch(
     name: &str,
     arguments: &str,
@@ -554,7 +573,7 @@ async fn dispatch_inner(
                 Some(Err(_)) | None => {}
             }
         }
-        if name == "read_file" {
+        if name == "read" {
             if let Some(path) = args.get("path").and_then(|v| v.as_str()) {
                 let resolved = filesystem::resolve_path(path, project_dir);
                 if let Some(text) = crate::review::staged_content(db, chat_id, &resolved).await {
@@ -585,10 +604,9 @@ async fn dispatch_inner(
         "execute_code" => code_exec::run(args, zone_config).await,
         // `sink` carries the window handle: a PDF's pages are rasterized by the
         // frontend's PDF.js (see `pdf_bridge`).
-        "read_file" => filesystem::read_file(args, zone_config, project_dir, sink).await,
-        "list_directory" => filesystem::list_directory(args, zone_config, project_dir).await,
-        "create_file" => filesystem::create_file(args, zone_config, project_dir).await,
-        "edit_file" => filesystem::edit_file(args, zone_config, project_dir).await,
+        "read" => filesystem::read_file(args, zone_config, project_dir, sink).await,
+        "write" => filesystem::create_file(args, zone_config, project_dir).await,
+        "edit" => filesystem::edit_file(args, zone_config, project_dir).await,
         "present_file" => filesystem::present_file(args, project_dir).await,
         "plot_function" => render_graph::plot(args).await,
         "render_chart" => render_graph::chart(args).await,
@@ -597,7 +615,7 @@ async fn dispatch_inner(
         "tag_chat" => tags::run(args, db, chat_id).await,
         "list_zones" => zone::list_zones(db).await,
         "change_zone" => zone::change_zone(args, db, chat_id).await,
-        "run_command" => shell::run(args, zone_config, project_dir).await,
+        "bash" => shell::run(args, zone_config, project_dir).await,
         "wsl_exec" => wsl::run(args, chat_id).await,
         "save_memory" => memory::save(args, db, chat_id).await,
         "read_memory" => memory::read(args, db, chat_id).await,
@@ -612,8 +630,8 @@ async fn dispatch_inner(
         "copy_file" => filesystem::copy_file(args, zone_config, project_dir).await,
         "delete_file" => filesystem::delete_file(args, zone_config, project_dir).await,
         "create_folder" => filesystem::create_folder(args, zone_config, project_dir).await,
-        "find_files" => filesystem::find_files(args, zone_config, project_dir).await,
-        "search_file_text" => filesystem::search_file_text(args, zone_config, project_dir).await,
+        "glob" => filesystem::find_files(args, zone_config, project_dir).await,
+        "grep" => filesystem::search_file_text(args, zone_config, project_dir).await,
         "update_plan" => plan::run(args, db, chat_id, caller_zone_id).await,
         "enter_plan_mode" => plan_mode::enter(args, db, chat_id).await,
         "exit_plan_mode" => plan_mode::exit(args, db, chat_id, caller_zone_id).await,

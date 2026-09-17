@@ -28,7 +28,7 @@ export function EditVisual({
     "";
 
   const diff = path
-    ? name === "create_file"
+    ? name === "write"
       ? creationDiff(path, String(args?.content ?? ""))
       : editDiff(path, String(args?.old_text ?? ""), String(args?.new_text ?? ""))
     : null;

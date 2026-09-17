@@ -4,7 +4,7 @@
 //! Checkpoints handle the half of that which comes *after* the change;
 //! this module handles the half that comes before. Three things live here:
 //!
-//! - **Preview.** What a pending `create_file` / `edit_file` would actually do,
+//! - **Preview.** What a pending `write` / `edit` would actually do,
 //!   as a diff. Until now the approval prompt showed the tool's raw arguments —
 //!   for a whole-file write, a wall of proposed content, which is the form in
 //!   which a change is hardest to judge.
@@ -14,7 +14,7 @@
 //!   worse lie than not offering it.
 //! - **The review queue.** A mode where a zone's writes stage instead of
 //!   landing, and the user applies the batch after reading it. Staged content
-//!   is what `read_file` serves back to the model, so an agent that stages three
+//!   is what `read` serves back to the model, so an agent that stages three
 //!   edits to one file is working against its own last version rather than
 //!   silently against the stale disk.
 
@@ -33,7 +33,7 @@ use std::path::{Path, PathBuf};
 /// tools and not every mutating one: a rename or a delete has no diff, and
 /// asking "which hunks of this deletion do you accept" is nonsense.
 pub fn is_reviewable(name: &str) -> bool {
-    matches!(name, "create_file" | "edit_file")
+    matches!(name, "write" | "edit")
 }
 
 /// What a pending call would leave on disk, resolved against the same working
@@ -99,7 +99,7 @@ pub async fn proposal(
     };
 
     match name {
-        "create_file" => {
+        "write" => {
             let after = args.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let before = match base {
                 Current::Absent => None,
@@ -108,7 +108,7 @@ pub async fn proposal(
             };
             Some(Ok(Proposal { path, display, before, after }))
         }
-        "edit_file" => {
+        "edit" => {
             let old_text = args.get("old_text").and_then(|v| v.as_str()).unwrap_or("");
             let new_text = args.get("new_text").and_then(|v| v.as_str()).unwrap_or("");
             let current = match base {
@@ -169,7 +169,7 @@ pub async fn preview(
 ///
 /// The tool name is deliberately left alone — history, checkpoints and the
 /// usage counters all key on it, and a call that changed identity between
-/// approval and execution would be unreadable afterwards. For `edit_file` that
+/// approval and execution would be unreadable afterwards. For `edit` that
 /// means expressing the narrowed result as a replacement of the whole current
 /// text, which is exactly what it is.
 pub fn narrow_arguments(name: &str, args: &Value, p: &Proposal, hunks: &[usize]) -> Value {
@@ -180,10 +180,10 @@ pub fn narrow_arguments(name: &str, args: &Value, p: &Proposal, hunks: &[usize])
 
     let mut out = args.clone();
     match name {
-        "create_file" => {
+        "write" => {
             out["content"] = json!(narrowed);
         }
-        "edit_file" => {
+        "edit" => {
             out["old_text"] = json!(before);
             out["new_text"] = json!(narrowed);
         }
@@ -220,7 +220,7 @@ fn key(path: &Path) -> String {
 }
 
 /// The staged content for a path in this chat, if any. This is what makes the
-/// queue usable by an agent rather than merely visible to a user: a `read_file`
+/// queue usable by an agent rather than merely visible to a user: a `read`
 /// after a staged write returns what the model wrote, not the stale disk.
 pub async fn staged_content(db: &SqlitePool, chat_id: &str, path: &Path) -> Option<String> {
     sqlx::query_scalar(
@@ -427,7 +427,7 @@ pub async fn apply(
     let turn = format!("review-{id}");
     let args = json!({ "path": path });
     if let Err(e) = crate::checkpoints::capture(
-        db, &chat_id, &turn, zone_id.as_deref(), "create_file", &args, None,
+        db, &chat_id, &turn, zone_id.as_deref(), "write", &args, None,
     )
     .await
     {
@@ -447,7 +447,7 @@ pub async fn apply(
     }
 
     if let Err(e) = crate::checkpoints::record_after(
-        db, &chat_id, &turn, zone_id.as_deref(), "create_file", &args, None,
+        db, &chat_id, &turn, zone_id.as_deref(), "write", &args, None,
     )
     .await
     {
@@ -524,7 +524,7 @@ mod tests {
             "path": file.to_string_lossy(),
             "content": "name = \"new\"\nport = 8080\n",
         });
-        let d = preview(&db, "c", "create_file", &args.to_string(), None)
+        let d = preview(&db, "c", "write", &args.to_string(), None)
             .await
             .unwrap()
             .unwrap();
@@ -535,7 +535,7 @@ mod tests {
         assert_eq!(d.hunks.len(), 1);
 
         // A tool with no reviewable change has no preview rather than an empty one.
-        assert!(preview(&db, "c", "run_command", "{}", None).await.unwrap().is_none());
+        assert!(preview(&db, "c", "bash", "{}", None).await.unwrap().is_none());
     }
 
     /// Approving some hunks and not others runs the call against the content
@@ -555,8 +555,8 @@ mod tests {
         let after = lines.join("\n");
 
         let args = json!({ "path": file.to_string_lossy(), "content": after });
-        let p = proposal(&db, "c", "create_file", &args, None).await.unwrap().unwrap();
-        let narrowed = narrow_arguments("create_file", &args, &p, &[0]);
+        let p = proposal(&db, "c", "write", &args, None).await.unwrap().unwrap();
+        let narrowed = narrow_arguments("write", &args, &p, &[0]);
 
         let written = narrowed["content"].as_str().unwrap();
         assert!(written.contains("wanted"));
@@ -575,8 +575,8 @@ mod tests {
         std::fs::write(&file, "on disk\n").unwrap();
 
         let args = json!({ "path": file.to_string_lossy(), "content": "staged version\n" });
-        let p = proposal(&db, "c", "create_file", &args, None).await.unwrap().unwrap();
-        let result = stage(&db, "c", None, "create_file", &p).await.unwrap();
+        let p = proposal(&db, "c", "write", &args, None).await.unwrap().unwrap();
+        let result = stage(&db, "c", None, "write", &p).await.unwrap();
 
         assert!(result.contains("\"staged\":true"));
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "on disk\n");
@@ -591,9 +591,9 @@ mod tests {
             "old_text": "staged",
             "new_text": "twice staged",
         });
-        let p2 = proposal(&db, "c", "edit_file", &args2, None).await.unwrap().unwrap();
+        let p2 = proposal(&db, "c", "edit", &args2, None).await.unwrap().unwrap();
         assert_eq!(p2.after, "twice staged version\n");
-        stage(&db, "c", None, "edit_file", &p2).await.unwrap();
+        stage(&db, "c", None, "edit", &p2).await.unwrap();
 
         // One row per path: the newest proposal is the only coherent one.
         let queued = list(&db, "c").await.unwrap();
@@ -615,8 +615,8 @@ mod tests {
         std::fs::write(&file, "original\n").unwrap();
 
         let args = json!({ "path": file.to_string_lossy(), "content": "the agent's version\n" });
-        let p = proposal(&db, "c", "create_file", &args, None).await.unwrap().unwrap();
-        stage(&db, "c", None, "create_file", &p).await.unwrap();
+        let p = proposal(&db, "c", "write", &args, None).await.unwrap().unwrap();
+        stage(&db, "c", None, "write", &p).await.unwrap();
 
         std::fs::write(&file, "the user's own edit\n").unwrap();
 
@@ -642,8 +642,8 @@ mod tests {
         std::fs::write(&file, "keep me\n").unwrap();
 
         let args = json!({ "path": file.to_string_lossy(), "content": "replace me\n" });
-        let p = proposal(&db, "c", "create_file", &args, None).await.unwrap().unwrap();
-        stage(&db, "c", None, "create_file", &p).await.unwrap();
+        let p = proposal(&db, "c", "write", &args, None).await.unwrap().unwrap();
+        stage(&db, "c", None, "write", &p).await.unwrap();
 
         let queued = list(&db, "c").await.unwrap();
         discard(&db, &queued[0].id).await.unwrap();

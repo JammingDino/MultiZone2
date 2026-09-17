@@ -251,7 +251,7 @@ export const deleteTag = (id: string) => invoke<void>("delete_tag", { id });
 
 /**
  * Every callable tool function, flattened out of the tool groups (0.9.3). A group
- * id like `file_system` exposes several functions (`read_file`, `edit_file`, …),
+ * id like `file_system` exposes several functions (`read`, `edit`, …),
  * and a description override is per function — so the zone editor reads the list
  * from Rust rather than duplicating it, keeping one source of truth for what the
  * model actually sees.
@@ -609,7 +609,7 @@ export const applyAllStagedEdits = (chatId: string, force?: boolean) =>
 export const discardAllStagedEdits = (chatId: string) =>
   invoke<void>("discard_all_staged_edits", { chatId });
 
-// PDF reads for the `read_file` tool (1.0). Rasterizing is PDF.js's job, so the
+// PDF reads for the `read` tool (1.0). Rasterizing is PDF.js's job, so the
 // backend asks the window to do it and waits for `resolve_pdf_read`.
 export interface PdfReadRequest {
   id: string;

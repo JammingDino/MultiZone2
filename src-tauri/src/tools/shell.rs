@@ -10,7 +10,7 @@ pub fn definition() -> Tool {
     Tool {
         tool_type: "function".into(),
         function: ToolFunction {
-            name: "run_command".into(),
+            name: "bash".into(),
             description: "Run a shell/terminal command in the chat's working directory. Returns stdout, stderr, and the exit code. Use for running scripts, listing files, installing packages, building projects, or any terminal operation. On Windows the default shell is PowerShell; on other platforms it is bash/sh.".into(),
             parameters: json!({
                 "type": "object",

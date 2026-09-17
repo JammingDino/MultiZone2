@@ -1813,7 +1813,7 @@ async fn run_participant_turn(
     // Whether this turn has already spent its one fallback zone (0.14.1).
     let mut used_fallback = false;
     // Citation numbering for this turn. Every citing tool numbers its own
-    // results from 1, so without a shared counter a search and a `read_file` in
+    // results from 1, so without a shared counter a search and a `read` in
     // the same turn would both tell the model to write `[1]`. See
     // `tools::citations`.
     let mut next_citation_ref = 1u32;
@@ -2068,7 +2068,7 @@ async fn run_participant_turn(
         let sink_for_emit = sink.clone();
         let chat_id_for_emit = chat_id.to_string();
         let persp_for_emit = persp_zone_id.clone();
-        let agg = consume_stream(response, cancel.clone(), parse_inline_think, move |ev| {
+        let mut agg = consume_stream(response, cancel.clone(), parse_inline_think, move |ev| {
             let persp = persp_for_emit.as_deref();
             match ev {
                 StreamEvent::Token { delta } => {
@@ -2102,6 +2102,12 @@ async fn run_participant_turn(
             }
         })
         .await?;
+        for tc in &mut agg.tool_calls {
+            let canon = tools::canonical_name(&tc.function.name);
+            if canon != tc.function.name {
+                tc.function.name = canon.to_string();
+            }
+        }
 
         // Book the request against the chat before anything else can return
         // early. Every step of the turn re-sends the whole context, so this is
@@ -2689,8 +2695,8 @@ async fn run_participant_turn(
                     format!(
                         "{} {}",
                         match tc.function.name.as_str() {
-                            "create_file" => "Wrote",
-                            "edit_file" => "Edited",
+                            "write" => "Wrote",
+                            "edit" => "Edited",
                             "delete_file" => "Deleted",
                             "move_file" => "Moved",
                             "copy_file" => "Copied",
@@ -4116,7 +4122,7 @@ async fn build_tools_for_zone(db: &SqlitePool, zone: &Zone, ctx: &ToolContext) -
 
 /// One callable function a zone can enable, flattened out of the tool groups.
 /// The zone editor needs this because a group id (`file_system`) can expose
-/// several functions (`read_file`, `edit_file`, …), and a description override
+/// several functions (`read`, `edit`, …), and a description override
 /// is per function. Derived from the Rust definitions so there is one source of
 /// truth for what the model actually sees.
 #[derive(serde::Serialize)]
@@ -4124,7 +4130,7 @@ async fn build_tools_for_zone(db: &SqlitePool, zone: &Zone, ctx: &ToolContext) -
 pub struct ToolFunctionInfo {
     /// The group id as stored in a zone's `tools_enabled`, e.g. "file_system".
     pub tool_id: String,
-    /// The function name the model calls, e.g. "read_file".
+    /// The function name the model calls, e.g. "read".
     pub name: String,
     /// The shipped description — the default an override replaces.
     pub description: String,
@@ -4247,7 +4253,7 @@ mod tests {
     /// failed too.
     #[test]
     fn orphaned_tool_results_are_dropped() {
-        let calls = r#"[{"id":"call_1","type":"function","function":{"name":"read_file","arguments":"{}"}}]"#;
+        let calls = r#"[{"id":"call_1","type":"function","function":{"name":"read","arguments":"{}"}}]"#;
         let mut rows = vec![
             msg("m1", "tool", None, Some("call_0")), // its call was compacted away
             msg("m2", "user", None, None),
@@ -4288,7 +4294,7 @@ mod tests {
     #[tokio::test]
     async fn a_read_only_zone_can_still_reach_plan_mode() {
         let pool = pool_with_long_chat().await;
-        let mut tools = vec![tool_named("smart_search"), tool_named("read_file")];
+        let mut tools = vec![tool_named("smart_search"), tool_named("read")];
         let planning = apply_plan_mode(&pool, "c1", &mut tools, false).await;
         assert!(!planning);
         assert!(names(&tools).contains(&"enter_plan_mode"));
@@ -4300,7 +4306,7 @@ mod tests {
     #[tokio::test]
     async fn a_perspective_zone_cannot_seize_the_mode() {
         let pool = pool_with_long_chat().await;
-        let mut tools = vec![tool_named("smart_search"), tool_named("create_file")];
+        let mut tools = vec![tool_named("smart_search"), tool_named("write")];
         apply_plan_mode(&pool, "c1", &mut tools, true).await;
         assert!(!names(&tools).contains(&"enter_plan_mode"));
     }
@@ -4321,11 +4327,11 @@ mod tests {
     async fn planning_swaps_the_toolset() {
         let pool = pool_with_long_chat().await;
         crate::plans::set_plan_mode(&pool, "c1", true).await.unwrap();
-        let mut tools = vec![tool_named("smart_search"), tool_named("create_file")];
+        let mut tools = vec![tool_named("smart_search"), tool_named("write")];
         let planning = apply_plan_mode(&pool, "c1", &mut tools, false).await;
         assert!(planning);
         let n = names(&tools);
-        assert!(!n.contains(&"create_file"), "mutating tools are withheld, not discouraged");
+        assert!(!n.contains(&"write"), "mutating tools are withheld, not discouraged");
         assert!(n.contains(&"smart_search"), "the research half of the mode survives");
         for t in ["draft_plan_step", "exit_plan_mode", "read_plan", "update_plan"] {
             assert!(n.contains(&t), "{t} should be offered while planning");
@@ -4345,7 +4351,7 @@ mod tests {
         // as progress reporting and points the "agree it first" case at plan
         // mode — so the two stop competing for the same request.
         let mut planner = zone_with_compact_tool();
-        planner.tools_enabled = r#"["plan","read_file"]"#.into();
+        planner.tools_enabled = r#"["plan","read"]"#.into();
         let prompt = system_prompt_for(&pool, &planner).await;
         assert!(prompt.contains("update_plan"));
         assert!(prompt.contains("enter_plan_mode` instead"));
@@ -4413,7 +4419,7 @@ mod tests {
             temperature: Some(0.7),
             max_tokens: None,
             top_p: None,
-            tools_enabled: r#"["compact","read_file"]"#.into(),
+            tools_enabled: r#"["compact","read"]"#.into(),
             tool_config: "{}".into(),
             thinking_enabled: false,
             thinking_effort: "medium".into(),

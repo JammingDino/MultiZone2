@@ -1,3 +1,4 @@
+import { canonicalToolName } from "@/components/Message/visuals/families";
 import { parseFileAttachments } from "@/lib/attachmentParts";
 import type { ContentPart, Message, ToolCall } from "@/lib/types";
 
@@ -374,17 +375,16 @@ export interface ToolDescription {
 }
 
 const LABELS: Record<string, { label: string; icon: ToolIcon }> = {
-  read_file: { label: "Read file", icon: "file" },
-  create_file: { label: "Wrote file", icon: "file" },
-  edit_file: { label: "Edited file", icon: "edit" },
-  list_directory: { label: "Listed folder", icon: "folder" },
+  read: { label: "Read file", icon: "file" },
+  write: { label: "Wrote file", icon: "file" },
+  edit: { label: "Edited file", icon: "edit" },
   present_file: { label: "Presented file", icon: "file" },
   move_file: { label: "Moved file", icon: "file" },
   copy_file: { label: "Copied file", icon: "file" },
   delete_file: { label: "Deleted file", icon: "file" },
   create_folder: { label: "Created folder", icon: "folder" },
-  find_files: { label: "Found files", icon: "search" },
-  search_file_text: { label: "Searched in files", icon: "search" },
+  glob: { label: "Found files", icon: "search" },
+  grep: { label: "Searched in files", icon: "search" },
   web_search: { label: "Web search", icon: "globe" },
   smart_search: { label: "Web search", icon: "globe" },
   smart_fetch: { label: "Fetched page", icon: "globe" },
@@ -392,7 +392,7 @@ const LABELS: Record<string, { label: string; icon: ToolIcon }> = {
   extract_url: { label: "Read web page", icon: "globe" },
   http_request: { label: "HTTP request", icon: "globe" },
   execute_code: { label: "Ran code", icon: "terminal" },
-  run_command: { label: "Ran command", icon: "terminal" },
+  bash: { label: "Ran command", icon: "terminal" },
   wsl_exec: { label: "Ran Linux command", icon: "terminal" },
   terminal_start: { label: "Opened terminal", icon: "terminal" },
   terminal_write: { label: "Typed into terminal", icon: "terminal" },
@@ -481,7 +481,7 @@ function genericSubject(args: Record<string, unknown> | null): string | null {
  */
 export function describeTool(item: TraceToolItem): ToolDescription {
   const name = item.call.function.name || "unknown";
-  const known = LABELS[name];
+  const known = LABELS[canonicalToolName(name)];
   const args = item.args;
   const body = asRecord(item.result);
 
@@ -493,12 +493,12 @@ export function describeTool(item: TraceToolItem): ToolDescription {
   };
 
   switch (name) {
-    case "read_file":
-    case "create_file":
-    case "edit_file":
+    case "read":
+    case "write":
+    case "edit":
     case "delete_file":
     case "present_file":
-    case "list_directory":
+    case "read":
     case "create_folder":
       desc.subject = str(args?.path) ? shortPath(str(args!.path)!) : null;
       break;
@@ -512,8 +512,8 @@ export function describeTool(item: TraceToolItem): ToolDescription {
     case "web_search":
     case "smart_search":
     case "search_local_files":
-    case "find_files":
-    case "search_file_text":
+    case "glob":
+    case "grep":
       desc.subject = str(args?.query) ?? str(args?.pattern) ?? str(args?.text);
       break;
     case "smart_fetch":
@@ -533,7 +533,7 @@ export function describeTool(item: TraceToolItem): ToolDescription {
     case "execute_code":
       desc.subject = str(args?.language) ? `${str(args!.language)} snippet` : "code snippet";
       break;
-    case "run_command":
+    case "bash":
     case "wsl_exec":
       desc.subject = str(args?.command);
       break;
@@ -623,7 +623,7 @@ function describeOutcome(
     const images = item.result.filter(
       (p) => asRecord(p)?.type === "image_url",
     ).length;
-    // `read_file` labels its own multimodal result: "PDF: …" for page renders,
+    // `read` labels its own multimodal result: "PDF: …" for page renders,
     // "Image file: …" for a picture read with `as_image`.
     const asPages = item.resultText?.startsWith("PDF:") ?? false;
     if (images > 0) {
@@ -643,20 +643,20 @@ function describeOutcome(
       const total = typeof body.total === "number" ? body.total : null;
       return done !== null && total !== null ? `${done} of ${total} done` : null;
     }
-    case "read_file": {
+    case "read": {
       const content = str(body.content) ?? str(body.text);
       return content ? `${plural(countLines(content), "line")} read` : null;
     }
-    case "create_file":
-    case "edit_file": {
+    case "write":
+    case "edit": {
       const bytes = typeof body.bytes === "number" ? body.bytes : null;
       return bytes !== null ? `${formatBytes(bytes)} written` : "saved";
     }
-    case "list_directory": {
+    case "read": {
       const entries = Array.isArray(body.entries) ? body.entries.length : null;
       return entries !== null ? plural(entries, "entry", "entries") : null;
     }
-    case "find_files": {
+    case "glob": {
       const files = Array.isArray(body.files) ? body.files.length : null;
       return files !== null ? plural(files, "file") : null;
     }
@@ -673,7 +673,7 @@ function describeOutcome(
       return status !== null ? `HTTP ${status}` : null;
     }
     case "execute_code":
-    case "run_command":
+    case "bash":
     case "wsl_exec": {
       const code = typeof body.exit_code === "number" ? body.exit_code : null;
       const out = str(body.stdout) ?? str(body.output);

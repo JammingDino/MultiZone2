@@ -57,7 +57,7 @@ export function FileVisual({
     return <Card icon={FolderPlus} path={str(result.path) || str(args?.path)} facts={["created"]} />;
   }
 
-  // read_file
+  // read
   const path = str(result.path) || str(result.source) || str(args?.path);
   const content = str(result.content);
   const note = str(result.note);

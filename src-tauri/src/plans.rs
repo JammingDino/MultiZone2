@@ -416,10 +416,10 @@ pub fn allowed_in_plan_mode(name: &str) -> bool {
     matches!(
         name,
         // Reading the world.
-        "read_file"
-            | "list_directory"
-            | "find_files"
-            | "search_file_text"
+        "read"
+            | "read"
+            | "glob"
+            | "grep"
             | "search_local_files"
             | "search_knowledge"
             | "present_file"
@@ -1105,13 +1105,13 @@ mod tests {
     #[test]
     fn mutating_tools_are_withheld() {
         for name in [
-            "create_file",
-            "edit_file",
+            "write",
+            "edit",
             "delete_file",
             "move_file",
             "copy_file",
             "create_folder",
-            "run_command",
+            "bash",
             "wsl_exec",
             "execute_code",
             "http_request",
@@ -1145,10 +1145,10 @@ mod tests {
     #[test]
     fn reads_and_the_mode_itself_survive() {
         for name in [
-            "read_file",
-            "list_directory",
-            "find_files",
-            "search_file_text",
+            "read",
+            "read",
+            "glob",
+            "grep",
             "search_local_files",
             "smart_search",
             "smart_fetch",

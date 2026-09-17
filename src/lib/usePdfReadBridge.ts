@@ -5,7 +5,7 @@ import * as api from "@/lib/tauri";
 /**
  * Serves the backend's PDF read requests (1.0).
  *
- * `read_file` returns a PDF as page images, and the only PDF rasterizer in the
+ * `read` returns a PDF as page images, and the only PDF rasterizer in the
  * app is PDF.js — which lives here, in the window. So the backend emits a
  * request and this listener answers it: decode the bytes it sent, render or
  * extract the pages it asked for, hand back the result. See `pdf_bridge.rs` for

@@ -311,7 +311,7 @@ function clamp(text: string): string {
  *
  * Ties go to the log: a `tool_call` row is written when the call is issued and the
  * assistant message carrying it is saved in the same instant, and reading "ran
- * read_file" before "read_file → ok" is the order it happened in.
+ * read" before "read → ok" is the order it happened in.
  */
 function mergeTimeline(events: SessionEvent[], messages: Message[]): ReplayEntry[] {
   const fromLog: ReplayEntry[] = events.map((e) => ({

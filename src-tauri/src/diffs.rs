@@ -3,7 +3,7 @@
 //! The approval prompt could only ever show what the model *said* it would do,
 //! and for a file write that was a wall of proposed content — the one form in
 //! which a change is hardest to judge. Everything here exists to turn a pending
-//! `create_file` / `edit_file` into the same thing every code review in the
+//! `write` / `edit` into the same thing every code review in the
 //! world uses: lines added, lines removed, grouped into hunks that can be taken
 //! or left one at a time.
 //!

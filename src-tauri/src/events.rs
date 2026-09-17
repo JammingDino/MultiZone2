@@ -119,7 +119,7 @@ pub async fn clear(db: &SqlitePool, chat_id: &str) -> AppResult<()> {
 pub fn is_file_mutation(name: &str) -> bool {
     matches!(
         name,
-        "create_file" | "edit_file" | "delete_file" | "move_file" | "copy_file" | "create_folder"
+        "write" | "edit" | "delete_file" | "move_file" | "copy_file" | "create_folder"
     )
 }
 
@@ -173,9 +173,9 @@ mod tests {
 
     #[test]
     fn file_mutations_are_named_explicitly() {
-        assert!(is_file_mutation("edit_file"));
+        assert!(is_file_mutation("edit"));
         assert!(is_file_mutation("delete_file"));
-        assert!(!is_file_mutation("read_file"));
-        assert!(!is_file_mutation("run_command"));
+        assert!(!is_file_mutation("read"));
+        assert!(!is_file_mutation("bash"));
     }
 }

@@ -473,8 +473,8 @@ fn render(
     let mut text = format!("{header}{body}");
     if omitted > 0 {
         text.push_str(&format!(
-            "\n…and {omitted} more files, less referenced than these. Use `find_files` and \
-             `search_file_text` for anything not listed.\n"
+            "\n…and {omitted} more files, less referenced than these. Use `glob` and \
+             `grep` for anything not listed.\n"
         ));
     }
     Some(RepoMap { text, files: shown_files, symbols: shown_symbols })

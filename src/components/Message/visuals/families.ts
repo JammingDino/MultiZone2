@@ -30,23 +30,22 @@ export type Family =
 
 export const FAMILY: Record<string, Family> = {
   // 1 · diff
-  create_file: "diff",
-  edit_file: "diff",
+  write: "diff",
+  edit: "diff",
   // 2 · file card
-  read_file: "file",
+  read: "file",
   present_file: "existing",
   create_folder: "file",
   move_file: "file",
   copy_file: "file",
   delete_file: "file",
-  // 3 · tree
-  list_directory: "tree",
-  find_files: "tree",
+  // 3 · tree — `read` on a directory lands here too; see ToolVisual.
+  glob: "tree",
   // 4 · match list
-  search_file_text: "match",
+  grep: "match",
   search_local_files: "match",
   // 5 · terminal
-  run_command: "terminal",
+  bash: "terminal",
   execute_code: "terminal",
   wsl_exec: "terminal",
   terminal_start: "terminal",
@@ -100,5 +99,30 @@ export const FAMILY: Record<string, Family> = {
 };
 
 export function familyOf(name: string): Family | null {
-  return FAMILY[name] ?? null;
+  return FAMILY[canonicalToolName(name)] ?? null;
+}
+
+/**
+ * The current name of a tool, given any name it has had. Mirrors
+ * `tools::canonical_name` in Rust: the file and shell tools took the names
+ * models were trained on in 0.18, and stored history still carries the old ones.
+ */
+export function canonicalToolName(name: string): string {
+  switch (name) {
+    case "read_file":
+    case "list_directory":
+      return "read";
+    case "create_file":
+      return "write";
+    case "edit_file":
+      return "edit";
+    case "find_files":
+      return "glob";
+    case "search_file_text":
+      return "grep";
+    case "run_command":
+      return "bash";
+    default:
+      return name;
+  }
 }

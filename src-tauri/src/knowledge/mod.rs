@@ -370,8 +370,8 @@ pub async fn has_index(db: &SqlitePool, project_id: &str) -> bool {
 ///
 /// Without this the retrieval tool was effectively dead weight: it was appended
 /// to the tool array and never mentioned anywhere else, so a model saw
-/// `search_local_files` sitting beside `read_file`, `list_directory`,
-/// `find_files` and `search_file_text` with no indication that an index existed,
+/// `search_local_files` sitting beside `read`, `read`,
+/// `glob` and `grep` with no indication that an index existed,
 /// what was in it, or when to prefer it. It reliably reached for the file tools
 /// it already understood and the embedding index went unused. Every other
 /// context system here (skills, memory, the leader roster, the agent loop) earns
@@ -418,8 +418,8 @@ pub async fn build_knowledge_block(db: &SqlitePool, project_id: &str) -> Option<
          Choose between it and the file tools this way:\n\
          - Conceptual or open-ended (\"what did we decide about X\", \"how does Y work\", \
          \"where is Z discussed\") → `search_local_files`.\n\
-         - An exact string, symbol, or error message you already know → `search_file_text`.\n\
-         - A path you already have, or one search just gave you → `read_file`.\n\
+         - An exact string, symbol, or error message you already know → `grep`.\n\
+         - A path you already have, or one search just gave you → `read`.\n\
          \n\
          Cite what you use: the results carry `ref` numbers, so mark a claim drawn from a \
          passage with its `[n]` the same way you would a web source."

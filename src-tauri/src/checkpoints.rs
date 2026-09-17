@@ -1,6 +1,6 @@
 //! Checkpoints (0.10.0) — a way back from the file tools.
 //!
-//! `create_file`, `edit_file`, `move_file` and `delete_file` were one-way doors.
+//! `write`, `edit`, `move_file` and `delete_file` were one-way doors.
 //! The user's only protection was the approval prompt, which asks *before* a
 //! change and offers nothing after it, so approving an edit meant living with
 //! it. A checkpoint is taken before the first mutating tool call of a turn and
@@ -65,7 +65,7 @@ fn mutating_paths(name: &str, args: &Value) -> Vec<String> {
             .collect()
     };
     match name {
-        "create_file" | "edit_file" | "delete_file" => pick(&["path", "file_path"]),
+        "write" | "edit" | "delete_file" => pick(&["path", "file_path"]),
         // A move changes both ends: the source stops existing and the
         // destination starts, so both have to be restorable.
         "move_file" => pick(&["source_path", "destination_path", "from", "to"]),
@@ -1117,12 +1117,12 @@ mod tests {
     #[test]
     fn only_mutating_tools_take_a_checkpoint() {
         let args = json!({ "path": "src/a.ts", "content": "x" });
-        assert_eq!(mutating_paths("create_file", &args), vec!["src/a.ts"]);
-        assert_eq!(mutating_paths("edit_file", &args), vec!["src/a.ts"]);
+        assert_eq!(mutating_paths("write", &args), vec!["src/a.ts"]);
+        assert_eq!(mutating_paths("edit", &args), vec!["src/a.ts"]);
         assert_eq!(mutating_paths("delete_file", &args), vec!["src/a.ts"]);
         assert_eq!(mutating_paths("create_folder", &args), vec!["src/a.ts"]);
-        assert!(mutating_paths("read_file", &args).is_empty());
-        assert!(mutating_paths("search_file_text", &args).is_empty());
+        assert!(mutating_paths("read", &args).is_empty());
+        assert!(mutating_paths("grep", &args).is_empty());
         assert!(mutating_paths("smart_search", &args).is_empty());
 
         // A move changes both ends; a copy only writes its destination, so the
@@ -1142,9 +1142,9 @@ mod tests {
         std::fs::write(&file, "original").unwrap();
         let args = json!({ "path": file.to_string_lossy() });
 
-        capture(&db, "chat1", "turn1", None, "edit_file", &args, None).await.unwrap();
+        capture(&db, "chat1", "turn1", None, "edit", &args, None).await.unwrap();
         std::fs::write(&file, "the agent's version").unwrap();
-        record_after(&db, "chat1", "turn1", None, "edit_file", &args, None).await.unwrap();
+        record_after(&db, "chat1", "turn1", None, "edit", &args, None).await.unwrap();
 
         let id = find_checkpoint(&db, "chat1", "turn1", None).await.unwrap().unwrap();
         let report = restore(&db, &id, None, false).await.unwrap();
@@ -1165,9 +1165,9 @@ mod tests {
         let file = dir.join("new.txt");
         let args = json!({ "path": file.to_string_lossy() });
 
-        capture(&db, "chat1", "turn1", None, "create_file", &args, None).await.unwrap();
+        capture(&db, "chat1", "turn1", None, "write", &args, None).await.unwrap();
         std::fs::write(&file, "brand new").unwrap();
-        record_after(&db, "chat1", "turn1", None, "create_file", &args, None).await.unwrap();
+        record_after(&db, "chat1", "turn1", None, "write", &args, None).await.unwrap();
 
         let id = find_checkpoint(&db, "chat1", "turn1", None).await.unwrap().unwrap();
         let report = restore(&db, &id, None, false).await.unwrap();
@@ -1191,13 +1191,13 @@ mod tests {
         let arg_a = json!({ "path": a.to_string_lossy() });
         let arg_b = json!({ "path": b.to_string_lossy() });
 
-        capture(&db, "c", "t", None, "edit_file", &arg_a, None).await.unwrap();
+        capture(&db, "c", "t", None, "edit", &arg_a, None).await.unwrap();
         std::fs::write(&a, "first edit").unwrap();
         // Same file again, later in the same turn: the pre-state must not be
         // overwritten with "first edit".
-        capture(&db, "c", "t", None, "edit_file", &arg_a, None).await.unwrap();
+        capture(&db, "c", "t", None, "edit", &arg_a, None).await.unwrap();
         std::fs::write(&a, "second edit").unwrap();
-        capture(&db, "c", "t", None, "edit_file", &arg_b, None).await.unwrap();
+        capture(&db, "c", "t", None, "edit", &arg_b, None).await.unwrap();
         std::fs::write(&b, "b edited").unwrap();
 
         let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM checkpoints")
@@ -1224,9 +1224,9 @@ mod tests {
         std::fs::write(&file, "original").unwrap();
         let args = json!({ "path": file.to_string_lossy() });
 
-        capture(&db, "c", "t", None, "edit_file", &args, None).await.unwrap();
+        capture(&db, "c", "t", None, "edit", &args, None).await.unwrap();
         std::fs::write(&file, "the agent's version").unwrap();
-        record_after(&db, "c", "t", None, "edit_file", &args, None).await.unwrap();
+        record_after(&db, "c", "t", None, "edit", &args, None).await.unwrap();
         std::fs::write(&file, "and then the user's own edit").unwrap();
 
         let id = find_checkpoint(&db, "c", "t", None).await.unwrap().unwrap();
@@ -1253,9 +1253,9 @@ mod tests {
         std::fs::write(&file, "original").unwrap();
         let args = json!({ "path": file.to_string_lossy() });
 
-        capture(&db, "c", "t", None, "edit_file", &args, None).await.unwrap();
+        capture(&db, "c", "t", None, "edit", &args, None).await.unwrap();
         std::fs::write(&file, "agent version").unwrap();
-        record_after(&db, "c", "t", None, "edit_file", &args, None).await.unwrap();
+        record_after(&db, "c", "t", None, "edit", &args, None).await.unwrap();
 
         let id = find_checkpoint(&db, "c", "t", None).await.unwrap().unwrap();
         let report = restore(&db, &id, None, false).await.unwrap();
@@ -1276,7 +1276,7 @@ mod tests {
 
         let file = dir.join("a.txt");
         std::fs::write(&file, "before").unwrap();
-        capture(&db, "c", "t", None, "edit_file", &json!({ "path": file.to_string_lossy() }), None)
+        capture(&db, "c", "t", None, "edit", &json!({ "path": file.to_string_lossy() }), None)
             .await
             .unwrap();
 
@@ -1307,9 +1307,9 @@ mod tests {
         std::fs::write(&touched, "before").unwrap();
         for f in [&calm, &touched] {
             let args = json!({ "path": f.to_string_lossy() });
-            capture(&db, "c", "t", None, "edit_file", &args, None).await.unwrap();
+            capture(&db, "c", "t", None, "edit", &args, None).await.unwrap();
             std::fs::write(f, "the agent's version").unwrap();
-            record_after(&db, "c", "t", None, "edit_file", &args, None).await.unwrap();
+            record_after(&db, "c", "t", None, "edit", &args, None).await.unwrap();
         }
         std::fs::write(&touched, "and then the user's own edit").unwrap();
 
@@ -1366,9 +1366,9 @@ mod tests {
         // Three later turns, each rewriting the same file.
         for (i, text) in ["first rewrite", "second rewrite", "third rewrite"].iter().enumerate() {
             let turn = format!("t{i}");
-            capture(&db, "c", &turn, None, "edit_file", &args, None).await.unwrap();
+            capture(&db, "c", &turn, None, "edit", &args, None).await.unwrap();
             std::fs::write(&file, text).unwrap();
-            record_after(&db, "c", &turn, None, "edit_file", &args, None).await.unwrap();
+            record_after(&db, "c", &turn, None, "edit", &args, None).await.unwrap();
             let mid = format!("msg-{i}");
             message(&db, "c", &mid, 200 + i as i64).await;
             link_message(&db, "c", &turn, None, &mid).await.unwrap();
@@ -1400,9 +1400,9 @@ mod tests {
         std::fs::write(&file, "before").unwrap();
         let args = json!({ "path": file.to_string_lossy() });
 
-        capture(&db, "c", "t", None, "edit_file", &args, None).await.unwrap();
+        capture(&db, "c", "t", None, "edit", &args, None).await.unwrap();
         std::fs::write(&file, "after").unwrap();
-        record_after(&db, "c", "t", None, "edit_file", &args, None).await.unwrap();
+        record_after(&db, "c", "t", None, "edit", &args, None).await.unwrap();
         message(&db, "c", "msg-latest", 500).await;
         link_message(&db, "c", "t", None, "msg-latest").await.unwrap();
 
@@ -1427,9 +1427,9 @@ mod tests {
             std::fs::write(&file, format!("contents of {name} — unique to this test")).unwrap();
             let args = json!({ "path": file.to_string_lossy() });
             let turn = format!("t{i}");
-            capture(&db, "c", &turn, None, "edit_file", &args, None).await.unwrap();
+            capture(&db, "c", &turn, None, "edit", &args, None).await.unwrap();
             std::fs::write(&file, "the agent's version").unwrap();
-            record_after(&db, "c", &turn, None, "edit_file", &args, None).await.unwrap();
+            record_after(&db, "c", &turn, None, "edit", &args, None).await.unwrap();
             // created_at is millisecond-resolution and these run inside one
             // millisecond, so the ordering is set explicitly.
             let id = find_checkpoint(&db, "c", &turn, None).await.unwrap().unwrap();
@@ -1481,7 +1481,7 @@ mod tests {
             let file = dir.join(name);
             std::fs::write(&file, format!("something {name}")).unwrap();
             let args = json!({ "path": file.to_string_lossy() });
-            capture(&db, "c", &format!("t{i}"), None, "edit_file", &args, None).await.unwrap();
+            capture(&db, "c", &format!("t{i}"), None, "edit", &args, None).await.unwrap();
             let id = find_checkpoint(&db, "c", &format!("t{i}"), None).await.unwrap().unwrap();
             sqlx::query("UPDATE checkpoints SET created_at = ?1 WHERE id = ?2")
                 .bind(i as i64)
@@ -1517,7 +1517,7 @@ mod tests {
         }
         for (i, f) in [&a, &b].iter().enumerate() {
             let args = json!({ "path": f.to_string_lossy() });
-            capture(&db, "c", &format!("t{i}"), None, "edit_file", &args, None).await.unwrap();
+            capture(&db, "c", &format!("t{i}"), None, "edit", &args, None).await.unwrap();
             let id = find_checkpoint(&db, "c", &format!("t{i}"), None).await.unwrap().unwrap();
             sqlx::query("UPDATE checkpoints SET created_at = ?1 WHERE id = ?2")
                 .bind(i as i64)
@@ -1551,7 +1551,7 @@ mod tests {
             let file = dir.join(name);
             std::fs::write(&file, format!("keep {name}")).unwrap();
             let args = json!({ "path": file.to_string_lossy() });
-            capture(&db, "c", &format!("t{i}"), None, "edit_file", &args, None).await.unwrap();
+            capture(&db, "c", &format!("t{i}"), None, "edit", &args, None).await.unwrap();
         }
         let out = prune(&db, 0, 0).await.unwrap();
         assert_eq!(out, PruneOutcome::default());
@@ -1569,10 +1569,10 @@ mod tests {
         std::fs::write(&a, "same bytes").unwrap();
         std::fs::write(&b, "same bytes").unwrap();
 
-        capture(&db, "c", "t1", None, "edit_file", &json!({ "path": a.to_string_lossy() }), None)
+        capture(&db, "c", "t1", None, "edit", &json!({ "path": a.to_string_lossy() }), None)
             .await
             .unwrap();
-        capture(&db, "c", "t2", None, "edit_file", &json!({ "path": b.to_string_lossy() }), None)
+        capture(&db, "c", "t2", None, "edit", &json!({ "path": b.to_string_lossy() }), None)
             .await
             .unwrap();
 

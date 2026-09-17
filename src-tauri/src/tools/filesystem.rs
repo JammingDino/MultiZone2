@@ -10,7 +10,7 @@ const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
 /// so the ceiling is about what that costs rather than what a page image costs.
 const MAX_PDF_BYTES: usize = 50 * 1024 * 1024;
 
-/// Lines returned by `read_file` when the call does not say (0.14.1). Roughly
+/// Lines returned by `read` when the call does not say (0.14.1). Roughly
 /// 15k tokens of source at typical line lengths — big enough that most files
 /// arrive whole and nothing about ordinary use changes, small enough that a
 /// 40,000-line log cannot end a turn by itself.
@@ -161,7 +161,7 @@ pub fn definitions(project_dir: Option<&str>, vision_capable: bool) -> Vec<Tool>
         Tool {
             tool_type: "function".into(),
             function: ToolFunction {
-                name: "read_file".into(),
+                name: "read".into(),
                 // A text-only model is never offered the image options. Their
                 // presence in the schema reads as a capability, and taking one up
                 // used to end the turn on a provider error about image content it
@@ -170,7 +170,7 @@ pub fn definitions(project_dir: Option<&str>, vision_capable: bool) -> Vec<Tool>
                 // actually get back.
                 description: if vision_capable {
                     format!(
-                        "Read a file. Use before editing, and whenever the answer depends on what \
+                        "Read a file, or list a directory as a nested tree. Use before editing, and whenever the answer depends on what \
                          a file actually contains. Text is returned as a string, and a long file \
                          arrives a window at a time: the result always reports the file's total \
                          line count and the range you got, so continue with `offset` rather than \
@@ -181,7 +181,7 @@ pub fn definitions(project_dir: Option<&str>, vision_capable: bool) -> Vec<Tool>
                     )
                 } else {
                     format!(
-                        "Read a file. Use before editing, and whenever the answer depends on what \
+                        "Read a file, or list a directory as a nested tree. Use before editing, and whenever the answer depends on what \
                          a file actually contains. Text is returned as a string, and a long file \
                          arrives a window at a time: the result always reports the file's total \
                          line count and the range you got, so continue with `offset` rather than \
@@ -215,6 +215,11 @@ pub fn definitions(project_dir: Option<&str>, vision_capable: bool) -> Vec<Tool>
                                 "description": "Text files: first line to read, 1-based. Use the `lines.to` of the previous read plus one to continue.",
                                 "default": 1
                             },
+                            "depth": {
+                                "type": "integer",
+                                "description": "Directories: levels to recurse (1 = immediate children).",
+                                "default": 1
+                            },
                             "limit": {
                                 "type": "integer",
                                 "description": "Text files: how many lines to read (default 1200, maximum 5000)."
@@ -237,6 +242,11 @@ pub fn definitions(project_dir: Option<&str>, vision_capable: bool) -> Vec<Tool>
                                 "description": "Text files: first line to read, 1-based. Use the `lines.to` of the previous read plus one to continue.",
                                 "default": 1
                             },
+                            "depth": {
+                                "type": "integer",
+                                "description": "Directories: levels to recurse (1 = immediate children).",
+                                "default": 1
+                            },
                             "limit": {
                                 "type": "integer",
                                 "description": "Text files: how many lines to read (default 1200, maximum 5000)."
@@ -250,33 +260,10 @@ pub fn definitions(project_dir: Option<&str>, vision_capable: bool) -> Vec<Tool>
         Tool {
             tool_type: "function".into(),
             function: ToolFunction {
-                name: "list_directory".into(),
-                description: format!(
-                    "List a directory when you need to know what is there before acting. Returns \
-                     nested JSON: a file is its extension string (\"rs\", \"\" for none), a \
-                     directory is an object. Pass \".\" for the working directory.\n\n{hint}"
-                ),
-                parameters: json!({
-                    "type": "object",
-                    "properties": {
-                        "path": { "type": "string" },
-                        "depth": {
-                            "type": "integer",
-                            "description": "Levels to recurse (1 = immediate children). An empty directory is {}; one left unexpanded at the depth limit is {\"…\": true}.",
-                            "default": 1
-                        }
-                    },
-                    "required": ["path"]
-                }),
-            },
-        },
-        Tool {
-            tool_type: "function".into(),
-            function: ToolFunction {
-                name: "create_file".into(),
+                name: "write".into(),
                 description: format!(
                     "Write a whole file, creating it or overwriting it. Use for new files; use \
-                     `edit_file` to change part of an existing one. Missing parent directories \
+                     `edit` to change part of an existing one. Missing parent directories \
                      are created.\n\n{hint}"
                 ),
                 parameters: json!({
@@ -292,7 +279,7 @@ pub fn definitions(project_dir: Option<&str>, vision_capable: bool) -> Vec<Tool>
         Tool {
             tool_type: "function".into(),
             function: ToolFunction {
-                name: "edit_file".into(),
+                name: "edit".into(),
                 description: format!(
                     "Change part of an existing file by replacing a block of text. Read the file \
                      first. `old_text` must identify exactly one place in the file: if it appears \
@@ -449,10 +436,10 @@ pub fn search_definitions(project_dir: Option<&str>) -> Vec<Tool> {
         Tool {
             tool_type: "function".into(),
             function: ToolFunction {
-                name: "find_files".into(),
+                name: "glob".into(),
                 description: format!(
                     "Call this when you know roughly what a file is *called* — use \
-                     `search_file_text` when you know what is *inside* it. Returns paths only, so \
+                     `grep` when you know what is *inside* it. Returns paths only, so \
                      it is cheap.\n\n{hint}"
                 ),
                 parameters: json!({
@@ -469,7 +456,7 @@ pub fn search_definitions(project_dir: Option<&str>) -> Vec<Tool> {
         Tool {
             tool_type: "function".into(),
             function: ToolFunction {
-                name: "search_file_text".into(),
+                name: "grep".into(),
                 description: format!(
                     "Call this to find where a specific name, string, or symbol appears — exact \
                      search, not semantic (that is `search_local_files`). Returns each match with \
@@ -708,6 +695,12 @@ pub async fn read_file(
         Err(e) => return Ok(e),
     };
 
+    // A directory reads as its tree, so there is one tool for "what is at this
+    // path" rather than a second one the model has to choose between.
+    if p.is_dir() {
+        return list_directory(args, zone_config, project_dir).await;
+    }
+
     let is_pdf = p
         .extension()
         .and_then(|e| e.to_str())
@@ -812,7 +805,7 @@ pub async fn read_file(
 }
 
 /// The JSON a text read returns, windowed by the call's `offset`/`limit`.
-/// Separate from [`read_file`] so it can be tested without an `AppHandle`.
+/// Separate from [`read`] so it can be tested without an `AppHandle`.
 fn text_read_result(path: &str, text: &str, args: &Value) -> Value {
     let window = window_lines(text, usize_arg(args, "offset"), usize_arg(args, "limit"));
     let mut out = json!({
@@ -1027,7 +1020,7 @@ fn describe_pages(pages: &[u32]) -> String {
 /// surfaces in the Sources list too.
 ///
 /// The `ref` is deliberately not spelled out here (0.9.10). It used to say
-/// "cite it with [1]", which was true only when `read_file` was the turn's only
+/// "cite it with [1]", which was true only when `read` was the turn's only
 /// citing call — a read after a search would tell the model to write `[1]` for
 /// the file when `[1]` already meant the first search hit. Refs are renumbered
 /// per turn now (see `tools::citations`), so the instruction has to point at
@@ -1463,7 +1456,7 @@ fn search_root(
     }
 }
 
-/// `find_files` — glob over file paths. Matches against both the path relative
+/// `glob` — glob over file paths. Matches against both the path relative
 /// to the search root and the bare filename, so "*.rs" behaves the way a user
 /// expects without requiring a leading "**/".
 pub async fn find_files(
@@ -1526,7 +1519,7 @@ pub async fn find_files(
     .to_string())
 }
 
-/// `search_file_text` — regex/literal content search, returning path + line
+/// `grep` — regex/literal content search, returning path + line
 /// number + the matching line. The exact-search counterpart to the semantic
 /// `search_local_files`.
 pub async fn search_file_text(
@@ -2600,7 +2593,7 @@ mod tests {
     fn tool_descriptions_name_the_working_directory() {
         let dir = r"F:\Development\MultiZone2";
         let defs = definitions(Some(dir), true);
-        let create = defs.iter().find(|t| t.function.name == "create_file").unwrap();
+        let create = defs.iter().find(|t| t.function.name == "write").unwrap();
 
         // The model needs the working directory spelled out somewhere to write a
         // path that resolves first time — but exactly once (0.9.10). It used to
@@ -2617,7 +2610,7 @@ mod tests {
 
         // With no working directory set, the wording must not claim one.
         let defs = definitions(None, true);
-        let create = defs.iter().find(|t| t.function.name == "create_file").unwrap();
+        let create = defs.iter().find(|t| t.function.name == "write").unwrap();
         assert!(create.function.description.contains("allowed roots"));
     }
 
@@ -2628,7 +2621,7 @@ mod tests {
     #[test]
     fn text_only_models_are_not_offered_image_reads() {
         let defs = definitions(Some(r"F:\Development\MultiZone2"), false);
-        let read = defs.iter().find(|t| t.function.name == "read_file").unwrap();
+        let read = defs.iter().find(|t| t.function.name == "read").unwrap();
         let props = &read.function.parameters["properties"];
 
         assert!(props["as_image"].is_null(), "as_image offered to a text-only model: {props}");
@@ -2640,7 +2633,7 @@ mod tests {
 
         // …and the vision-capable definition still offers both.
         let defs = definitions(Some(r"F:\Development\MultiZone2"), true);
-        let read = defs.iter().find(|t| t.function.name == "read_file").unwrap();
+        let read = defs.iter().find(|t| t.function.name == "read").unwrap();
         assert!(read.function.parameters["properties"]["as_image"].is_object());
         assert!(read.function.description.contains("as_image"));
     }

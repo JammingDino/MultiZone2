@@ -898,8 +898,8 @@ function renderDiffVisual(item: TraceToolItem, p: Palette): string {
   const name = item.call.function.name;
   const args = (item.args ?? {}) as Record<string, unknown>;
   const removed =
-    name === "create_file" ? [] : String(args.old_text ?? "").split("\n").filter((l, i, a) => l !== "" || i < a.length - 1);
-  const added = String(name === "create_file" ? (args.content ?? "") : (args.new_text ?? ""))
+    name === "write" ? [] : String(args.old_text ?? "").split("\n").filter((l, i, a) => l !== "" || i < a.length - 1);
+  const added = String(name === "write" ? (args.content ?? "") : (args.new_text ?? ""))
     .split("\n")
     .filter((l, i, a) => l !== "" || i < a.length - 1);
   if (removed.length === 0 && added.length === 0) return "";
@@ -951,8 +951,8 @@ function renderTerminalVisual(item: TraceToolItem, p: Palette): string {
 }
 
 const DIFF_LINES = 24;
-const DIFF_TOOLS = new Set(["create_file", "edit_file"]);
-const TERMINAL_TOOLS = new Set(["run_command", "execute_code", "wsl_exec"]);
+const DIFF_TOOLS = new Set(["write", "edit"]);
+const TERMINAL_TOOLS = new Set(["bash", "execute_code", "wsl_exec"]);
 
 function renderToolCard(
   item: TraceToolItem,

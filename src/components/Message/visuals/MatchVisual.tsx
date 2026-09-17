@@ -3,7 +3,7 @@ import { Search, FileText } from "lucide-react";
 /**
  * Family 4 — search hits, grouped by the file they are in (0.13.1).
  *
- * `search_file_text` returns a flat array of {file, line, text}; a hundred of
+ * `grep` returns a flat array of {file, line, text}; a hundred of
  * those as JSON is unreadable, and the thing a reader wants — which files, how
  * many each — is exactly what the flat form hides. Knowledge-base hits carry a
  * similarity score and the source document, which is the same shape and the
@@ -50,7 +50,7 @@ export function MatchVisual({
     );
   }
 
-  // search_file_text
+  // grep
   const matches = Array.isArray(result.matches) ? (result.matches as any[]) : [];
   const groups = new Map<string, any[]>();
   for (const m of matches) {

@@ -474,14 +474,14 @@ mod tests {
     #[test]
     fn keeps_parallel_calls_separate() {
         let (events, acc) = replay(vec![
-            delta(0, Some("c0"), Some("read_file"), None),
+            delta(0, Some("c0"), Some("read"), None),
             delta(1, Some("c1"), Some("write_file"), None),
             delta(0, None, None, Some("{\"p\":0}")),
             delta(1, None, None, Some("{\"p\":1}")),
         ]);
         assert_eq!(streamed_args(&events, 0), "{\"p\":0}");
         assert_eq!(streamed_args(&events, 1), "{\"p\":1}");
-        assert_eq!(acc[&0].function.name, "read_file");
+        assert_eq!(acc[&0].function.name, "read");
         assert_eq!(acc[&1].function.name, "write_file");
     }
 

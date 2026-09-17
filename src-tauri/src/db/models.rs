@@ -264,7 +264,7 @@ pub struct Memory {
 #[serde(rename_all = "camelCase")]
 pub struct ToolUsage {
     pub zone_id: String,
-    /// The function name the model called, e.g. "read_file".
+    /// The function name the model called, e.g. "read".
     pub tool_name: String,
     pub calls: i64,
     pub errors: i64,

@@ -235,3 +235,23 @@ loop preamble for weak models, snippet ordering for prefix caches.
    context window; keep `compact_context` for the manual case only.
 5. A short default rules block for tooled zones with an empty prompt
    (conventions, don't commit, verify) — opencode's substance at pi's length.
+
+## Status after 0.18 (same day)
+
+All five lifts landed, plus the rename:
+
+| Item | Commit | Notes |
+|---|---|---|
+| Names models were trained on: `read`, `write`, `edit`, `glob`, `grep`, `bash`; `list_directory` folded into `read` | `0813aba` | old names still dispatch and render |
+| `bash` output capped at 30k chars, rest spilled to a readable file; `workdir`; opencode's description | `5ad310b` | |
+| cwd once in an `<env>` block; `PATHS:` gone from every tool | `bbe4a44` | |
+| Read-before-edit / overwrite, refused when the file changed since (per chat, so per agent) | `50d4ba4` | opencode's rule, enforced by the tool |
+| `edits[]` — several replacements per `edit` call | `8e906db` | pi's shape |
+| Harness-driven compaction at window − 16k; window is a setting (default 128k) | `9b3a4fb` | pi/opencode's approach |
+| Default working rules for a tooled zone with no prompt | `aab9fed` | |
+
+Re-measured (same probe, no project dir): Code Companion 25 tools /
+~5.3k tok schemas / ~0.58k tok harness prompt. The schema figure barely
+moved — the `PATHS:` saving was spent on `bash`'s git rules and the
+`edits[]` schema. The remaining lever is the *zone's* toolset, not the
+harness: the six rarely-used-in-coding tools are still on by default.

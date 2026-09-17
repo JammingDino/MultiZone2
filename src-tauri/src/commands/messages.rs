@@ -1804,6 +1804,10 @@ async fn run_participant_turn(
     let mut produced_output = false;
     // A turn the user stopped is an empty result on purpose, not a failure.
     let mut cancelled_turn = false;
+    // The size of the last request this turn sent, as the provider counted it
+    // (or as we estimated it, for providers that report nothing). What decides
+    // whether the chat is condensed before the next turn (0.18).
+    let mut last_context_tokens: i64 = 0;
     // Set when the user asked the run to stop after the step in flight (0.12.1).
     // The next step runs with no tools, so it can only answer.
     let mut stop_after_step = false;
@@ -2121,6 +2125,12 @@ async fn run_participant_turn(
             agg.usage.as_ref(),
         )
         .await;
+        last_context_tokens = agg
+            .usage
+            .as_ref()
+            .map(|u| u.prompt_tokens)
+            .filter(|n| *n > 0)
+            .unwrap_or(measure.input_tokens);
 
         // Did this step end the turn, or did the model just stall? A step with
         // no tool calls used to end the turn unconditionally, which is how a
@@ -3029,6 +3039,33 @@ async fn run_participant_turn(
     .await;
 
     sink.emit_for(chat_id, persp, StreamPayload::Done);
+
+    // Harness-driven compaction (0.18). After the turn, not during it: the
+    // summary sees the whole exchange, and the next turn is the first to send
+    // it. Primary conversation only — perspectives and multi-model chats never
+    // read the compacted prefix (see `build_message_history`).
+    if !cancelled_turn && persp.is_none() && !is_multi_model(&ctx.db, chat_id).await {
+        let window = crate::tools::compact::context_window_tokens(&ctx.db).await;
+        if crate::tools::compact::should_compact(last_context_tokens, window) {
+            match crate::tools::compact::auto_compact(&ctx.db, &ctx.http, chat_id, &zone, &provider).await {
+                Ok(Some(n)) => {
+                    crate::events::record(
+                        &ctx.db,
+                        chat_id,
+                        Some(&turn_id),
+                        None,
+                        "compacted",
+                        format!("Condensed {n} earlier messages to stay inside the context window"),
+                        Some(serde_json::json!({ "messages": n, "contextTokens": last_context_tokens, "window": window })),
+                    )
+                    .await;
+                    sink.notify_chats_changed();
+                }
+                Ok(None) => {}
+                Err(e) => tracing::warn!("auto-compaction failed for {chat_id}: {e}"),
+            }
+        }
+    }
     Ok(())
 }
 
@@ -3503,7 +3540,7 @@ pub async fn turn_overhead(db: &SqlitePool, chat_id: &str) -> AppResult<TurnOver
     })
 }
 
-async fn build_message_history(
+pub(crate) async fn build_message_history(
     db: &SqlitePool,
     chat_id: &str,
     zone: &Zone,

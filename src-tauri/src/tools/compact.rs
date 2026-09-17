@@ -72,6 +72,27 @@ pub async fn run(args: &Value, db: &SqlitePool, chat_id: &str) -> AppResult<Stri
         .to_string());
     }
 
+    let compacted = match store_summary(db, chat_id, summary).await? {
+        Some(n) => n,
+        None => return Ok(json!({ "error": "nothing to compact — this chat has no messages yet" }).to_string()),
+    };
+
+    Ok(json!({
+        "rendered": "compact_context",
+        "ok": true,
+        "messages_compacted": compacted,
+        "summary": summary,
+        "note": "Done. From your next turn, the earlier messages are replaced by this summary in \
+                 your context. The user still sees the full conversation.",
+    })
+    .to_string())
+}
+
+/// Write `summary` as the chat's compacted prefix and move the cutoff to the
+/// newest message it can stand in for. Returns how many messages that is, or
+/// `None` for a chat with nothing to compact. Shared by the tool and by the
+/// harness-driven compaction in [`auto_compact`].
+pub async fn store_summary(db: &SqlitePool, chat_id: &str, summary: &str) -> AppResult<Option<i64>> {
     // Cut off at the newest message that isn't an assistant turn holding tool
     // calls. That message and everything before it is what the summary stands in
     // for.
@@ -101,7 +122,7 @@ pub async fn run(args: &Value, db: &SqlitePool, chat_id: &str) -> AppResult<Stri
     .unwrap_or(None);
     let cutoff = match cutoff {
         Some(c) => c,
-        None => return Ok(json!({ "error": "nothing to compact — this chat has no messages yet" }).to_string()),
+        None => return Ok(None),
     };
 
     let compacted: i64 = sqlx::query_scalar(
@@ -124,15 +145,7 @@ pub async fn run(args: &Value, db: &SqlitePool, chat_id: &str) -> AppResult<Stri
     .execute(db)
     .await?;
 
-    Ok(json!({
-        "rendered": "compact_context",
-        "ok": true,
-        "messages_compacted": compacted,
-        "summary": summary,
-        "note": "Done. From your next turn, the earlier messages are replaced by this summary in \
-                 your context. The user still sees the full conversation.",
-    })
-    .to_string())
+    Ok(Some(compacted))
 }
 
 /// The `# Conversation so far` block that stands in for the compacted turns, and
@@ -161,6 +174,125 @@ pub async fn compacted_prefix(db: &SqlitePool, chat_id: &str) -> Option<(String,
         )),
         _ => None,
     }
+}
+
+/// Tokens kept free below the window for the next turn's output and tool
+/// results. pi's figure.
+pub const RESERVE_TOKENS: i64 = 16_384;
+
+/// The model's context window, as the user has told us (0.18). Nothing in an
+/// OpenAI-compatible API reports it, so it is a setting; `0` turns
+/// harness-driven compaction off.
+pub async fn context_window_tokens(db: &SqlitePool) -> i64 {
+    let raw: Option<String> =
+        sqlx::query_scalar("SELECT value FROM settings WHERE key = 'app_settings'")
+            .fetch_optional(db)
+            .await
+            .ok()
+            .flatten()
+            .flatten();
+    raw.and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| v.get("contextWindowTokens").and_then(|n| n.as_i64()))
+        .unwrap_or(DEFAULT_CONTEXT_WINDOW_TOKENS)
+        .max(0)
+}
+
+/// What an unset window is taken to be. Most current frontier models are at
+/// least this; a smaller local model is the case for setting it lower.
+pub const DEFAULT_CONTEXT_WINDOW_TOKENS: i64 = 128_000;
+
+/// Whether `context_tokens` — the last request's measured or estimated prompt
+/// size — is past the point where the next turn risks overflowing.
+pub fn should_compact(context_tokens: i64, window: i64) -> bool {
+    window > RESERVE_TOKENS * 2 && context_tokens >= window - RESERVE_TOKENS
+}
+
+/// The summarisation instruction. pi's template: structured, and explicit that
+/// exact names, paths and error text must survive.
+const SUMMARY_INSTRUCTION: &str = "The conversation above is being condensed so it fits in your \
+context window. Write the summary that will stand in for it from the next turn on. Use these \
+sections:\n\n\
+## Goal\nWhat the user is trying to get done, in their terms.\n\n\
+## Decisions and constraints\nEverything agreed or ruled out, with the reason.\n\n\
+## Established facts\nWhat has been found out — exact file paths, function names, commands, \
+version numbers, error messages, verbatim.\n\n\
+## Done\nWhat has been changed or produced, and where.\n\n\
+## Outstanding\nWhat is still to do, in order, and any open questions.\n\n\
+If the conversation already opens with a summary from an earlier condensation, fold it in \
+rather than dropping it. Be thorough — this is all you will retain. Reply with the summary \
+only.";
+
+/// Harness-driven compaction (0.18): condense the chat from outside the turn,
+/// the way pi and opencode do, rather than waiting for the model to decide to
+/// call `compact_context`. Runs after a turn whose last request was within
+/// [`RESERVE_TOKENS`] of the window. One extra request, no tools, plain text.
+///
+/// Returns how many messages the summary now stands in for, or `None` when
+/// nothing was stored (the model produced nothing usable).
+pub async fn auto_compact(
+    db: &SqlitePool,
+    http: &reqwest::Client,
+    chat_id: &str,
+    zone: &crate::db::models::Zone,
+    provider: &crate::db::models::Provider,
+) -> AppResult<Option<i64>> {
+    use crate::llm::types::{ChatMessage, ChatRequest, MessageContent};
+
+    let mut messages =
+        crate::commands::messages::build_message_history(db, chat_id, zone, false).await?;
+    messages.push(ChatMessage {
+        role: "user".into(),
+        content: Some(MessageContent::Text(SUMMARY_INSTRUCTION.into())),
+        tool_calls: None,
+        tool_call_id: None,
+        name: None,
+    });
+    let req = ChatRequest {
+        model: zone.model.clone(),
+        messages,
+        temperature: Some(0.2),
+        max_tokens: Some(4000),
+        top_p: None,
+        tools: None,
+        tool_choice: None,
+        reasoning_effort: None,
+        chat_template_kwargs: None,
+        stream_options: None,
+        stream: false,
+    };
+    let measure = {
+        let cpt = crate::llm::tokens::chars_per_token(db, &req.model).await;
+        crate::llm::tokens::measure_request(&req, cpt)
+    };
+    let client = crate::llm::client::LlmClient::new(http, &provider.base_url, provider.api_key.as_deref());
+    let resp = client.chat_completion(&req).await?;
+    crate::llm::tokens::record_request(db, chat_id, &zone.model, &measure, resp.usage.as_ref()).await;
+
+    let text = resp
+        .choices
+        .first()
+        .and_then(|c| match &c.message.content {
+            Some(MessageContent::Text(s)) => Some(s.clone()),
+            Some(MessageContent::Parts(parts)) => Some(
+                parts
+                    .iter()
+                    .filter_map(|p| match p {
+                        crate::llm::types::ContentPart::Text { text } => Some(text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\\n"),
+            ),
+            None => None,
+        })
+        .unwrap_or_default();
+    let summary = crate::llm::thinking::strip_thinking_blocks(&text);
+    let summary = summary.trim();
+    if summary.len() < MIN_SUMMARY_CHARS {
+        tracing::warn!("auto-compaction of {chat_id} produced no usable summary");
+        return Ok(None);
+    }
+    store_summary(db, chat_id, summary).await
 }
 
 #[cfg(test)]
@@ -237,5 +369,15 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(kept, ["m6"], "the call that compacted must survive to answer its own result");
+    }
+
+    #[test]
+    fn compaction_triggers_inside_the_reserve_and_never_with_the_window_off() {
+        assert!(!should_compact(200_000, 0));
+        assert!(!should_compact(100_000, 128_000));
+        assert!(should_compact(128_000 - RESERVE_TOKENS, 128_000));
+        assert!(should_compact(140_000, 128_000));
+        // A window smaller than two reserves cannot be compacted into.
+        assert!(!should_compact(30_000, 20_000));
     }
 }

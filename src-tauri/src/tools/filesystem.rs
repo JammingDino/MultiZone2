@@ -491,6 +491,8 @@ fn allowed_roots(zone_config: &Value, project_dir: Option<&str>) -> Vec<PathBuf>
             roots.push(PathBuf::from(dir));
         }
     }
+    // Output `bash` had to cut is parked here and the model is handed the path.
+    roots.push(super::shell::spill_dir());
     roots
 }
 

@@ -145,18 +145,11 @@ fn image_mime(path: &Path) -> Option<&'static str> {
     }
 }
 
-/// The read/write `file_system` group. Takes the chat's working directory so the
-/// path hint can name it and show a path that actually resolves — a tool whose
-/// `path` argument is described only in the abstract gets the argument wrong,
-/// and the model has no other way to learn the right shape.
-///
-/// The hint appears **once per tool**, at the end of the description (0.9.10).
-/// It used to be repeated inside each `path` parameter as well, so the same ~70
-/// tokens shipped twice per tool and ~19 times across the four file groups —
-/// roughly 1.3k tokens of pure duplication on every request from a zone with
-/// file access, before the model had read a single word of the conversation.
-pub fn definitions(project_dir: Option<&str>, vision_capable: bool) -> Vec<Tool> {
-    let hint = path_syntax_hint(project_dir);
+/// The read/write `file_system` group. Where paths resolve is stated once, in
+/// the system prompt's environment block (`commands::messages::env_block`),
+/// not in every tool description; the scope error repeats it for a path that
+/// missed.
+pub fn definitions(_project_dir: Option<&str>, vision_capable: bool) -> Vec<Tool> {
     vec![
         Tool {
             tool_type: "function".into(),
@@ -177,7 +170,7 @@ pub fn definitions(project_dir: Option<&str>, vision_capable: bool) -> Vec<Tool>
                          answering from a fragment. Set `as_image` \
                          for an image file to put it in your visual context. A `.pdf` is returned \
                          as page images (so you see tables, figures and scans) — page 1 plus the \
-                         document's page count unless you ask for more via `pages`.\n\n{hint}"
+                         document's page count unless you ask for more via `pages`."
                     )
                 } else {
                     format!(
@@ -187,7 +180,7 @@ pub fn definitions(project_dir: Option<&str>, vision_capable: bool) -> Vec<Tool>
                          line count and the range you got, so continue with `offset` rather than \
                          answering from a fragment. A `.pdf` is \
                          returned as extracted text — page 1 plus the document's page count \
-                         unless you ask for more via `pages`.\n\n{hint}"
+                         unless you ask for more via `pages`."
                     )
                 },
                 parameters: if vision_capable {
@@ -264,7 +257,7 @@ pub fn definitions(project_dir: Option<&str>, vision_capable: bool) -> Vec<Tool>
                 description: format!(
                     "Write a whole file, creating it or overwriting it. Use for new files; use \
                      `edit` to change part of an existing one. Missing parent directories \
-                     are created.\n\n{hint}"
+                     are created."
                 ),
                 parameters: json!({
                     "type": "object",
@@ -286,7 +279,7 @@ pub fn definitions(project_dir: Option<&str>, vision_capable: bool) -> Vec<Tool>
                      more than once the edit is refused with the count, so include enough \
                      surrounding lines to make it unique (or set `replace_all` when you really do \
                      mean every occurrence). Indentation and trailing whitespace are matched \
-                     leniently when an exact match fails.\n\n{hint}"
+                     leniently when an exact match fails."
                 ),
                 parameters: json!({
                     "type": "object",
@@ -310,8 +303,7 @@ pub fn definitions(project_dir: Option<&str>, vision_capable: bool) -> Vec<Tool>
 /// read/write/edit `file_system` group so a presentation-focused zone (e.g. the
 /// HTML report writer) can offer file presentation without full filesystem
 /// access.
-pub fn present_file_definitions(project_dir: Option<&str>) -> Vec<Tool> {
-    let hint = path_syntax_hint(project_dir);
+pub fn present_file_definitions(_project_dir: Option<&str>) -> Vec<Tool> {
     vec![Tool {
         tool_type: "function".into(),
         function: ToolFunction {
@@ -343,8 +335,7 @@ pub fn present_file_definitions(project_dir: Option<&str>) -> Vec<Tool> {
 /// create folder. Split from the read/write `file_system` group so a zone can be
 /// given the ability to produce files without the ability to destroy them —
 /// `delete_file` is classed dangerous and always prompts for approval.
-pub fn manage_definitions(project_dir: Option<&str>) -> Vec<Tool> {
-    let hint = path_syntax_hint(project_dir);
+pub fn manage_definitions(_project_dir: Option<&str>) -> Vec<Tool> {
     vec![
         Tool {
             tool_type: "function".into(),
@@ -353,7 +344,7 @@ pub fn manage_definitions(project_dir: Option<&str>) -> Vec<Tool> {
                 description: format!(
                     "Move or rename a file or folder. To rename in place, keep the parent \
                      directory and change only the last path segment. Missing destination parents \
-                     are created; an existing destination fails unless `overwrite`.\n\n{hint}"
+                     are created; an existing destination fails unless `overwrite`."
                 ),
                 parameters: json!({
                     "type": "object",
@@ -372,7 +363,7 @@ pub fn manage_definitions(project_dir: Option<&str>) -> Vec<Tool> {
                 name: "copy_file".into(),
                 description: format!(
                     "Copy a single file (not a directory) to a new path. Missing destination \
-                     parents are created; an existing destination fails unless `overwrite`.\n\n{hint}"
+                     parents are created; an existing destination fails unless `overwrite`."
                 ),
                 parameters: json!({
                     "type": "object",
@@ -391,7 +382,7 @@ pub fn manage_definitions(project_dir: Option<&str>) -> Vec<Tool> {
                 name: "delete_file".into(),
                 description: format!(
                     "Delete a file. Destructive and not undoable — the user approves every call. A \
-                     directory path is refused unless `recursive` is set.\n\n{hint}"
+                     directory path is refused unless `recursive` is set."
                 ),
                 parameters: json!({
                     "type": "object",
@@ -413,7 +404,7 @@ pub fn manage_definitions(project_dir: Option<&str>) -> Vec<Tool> {
                 name: "create_folder".into(),
                 description: format!(
                     "Create a directory and any missing parents. Succeeds quietly if it already \
-                     exists.\n\n{hint}"
+                     exists."
                 ),
                 parameters: json!({
                     "type": "object",
@@ -430,8 +421,7 @@ pub fn manage_definitions(project_dir: Option<&str>) -> Vec<Tool> {
 /// Definitions for the `file_search` group (0.9.1): exact/pattern search over
 /// files. Read-only (safety 0). Complements semantic search (`search_local_files`):
 /// embeddings answer "what is this about", these answer "where is this string".
-pub fn search_definitions(project_dir: Option<&str>) -> Vec<Tool> {
-    let hint = path_syntax_hint(project_dir);
+pub fn search_definitions(_project_dir: Option<&str>) -> Vec<Tool> {
     vec![
         Tool {
             tool_type: "function".into(),
@@ -440,7 +430,7 @@ pub fn search_definitions(project_dir: Option<&str>) -> Vec<Tool> {
                 description: format!(
                     "Call this when you know roughly what a file is *called* — use \
                      `grep` when you know what is *inside* it. Returns paths only, so \
-                     it is cheap.\n\n{hint}"
+                     it is cheap."
                 ),
                 parameters: json!({
                     "type": "object",
@@ -460,7 +450,7 @@ pub fn search_definitions(project_dir: Option<&str>) -> Vec<Tool> {
                 description: format!(
                     "Call this to find where a specific name, string, or symbol appears — exact \
                      search, not semantic (that is `search_local_files`). Returns each match with \
-                     its path and line number. Narrow with `glob` when you can.\n\n{hint}"
+                     its path and line number. Narrow with `glob` when you can."
                 ),
                 parameters: json!({
                     "type": "object",
@@ -2585,33 +2575,6 @@ mod tests {
         let hint = v["how_to_write_the_path"].as_str().unwrap();
         assert!(hint.contains(sb.dir().unwrap()), "hint must name the directory: {hint}");
         assert!(!sb.root.parent().unwrap().join("escaped.md").exists());
-    }
-
-    /// The descriptions the model reads must name the real working directory —
-    /// that is what stops the bad path being written in the first place.
-    #[test]
-    fn tool_descriptions_name_the_working_directory() {
-        let dir = r"F:\Development\MultiZone2";
-        let defs = definitions(Some(dir), true);
-        let create = defs.iter().find(|t| t.function.name == "write").unwrap();
-
-        // The model needs the working directory spelled out somewhere to write a
-        // path that resolves first time — but exactly once (0.9.10). It used to
-        // be repeated in the `path` parameter too, doubling the cost of a hint
-        // the model reads once.
-        assert!(create.function.description.contains(dir));
-        assert_eq!(create.function.description.matches(dir).count(), 1);
-
-        let path_desc = create.function.parameters["properties"]["path"]["description"].as_str();
-        assert!(
-            path_desc.map_or(true, |d| !d.contains(dir)),
-            "the path parameter repeats the working directory: {path_desc:?}",
-        );
-
-        // With no working directory set, the wording must not claim one.
-        let defs = definitions(None, true);
-        let create = defs.iter().find(|t| t.function.name == "write").unwrap();
-        assert!(create.function.description.contains("allowed roots"));
     }
 
     /// A model that can't accept images is never *offered* one: `as_image` is

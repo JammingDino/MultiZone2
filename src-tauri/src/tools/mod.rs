@@ -794,34 +794,19 @@ mod tests {
         );
     }
 
-    /// The filesystem group takes the working directory and names it so the
-    /// model writes a path that resolves first time. That hint used to be
-    /// pasted into both the tool description *and* every `path` parameter, so
-    /// it shipped twice per tool and ~19 times across the four file groups.
-    /// Once per tool is enough to steer the model; more than that is rent.
+    /// Where paths resolve is said once, in the system prompt, never inside a
+    /// tool description, where it would ship once per tool on every request.
     #[test]
-    fn path_hint_appears_once_per_file_tool() {
+    fn no_tool_description_repeats_the_working_directory() {
         let ctx = ToolContext {
             project_dir: Some(r"C:\Users\me\project".to_string()),
             ..Default::default()
         };
-
-        for group in [
-            ToolId::FileSystem,
-            ToolId::FileManage,
-            ToolId::FileSearch,
-            ToolId::PresentFile,
-        ] {
+        for group in [ToolId::FileSystem, ToolId::FileManage, ToolId::FileSearch, ToolId::PresentFile] {
             for def in group.definitions(&ctx) {
                 let json = serde_json::to_string(&def).unwrap();
-                // The hint is the only place the working directory is spelled
-                // out, so counting it counts the hint.
-                let occurrences = json.matches("PATHS:").count();
-                assert!(
-                    occurrences <= 1,
-                    "{} repeats the path hint {occurrences} times",
-                    def.function.name,
-                );
+                assert!(!json.contains("PATHS:"), "{} carries the path hint", def.function.name);
+                assert!(!json.contains("Users"), "{} spells out the cwd", def.function.name);
             }
         }
     }

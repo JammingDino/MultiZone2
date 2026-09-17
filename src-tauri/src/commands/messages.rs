@@ -3119,6 +3119,8 @@ pub enum SnippetKind {
     /// The project's own `AGENTS.md` / `CLAUDE.md` (0.14.5).
     ProjectInstructions,
     Continuity,
+    /// Where the tools act: working directory, platform, date (0.18).
+    Env,
     Skills,
     Knowledge,
     /// The ranked map of what this project defines (0.14.5).
@@ -3149,6 +3151,7 @@ impl SnippetKind {
             Self::ZonePrompt => "Zone prompt",
             Self::ProjectInstructions => "Project instructions",
             Self::Continuity => "Agent-loop preamble",
+            Self::Env => "Environment",
             Self::Leader => "Sub-agent roster",
             Self::Memory => "Memories",
             Self::Identity => "Multi-zone identity",
@@ -3186,6 +3189,33 @@ async fn is_multi_model(db: &SqlitePool, chat_id: &str) -> bool {
 /// Extracted so the context meter measures the same bytes the turn sends: a
 /// meter with its own idea of what the system prompt contains is a meter that
 /// goes stale the first time either side changes.
+/// The `<env>` block: working directory and how paths are written, platform,
+/// and today's date. The date is bucketed to the day, so the prefix cache is
+/// lost once at midnight rather than on every turn.
+pub fn env_block(project_dir: Option<&str>) -> String {
+    let mut lines = vec!["<env>".to_string()];
+    match project_dir.map(str::trim).filter(|d| !d.is_empty()) {
+        Some(dir) => {
+            let dir = dir.trim_end_matches(['/', '\\']);
+            let sep = if dir.contains('\\') { '\\' } else { '/' };
+            lines.push(format!("  Working directory: {dir}"));
+            lines.push(format!(
+                "  Paths: write them relative to the working directory (`notes.md`, \
+                 `docs{sep}notes.md`); a leading `/` or `~` is read as relative to it too. \
+                 An absolute path works only inside it; anywhere else on disk is refused."
+            ));
+        }
+        None => lines.push(
+            "  Working directory: none set — paths resolve against the zone's allowed roots."
+                .to_string(),
+        ),
+    }
+    lines.push(format!("  Platform: {}", std::env::consts::OS));
+    lines.push(format!("  Today's date: {}", chrono::Local::now().format("%Y-%m-%d")));
+    lines.push("</env>".to_string());
+    lines.join("\n")
+}
+
 pub async fn build_system_snippets(
     db: &SqlitePool,
     chat_id: &str,
@@ -3256,6 +3286,15 @@ pub async fn build_system_snippets(
                 zone_tool_ids.iter().any(|t| t == "plan"),
             ),
         ));
+    }
+
+    // The environment (0.18): where paths resolve, said once. It used to be a
+    // `PATHS:` paragraph in every file tool's description — eleven copies on a
+    // team lead — which is where opencode's `<env>` block and pi's `<cwd>`
+    // section put it instead. Only zones with tools have anywhere to act.
+    if !zone_tool_ids.is_empty() {
+        let dir = resolve_working_dir(db, chat_id).await.ok().flatten();
+        snippets.push((SnippetKind::Env, env_block(dir.as_deref())));
     }
 
     // Plan mode and its aftermath (0.12.0), directly after the loop preamble

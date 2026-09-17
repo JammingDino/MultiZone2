@@ -1080,36 +1080,6 @@ function ChatTab() {
       </section>
 
       <section>
-        <h3 className="mb-1 text-sm font-medium">Context window</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          How many tokens your models can hold. The API does not say, so this is yours to set: when
-          a turn's last request comes within about 16k of it, the earlier part of the chat is
-          condensed into a summary before the next turn — you still see everything, only what the
-          model re-reads is condensed. A model that rejects a request as too long is condensed and retried regardless, so this only decides how early it happens. <strong>0 is off.</strong>
-        </p>
-        <div className="flex items-center gap-3">
-          <input
-            type="number"
-            min={0}
-            step={8192}
-            value={appSettings.contextWindowTokens}
-            onChange={(e) => {
-              const n = Number(e.target.value);
-              if (Number.isFinite(n)) {
-                setAppSettings({ contextWindowTokens: Math.max(0, Math.round(n)) });
-              }
-            }}
-            className="w-32 rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1.5 text-sm"
-          />
-          <span className="text-xs text-[var(--color-text-muted)]">
-            {appSettings.contextWindowTokens > 0
-              ? `tokens (condenses past ${Math.max(0, Math.round((appSettings.contextWindowTokens - 16384) / 1000))}k)`
-              : "never condensed automatically"}
-          </span>
-        </div>
-      </section>
-
-      <section>
         <h3 className="mb-1 text-sm font-medium">Tool auto-approval</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
           By danger, for anything the categories below leave undecided. Dangerous: code execution

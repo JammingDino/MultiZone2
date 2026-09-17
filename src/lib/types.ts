@@ -899,13 +899,6 @@ export interface AppSettings {
    */
   maxSessionTokens: number;
   /**
-   * The model's context window, in tokens (0.18). Nothing in an
-   * OpenAI-compatible API reports it, so it is stated here. When a turn's last
-   * request comes within ~16k of it, the chat is condensed before the next
-   * turn — the harness does it, not the model. `0` turns that off.
-   */
-  contextWindowTokens: number;
-  /**
    * How PDF files are processed when attached in the input bar.
    * "images" — render each page to a JPEG and send visually (default)
    * "text"   — extract text content from pages and send as text
@@ -1233,7 +1226,6 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   notifyWhenWaiting: true,
   maxToolSteps: 30,
   maxSessionTokens: 0,
-  contextWindowTokens: 128_000,
   pdfMode: "images",
   pdfExportDetail: "steps",
   pdfExportTheme: "app",

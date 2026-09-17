@@ -417,7 +417,6 @@ pub fn allowed_in_plan_mode(name: &str) -> bool {
         name,
         // Reading the world.
         "read"
-            | "read"
             | "glob"
             | "grep"
             | "search_local_files"

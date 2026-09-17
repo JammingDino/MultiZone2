@@ -390,7 +390,7 @@ pub fn present_file_definitions(_project_dir: Option<&str>) -> Vec<Tool> {
                  file's contents into your reply. It opens in the workspace panel beside the chat: \
                  `.html` as a live page with its scripts and animations running, `.md` rendered, \
                  anything else as text in a small editor. The chat also gets a card that opens it \
-                 in its default app.\n\n{hint}"
+                 in its default app."
             ),
             parameters: json!({
                 "type": "object",
@@ -986,7 +986,7 @@ async fn read_pdf(
     }
     if (shown.len() as u32) < total {
         note.push_str(
-            " Read the pages you still need before answering — call read_file again with \
+            " Read the pages you still need before answering — call read again with \
              `pages` (e.g. \"2-6\", \"all\").",
         );
     }
@@ -1811,7 +1811,7 @@ pub fn resolve_edit(
 ) -> Result<ResolvedEdit, String> {
     if old_text.is_empty() {
         return Err("old_text is empty — it must be the text to replace. To create or overwrite \
-                    a file use create_file; to append, read the file and edit against its end."
+                    a file use write; to append, read the file and edit against its end."
             .into());
     }
     if old_text == new_text {

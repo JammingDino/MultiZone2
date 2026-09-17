@@ -89,7 +89,7 @@ pub fn category_for(tool: &str) -> Category {
     }
     match tool {
         // Reads of local state.
-        "read" | "read" | "glob" | "grep"
+        "read" | "glob" | "grep"
         | "search_local_files" | "search_knowledge" | "read_memory" | "read_subchat"
         | "list_subchats" | "collect_subagents" | "list_zones" | "team_status"
         | "terminal_read" | "terminal_list" | "app_read" | "get_current_datetime"

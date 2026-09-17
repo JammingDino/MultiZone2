@@ -3083,7 +3083,7 @@ async fn run_participant_turn(
     // it. Primary conversation only — perspectives and multi-model chats never
     // read the compacted prefix (see `build_message_history`).
     if !cancelled_turn && persp.is_none() && !is_multi_model(&ctx.db, chat_id).await {
-        let window = crate::tools::compact::context_window_tokens(&ctx.db).await;
+        let window = crate::tools::compact::context_window_tokens(&ctx.http, &provider, &zone.model).await;
         if crate::tools::compact::should_compact(last_context_tokens, window) {
             match crate::tools::compact::auto_compact(&ctx.db, &ctx.http, chat_id, &zone, &provider).await {
                 Ok(Some(n)) => {

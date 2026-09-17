@@ -180,30 +180,24 @@ pub async fn compacted_prefix(db: &SqlitePool, chat_id: &str) -> Option<(String,
 /// results. pi's figure.
 pub const RESERVE_TOKENS: i64 = 16_384;
 
-/// The model's context window, as the user has told us (0.18). Nothing in an
-/// OpenAI-compatible API reports it, so it is a setting; `0` turns
-/// harness-driven compaction off.
-pub async fn context_window_tokens(db: &SqlitePool) -> i64 {
-    let raw: Option<String> =
-        sqlx::query_scalar("SELECT value FROM settings WHERE key = 'app_settings'")
-            .fetch_optional(db)
-            .await
-            .ok()
-            .flatten()
-            .flatten();
-    raw.and_then(|s| serde_json::from_str::<Value>(&s).ok())
-        .and_then(|v| v.get("contextWindowTokens").and_then(|n| n.as_i64()))
-        .unwrap_or(DEFAULT_CONTEXT_WINDOW_TOKENS)
-        .max(0)
+/// The model's context window, found the way the meter finds it (0.17.9):
+/// the provider's model entry, a local server's native API, the models.dev
+/// catalogue, a family table. `None` when nothing knows — then only a
+/// provider's overflow error can trigger compaction.
+pub async fn context_window_tokens(
+    http: &reqwest::Client,
+    provider: &crate::db::models::Provider,
+    model: &str,
+) -> Option<i64> {
+    crate::llm::context_window::lookup_default(http, provider, model)
+        .await
+        .map(|w| w.tokens)
 }
-
-/// What an unset window is taken to be. Most current frontier models are at
-/// least this; a smaller local model is the case for setting it lower.
-pub const DEFAULT_CONTEXT_WINDOW_TOKENS: i64 = 128_000;
 
 /// Whether `context_tokens` — the last request's measured or estimated prompt
 /// size — is past the point where the next turn risks overflowing.
-pub fn should_compact(context_tokens: i64, window: i64) -> bool {
+pub fn should_compact(context_tokens: i64, window: Option<i64>) -> bool {
+    let Some(window) = window else { return false };
     window > RESERVE_TOKENS * 2 && context_tokens >= window - RESERVE_TOKENS
 }
 
@@ -396,12 +390,12 @@ mod tests {
 
     #[test]
     fn compaction_triggers_inside_the_reserve_and_never_with_the_window_off() {
-        assert!(!should_compact(200_000, 0));
-        assert!(!should_compact(100_000, 128_000));
-        assert!(should_compact(128_000 - RESERVE_TOKENS, 128_000));
-        assert!(should_compact(140_000, 128_000));
+        assert!(!should_compact(200_000, None));
+        assert!(!should_compact(100_000, Some(128_000)));
+        assert!(should_compact(128_000 - RESERVE_TOKENS, Some(128_000)));
+        assert!(should_compact(140_000, Some(128_000)));
         // A window smaller than two reserves cannot be compacted into.
-        assert!(!should_compact(30_000, 20_000));
+        assert!(!should_compact(30_000, Some(20_000)));
     }
 
     #[test]

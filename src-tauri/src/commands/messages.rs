@@ -3119,6 +3119,8 @@ pub enum SnippetKind {
     /// The project's own `AGENTS.md` / `CLAUDE.md` (0.14.5).
     ProjectInstructions,
     Continuity,
+    /// What a tooled zone with no prompt of its own is told (0.18).
+    DefaultRules,
     /// Where the tools act: working directory, platform, date (0.18).
     Env,
     Skills,
@@ -3151,6 +3153,7 @@ impl SnippetKind {
             Self::ZonePrompt => "Zone prompt",
             Self::ProjectInstructions => "Project instructions",
             Self::Continuity => "Agent-loop preamble",
+            Self::DefaultRules => "Default rules",
             Self::Env => "Environment",
             Self::Leader => "Sub-agent roster",
             Self::Memory => "Memories",
@@ -3189,6 +3192,17 @@ async fn is_multi_model(db: &SqlitePool, chat_id: &str) -> bool {
 /// Extracted so the context meter measures the same bytes the turn sends: a
 /// meter with its own idea of what the system prompt contains is a meter that
 /// goes stale the first time either side changes.
+/// See `SnippetKind::DefaultRules`.
+pub const DEFAULT_RULES: &str = "# Working in a codebase\n\
+- Match the surrounding code's style and use the libraries the project already uses; check \
+  before assuming one is available.\n\
+- Prefer editing existing files to creating new ones. No documentation or README files \
+  unless asked.\n\
+- Verify with the project's own test, build and lint commands when they exist, and report \
+  the real output, including failures.\n\
+- Never commit, push or open a pull request unless asked.\n\
+- Be concise. Refer to code as `path:line`.";
+
 /// The `<env>` block: working directory and how paths are written, platform,
 /// and today's date. The date is bucketed to the day, so the prefix cache is
 /// lost once at midnight rather than on every turn.
@@ -3252,6 +3266,16 @@ pub async fn build_system_snippets(
     }
 
     let zone_tool_ids: Vec<String> = serde_json::from_str(&zone.tools_enabled).unwrap_or_default();
+
+    // A zone with tools but no prompt (0.18). The shipped zones carry their
+    // working rules in their own prompts; a blank custom zone used to get the
+    // loop preamble and nothing about conventions, committing or verbosity.
+    // This is opencode's substance at pi's length, and it steps aside the
+    // moment the user writes a prompt of their own.
+    let has_own_prompt = zone.system_prompt.as_deref().map_or(false, |p| !p.trim().is_empty());
+    if !zone_tool_ids.is_empty() && !has_own_prompt {
+        snippets.push((SnippetKind::DefaultRules, DEFAULT_RULES.to_string()));
+    }
 
     // The project's own `AGENTS.md` / `CLAUDE.md` (0.14.5) — second only to the
     // zone prompt, because it is the same kind of thing (standing instructions

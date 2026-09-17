@@ -212,27 +212,20 @@ export function ChatList({ chats, activeId, onSelect, projectId }: Props) {
               </span>
             )}
           </div>
+          {/* Tags as dots, not chips: the names are on hover and in the tag
+              filter, and a sidebar row is not the place to read them. */}
           {!editing && (tagsByChatId[chat.id]?.length ?? 0) > 0 && (
-            <div className="mt-1 flex flex-wrap gap-1 pl-6">
-              {tagsByChatId[chat.id].slice(0, 4).map((t) => (
+            <div
+              className="mt-0.5 flex gap-1 pl-6"
+              title={tagsByChatId[chat.id].map((t) => t.name).join(", ")}
+            >
+              {tagsByChatId[chat.id].map((t) => (
                 <span
                   key={t.tagId}
-                  className="flex max-w-[90px] items-center gap-1 rounded-full px-1.5 py-px text-[10px] leading-tight"
-                  style={{
-                    color: t.color ?? "var(--color-text-muted)",
-                    background: `color-mix(in srgb, ${t.color ?? "var(--color-text-muted)"} 14%, transparent)`,
-                  }}
-                  title={t.name}
-                >
-                  <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: t.color ?? "var(--color-text-muted)" }} />
-                  <span className="truncate">{t.name}</span>
-                </span>
+                  className="h-1.5 w-1.5 rounded-full"
+                  style={{ background: t.color ?? "var(--color-text-muted)" }}
+                />
               ))}
-              {tagsByChatId[chat.id].length > 4 && (
-                <span className="text-[10px] text-[var(--color-text-muted)]">
-                  +{tagsByChatId[chat.id].length - 4}
-                </span>
-              )}
             </div>
           )}
         </div>

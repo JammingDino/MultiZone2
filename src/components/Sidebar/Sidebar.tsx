@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Settings, Layers, ChevronRight, ChevronDown, FolderPlus, ChevronLeft, Pencil, Trash2, Tag as TagIcon, X, Sparkles, Keyboard } from "lucide-react";
+import { Plus, Settings, Layers, ChevronRight, ChevronDown, FolderPlus, ChevronLeft, Pencil, Trash2, Tag as TagIcon, X, Sparkles } from "lucide-react";
 import { Popover, pointRect } from "@/components/common/Popover";
 import { useApp } from "@/store/app";
 import { useShallow } from "zustand/react/shallow";
@@ -32,7 +32,6 @@ export function Sidebar() {
     openSettings,
     openZoneLibrary,
     openProjectsPanel,
-    openShortcutsHelp,
     sidebarOpen,
     setSidebarOpen,
     loadThemeFromBackend,
@@ -56,7 +55,6 @@ export function Sidebar() {
       openSettings: s.openSettings,
       openZoneLibrary: s.openZoneLibrary,
       openProjectsPanel: s.openProjectsPanel,
-      openShortcutsHelp: s.openShortcutsHelp,
       sidebarOpen: s.sidebarOpen,
       setSidebarOpen: s.setSidebarOpen,
       loadThemeFromBackend: s.loadThemeFromBackend,
@@ -216,25 +214,11 @@ export function Sidebar() {
             <Layers size={16} />
           </button>
           <button
-            onClick={() => openProjectsPanel()}
-            title="Manage Projects"
-            className={`rounded p-2 ${CHROME_QUIET}`}
-          >
-            <FolderPlus size={16} />
-          </button>
-          <button
             onClick={openSettings}
             title="Settings"
             className={`rounded p-2 ${CHROME_QUIET}`}
           >
             <Settings size={16} />
-          </button>
-          <button
-            onClick={openShortcutsHelp}
-            title="Keyboard Shortcuts (?)"
-            className={`rounded p-2 ${CHROME_QUIET}`}
-          >
-            <Keyboard size={16} />
           </button>
         </div>
       </aside>
@@ -266,11 +250,11 @@ export function Sidebar() {
         </div>
         <div className="flex items-center gap-0.5">
           <button
-            onClick={openShortcutsHelp}
+            onClick={() => openZoneLibrary()}
             className={`rounded p-1.5 ${CHROME_QUIET}`}
-            title="Keyboard Shortcuts (?)"
+            title="Zones"
           >
-            <Keyboard size={16} />
+            <Layers size={16} />
           </button>
           <button
             onClick={openSettings}
@@ -467,23 +451,6 @@ export function Sidebar() {
         />
       )}
 
-      {/* Footer buttons */}
-      <div className="border-t border-[var(--color-border)] p-2 flex flex-col gap-1">
-        <button
-          onClick={() => openZoneLibrary()}
-          className="flex w-full items-center justify-center gap-2 rounded-md border border-[var(--color-border)] py-2 text-xs transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
-        >
-          <Layers size={13} />
-          Configure Zones
-        </button>
-        <button
-          onClick={() => openProjectsPanel()}
-          className="flex w-full items-center justify-center gap-2 rounded-md border border-[var(--color-border)] py-2 text-xs transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
-        >
-          <FolderPlus size={13} />
-          Manage Projects
-        </button>
-      </div>
     </aside>
   );
 }

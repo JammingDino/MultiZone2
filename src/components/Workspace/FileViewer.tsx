@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, Code2, ExternalLink, Eye, FolderOpen, Loader2, RefreshCw, Save, X } from "lucide-react";
+import { AlertCircle, Code2, ExternalLink, Eye, FileText as FileTextIcon, FolderOpen, Loader2, Minus, Plus, RefreshCw, Save, X } from "lucide-react";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { formatBytes } from "@/lib/format";
@@ -10,6 +10,65 @@ import { useIsLightMode } from "@/components/Renderers/CodeBlock";
 import { openPdf, drawPdfPage, type PdfDoc } from "@/lib/pdf";
 import type { FileText as FileTextData } from "@/lib/types";
 import { iconFor } from "./FilesPanel";
+
+/**
+ * The zoom ladder, in place of a percentage that can be any number. Every stop
+ * is a size somebody would choose, and stepping through a list means the
+ * buttons and the wheel can never disagree about what comes next.
+ */
+const ZOOMS = [0.5, 0.67, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4];
+
+function stepZoom(current: number, direction: 1 | -1): number {
+  const i = ZOOMS.findIndex((z) => z >= current - 0.001);
+  const next = (i < 0 ? ZOOMS.length - 1 : i) + direction;
+  return ZOOMS[Math.min(Math.max(next, 0), ZOOMS.length - 1)];
+}
+
+/**
+ * Ctrl+wheel zooms the pane, the way it does in a browser and every viewer
+ * anyone has used.
+ *
+ * It is a listener rather than React's `onWheel` because that one is passive:
+ * `preventDefault` does nothing there, so the webview would zoom the whole app
+ * underneath the pane doing its own zoom. React 19 runs the returned cleanup
+ * when the ref detaches, which is what makes a ref callback the right place.
+ */
+function useCtrlWheelZoom(setZoom: React.Dispatch<React.SetStateAction<number>>) {
+  return useCallback(
+    (node: HTMLDivElement | null) => {
+      if (!node) return;
+      const onWheel = (e: WheelEvent) => {
+        if (!e.ctrlKey && !e.metaKey) return;
+        e.preventDefault();
+        setZoom((z) => stepZoom(z, e.deltaY < 0 ? 1 : -1));
+      };
+      node.addEventListener("wheel", onWheel, { passive: false });
+      return () => node.removeEventListener("wheel", onWheel);
+    },
+    [setZoom],
+  );
+}
+
+/** Minus, the percentage (click to reset), plus. */
+function Zoom({ value, onChange }: { value: number; onChange: (z: number) => void }) {
+  return (
+    <div className="ml-1 flex shrink-0 items-center overflow-hidden rounded border border-[var(--color-border)]">
+      <ModeButton active={false} onClick={() => onChange(stepZoom(value, -1))} title="Zoom out (Ctrl+wheel)">
+        <Minus size={11} />
+      </ModeButton>
+      <button
+        onClick={() => onChange(1)}
+        title="Reset to 100%"
+        className="w-10 px-1 py-0.5 font-mono text-[10px] text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
+      >
+        {Math.round(value * 100)}%
+      </button>
+      <ModeButton active={false} onClick={() => onChange(stepZoom(value, 1))} title="Zoom in (Ctrl+wheel)">
+        <Plus size={11} />
+      </ModeButton>
+    </div>
+  );
+}
 
 /**
  * One file, as a document tab in the main column (0.17.9, moved 0.18).
@@ -43,9 +102,16 @@ export function FileViewer({ path }: { path: string }) {
   const viewOnly = kind === "image" || kind === "pdf";
   const previewable = kind !== "text" && !viewOnly;
   const [mode, setMode] = useState<"preview" | "source">(kind === "text" ? "source" : "preview");
-  // A different file starts over: its own default view, its own draft.
+  const [zoom, setZoom] = useState(1);
+  // A file whose bytes were called binary, opened in the editor anyway on the
+  // user's say-so. Read-only: the text is a lossy decode, and saving it back
+  // would write that lossiness over the file.
+  const [asText, setAsText] = useState(false);
+  // A different file starts over: its own default view, its own zoom, its own draft.
   useEffect(() => {
     setMode(kindOf(path) === "text" ? "source" : "preview");
+    setZoom(1);
+    setAsText(false);
     setSavedAt(null);
     setSaveError(null);
   }, [path]);
@@ -83,6 +149,7 @@ export function FileViewer({ path }: { path: string }) {
     }
   }, [file, dirty, saving, path, draft]);
 
+  const paneRef = useCtrlWheelZoom(setZoom);
   const { Icon, color } = iconFor(file?.name ?? path);
   const name = file?.name ?? path.slice(Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1);
 
@@ -107,7 +174,8 @@ export function FileViewer({ path }: { path: string }) {
             </ModeButton>
           </div>
         )}
-        {!viewOnly && (
+        <Zoom value={zoom} onChange={setZoom} />
+        {!viewOnly && !asText && (
           <Action title={dirty ? "Save (Ctrl+S)" : "Saved"} onClick={save} disabled={!dirty || saving} accent={dirty}>
             {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
           </Action>
@@ -136,30 +204,51 @@ export function FileViewer({ path }: { path: string }) {
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      {/* Ctrl+wheel is wired once here rather than in each pane. */}
+      <div ref={paneRef} className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {/* An image first, ahead of both the loader and the read error: the
             frame fetches its own bytes from the scheme, so it needs neither.
             `read_workspace_file` caps at 4 MB because it is building a
             *string*; a 6 MB screenshot displays perfectly well and used to be
             refused by a limit that had nothing to do with it. */}
         {kind === "image" ? (
-          <ImagePreview path={path} name={name} savedAt={savedAt} />
+          <ImagePreview path={path} name={name} savedAt={savedAt} zoom={zoom} />
         ) : kind === "pdf" ? (
-          <PdfPreview path={path} name={name} />
+          <PdfPreview path={path} name={name} zoom={zoom} />
         ) : error ? (
           <Notice icon={<AlertCircle size={12} />} danger>
             {error}
           </Notice>
         ) : !file ? (
           <Notice icon={<Loader2 size={12} className="animate-spin text-[var(--color-accent)]" />}>Loading…</Notice>
-        ) : file.binary ? (
+        ) : file.binary && !asText ? (
+          // Not "cannot open": the bytes did not decode, which is a verdict
+          // the user is allowed to overrule. An extension nobody here has
+          // heard of is not evidence of anything, and the editor is the
+          // default for everything precisely so a new one needs no release.
           <Notice icon={<AlertCircle size={12} />}>
-            Not a text file. Open it in its own app with the arrow above.
+            <span>
+              {name} does not look like text — it did not decode as any encoding this reads.
+            </span>
+            <button
+              onClick={() => setAsText(true)}
+              className="mt-2 flex items-center gap-1.5 rounded border border-[var(--color-border)] px-2 py-1 text-[11px] text-[var(--color-text)] hover:bg-[var(--color-panel-hover)]"
+            >
+              <FileTextIcon size={11} />
+              Open as text anyway
+            </button>
           </Notice>
-        ) : mode === "preview" ? (
-          <Preview kind={kind} content={draft} name={name} path={path} savedAt={savedAt} />
+        ) : mode === "preview" && !asText ? (
+          <Preview kind={kind} content={draft} name={name} path={path} savedAt={savedAt} zoom={zoom} />
         ) : (
-          <Editor value={draft} onChange={setDraft} onSave={save} path={path} />
+          <Editor
+            value={draft}
+            onChange={setDraft}
+            onSave={save}
+            path={path}
+            zoom={zoom}
+            readOnly={asText}
+          />
         )}
       </div>
     </div>
@@ -187,7 +276,21 @@ function viewOnlyKind(path: string): boolean {
 /** Raster formats the `mzfile` scheme already serves with a real media type. */
 const IMAGE = new Set(["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "ico"]);
 
-function Preview({ kind, content, name, path, savedAt }: { kind: Kind; content: string; name: string; path: string; savedAt: number | null }) {
+function Preview({
+  kind,
+  content,
+  name,
+  path,
+  savedAt,
+  zoom,
+}: {
+  kind: Kind;
+  content: string;
+  name: string;
+  path: string;
+  savedAt: number | null;
+  zoom: number;
+}) {
   const svgSrc = useMemo(
     () => (kind === "svg" ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(content)}` : ""),
     [kind, content],
@@ -208,6 +311,10 @@ function Preview({ kind, content, name, path, savedAt }: { kind: Kind; content: 
         // still having no reach into this window. A `srcdoc` would inherit
         // *this* origin, so there it stays opaque. Popups so links can open.
         sandbox={`allow-scripts allow-popups allow-forms allow-modals${url ? " allow-same-origin" : ""}`}
+        // CSS `zoom` rather than a transform: the page inside reflows to the
+        // new size instead of being a scaled picture of the old one, and the
+        // frame is cross-origin so its own styles are out of reach anyway.
+        style={{ zoom }}
         className="min-h-0 w-full flex-1 border-0 bg-white"
       />
     );
@@ -215,12 +322,12 @@ function Preview({ kind, content, name, path, savedAt }: { kind: Kind; content: 
   if (kind === "svg") {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4">
-        <img src={svgSrc} alt={name} className="max-h-full max-w-full" />
+        <img src={svgSrc} alt={name} style={{ zoom }} className="max-h-full max-w-full" />
       </div>
     );
   }
   return (
-    <div className="min-h-0 flex-1 overflow-auto px-4 py-3 text-[13px]">
+    <div className="min-h-0 flex-1 overflow-auto px-4 py-3" style={{ fontSize: `${13 * zoom}px` }}>
       <div className="mx-auto max-w-3xl"><Markdown source={content} /></div>
     </div>
   );
@@ -236,8 +343,17 @@ function Preview({ kind, content, name, path, savedAt }: { kind: Kind; content: 
  * A remote window has no such scheme, so it says so rather than showing a
  * broken image.
  */
-function ImagePreview({ path, name, savedAt }: { path: string; name: string; savedAt: number | null }) {
-  const [actual, setActual] = useState(false);
+function ImagePreview({
+  path,
+  name,
+  savedAt,
+  zoom,
+}: {
+  path: string;
+  name: string;
+  savedAt: number | null;
+  zoom: number;
+}) {
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   const [failed, setFailed] = useState(false);
   const url = useMemo(() => {
@@ -246,7 +362,6 @@ function ImagePreview({ path, name, savedAt }: { path: string; name: string; sav
   }, [path, savedAt]);
 
   useEffect(() => {
-    setActual(false);
     setSize(null);
     setFailed(false);
   }, [path]);
@@ -271,7 +386,11 @@ function ImagePreview({ path, name, savedAt }: { path: string; name: string; sav
           child is what keeps it to the picture. */}
       <div
         className="w-fit shrink-0"
+        // Zoom scales the framed picture, so at 100% the image still fits the
+        // pane and above it the pane scrolls — the same gesture as every other
+        // pane here, rather than a bespoke fit/actual toggle.
         style={{
+          zoom,
           backgroundImage:
             "repeating-conic-gradient(var(--color-panel) 0% 25%, var(--color-bg) 0% 50%)",
           backgroundSize: "16px 16px",
@@ -282,11 +401,9 @@ function ImagePreview({ path, name, savedAt }: { path: string; name: string; sav
           alt={name}
           onLoad={(e) => setSize({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
           onError={() => setFailed(true)}
-          onClick={() => setActual((v) => !v)}
-          // Never upscaled: "fit" shrinks an image too big for the pane and
-          // leaves a small one at its own size, which is what looking at a
-          // file means. 1:1 is the escape hatch for a screenshot to read.
-          className={actual ? "max-w-none cursor-zoom-out" : "max-h-full max-w-full cursor-zoom-in"}
+          // Never upscaled at 100%: an image too big for the pane shrinks to
+          // fit, a small one is left at its own size.
+          className="max-h-full max-w-full"
         />
       </div>
       {size && (
@@ -312,7 +429,7 @@ function ImagePreview({ path, name, savedAt }: { path: string; name: string; sav
  */
 const MAX_PAGES = 60;
 
-function PdfPreview({ path, name }: { path: string; name: string }) {
+function PdfPreview({ path, name, zoom }: { path: string; name: string; zoom: number }) {
   const [doc, setDoc] = useState<PdfDoc | null>(null);
   const [error, setError] = useState<string | null>(null);
   const url = useMemo(() => api.previewUrl(path), [path]);
@@ -359,9 +476,15 @@ function PdfPreview({ path, name }: { path: string; name: string }) {
   const shown = Math.min(doc.numPages, MAX_PAGES);
   return (
     <div className="min-h-0 flex-1 overflow-auto overscroll-contain bg-[var(--color-panel)] px-4 py-4">
-      <div className="mx-auto flex max-w-3xl flex-col gap-4">
+      {/* Zoom widens the column and each page re-renders into it, so a zoomed
+          page is drawn at that size rather than being a stretched bitmap —
+          which is the whole point of zooming into a document. */}
+      <div
+        className="mx-auto flex flex-col gap-4"
+        style={{ width: `${zoom * 100}%`, maxWidth: zoom <= 1 ? "48rem" : "none" }}
+      >
         {Array.from({ length: shown }, (_, i) => (
-          <PdfPage key={i} doc={doc} n={i + 1} total={doc.numPages} />
+          <PdfPage key={i} doc={doc} n={i + 1} total={doc.numPages} zoom={zoom} />
         ))}
         {shown < doc.numPages && (
           <p className="pb-2 text-center text-[11px] text-[var(--color-text-muted)]">
@@ -373,7 +496,7 @@ function PdfPreview({ path, name }: { path: string; name: string }) {
   );
 }
 
-function PdfPage({ doc, n, total }: { doc: PdfDoc; n: number; total: number }) {
+function PdfPage({ doc, n, total, zoom }: { doc: PdfDoc; n: number; total: number; zoom: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const [failed, setFailed] = useState(false);
 
@@ -391,7 +514,9 @@ function PdfPage({ doc, n, total }: { doc: PdfDoc; n: number; total: number }) {
     return () => {
       live = false;
     };
-  }, [doc, n]);
+    // `zoom` is not read here — the container's width is — but it is what
+    // changed that width, so it is what has to trigger the redraw.
+  }, [doc, n, zoom]);
 
   return (
     <div className="relative">
@@ -414,29 +539,6 @@ function PdfPage({ doc, n, total }: { doc: PdfDoc; n: number; total: number }) {
 }
 
 /**
- * Prism's name for a file extension. Only the ones this app's own tree is full
- * of plus the usual suspects — an unknown extension highlights as nothing,
- * which is exactly what it used to do for everything.
- */
-const LANGUAGES: Record<string, string> = {
-  ts: "typescript", tsx: "tsx", js: "javascript", jsx: "jsx", mjs: "javascript", cjs: "javascript",
-  rs: "rust", py: "python", go: "go", java: "java", kt: "kotlin", swift: "swift", rb: "ruby",
-  php: "php", c: "c", h: "c", cpp: "cpp", hpp: "cpp", cs: "csharp", lua: "lua", zig: "zig",
-  sh: "bash", bash: "bash", zsh: "bash", ps1: "powershell", bat: "batch", sql: "sql",
-  css: "css", scss: "scss", less: "less", html: "markup", htm: "markup", xml: "markup",
-  svg: "markup", vue: "markup", svelte: "markup", json: "json", yaml: "yaml", yml: "yaml",
-  toml: "toml", ini: "ini", md: "markdown", mdx: "markdown", diff: "diff", patch: "diff",
-  dockerfile: "docker", graphql: "graphql", proto: "protobuf",
-};
-
-function languageOf(path: string): string | null {
-  const name = path.slice(Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1);
-  if (name.toLowerCase() === "dockerfile") return "docker";
-  const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1).toLowerCase() : "";
-  return LANGUAGES[ext] ?? null;
-}
-
-/**
  * Above this many characters the file is edited as plain text. Highlighting
  * re-tokenises the whole document on every keystroke, and somewhere past a few
  * hundred KB that turns typing into a slideshow.
@@ -447,34 +549,99 @@ function languageOf(path: string): string | null {
  */
 const HIGHLIGHT_LIMIT = 200_000;
 
+/** Columns per indent level — the same two spaces Tab inserts. */
+const INDENT = 2;
+
+/**
+ * The indent guides, as text.
+ *
+ * Every editor draws faint vertical lines down each level of indentation, and
+ * the cheap way to get them is to notice that the columns they occupy are
+ * blank by definition. So this builds one line per line of the file holding a
+ * box-drawing character at each indent step and spaces elsewhere, and paints
+ * it underneath in the same metrics. No per-line elements, no measuring of
+ * character widths — a string, in a `<pre>`, that lands exactly where the
+ * whitespace already is.
+ *
+ * A blank line gets the guides of the deeper of its neighbours, so a gap
+ * inside a block does not cut the lines in half.
+ */
+function indentGuides(value: string): string {
+  const lines = value.split("\n");
+  const depth = lines.map((line) => {
+    if (line.trim() === "") return -1;
+    const lead = /^[ \t]*/.exec(line)?.[0] ?? "";
+    return Math.floor(lead.replace(/\t/g, " ".repeat(INDENT)).length / INDENT);
+  });
+  // Fill each blank line from its neighbours, so a run of them keeps the
+  // guides that surround it rather than breaking them.
+  for (let i = 0; i < depth.length; i++) {
+    if (depth[i] !== -1) continue;
+    let before = 0;
+    for (let j = i - 1; j >= 0; j--) if (depth[j] !== -1) { before = depth[j]; break; }
+    let after = 0;
+    for (let j = i + 1; j < depth.length; j++) if (depth[j] !== -1) { after = depth[j]; break; }
+    depth[i] = Math.min(before, after);
+  }
+  return depth
+    .map((d) => ("\u2502" + " ".repeat(INDENT - 1)).repeat(Math.max(d, 0)))
+    .join("\n");
+}
+
+/** Prism's name for a file extension. An unknown one highlights as nothing. */
+const LANGUAGES: Record<string, string> = {
+  ts: "typescript", tsx: "tsx", js: "javascript", jsx: "jsx", mjs: "javascript", cjs: "javascript",
+  rs: "rust", py: "python", go: "go", java: "java", kt: "kotlin", swift: "swift", rb: "ruby",
+  php: "php", c: "c", h: "c", cpp: "cpp", hpp: "cpp", cs: "csharp", lua: "lua", zig: "zig",
+  sh: "bash", bash: "bash", zsh: "bash", ps1: "powershell", bat: "batch", sql: "sql",
+  css: "css", scss: "scss", less: "less", html: "markup", htm: "markup", xml: "markup",
+  svg: "markup", vue: "markup", svelte: "markup", json: "json", yaml: "yaml", yml: "yaml",
+  toml: "toml", ini: "ini", md: "markdown", mdx: "markdown", diff: "diff", patch: "diff",
+  dockerfile: "docker", graphql: "graphql", proto: "protobuf", conf: "ini", cfg: "ini",
+  env: "bash", gitignore: "bash", lock: "toml",
+};
+
+function languageOf(path: string): string | null {
+  const name = path.slice(Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1);
+  if (name.toLowerCase() === "dockerfile") return "docker";
+  const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1).toLowerCase() : "";
+  return LANGUAGES[ext] ?? null;
+}
+
 /**
  * A textarea with a line-number gutter kept in step by mirroring its scroll,
- * and — since 0.18 — Prism's colours behind it.
+ * indent guides behind it, and — since 0.18 — Prism's colours between them.
  *
- * The highlighting is the standard overlay: a `<pre>` painted underneath and a
- * textarea with transparent text on top, the two kept in register by sharing
- * every metric that moves a glyph (family, size, line height, padding, tab
- * size, no wrapping) and by mirroring the textarea's scroll onto the layer
- * below. The caret, the selection and every keystroke still belong to the
- * textarea, which is what keeps this a text box that happens to have colour
- * rather than an editor that has to reimplement one.
+ * Three layers, one set of metrics: guides at the back, highlighting over
+ * them, and a textarea with transparent text on top. They stay in register by
+ * sharing every property that can move a glyph (family, size, line height,
+ * padding, tab size, no wrapping) and by mirroring the textarea's scroll onto
+ * the two below it. The caret, the selection and every keystroke still belong
+ * to the textarea, which is what keeps this a text box that happens to have
+ * colour rather than an editor that has to reimplement one.
  */
 function Editor({
   value,
   onChange,
   onSave,
   path,
+  zoom,
+  readOnly,
 }: {
   value: string;
   onChange: (v: string) => void;
   onSave: () => void;
   path: string;
+  zoom: number;
+  readOnly?: boolean;
 }) {
   const gutterRef = useRef<HTMLDivElement>(null);
+  const guideRef = useRef<HTMLDivElement>(null);
   const layerRef = useRef<HTMLDivElement>(null);
   const isLight = useIsLightMode();
   const lines = useMemo(() => value.split("\n").length, [value]);
   const numbers = useMemo(() => Array.from({ length: lines }, (_, i) => i + 1).join("\n"), [lines]);
+  const guides = useMemo(() => indentGuides(value), [value]);
   const language = languageOf(path);
   const highlight = language !== null && value.length <= HIGHLIGHT_LIMIT;
 
@@ -487,24 +654,24 @@ function Editor({
     if (e.key === "Tab" && !e.shiftKey) {
       e.preventDefault();
       const el = e.currentTarget;
-      const { selectionStart: s, selectionEnd: end } = el;
-      const next = `${value.slice(0, s)}  ${value.slice(end)}`;
+      const { selectionStart: start, selectionEnd: end } = el;
+      const next = `${value.slice(0, start)}${" ".repeat(INDENT)}${value.slice(end)}`;
       onChange(next);
       requestAnimationFrame(() => {
-        el.selectionStart = el.selectionEnd = s + 2;
+        el.selectionStart = el.selectionEnd = start + INDENT;
       });
     }
   }
 
-  // Every metric that decides where a glyph lands, in one object, applied to
-  // the textarea and to the layer under it. They drift the moment they are
+  // Every property that decides where a glyph lands, in one object, applied to
+  // the textarea and to both layers under it. They drift the moment they are
   // written down twice.
   const metrics: React.CSSProperties = {
     fontFamily: "inherit",
     fontSize: "inherit",
     lineHeight: "inherit",
     padding: "8px",
-    tabSize: 2,
+    tabSize: INDENT,
     whiteSpace: "pre",
     wordBreak: "normal",
     overflowWrap: "normal",
@@ -512,7 +679,13 @@ function Editor({
   };
 
   return (
-    <div className="flex min-h-0 flex-1 font-mono text-[12px] leading-[1.55]">
+    <div
+      className="flex min-h-0 flex-1 font-mono leading-[1.55]"
+      // Zoom is the font size here. It is the honest knob for text, and
+      // because every layer inherits it they all scale together and stay
+      // aligned — which CSS `zoom` on a textarea does not reliably manage.
+      style={{ fontSize: `${12 * zoom}px` }}
+    >
       <div
         ref={gutterRef}
         aria-hidden
@@ -521,6 +694,11 @@ function Editor({
         <pre className="m-0 font-[inherit] text-[inherit]">{numbers}</pre>
       </div>
       <div className="relative min-w-0 flex-1">
+        <div ref={guideRef} aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
+          <pre className="m-0 text-[var(--color-border)]" style={metrics}>
+            {guides}
+          </pre>
+        </div>
         {highlight && (
           <div ref={layerRef} aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
             <SyntaxHighlighter
@@ -530,7 +708,7 @@ function Editor({
               codeTagProps={{ style: { ...metrics, padding: 0, background: "transparent" } }}
             >
               {/* A file ending in a newline loses its last (empty) line to the
-                  tokeniser, which shifts nothing but does make the layer one
+                  tokeniser, which shifts nothing but does leave the layer one
                   line shorter than the textarea; a space keeps them equal. */}
               {value.endsWith("\n") ? `${value} ` : value}
             </SyntaxHighlighter>
@@ -538,13 +716,16 @@ function Editor({
         )}
         <textarea
           value={value}
+          readOnly={readOnly}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={onKeyDown}
           onScroll={(e) => {
-            if (gutterRef.current) gutterRef.current.scrollTop = e.currentTarget.scrollTop;
-            if (layerRef.current) {
-              layerRef.current.scrollTop = e.currentTarget.scrollTop;
-              layerRef.current.scrollLeft = e.currentTarget.scrollLeft;
+            const { scrollTop, scrollLeft } = e.currentTarget;
+            if (gutterRef.current) gutterRef.current.scrollTop = scrollTop;
+            for (const layer of [guideRef.current, layerRef.current]) {
+              if (!layer) continue;
+              layer.scrollTop = scrollTop;
+              layer.scrollLeft = scrollLeft;
             }
           }}
           spellCheck={false}
@@ -553,8 +734,8 @@ function Editor({
           wrap="off"
           style={{
             ...metrics,
-            // The text is the layer's job; the caret and the selection are
-            // still this element's, so both are given explicitly.
+            // The text is the highlighting layer's job; the caret and the
+            // selection are still this element's, so both are given here.
             color: highlight ? "transparent" : "var(--color-text)",
             caretColor: "var(--color-text)",
           }}
@@ -609,9 +790,9 @@ function Action({
 
 function Notice({ icon, danger, children }: { icon: React.ReactNode; danger?: boolean; children: React.ReactNode }) {
   return (
-    <div className={`flex items-center gap-2 p-3 text-[11px] ${danger ? "text-[var(--color-danger)]" : "text-[var(--color-text-muted)]"}`}>
-      {icon}
-      <span>{children}</span>
+    <div className={`flex items-start gap-2 p-3 text-[11px] ${danger ? "text-[var(--color-danger)]" : "text-[var(--color-text-muted)]"}`}>
+      <span className="mt-px shrink-0">{icon}</span>
+      <div className="flex min-w-0 flex-col items-start">{children}</div>
     </div>
   );
 }

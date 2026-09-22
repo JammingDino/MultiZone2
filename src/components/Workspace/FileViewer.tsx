@@ -34,8 +34,10 @@ export function FileViewer({ path }: { path: string }) {
   const [savedAt, setSavedAt] = useState<number | null>(null);
 
   const kind = kindOf(path);
-  const previewable = kind !== "text";
-  const [mode, setMode] = useState<"preview" | "source">(previewable ? "preview" : "source");
+  // An image has a preview and nothing else: its "source" is bytes, and the
+  // editor would offer to save a textarea full of them back over the file.
+  const previewable = kind !== "text" && kind !== "image";
+  const [mode, setMode] = useState<"preview" | "source">(kind === "text" ? "source" : "preview");
   // A different file starts over: its own default view, its own draft.
   useEffect(() => {
     setMode(kindOf(path) === "text" ? "source" : "preview");
@@ -45,6 +47,7 @@ export function FileViewer({ path }: { path: string }) {
 
   const load = useCallback(() => {
     setError(null);
+    if (kindOf(path) === "image") return;
     api.readWorkspaceFile(path)
       .then((f) => {
         setFile(f);
@@ -99,9 +102,11 @@ export function FileViewer({ path }: { path: string }) {
             </ModeButton>
           </div>
         )}
-        <Action title={dirty ? "Save (Ctrl+S)" : "Saved"} onClick={save} disabled={!dirty || saving} accent={dirty}>
-          {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-        </Action>
+        {kind !== "image" && (
+          <Action title={dirty ? "Save (Ctrl+S)" : "Saved"} onClick={save} disabled={!dirty || saving} accent={dirty}>
+            {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+          </Action>
+        )}
         <Action title="Re-read from disk" onClick={load}>
           <RefreshCw size={12} />
         </Action>
@@ -127,7 +132,14 @@ export function FileViewer({ path }: { path: string }) {
       )}
 
       <div className="h-[48vh] min-h-[160px] resize-y overflow-hidden bg-[var(--color-panel)]">
-        {error ? (
+        {/* An image first, ahead of both the loader and the read error: the
+            frame fetches its own bytes from the scheme, so it needs neither.
+            `read_workspace_file` caps at 4 MB because it is building a
+            *string*; a 6 MB screenshot displays perfectly well and used to be
+            refused by a limit that had nothing to do with it. */}
+        {kind === "image" ? (
+          <ImagePreview path={path} name={name} savedAt={savedAt} />
+        ) : error ? (
           <Notice icon={<AlertCircle size={12} />} danger>
             {error}
           </Notice>
@@ -147,15 +159,19 @@ export function FileViewer({ path }: { path: string }) {
   );
 }
 
-type Kind = "html" | "markdown" | "svg" | "text";
+type Kind = "html" | "markdown" | "svg" | "image" | "text";
 
 function kindOf(path: string): Kind {
   const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
   if (ext === "html" || ext === "htm") return "html";
   if (ext === "md" || ext === "mdx" || ext === "markdown") return "markdown";
   if (ext === "svg") return "svg";
+  if (IMAGE.has(ext)) return "image";
   return "text";
 }
+
+/** Raster formats the `mzfile` scheme already serves with a real media type. */
+const IMAGE = new Set(["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "ico"]);
 
 function Preview({ kind, content, name, path, savedAt }: { kind: Kind; content: string; name: string; path: string; savedAt: number | null }) {
   const svgSrc = useMemo(
@@ -192,6 +208,73 @@ function Preview({ kind, content, name, path, savedAt }: { kind: Kind; content: 
   return (
     <div className="h-full overflow-auto px-3 py-2 text-[13px]">
       <Markdown source={content} />
+    </div>
+  );
+}
+
+/**
+ * An image, served by the `mzfile` scheme — which already answers with the
+ * right media type, so the file needs no encoding pass to be looked at. Click
+ * to toggle between fitting the frame and full size, because a screenshot that
+ * fits is unreadable and one at full size needs scrolling; which of those is
+ * wanted is not something the viewer can know.
+ *
+ * A remote window has no such scheme, so it says so rather than showing a
+ * broken image.
+ */
+function ImagePreview({ path, name, savedAt }: { path: string; name: string; savedAt: number | null }) {
+  const [actual, setActual] = useState(false);
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  const [failed, setFailed] = useState(false);
+  const url = useMemo(() => {
+    const u = api.previewUrl(path);
+    return u ? `${u}${u.includes("?") ? "&" : "?"}v=${savedAt ?? 0}` : null;
+  }, [path, savedAt]);
+
+  useEffect(() => {
+    setActual(false);
+    setSize(null);
+    setFailed(false);
+  }, [path]);
+
+  if (!url) {
+    return (
+      <Notice icon={<AlertCircle size={12} />}>
+        Images open on the desktop app only. Use the arrow above to open this one in its own app.
+      </Notice>
+    );
+  }
+  if (failed) {
+    return <Notice icon={<AlertCircle size={12} />} danger>Could not decode {name}.</Notice>;
+  }
+
+  return (
+    <div className="relative h-full overflow-auto bg-[var(--color-bg)]">
+      {/* The checker under a transparent PNG, so its transparency is visible
+          as transparency rather than as whatever the panel is painted. */}
+      <div
+        className={`flex min-h-full min-w-full items-center justify-center p-3 ${actual ? "w-max" : ""}`}
+        style={{
+          backgroundImage:
+            "repeating-conic-gradient(var(--color-panel) 0% 25%, var(--color-bg) 0% 50%)",
+          backgroundSize: "16px 16px",
+        }}
+      >
+        <img
+          src={url}
+          alt={name}
+          onLoad={(e) => setSize({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+          onError={() => setFailed(true)}
+          onClick={() => setActual((v) => !v)}
+          className={actual ? "max-w-none cursor-zoom-out" : "max-h-full max-w-full cursor-zoom-in object-contain"}
+        />
+      </div>
+      {size && (
+        <span className="pointer-events-none sticky bottom-1 left-1 ml-1 inline-block rounded bg-[var(--color-bg)]/85 px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-text-muted)]">
+          {size.w}×{size.h}
+          {actual ? " · 1:1" : " · fit"}
+        </span>
+      )}
     </div>
   );
 }

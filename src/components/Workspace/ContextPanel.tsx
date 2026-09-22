@@ -107,6 +107,19 @@ export function ContextPanel({ chatId }: { chatId: string }) {
             ))}
           </div>
         )}
+        {u.current && u.current.toolParts.length > 1 && (
+          <div className="mt-1.5 flex flex-col gap-0.5 pl-3">
+            {u.current.toolParts.map((p) => (
+              <MiniBar
+                key={p.label}
+                label={p.label}
+                value={p.tokens}
+                max={toolsTokens}
+                color="var(--viz-2)"
+              />
+            ))}
+          </div>
+        )}
         {u.est.compacted && (
           <p className="mt-1.5 text-[10px] leading-relaxed text-[var(--color-text-muted)]">
             {u.est.compacted.messages} earlier message{u.est.compacted.messages === 1 ? "" : "s"} condensed into a{" "}

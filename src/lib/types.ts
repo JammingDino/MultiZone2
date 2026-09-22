@@ -695,6 +695,8 @@ export interface AgentUsage {
   overheadTokens: number;
   /** The system prompt by what put each piece there, largest first. */
   overheadParts: OverheadPart[];
+  /** The tool schemas by the group that put them there, largest first. */
+  toolParts: OverheadPart[];
   /** The model this chat's turns go to, when its zone resolves. */
   model: string | null;
   /** How much that model can carry, when anything knows (0.17.9). */
@@ -1058,6 +1060,12 @@ export interface AppSettings {
    */
   projectInstructions: boolean;
   /**
+   * Whether the system prompt's planning offer is the full block or one line
+   * (0.18.1). The full block restates the `enter_plan_mode` tool description;
+   * off is the trial of whether the schema plus a pointer is enough.
+   */
+  planOfferFull: boolean;
+  /**
    * Tokens of repository map injected at session start (0.14.5), or 0 for none.
    *
    * The map is every source file's definitions, ranked by a PageRank over which
@@ -1249,6 +1257,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   checkpointRetentionDays: 30,
   reviewQueue: false,
   projectInstructions: true,
+  planOfferFull: true,
   repoMapTokens: 1000,
   checkpointMaxMb: 512,
   visionOverrides: {},

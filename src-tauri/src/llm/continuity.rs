@@ -183,7 +183,12 @@ pub fn stall_nudge(stall: Stall) -> &'static str {
 ///
 /// Deliberately short: the models that need it most are the ones that degrade
 /// fastest as the system prompt grows.
-pub fn multi_step_preamble(max_steps: usize, has_plan_tool: bool) -> String {
+pub fn multi_step_preamble(max_steps: usize, has_plan_tool: bool, has_context_tool: bool) -> String {
+    // The batching line and the loop line both describe what the runtime does
+    // (0.18.1): calls in one message run in order within one step, and
+    // `runaway` stops a turn on the fourth identical call or the third identical
+    // error. Telling the model how it is parsed is worth more than telling it
+    // to be efficient.
     let mut s = format!(
         "# Working through a task\n\
          You are running in a loop: every tool result comes back to you and you are called \
@@ -192,11 +197,23 @@ pub fn multi_step_preamble(max_steps: usize, has_plan_tool: bool) -> String {
          - Never announce an action without taking it. If you say you will do something, make \
          the tool call in the same message — do not stop and wait to be told to continue.\n\
          - After a tool result, do the next thing or answer. Never reply with an empty message.\n\
+         - Put independent tool calls in one message; each step re-sends the whole conversation, \
+         so one step with three calls costs a third of three steps with one.\n\
+         - The turn is stopped if you repeat a call and get the same result, or hit the same \
+         error three times. Change approach before that — a different query, path or command — \
+         or name the blocker.\n\
          - Stop only when the work is finished, or when you need something only the user can \
          give you — then say plainly what you need.\n\
          - Finish with a written answer: what you did, what you found, and anything still \
          outstanding. Tool output on its own is not an answer to the user."
     );
+    if has_context_tool {
+        s.push_str(
+            "\n- Context is finite and `read_context` shows how much of it this chat is using. On \
+             a long job, write down what a fresh start would need — plan, findings, paths — \
+             before it is lost.",
+        );
+    }
     if has_plan_tool {
         // Named as progress tracking rather than as planning. The old wording —
         // "for anything that will take more than about three steps, call

@@ -1001,6 +1001,21 @@ pub fn plan_offer_preamble() -> String {
         .to_string()
 }
 
+/// The one-line form of the offer (0.18.1), behind the `planOfferFull` setting.
+///
+/// The full block above repeats the `enter_plan_mode` description almost word
+/// for word, so the rule exists three times in a request (tool schema, loop
+/// preamble, this). Whether one pointer plus the schema is enough was never
+/// isolated: the commit that added the block also started offering the tool to
+/// read-only zones, which may have been the whole fix. This is the other arm
+/// of that test. Default stays on the full block until the short one is shown
+/// to reach the tool on "plan this for me" from a read-only zone.
+pub fn plan_offer_line() -> String {
+    "`enter_plan_mode` is how you give the user a plan they can edit, reorder and approve. \
+     A plan written as prose is the wrong answer to a request for one."
+        .to_string()
+}
+
 /// Phrases that read as "give me a plan".
 ///
 /// Deliberately phrases and not the bare word `plan`: this chat is full of

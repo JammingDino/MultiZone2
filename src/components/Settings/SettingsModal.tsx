@@ -1276,6 +1276,23 @@ function ChatTab() {
       </section>
 
       <section>
+        <h3 className="mb-1 text-sm font-medium">Planning offer</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          Zones with tools are told that <code>enter_plan_mode</code> exists and when to reach
+          for it. The full block (~270 tokens) restates the tool's own description; the short
+          form is one sentence and leaves the rest to the tool schema. Turn this off to try the
+          short form — if "plan this for me" still reaches the tool from a read-only zone, the
+          block was never needed.
+        </p>
+        <ToggleRow
+          label="Full planning offer in the system prompt"
+          description="Off sends a one-line pointer instead. The context meter shows the difference under Planning available."
+          checked={appSettings.planOfferFull}
+          onChange={(v) => setAppSettings({ planOfferFull: v })}
+        />
+      </section>
+
+      <section>
         <h3 className="mb-1 text-sm font-medium">Repository map</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
           What the project defines, ranked by how much the rest of the code refers to it — so an

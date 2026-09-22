@@ -67,9 +67,14 @@ const MAX_DEFS_PER_FILE: usize = 12;
 /// An agent working in a repository changes it constantly, and rebuilding on
 /// every change would move the system prompt on every turn — which costs the
 /// provider's prefix cache for the whole conversation behind it, to reflect one
-/// function appearing in one file. Ten minutes keeps the map stable across a
-/// working session and current across days.
-const REFRESH_COOLDOWN_SECS: i64 = 600;
+/// function appearing in one file. The system message is the front of every
+/// request, so *any* byte moving in it — wherever in the prompt the map sits —
+/// re-prices the entire conversation; the map is the only block that moves
+/// while the agent works, and this is the one dial on how often. An hour is
+/// one miss per hour of editing, and still current across days. (A signature
+/// that ignored edits would never refresh at all; the cooldown is what
+/// carries it.)
+const REFRESH_COOLDOWN_SECS: i64 = 3600;
 
 /// One definition found in a file.
 #[derive(Debug, Clone, PartialEq)]
@@ -747,6 +752,30 @@ mod tests {
         assert!(!map.text.contains("theirs"), "{}", map.text);
         assert!(!map.text.contains("generated"), "{}", map.text);
         assert!(!map.text.contains("vendored"), "{}", map.text);
+    }
+
+    /// The cooldown is what keeps the system prompt still while the agent
+    /// edits: a changed tree inside it serves the map already built, byte for
+    /// byte.
+    #[tokio::test]
+    async fn an_edit_inside_the_cooldown_leaves_the_cached_map_untouched() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        let t = Tree::new("cooldown");
+        t.write("src/a.rs", "pub fn one() {}
+");
+        let first = cached(&pool, &t.0, 500).await.unwrap().text;
+        t.write("src/a.rs", "pub fn one() {}
+pub fn two() {}
+");
+        t.write("src/b.rs", "pub fn three() {}
+");
+        let second = cached(&pool, &t.0, 500).await.unwrap().text;
+        assert_eq!(first, second, "the map moved under the prefix cache mid-session");
     }
 
     /// The signature has to move when a file's content does, or an edited

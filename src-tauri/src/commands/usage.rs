@@ -94,6 +94,9 @@ pub struct AgentUsage {
     /// The system prompt broken down by what put each piece there, largest
     /// first. Empty pieces are dropped.
     pub overhead_parts: Vec<OverheadPart>,
+    /// The tool schemas by the group that put them there, largest first — the
+    /// unit the zone editor can switch off (0.18.1).
+    pub tool_parts: Vec<OverheadPart>,
     /// Everything: conversation plus baseline.
     pub total_tokens: i64,
     /// What the chat has actually spent, measured on the requests themselves
@@ -268,11 +271,11 @@ async fn chat_usage(db: &SqlitePool, chat_id: &str) -> AppResult<(i64, i64, i64)
 /// prompt, skills catalog, memories, project and tag context, preambles) and
 /// the tool schemas offered with it.
 ///
-/// Returns `(system_tokens, tools_tokens, tool_count, parts)`.
+/// Returns `(system_tokens, tools_tokens, tool_count, parts, tool_parts)`.
 async fn chat_overhead(
     db: &SqlitePool,
     chat_id: &str,
-) -> AppResult<(i64, i64, i64, Vec<OverheadPart>)> {
+) -> AppResult<(i64, i64, i64, Vec<OverheadPart>, Vec<OverheadPart>)> {
     let overhead = crate::commands::messages::turn_overhead(db, chat_id).await?;
 
     let mut parts: Vec<OverheadPart> = Vec::new();
@@ -293,8 +296,18 @@ async fn chat_overhead(
     // breakdown rather than something to hunt for.
     parts.sort_by(|a, b| b.tokens.cmp(&a.tokens));
 
+    let mut tool_parts: Vec<OverheadPart> = Vec::new();
+    for (group, chars) in &overhead.tool_parts {
+        let tokens = estimate_tokens(*chars as i64);
+        match tool_parts.iter_mut().find(|p| &p.label == group) {
+            Some(existing) => existing.tokens += tokens,
+            None => tool_parts.push(OverheadPart { label: group.clone(), tokens }),
+        }
+    }
+    tool_parts.sort_by(|a, b| b.tokens.cmp(&a.tokens));
+
     let tools_tokens = estimate_tokens(overhead.tools_json.chars().count() as i64);
-    Ok((system_tokens, tools_tokens, overhead.tool_count as i64, parts))
+    Ok((system_tokens, tools_tokens, overhead.tool_count as i64, parts, tool_parts))
 }
 
 /// Every request the app has ever made, added up.
@@ -447,7 +460,7 @@ pub async fn session_usage(db: &SqlitePool, chat_id: &str) -> AppResult<SessionU
 
     for (id, title, _, zone_name) in &rows {
         let (input, output, messages) = chat_usage(db, id).await?;
-        let (system_tokens, tools_tokens, tool_count, overhead_parts) =
+        let (system_tokens, tools_tokens, tool_count, overhead_parts, tool_parts) =
             chat_overhead(db, id).await?;
         let overhead_tokens = system_tokens + tools_tokens;
         let spent = SpentUsage::from_recorded(crate::llm::tokens::recorded_usage(db, id).await?);
@@ -488,6 +501,7 @@ pub async fn session_usage(db: &SqlitePool, chat_id: &str) -> AppResult<SessionU
             tool_count,
             overhead_tokens,
             overhead_parts,
+            tool_parts,
             total_tokens: input + output + overhead_tokens,
             spent,
             model: None,

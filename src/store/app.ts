@@ -407,6 +407,12 @@ interface AppStore {
   /** Pending tool approvals per chat: chatId → one entry per participant (primary
    * + perspective zones) currently awaiting approval. */
   pendingApprovalByChat: Record<string, PendingApproval[]>;
+  /**
+   * A request waiting out a backoff before it is retried, per chat. One entry
+   * whichever participant is waiting: the banner and its stop button are the
+   * same ones either way. Absent when nothing is retrying.
+   */
+  retryByChat: Record<string, { attempt: number; max: number; secondsLeft: number }>;
   /** Smart routing state per chat. null = idle, "routing" = LLM call in progress, done = zone was resolved. */
   routingByChat: Record<string, { status: "routing" } | { status: "done"; zoneId: string; zoneName: string } | null>;
   /**
@@ -1110,6 +1116,7 @@ export const useApp = create<AppStore>((set, get) => ({
   perspectiveTurnByChat: {},
   regeneratingTitles: new Set(),
   pendingApprovalByChat: {},
+  retryByChat: {},
   routingByChat: {},
   errorsByChat: {},
   spendLimitByChat: {},
@@ -1318,6 +1325,27 @@ export const useApp = create<AppStore>((set, get) => ({
       } catch {
         /* an error result is not a file */
       }
+    }
+
+    // The retry countdown is a chat-level condition, not a participant's, so it
+    // is handled ahead of the primary/perspective split — and cleared by the
+    // next event of any kind. A retry that succeeded goes on to emit tokens and
+    // one that gave up emits an error; neither needs to say so twice.
+    if (event.type === "retrying") {
+      set((s) => ({
+        retryByChat: {
+          ...s.retryByChat,
+          [chatId]: { attempt: event.attempt, max: event.max, secondsLeft: event.secondsLeft },
+        },
+      }));
+      return;
+    }
+    if (get().retryByChat[chatId]) {
+      set((s) => {
+        const retryByChat = { ...s.retryByChat };
+        delete retryByChat[chatId];
+        return { retryByChat };
+      });
     }
 
     // Route perspective events to the separate perspective streams map. A

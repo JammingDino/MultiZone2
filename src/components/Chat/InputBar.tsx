@@ -116,8 +116,13 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
   const isStreaming = useApp(
     (s) =>
       Boolean(s.streamingByChat[chatId]) ||
+      Boolean(s.retryByChat[chatId]) ||
       Object.keys(s.perspectiveStreamsByChat[chatId] ?? {}).length > 0,
   );
+  // A request waiting out a provider backoff. Counted as streaming above so the
+  // stop button is already on screen — stopping a retry is the same gesture as
+  // stopping a stream, and the backend checks the same flag.
+  const retry = useApp((s) => s.retryByChat[chatId]);
 
   // Conversation loop: once a spoken response finishes (TTS returns to idle
   // after playing) and nothing else is in flight, start listening again so the
@@ -404,6 +409,21 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
                 </button>
               </div>
             ))}
+          </div>
+        )}
+        {/* A busy provider, and the wait before the next attempt. This used to
+            be an error that ended the turn and then refused to send anything at
+            all for thirty seconds; retrying is the app's job, and stopping is
+            the button already sitting to the right of this row. */}
+        {retry && (
+          <div className="mx-auto mb-2 flex w-fit max-w-full items-center gap-2 rounded-full border border-amber-500/40 bg-amber-500/10 px-3 py-1 text-xs text-[var(--color-text-muted)]">
+            <Loader2 size={11} className="shrink-0 animate-spin text-amber-500" />
+            <span className="shrink-0">
+              Provider busy — retrying{retry.secondsLeft > 0 ? ` in ${retry.secondsLeft}s` : "…"}
+            </span>
+            <span className="shrink-0 tabular-nums opacity-60">
+              {retry.attempt}/{retry.max}
+            </span>
           </div>
         )}
         {/* Only once there is something to send: the choice between "now" and

@@ -656,6 +656,12 @@ export type StreamEvent =
   | { type: "pending_cleared"; ids: string[] }
   | { type: "pending_queued"; id: string; text: string }
   | { type: "cancelled" }
+  /**
+   * The provider was busy and the request is being retried after a wait.
+   * Emitted once a second while that wait runs; `secondsLeft` counts down to 0.
+   * The turn's stop button ends it.
+   */
+  | { type: "retrying"; attempt: number; max: number; secondsLeft: number }
   /** Loop detection stopped the run (0.14.1); one tool-free step still follows. */
   | { type: "runaway"; kind: "repeat" | "stuck_error" | "oscillation" | "handoff"; label: string }
   /**

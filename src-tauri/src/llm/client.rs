@@ -2,9 +2,9 @@ use crate::error::{AppError, AppResult};
 use crate::llm::responses::{self, Dialect};
 use crate::llm::types::*;
 use reqwest::Client;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// (base URL, model) pairs that rejected the thinking fields
 /// (`reasoning_effort` / `chat_template_kwargs`). The profile in
@@ -24,36 +24,38 @@ fn no_stream_options() -> &'static Mutex<HashSet<String>> {
 }
 
 // ---------------------------------------------------------------------------
-// Backoff and per-provider cooldown (0.14.1)
+// Backoff and retry (0.14.1, revised 0.18)
 // ---------------------------------------------------------------------------
 //
-// Until now there was no 429 path at all: a rate limit came back as a provider
-// error and ended the turn. One chat rarely meets a rate limit; a seven-member
-// panel meets it constantly, and every member hitting the same provider in the
-// same second is exactly the pattern that triggers one. Retrying immediately —
-// all seven at once — is how a brief limit becomes a sustained one.
+// Until 0.14.1 there was no 429 path at all: a rate limit came back as a
+// provider error and ended the turn. One chat rarely meets a rate limit; a
+// seven-member panel meets it constantly, and every member hitting the same
+// provider in the same second is exactly the pattern that triggers one.
+// Retrying immediately — all seven at once — is how a brief limit becomes a
+// sustained one. So: exponential backoff with full jitter.
 //
-// So: retry the transient failures with exponential backoff and jitter, and if
-// a provider fails repeatedly, stop asking it for a while. A cooldown is not
-// pessimism, it is what turns "seven agents hammering a dead endpoint" into one
-// fast, clear failure per agent.
+// There used to be a per-provider cooldown on top of that, which refused to
+// even send after three failures in a minute. Wrong shape: a user watching a
+// transient blip was locked out of their own app for thirty seconds by a
+// message about backing off. Retrying is the app's job; giving up is the
+// user's call. So the cooldown is gone, the retry budget is generous, and
+// every wait is reported to the UI with a stop button already attached.
 
 /// Attempts after the first, for one request.
-const MAX_RETRIES: u32 = 3;
+const MAX_RETRIES: u32 = 10;
 /// First backoff. Doubles each attempt, before jitter.
 const BASE_BACKOFF_MS: u64 = 500;
-/// Ceiling for a single wait. A turn is interactive; a 30-second sleep inside
-/// one is indistinguishable from a hang.
+/// Ceiling for a single wait. Long enough to let a busy provider recover,
+/// short enough that the countdown on screen keeps moving.
 const MAX_BACKOFF_MS: u64 = 8_000;
 /// The provider's own `Retry-After` is honoured up to here. Beyond it, waiting
 /// is worse than failing with a message the user can act on.
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(20);
-/// Failures within this window count toward the cooldown.
-const FAILURE_WINDOW: Duration = Duration::from_secs(60);
-/// Failures in that window before the provider is put on ice.
-const FAILURES_BEFORE_COOLDOWN: usize = 3;
-/// How long a provider stays on ice.
-const COOLDOWN: Duration = Duration::from_secs(30);
+
+/// Called once a second while a retry waits: attempt, budget, seconds left.
+/// Returning `false` abandons the retry — this is the turn's stop button
+/// reaching in here.
+pub type RetryHook<'h> = &'h (dyn Fn(u32, u32, u64) -> bool + Send + Sync);
 
 /// Wait before attempt `attempt` (1-based), given a jitter factor in `[0, 1)`.
 ///
@@ -100,46 +102,24 @@ fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
     Some(Duration::from_secs(secs).min(MAX_RETRY_AFTER))
 }
 
-#[derive(Default)]
-struct ProviderHealth {
-    /// Recent transient failures, oldest first.
-    failures: VecDeque<Instant>,
-    cooling_until: Option<Instant>,
-}
-
-fn health() -> &'static Mutex<HashMap<String, ProviderHealth>> {
-    static MAP: OnceLock<Mutex<HashMap<String, ProviderHealth>>> = OnceLock::new();
-    MAP.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-/// How long this provider is still on ice, if it is.
-fn cooling_for(base_url: &str, now: Instant) -> Option<Duration> {
-    let map = health().lock().ok()?;
-    let until = map.get(base_url)?.cooling_until?;
-    (until > now).then(|| until - now)
-}
-
-/// Record a transient failure; returns true if it started a cooldown.
-fn note_failure(base_url: &str, now: Instant) -> bool {
-    let Ok(mut map) = health().lock() else { return false };
-    let entry = map.entry(base_url.to_string()).or_default();
-    while entry.failures.front().is_some_and(|t| now.duration_since(*t) > FAILURE_WINDOW) {
-        entry.failures.pop_front();
-    }
-    entry.failures.push_back(now);
-    if entry.failures.len() >= FAILURES_BEFORE_COOLDOWN {
-        entry.cooling_until = Some(now + COOLDOWN);
-        entry.failures.clear();
-        return true;
-    }
-    false
-}
-
-/// A provider that answered is a working provider — forget its history rather
-/// than carrying two old failures into an unrelated one an hour later.
-fn note_success(base_url: &str) {
-    if let Ok(mut map) = health().lock() {
-        map.remove(base_url);
+/// Sleep out a backoff, telling `on_retry` how long is left once a second and
+/// stopping early if it says to. A second's granularity keeps the event stream
+/// quiet and still answers a stop button faster than anyone can notice.
+async fn wait_out(delay: Duration, attempt: u32, on_retry: RetryHook<'_>) -> bool {
+    let tick = Duration::from_secs(1);
+    let mut left = delay;
+    loop {
+        // Round up: "0s left" for the last 900ms reads as a stall.
+        let secs = (left.as_millis() as u64).div_ceil(1_000);
+        if !on_retry(attempt, MAX_RETRIES, secs) {
+            return false;
+        }
+        if left.is_zero() {
+            return true;
+        }
+        let step = tick.min(left);
+        tokio::time::sleep(step).await;
+        left -= step;
     }
 }
 
@@ -297,35 +277,26 @@ impl<'a> LlmClient<'a> {
     /// Retries happen here, before a single byte has been streamed, which is the
     /// only place they are safe: once tokens have reached the transcript a retry
     /// would duplicate them.
-    pub async fn chat_stream(&self, req: &ChatRequest) -> AppResult<LlmStream> {
-        if let Some(left) = cooling_for(&self.base_url, Instant::now()) {
-            return Err(AppError::Provider(format!(
-                "{} is cooling down for another {}s after {FAILURES_BEFORE_COOLDOWN} failures in a \
-                 minute. This is the app backing off, not the provider refusing — try again after \
-                 that, or point this zone at another provider.",
-                self.base_url,
-                left.as_secs() + 1
-            )));
-        }
-
+    pub async fn chat_stream(
+        &self,
+        req: &ChatRequest,
+        on_retry: RetryHook<'_>,
+    ) -> AppResult<LlmStream> {
         let mut attempt = 0;
         loop {
             match self.chat_stream_once(req).await {
                 Ok(res) => {
-                    note_success(&self.base_url);
                     return Ok(LlmStream { response: res, dialect: self.dialect(&req.model) });
                 }
                 Err((status, wait, e)) => {
+                    // Not the provider's health — a bad key, an unknown model, a
+                    // malformed body. It will fail identically next time, and
+                    // retrying only delays the message that says so.
                     if !is_transient(status) {
-                        // Not the provider's health — a bad key or a bad
-                        // request. Never counted toward a cooldown: putting a
-                        // provider on ice because a zone names a model that does
-                        // not exist would take the other zones down with it.
                         return Err(e);
                     }
-                    let cooling = note_failure(&self.base_url, Instant::now());
                     attempt += 1;
-                    if cooling || attempt > MAX_RETRIES {
+                    if attempt > MAX_RETRIES {
                         return Err(e);
                     }
                     let delay = wait.unwrap_or_else(|| backoff_delay(attempt, jitter()));
@@ -335,7 +306,9 @@ impl<'a> LlmClient<'a> {
                         status.map(|s| s.as_u16()),
                         delay.as_millis(),
                     );
-                    tokio::time::sleep(delay).await;
+                    if !wait_out(delay, attempt, on_retry).await {
+                        return Err(e);
+                    }
                 }
             }
         }
@@ -460,6 +433,7 @@ fn rejects_the_request(status: Option<reqwest::StatusCode>) -> bool {
 mod tests {
     use super::*;
     use reqwest::StatusCode;
+    use std::time::Instant;
 
     fn code(n: u16) -> Option<StatusCode> {
         Some(StatusCode::from_u16(n).unwrap())
@@ -515,43 +489,31 @@ mod tests {
         assert_eq!(retry_after(&h), None);
     }
 
-    #[test]
-    fn three_failures_in_the_window_start_a_cooldown() {
-        let url = "http://cooldown-test.invalid/v1";
-        let now = Instant::now();
-        assert!(!note_failure(url, now));
-        assert!(!note_failure(url, now));
-        assert!(note_failure(url, now), "the third one");
-
-        assert!(cooling_for(url, now).is_some());
-        assert!(
-            cooling_for(url, now + COOLDOWN + Duration::from_secs(1)).is_none(),
-            "and it expires"
-        );
-        note_success(url);
-    }
-
-    /// Two failures an hour apart are two unrelated blips, not a broken
-    /// provider.
-    #[test]
-    fn failures_outside_the_window_do_not_accumulate() {
-        let url = "http://window-test.invalid/v1";
+    /// The stop button, from the inside: a hook that says no ends the wait
+    /// instead of sleeping out the full backoff.
+    #[tokio::test]
+    async fn a_refusing_hook_abandons_the_wait() {
+        let seen = std::sync::Mutex::new(Vec::new());
         let start = Instant::now();
-        assert!(!note_failure(url, start));
-        assert!(!note_failure(url, start + FAILURE_WINDOW * 2));
-        assert!(!note_failure(url, start + FAILURE_WINDOW * 4));
-        assert!(cooling_for(url, start + FAILURE_WINDOW * 4).is_none());
-        note_success(url);
+        let kept = wait_out(Duration::from_secs(8), 2, &|attempt, max, left| {
+            seen.lock().unwrap().push((attempt, max, left));
+            false
+        })
+        .await;
+        assert!(!kept, "the hook said stop");
+        assert_eq!(*seen.lock().unwrap(), vec![(2, MAX_RETRIES, 8)]);
+        assert!(start.elapsed() < Duration::from_secs(1), "and it did not sleep");
     }
 
-    #[test]
-    fn a_success_clears_the_history() {
-        let url = "http://recovery-test.invalid/v1";
-        let now = Instant::now();
-        note_failure(url, now);
-        note_failure(url, now);
-        note_success(url);
-        assert!(!note_failure(url, now), "back to counting from zero");
-        note_success(url);
+    #[tokio::test]
+    async fn a_wait_counts_down_to_zero() {
+        let seen = std::sync::Mutex::new(Vec::new());
+        let kept = wait_out(Duration::from_millis(1_200), 1, &|_, _, left| {
+            seen.lock().unwrap().push(left);
+            true
+        })
+        .await;
+        assert!(kept);
+        assert_eq!(*seen.lock().unwrap(), vec![2, 1, 0], "rounded up, ending at zero");
     }
 }

@@ -256,6 +256,12 @@ pub enum StreamPayload<'a> {
     /// thought it was sending, not queueing.
     PendingQueued { id: String, text: String },
     Cancelled,
+    /// The provider was busy (429 / 5xx / dead socket) and the request is being
+    /// retried after a wait. Emitted once a second while that wait runs, so the
+    /// UI can show a live countdown instead of the app silently stalling — or,
+    /// as it used to, refusing to send at all for thirty seconds. The turn's
+    /// existing stop button ends it; see `llm::client::RetryHook`.
+    Retrying { attempt: u32, max: u32, seconds_left: u64 },
     /// Loop detection stopped the turn (0.14.1). The turn does not end here —
     /// one tool-free step follows so the model can report — but the reason is
     /// surfaced now, while the repeated calls are still on screen.
@@ -2021,7 +2027,18 @@ async fn run_participant_turn(
             crate::llm::tokens::measure_request(&req, cpt)
         };
 
-        let response = match client.chat_stream(&req).await {
+        // The retry countdown goes to the UI on this participant's own channel,
+        // and the stop button comes back the same way: one flag, checked each
+        // second, so stopping a retry is the same gesture as stopping a stream.
+        let on_retry = |attempt: u32, max: u32, seconds_left: u64| {
+            if cancel.load(Ordering::Relaxed) {
+                return false;
+            }
+            sink.emit_for(chat_id, persp, StreamPayload::Retrying { attempt, max, seconds_left });
+            true
+        };
+
+        let response = match client.chat_stream(&req, &on_retry).await {
             Ok(res) => res,
             Err(e)
                 if !compacted_for_overflow
@@ -2065,6 +2082,11 @@ async fn run_participant_turn(
                 // (0.14.1). Once per turn: a second fallback would be a chain
                 // that hides which provider actually died, and a fallback whose
                 // own provider is also down is a dead turn either way.
+                // Stop means stop: a turn the user cancelled mid-retry does not
+                // get handed to the fallback provider to try all over again.
+                if cancel.load(Ordering::Relaxed) {
+                    return Err(e);
+                }
                 let fallback_id = (!used_fallback)
                     .then(|| zone.fallback_zone_id.clone())
                     .flatten();

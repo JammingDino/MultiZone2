@@ -16,15 +16,15 @@ export interface SavedOutput {
  *
  * An HTML report used to render here, in a scripts-off iframe a few hundred
  * pixels tall — which is why pages with animation or a chart library in
- * them arrived frozen or blank. The file now opens in the workspace panel's
- * viewer, with its scripts running and the height to show it, and this is
- * the handle back to it: a name, where it is, and the three things to do
- * with it. It opens itself in the panel the moment the tool result arrives
- * (see `applyStreamEvent`); the button is for the second time.
+ * them arrived frozen or blank. The file now opens as a document tab in the
+ * main column (0.18), with its scripts running and the whole column to show
+ * them in, and this is the handle back to it: a name, where it is, and the
+ * three things to do with it. It opens itself the moment the tool result
+ * arrives (see `applyStreamEvent`); the button is for the second time.
  */
 export function SavedFileChip({ output }: { output: SavedOutput }) {
   const openInPanel = useApp((s) => s.openWorkspaceFile);
-  const showing = useApp((s) => s.workspaceOpen && s.workspaceFile === output.path);
+  const showing = useApp((s) => s.activeFileByChat[s.activeChatId ?? ""] === output.path);
   const name = output.filename || output.path;
   const { Icon, color } = iconFor(name);
   return (

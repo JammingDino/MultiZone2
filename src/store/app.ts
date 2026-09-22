@@ -651,13 +651,23 @@ interface AppStore {
   workspaceFocus: WorkspaceSection | null;
   focusWorkspace: (section: WorkspaceSection | null) => void;
   /**
-   * The file the panel's Files section is showing (0.17.9) — a preview or an
-   * editor, by type. Set by a click in the tree or by `present_file`, which
-   * opens the panel so the file has room to be looked at.
+   * Files open as document tabs in the main column, per chat (0.18).
+   *
+   * The viewer used to live inside the Files section of the workspace panel,
+   * stacked above the tree — which meant a file and the tree fought over one
+   * 360px column, and the tree lost, dropping to about eight rows. A file is
+   * now a tab beside Chat, at the main column's width, and the panel is a
+   * navigator only. Per chat because the tree is: a chat's working directory
+   * is its own, and another chat's open files name paths that are not in it.
    */
-  workspaceFile: string | null;
+  openFilesByChat: Record<string, string[]>;
+  /** Which tab each chat is showing: a path, or null for the transcript. */
+  activeFileByChat: Record<string, string | null>;
   openWorkspaceFile: (path: string) => void;
-  closeWorkspaceFile: () => void;
+  /** Close one tab, or the active one. */
+  closeWorkspaceFile: (path?: string) => void;
+  /** Back to the transcript without closing anything. */
+  showChatTab: () => void;
   /** Signal the active composer to take keyboard focus. */
   focusComposer: () => void;
   /**
@@ -1149,7 +1159,8 @@ export const useApp = create<AppStore>((set, get) => ({
   sidebarOpen: readSidebarOpen(),
   workspaceOpen: readWorkspaceOpen(),
   workspaceFocus: null,
-  workspaceFile: null,
+  openFilesByChat: {},
+  activeFileByChat: {},
   focusComposerNonce: 0,
   projectsPanelOpen: false,
   projectsPanelInitId: null,
@@ -2234,10 +2245,41 @@ export const useApp = create<AppStore>((set, get) => ({
     }
   },
   openWorkspaceFile: (path) => {
-    writeWorkspaceOpen(true);
-    set({ workspaceOpen: true, workspaceFocus: "files", workspaceFile: path });
+    const chatId = get().activeChatId;
+    if (!chatId) return;
+    const open = get().openFilesByChat[chatId] ?? [];
+    set({
+      openFilesByChat: {
+        ...get().openFilesByChat,
+        [chatId]: open.includes(path) ? open : [...open, path],
+      },
+      activeFileByChat: { ...get().activeFileByChat, [chatId]: path },
+    });
   },
-  closeWorkspaceFile: () => set({ workspaceFile: null }),
+  closeWorkspaceFile: (path) => {
+    const chatId = get().activeChatId;
+    if (!chatId) return;
+    const open = get().openFilesByChat[chatId] ?? [];
+    const active = get().activeFileByChat[chatId] ?? null;
+    const target = path ?? active;
+    if (!target) return;
+    const i = open.indexOf(target);
+    const rest = open.filter((p) => p !== target);
+    set({
+      openFilesByChat: { ...get().openFilesByChat, [chatId]: rest },
+      activeFileByChat: {
+        ...get().activeFileByChat,
+        // Closing the tab you are on lands on its neighbour, not back at the
+        // transcript: closing three files in a row should not bounce you away
+        // and back each time. Closing a background tab leaves you where you are.
+        [chatId]: active === target ? rest[i] ?? rest[i - 1] ?? null : active,
+      },
+    });
+  },
+  showChatTab: () => {
+    const chatId = get().activeChatId;
+    if (chatId) set({ activeFileByChat: { ...get().activeFileByChat, [chatId]: null } });
+  },
   toggleSidebar: () => {
     const next = !get().sidebarOpen;
     writeSidebarOpen(next);

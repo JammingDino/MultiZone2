@@ -1,16 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ClipboardList, FolderTree, Gauge, MessageSquare, PanelRightClose, TerminalSquare } from "lucide-react";
-import { useApp } from "@/store/app";
+import { useApp, type WorkspaceSection } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { useIsNarrow } from "@/lib/useIsNarrow";
 import { ResizeHandle, usePanelWidth } from "@/components/common/ResizeHandle";
 import { useBackDismiss } from "@/lib/useBackDismiss";
+import { usePersistentChoice } from "@/lib/uiState";
 import { PLAN_APPROVED, systemTurnParts } from "@/lib/systemTurn";
 import { TaskPanel } from "@/components/Chat/TaskPanel";
 import { PlanReview } from "@/components/Chat/PlanReview";
 import { ReviewQueue } from "@/components/Chat/ReviewQueue";
 import { TerminalPanel } from "@/components/Chat/TerminalPanel";
-import { Section } from "./Section";
 import { ContextPanel } from "./ContextPanel";
 import { FilesPanel } from "./FilesPanel";
 import { ChatSection } from "./ChatSection";
@@ -74,6 +74,14 @@ export function WorkspacePanel() {
   );
 }
 
+const TABS: { id: WorkspaceSection; label: string; title: string; icon: ReactNode }[] = [
+  { id: "chat", label: "Chat", title: "This chat: project, tags, perspectives", icon: <MessageSquare size={13} /> },
+  { id: "plan", label: "Plan", title: "Plans and the task list", icon: <ClipboardList size={13} /> },
+  { id: "terminals", label: "Term", title: "Terminals", icon: <TerminalSquare size={13} /> },
+  { id: "files", label: "Files", title: "The chat's working directory", icon: <FolderTree size={13} /> },
+  { id: "context", label: "Ctx", title: "What is in the context window", icon: <Gauge size={13} /> },
+];
+
 function PanelBody({ chatId, onClose }: { chatId: string; onClose: () => void }) {
   const isStreaming = useApp(
     (s) => Boolean(s.streamingByChat[chatId]) || Object.keys(s.perspectiveStreamsByChat[chatId] ?? {}).length > 0,
@@ -85,7 +93,7 @@ function PanelBody({ chatId, onClose }: { chatId: string; onClose: () => void })
   const focusWorkspace = useApp((s) => s.focusWorkspace);
   const [planBusy, setPlanBusy] = useState(false);
 
-  // A newly filed plan is a decision waiting: bring its section into view.
+  // A newly filed plan is a decision waiting: switch to its tab.
   const seenPlan = useRef<string | null>(null);
   useEffect(() => {
     if (pendingPlan && pendingPlan.id !== seenPlan.current) {
@@ -94,28 +102,20 @@ function PanelBody({ chatId, onClose }: { chatId: string; onClose: () => void })
     }
   }, [pendingPlan, focusWorkspace]);
 
-  // What the collapsed Chat section says: where the chat is filed and how
-  // many voices answer in it, so the row is worth reading closed.
-  const chatBadge = useApp((s) => {
-    const chat = s.chats.find((c) => c.id === chatId);
-    const project = chat?.projectId ? s.projects.find((p) => p.id === chat.projectId) : null;
-    const tags = s.tagsByChat[chatId]?.length ?? 0;
-    const persp = s.chatZonesByChat[chatId]?.length ?? 0;
-    return [
-      project?.name,
-      tags > 0 ? `${tags} tag${tags === 1 ? "" : "s"}` : null,
-      persp > 0 ? `${persp} perspective${persp === 1 ? "" : "s"}` : null,
-    ]
-      .filter(Boolean)
-      .join(" · ") || undefined;
-  });
-
   const livePlans = (plans ?? []).filter((p) => ["approved", "executing", "stopped"].includes(p.status));
-  const planBadge = pendingPlan
-    ? "waiting for you"
-    : livePlans.length > 0
-      ? `${livePlans.length} running`
-      : undefined;
+
+  // The five sections were a stack of collapsible bands, all in one scroller
+  // (0.18). Every one started closed, so reaching the tree meant opening it
+  // past three other headers — and once a file was open the tree had about a
+  // quarter of the panel left. They are tabs now: one at a time, at full
+  // height. `focusWorkspace(id)` switches tab instead of scrolling.
+  const [tab, setTab] = usePersistentChoice<WorkspaceSection>("workspace.tab", "files", TABS.map((t) => t.id));
+  const focus = useApp((s) => s.workspaceFocus);
+  useEffect(() => {
+    if (!focus) return;
+    setTab(focus);
+    focusWorkspace(null);
+  }, [focus, setTab, focusWorkspace]);
 
   return (
     <>
@@ -130,64 +130,84 @@ function PanelBody({ chatId, onClose }: { chatId: string; onClose: () => void })
           <PanelRightClose size={16} />
         </button>
       </div>
-      {/* Every section starts closed (0.18): an empty chat used to open on
-          "No plan in progress", an empty terminal strip and the full context
-          breakdown at once, which is a lot of panel for nothing yet. A filed
-          plan opens Plan itself, the header meter opens Context, and the
-          badges say what a closed section holds. */}
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-        <Section id="chat" title="Chat" icon={<MessageSquare size={12} />} badge={chatBadge} defaultOpen={false}>
-          <ChatSection chatId={chatId} />
-        </Section>
-        <Section id="plan" title="Plan" icon={<ClipboardList size={12} />} badge={planBadge} defaultOpen={false}>
-          {pendingPlan ? (
-            <PlanReview
-              plan={pendingPlan}
-              busy={planBusy}
-              onApprove={async (steps, edited) => {
-                setPlanBusy(true);
-                try {
-                  await approvePlan(chatId, pendingPlan.id, steps, edited);
-                  // Approval is a decision, not a message: the turn that
-                  // executes it starts here rather than waiting for the user
-                  // to also type "go". Sent as a system turn so the model is
-                  // told to proceed without the transcript claiming the user
-                  // typed the sentence.
-                  await api.sendMessage(chatId, systemTurnParts(PLAN_APPROVED));
-                } finally {
-                  setPlanBusy(false);
-                }
-              }}
-              onReject={async () => {
-                setPlanBusy(true);
-                try {
-                  await rejectPlan(chatId, pendingPlan.id);
-                } finally {
-                  setPlanBusy(false);
-                }
-              }}
-            />
-          ) : null}
-          <div className={pendingPlan ? "mt-2" : ""}>
-            <TaskPanel chatId={chatId} streaming={isStreaming} full />
-          </div>
-          <ReviewQueue chatId={chatId} embedded />
-          {!pendingPlan && livePlans.length === 0 && (
-            <p className="text-[11px] text-[var(--color-text-muted)]">
-              No plan in progress. Ask for one, or type <span className="font-mono">/plan</span>.
-            </p>
-          )}
-        </Section>
-        <Section id="terminals" title="Terminals" icon={<TerminalSquare size={12} />} defaultOpen={false}>
-          <TerminalPanel chatId={chatId} embedded />
-        </Section>
-        <Section id="files" title="Files" icon={<FolderTree size={12} />} defaultOpen={false}>
-          <FilesPanel chatId={chatId} />
-        </Section>
-        <Section id="context" title="Context" icon={<Gauge size={12} />} defaultOpen={false}>
-          <ContextPanel chatId={chatId} />
-        </Section>
+      {/* The tab strip. Short labels because the panel is 360px by default and
+          five tabs have to fit; the icon carries the rest. A dot marks a tab
+          with something waiting — a filed plan is the case that matters. */}
+      <div className="flex shrink-0 border-b border-[var(--color-border)]">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            aria-pressed={tab === t.id}
+            title={t.title}
+            className={`relative flex h-9 flex-1 items-center justify-center gap-1.5 border-b-2 text-[11px] ${
+              tab === t.id
+                ? "border-[var(--color-accent)] font-medium text-[var(--color-text)]"
+                : "border-transparent text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
+            }`}
+          >
+            {t.icon}
+            <span>{t.label}</span>
+            {t.id === "plan" && pendingPlan && (
+              <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-[var(--color-accent)]" />
+            )}
+          </button>
+        ))}
       </div>
+
+      {/* One tab's worth of panel, and the whole panel's height to put it in.
+          Files takes the height directly (its tree is its own scroller); the
+          rest keep the scrolling column they were written for. */}
+      {tab === "files" ? (
+        <FilesPanel chatId={chatId} />
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2.5 py-2.5 text-xs">
+          {tab === "chat" && <ChatSection chatId={chatId} />}
+          {tab === "plan" && (
+            <>
+              {pendingPlan ? (
+                <PlanReview
+                  plan={pendingPlan}
+                  busy={planBusy}
+                  onApprove={async (steps, edited) => {
+                    setPlanBusy(true);
+                    try {
+                      await approvePlan(chatId, pendingPlan.id, steps, edited);
+                      // Approval is a decision, not a message: the turn that
+                      // executes it starts here rather than waiting for the user
+                      // to also type "go". Sent as a system turn so the model is
+                      // told to proceed without the transcript claiming the user
+                      // typed the sentence.
+                      await api.sendMessage(chatId, systemTurnParts(PLAN_APPROVED));
+                    } finally {
+                      setPlanBusy(false);
+                    }
+                  }}
+                  onReject={async () => {
+                    setPlanBusy(true);
+                    try {
+                      await rejectPlan(chatId, pendingPlan.id);
+                    } finally {
+                      setPlanBusy(false);
+                    }
+                  }}
+                />
+              ) : null}
+              <div className={pendingPlan ? "mt-2" : ""}>
+                <TaskPanel chatId={chatId} streaming={isStreaming} full />
+              </div>
+              <ReviewQueue chatId={chatId} embedded />
+              {!pendingPlan && livePlans.length === 0 && (
+                <p className="text-[11px] text-[var(--color-text-muted)]">
+                  No plan in progress. Ask for one, or type <span className="font-mono">/plan</span>.
+                </p>
+              )}
+            </>
+          )}
+          {tab === "terminals" && <TerminalPanel chatId={chatId} embedded />}
+          {tab === "context" && <ContextPanel chatId={chatId} />}
+        </div>
+      )}
     </>
   );
 }

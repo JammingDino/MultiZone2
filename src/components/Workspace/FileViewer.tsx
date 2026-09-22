@@ -8,7 +8,7 @@ import type { FileText as FileTextData } from "@/lib/types";
 import { iconFor } from "./FilesPanel";
 
 /**
- * One file, in the workspace panel (0.17.9).
+ * One file, as a document tab in the main column (0.17.9, moved 0.18).
  *
  * Two ways of looking at a file, and the type picks the default: a **preview**
  * — an HTML page in a frame with its scripts running, Markdown rendered, an
@@ -82,8 +82,8 @@ export function FileViewer({ path }: { path: string }) {
   const name = file?.name ?? path.slice(Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1);
 
   return (
-    <div className="overflow-hidden rounded-md border border-[var(--color-border)]">
-      <div className="flex items-center gap-1.5 border-b border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1">
+    <div className="flex min-h-0 flex-1 flex-col bg-[var(--color-bg)]">
+      <div className="flex shrink-0 items-center gap-1.5 border-b border-[var(--color-border)] px-3 py-1.5">
         <Icon size={13} className="shrink-0" style={{ color }} />
         <span className="min-w-0 flex-1 truncate text-[var(--color-text)]" title={path}>
           {name}
@@ -131,7 +131,7 @@ export function FileViewer({ path }: { path: string }) {
         </div>
       )}
 
-      <div className="h-[48vh] min-h-[160px] resize-y overflow-hidden bg-[var(--color-panel)]">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {/* An image first, ahead of both the loader and the read error: the
             frame fetches its own bytes from the scheme, so it needs neither.
             `read_workspace_file` caps at 4 MB because it is building a
@@ -194,20 +194,20 @@ function Preview({ kind, content, name, path, savedAt }: { kind: Kind; content: 
         // still having no reach into this window. A `srcdoc` would inherit
         // *this* origin, so there it stays opaque. Popups so links can open.
         sandbox={`allow-scripts allow-popups allow-forms allow-modals${url ? " allow-same-origin" : ""}`}
-        className="h-full w-full border-0 bg-white"
+        className="min-h-0 w-full flex-1 border-0 bg-white"
       />
     );
   }
   if (kind === "svg") {
     return (
-      <div className="flex h-full items-center justify-center overflow-auto bg-[var(--color-bg)] p-3">
+      <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4">
         <img src={svgSrc} alt={name} className="max-h-full max-w-full" />
       </div>
     );
   }
   return (
-    <div className="h-full overflow-auto px-3 py-2 text-[13px]">
-      <Markdown source={content} />
+    <div className="min-h-0 flex-1 overflow-auto px-4 py-3 text-[13px]">
+      <div className="mx-auto max-w-3xl"><Markdown source={content} /></div>
     </div>
   );
 }
@@ -249,11 +249,14 @@ function ImagePreview({ path, name, savedAt }: { path: string; name: string; sav
   }
 
   return (
-    <div className="relative h-full overflow-auto bg-[var(--color-bg)]">
-      {/* The checker under a transparent PNG, so its transparency is visible
-          as transparency rather than as whatever the panel is painted. */}
+    <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-auto p-4">
+      {/* The checkered frame is the size of the image, not the size of the
+          pane. It is there to show a transparent PNG's transparency, and a
+          checker stretched across the whole column showed nothing except how
+          much emptiness surrounded a 200px GIF. `w-fit` on a flex-centred
+          child is what keeps it to the picture. */}
       <div
-        className={`flex min-h-full min-w-full items-center justify-center p-3 ${actual ? "w-max" : ""}`}
+        className="w-fit shrink-0"
         style={{
           backgroundImage:
             "repeating-conic-gradient(var(--color-panel) 0% 25%, var(--color-bg) 0% 50%)",
@@ -266,11 +269,14 @@ function ImagePreview({ path, name, savedAt }: { path: string; name: string; sav
           onLoad={(e) => setSize({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
           onError={() => setFailed(true)}
           onClick={() => setActual((v) => !v)}
-          className={actual ? "max-w-none cursor-zoom-out" : "max-h-full max-w-full cursor-zoom-in object-contain"}
+          // Never upscaled: "fit" shrinks an image too big for the pane and
+          // leaves a small one at its own size, which is what looking at a
+          // file means. 1:1 is the escape hatch for a screenshot to read.
+          className={actual ? "max-w-none cursor-zoom-out" : "max-h-full max-w-full cursor-zoom-in"}
         />
       </div>
       {size && (
-        <span className="pointer-events-none sticky bottom-1 left-1 ml-1 inline-block rounded bg-[var(--color-bg)]/85 px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-text-muted)]">
+        <span className="pointer-events-none absolute bottom-1.5 left-1.5 rounded bg-[var(--color-bg)]/85 px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-text-muted)]">
           {size.w}×{size.h}
           {actual ? " · 1:1" : " · fit"}
         </span>
@@ -308,7 +314,7 @@ function Editor({ value, onChange, onSave }: { value: string; onChange: (v: stri
   }
 
   return (
-    <div className="flex h-full font-mono text-[11.5px] leading-[1.5]">
+    <div className="flex min-h-0 flex-1 font-mono text-[12px] leading-[1.55]">
       <div
         ref={gutterRef}
         aria-hidden

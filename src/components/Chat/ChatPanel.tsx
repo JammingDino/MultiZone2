@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Upload, ShieldAlert, Eye } from "lucide-react";
+import { Upload, ShieldAlert, Eye, MessageSquare, X } from "lucide-react";
 import { useApp } from "@/store/app";
 import { useShallow } from "zustand/react/shallow";
 import * as api from "@/lib/tauri";
 import { MessageThread } from "./MessageThread";
+import { FileViewer } from "@/components/Workspace/FileViewer";
+import { iconFor } from "@/components/Workspace/FilesPanel";
 import { InputBar, type InputBarHandle } from "./InputBar";
 import { ZonePicker } from "./ZonePicker";
 import { WorkspaceToggle } from "@/components/Workspace/WorkspaceToggle";
@@ -27,6 +29,90 @@ import { ReplayView } from "@/components/Chat/ReplayView";
 import { resolveBaseModel } from "@/lib/baseZone";
 import { PRIMARY_ACTION } from "@/lib/chrome";
 import type { FileDiff, StreamEnvelope } from "@/lib/types";
+
+/**
+ * The main column's tabs: the transcript, then one per open file (0.18).
+ *
+ * A file used to open in the workspace panel, in a box above the tree, both of
+ * them sharing 360px — so an image was a postage stamp and an HTML report was
+ * a letterbox. Here a file gets the column the transcript gets. The strip
+ * hides itself when nothing is open, so a chat that never opens a file looks
+ * exactly as it did.
+ */
+function DocumentTabs({ chatId }: { chatId: string }) {
+  const open = useApp((s) => s.openFilesByChat[chatId]);
+  const active = useApp((s) => s.activeFileByChat[chatId] ?? null);
+  const openFile = useApp((s) => s.openWorkspaceFile);
+  const closeFile = useApp((s) => s.closeWorkspaceFile);
+  const showChat = useApp((s) => s.showChatTab);
+  if (!open || open.length === 0) return null;
+
+  return (
+    // Scrolls sideways rather than squeezing: on a narrow window four open
+    // files must not shrink the chat tab to an ellipsis.
+    <div className="hide-scrollbar flex shrink-0 items-stretch overflow-x-auto border-b border-[var(--color-border)] bg-[var(--color-panel)]">
+      <Tab active={active === null} onClick={showChat} icon={<MessageSquare size={12} />} label="Chat" />
+      {open.map((path) => {
+        const name = path.slice(Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1);
+        const { Icon, color } = iconFor(name);
+        return (
+          <Tab
+            key={path}
+            active={active === path}
+            onClick={() => openFile(path)}
+            onClose={() => closeFile(path)}
+            title={path}
+            icon={<Icon size={12} style={{ color }} />}
+            label={name}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function Tab({
+  active,
+  onClick,
+  onClose,
+  icon,
+  label,
+  title,
+}: {
+  active: boolean;
+  onClick: () => void;
+  onClose?: () => void;
+  icon: React.ReactNode;
+  label: string;
+  title?: string;
+}) {
+  return (
+    <div
+      className={`flex h-9 shrink-0 items-center gap-1.5 border-b-2 border-r border-r-[var(--color-border)] pl-2.5 text-xs ${
+        onClose ? "pr-1" : "pr-2.5"
+      } ${
+        active
+          ? "border-b-[var(--color-accent)] bg-[var(--color-bg)] text-[var(--color-text)]"
+          : "border-b-transparent text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)]"
+      }`}
+    >
+      <button onClick={onClick} title={title ?? label} className="flex min-w-0 items-center gap-1.5">
+        <span className="flex shrink-0">{icon}</span>
+        <span className="max-w-[10rem] truncate">{label}</span>
+      </button>
+      {onClose && (
+        <button
+          onClick={onClose}
+          title="Close this tab"
+          aria-label={`Close ${label}`}
+          className="shrink-0 rounded p-0.5 text-[var(--color-text-muted)] hover:bg-[var(--color-border)] hover:text-[var(--color-text)]"
+        >
+          <X size={11} />
+        </button>
+      )}
+    </div>
+  );
+}
 
 /** How long stream events are collected before being applied as one batch. */
 const STREAM_DRAIN_MS = 16;
@@ -73,6 +159,8 @@ export function ChatPanel() {
   const routingByChat = useApp((s) => s.routingByChat);
   const stageImport = useApp((s) => s.stageImport);
   const pendingApprovals = activeChatId ? (pendingApprovalByChat[activeChatId] ?? []) : [];
+  // The file tab this chat is showing, if any; null is the transcript (0.18).
+  const activeFile = useApp((s) => (activeChatId ? s.activeFileByChat[activeChatId] ?? null : null));
 
   const activeChat = chats.find((c) => c.id === activeChatId) ?? null;
   const activeZone = activeChat ? zones.find((z) => z.id === activeChat.zoneId) : null;
@@ -403,7 +491,12 @@ export function ChatPanel() {
               persists), so without this a reused instance could carry the old
               chat's view state — collapsed rails, edit drafts, scroll position,
               and (before the `useThrottledStreaming` fix) the old answer text. */}
-          <MessageThread key={activeChat.id} chatId={activeChat.id} />
+          <DocumentTabs chatId={activeChat.id} />
+          {activeFile ? (
+            <FileViewer key={activeFile} path={activeFile} />
+          ) : (
+            <MessageThread key={activeChat.id} chatId={activeChat.id} />
+          )}
           {elsewhereApprovals.length > 0 && (
             <div className="border-t border-amber-500/40 bg-amber-500/10 px-4 py-2">
               <div className="mx-auto flex max-w-3xl flex-col gap-1.5">

@@ -14,7 +14,7 @@ interface Props {
 }
 
 /** Watches for dark/light class changes on <html> and returns true when in light mode. */
-function useIsLightMode() {
+export function useIsLightMode() {
   const [light, setLight] = useState(() =>
     document.documentElement.classList.contains("light"),
   );

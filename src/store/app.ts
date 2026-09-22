@@ -663,7 +663,12 @@ interface AppStore {
   openFilesByChat: Record<string, string[]>;
   /** Which tab each chat is showing: a path, or null for the transcript. */
   activeFileByChat: Record<string, string | null>;
-  openWorkspaceFile: (path: string) => void;
+  /**
+   * Open a file as a document tab. `background` leaves you where you are —
+   * the middle-click habit: queue up three files from the tree without the
+   * view jumping away each time.
+   */
+  openWorkspaceFile: (path: string, background?: boolean) => void;
   /** Close one tab, or the active one. */
   closeWorkspaceFile: (path?: string) => void;
   /** Back to the transcript without closing anything. */
@@ -2244,7 +2249,7 @@ export const useApp = create<AppStore>((set, get) => ({
       set({ workspaceFocus: null });
     }
   },
-  openWorkspaceFile: (path) => {
+  openWorkspaceFile: (path, background = false) => {
     const chatId = get().activeChatId;
     if (!chatId) return;
     const open = get().openFilesByChat[chatId] ?? [];
@@ -2253,7 +2258,9 @@ export const useApp = create<AppStore>((set, get) => ({
         ...get().openFilesByChat,
         [chatId]: open.includes(path) ? open : [...open, path],
       },
-      activeFileByChat: { ...get().activeFileByChat, [chatId]: path },
+      // A background open of a file that is already the active tab must not
+      // knock you off it, so this only ever leaves the active tab alone.
+      ...(background ? {} : { activeFileByChat: { ...get().activeFileByChat, [chatId]: path } }),
     });
   },
   closeWorkspaceFile: (path) => {

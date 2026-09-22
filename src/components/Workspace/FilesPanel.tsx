@@ -180,7 +180,14 @@ function Row({ entry, depth }: { entry: DirEntry; depth: number }) {
     <li>
       <button
         onClick={() => openFile(entry.path)}
-        title={entry.path}
+        // Middle-click opens the file without leaving the tab you are on, the
+        // way it does in a browser. `onMouseDown` only to stop Windows from
+        // dropping into autoscroll; the open itself is on `onAuxClick`, which
+        // is the event a non-primary button actually completes on.
+        onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }}
+        onAuxClick={(e) => { if (e.button === 1) openFile(entry.path, true); }}
+        title={`${entry.path}
+Middle-click to open in a background tab`}
         className={`group relative flex h-[22px] w-full items-center gap-1 pr-2 text-left ${
           selected
             ? "bg-[var(--color-accent)]/15 text-[var(--color-text)]"

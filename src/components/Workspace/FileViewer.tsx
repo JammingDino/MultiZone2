@@ -4,6 +4,10 @@ import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { formatBytes } from "@/lib/format";
 import { Markdown } from "@/components/Renderers/Markdown";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { oneDark, oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { useIsLightMode } from "@/components/Renderers/CodeBlock";
+import { openPdf, drawPdfPage, type PdfDoc } from "@/lib/pdf";
 import type { FileText as FileTextData } from "@/lib/types";
 import { iconFor } from "./FilesPanel";
 
@@ -34,9 +38,10 @@ export function FileViewer({ path }: { path: string }) {
   const [savedAt, setSavedAt] = useState<number | null>(null);
 
   const kind = kindOf(path);
-  // An image has a preview and nothing else: its "source" is bytes, and the
-  // editor would offer to save a textarea full of them back over the file.
-  const previewable = kind !== "text" && kind !== "image";
+  // An image or a PDF has a preview and nothing else: the "source" is bytes,
+  // and the editor would offer to save a textarea full of them over the file.
+  const viewOnly = kind === "image" || kind === "pdf";
+  const previewable = kind !== "text" && !viewOnly;
   const [mode, setMode] = useState<"preview" | "source">(kind === "text" ? "source" : "preview");
   // A different file starts over: its own default view, its own draft.
   useEffect(() => {
@@ -47,7 +52,7 @@ export function FileViewer({ path }: { path: string }) {
 
   const load = useCallback(() => {
     setError(null);
-    if (kindOf(path) === "image") return;
+    if (viewOnlyKind(path)) return;
     api.readWorkspaceFile(path)
       .then((f) => {
         setFile(f);
@@ -102,7 +107,7 @@ export function FileViewer({ path }: { path: string }) {
             </ModeButton>
           </div>
         )}
-        {kind !== "image" && (
+        {!viewOnly && (
           <Action title={dirty ? "Save (Ctrl+S)" : "Saved"} onClick={save} disabled={!dirty || saving} accent={dirty}>
             {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
           </Action>
@@ -139,6 +144,8 @@ export function FileViewer({ path }: { path: string }) {
             refused by a limit that had nothing to do with it. */}
         {kind === "image" ? (
           <ImagePreview path={path} name={name} savedAt={savedAt} />
+        ) : kind === "pdf" ? (
+          <PdfPreview path={path} name={name} />
         ) : error ? (
           <Notice icon={<AlertCircle size={12} />} danger>
             {error}
@@ -152,14 +159,14 @@ export function FileViewer({ path }: { path: string }) {
         ) : mode === "preview" ? (
           <Preview kind={kind} content={draft} name={name} path={path} savedAt={savedAt} />
         ) : (
-          <Editor value={draft} onChange={setDraft} onSave={save} />
+          <Editor value={draft} onChange={setDraft} onSave={save} path={path} />
         )}
       </div>
     </div>
   );
 }
 
-type Kind = "html" | "markdown" | "svg" | "image" | "text";
+type Kind = "html" | "markdown" | "svg" | "image" | "pdf" | "text";
 
 function kindOf(path: string): Kind {
   const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
@@ -167,7 +174,14 @@ function kindOf(path: string): Kind {
   if (ext === "md" || ext === "mdx" || ext === "markdown") return "markdown";
   if (ext === "svg") return "svg";
   if (IMAGE.has(ext)) return "image";
+  if (ext === "pdf") return "pdf";
   return "text";
+}
+
+/** Bytes, not text: nothing to read into a string and nothing to save back. */
+function viewOnlyKind(path: string): boolean {
+  const k = kindOf(path);
+  return k === "image" || k === "pdf";
 }
 
 /** Raster formats the `mzfile` scheme already serves with a real media type. */
@@ -278,7 +292,6 @@ function ImagePreview({ path, name, savedAt }: { path: string; name: string; sav
       {size && (
         <span className="pointer-events-none absolute bottom-1.5 left-1.5 rounded bg-[var(--color-bg)]/85 px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-text-muted)]">
           {size.w}×{size.h}
-          {actual ? " · 1:1" : " · fit"}
         </span>
       )}
     </div>
@@ -286,14 +299,184 @@ function ImagePreview({ path, name, savedAt }: { path: string; name: string; sav
 }
 
 /**
- * A textarea with a line-number gutter kept in step by mirroring its scroll.
- * Tab inserts two spaces rather than leaving the field, and Ctrl/Cmd+S saves —
- * the two habits that make a plain textarea feel like it is not one.
+ * A PDF, drawn page by page with the copy of pdf.js the app already carries
+ * for the `read` tool (`lib/pdf.ts`). Viewing only: no form filling, no
+ * annotation, no text layer — the toolbar's "open in the default app" is the
+ * way to a real PDF reader, and this is the way to glance at one without
+ * leaving the window.
+ *
+ * Pages render in order rather than on demand. A document in a project folder
+ * is a report or a datasheet, not a book, and an IntersectionObserver per page
+ * would be more machinery than the case deserves; past `MAX_PAGES` it stops
+ * and says so instead of drawing a thousand canvases.
  */
-function Editor({ value, onChange, onSave }: { value: string; onChange: (v: string) => void; onSave: () => void }) {
+const MAX_PAGES = 60;
+
+function PdfPreview({ path, name }: { path: string; name: string }) {
+  const [doc, setDoc] = useState<PdfDoc | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const url = useMemo(() => api.previewUrl(path), [path]);
+
+  useEffect(() => {
+    if (!url) return;
+    let live = true;
+    let opened: PdfDoc | null = null;
+    setDoc(null);
+    setError(null);
+    openPdf(url)
+      .then((d) => {
+        opened = d;
+        // Arriving after the viewer moved on means this document belongs to a
+        // file nobody is looking at: close it rather than leaking a worker.
+        if (live) setDoc(d);
+        else void d.destroy();
+      })
+      .catch((e) => {
+        if (live) setError(String(e));
+      });
+    return () => {
+      live = false;
+      void opened?.destroy();
+    };
+  }, [url]);
+
+  if (!url) {
+    return (
+      <Notice icon={<AlertCircle size={12} />}>
+        PDFs open on the desktop app only. Use the arrow above to open this one in its own app.
+      </Notice>
+    );
+  }
+  if (error) return <Notice icon={<AlertCircle size={12} />} danger>Could not open {name}: {error}</Notice>;
+  if (!doc) {
+    return (
+      <Notice icon={<Loader2 size={12} className="animate-spin text-[var(--color-accent)]" />}>
+        Opening {name}…
+      </Notice>
+    );
+  }
+
+  const shown = Math.min(doc.numPages, MAX_PAGES);
+  return (
+    <div className="min-h-0 flex-1 overflow-auto overscroll-contain bg-[var(--color-panel)] px-4 py-4">
+      <div className="mx-auto flex max-w-3xl flex-col gap-4">
+        {Array.from({ length: shown }, (_, i) => (
+          <PdfPage key={i} doc={doc} n={i + 1} total={doc.numPages} />
+        ))}
+        {shown < doc.numPages && (
+          <p className="pb-2 text-center text-[11px] text-[var(--color-text-muted)]">
+            Showing the first {MAX_PAGES} of {doc.numPages} pages. Open it in a PDF reader for the rest.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PdfPage({ doc, n, total }: { doc: PdfDoc; n: number; total: number }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas) return;
+    let live = true;
+    // The canvas is laid out by CSS before anything is drawn, so its own width
+    // is the width to render at — no measuring of ancestors, and correct
+    // whatever the panel has been dragged to.
+    const width = canvas.clientWidth || 700;
+    drawPdfPage(doc, n, canvas, width).catch(() => {
+      if (live) setFailed(true);
+    });
+    return () => {
+      live = false;
+    };
+  }, [doc, n]);
+
+  return (
+    <div className="relative">
+      <canvas
+        ref={ref}
+        aria-label={`Page ${n} of ${total}`}
+        className="block w-full rounded-sm bg-white shadow-md"
+        style={{ aspectRatio: "1 / 1.414" }}
+      />
+      <span className="pointer-events-none absolute -top-0.5 right-1.5 translate-y-[-100%] font-mono text-[10px] text-[var(--color-text-muted)]">
+        {n}/{total}
+      </span>
+      {failed && (
+        <span className="absolute inset-0 flex items-center justify-center text-[11px] text-[var(--color-danger)]">
+          Page {n} could not be drawn.
+        </span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Prism's name for a file extension. Only the ones this app's own tree is full
+ * of plus the usual suspects — an unknown extension highlights as nothing,
+ * which is exactly what it used to do for everything.
+ */
+const LANGUAGES: Record<string, string> = {
+  ts: "typescript", tsx: "tsx", js: "javascript", jsx: "jsx", mjs: "javascript", cjs: "javascript",
+  rs: "rust", py: "python", go: "go", java: "java", kt: "kotlin", swift: "swift", rb: "ruby",
+  php: "php", c: "c", h: "c", cpp: "cpp", hpp: "cpp", cs: "csharp", lua: "lua", zig: "zig",
+  sh: "bash", bash: "bash", zsh: "bash", ps1: "powershell", bat: "batch", sql: "sql",
+  css: "css", scss: "scss", less: "less", html: "markup", htm: "markup", xml: "markup",
+  svg: "markup", vue: "markup", svelte: "markup", json: "json", yaml: "yaml", yml: "yaml",
+  toml: "toml", ini: "ini", md: "markdown", mdx: "markdown", diff: "diff", patch: "diff",
+  dockerfile: "docker", graphql: "graphql", proto: "protobuf",
+};
+
+function languageOf(path: string): string | null {
+  const name = path.slice(Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1);
+  if (name.toLowerCase() === "dockerfile") return "docker";
+  const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1).toLowerCase() : "";
+  return LANGUAGES[ext] ?? null;
+}
+
+/**
+ * Above this many characters the file is edited as plain text. Highlighting
+ * re-tokenises the whole document on every keystroke, and somewhere past a few
+ * hundred KB that turns typing into a slideshow.
+ *
+ * ponytail: one flat ceiling, no incremental tokeniser. If editing large files
+ * here ever becomes a thing people do, the answer is a real editor component,
+ * not a cleverer version of this.
+ */
+const HIGHLIGHT_LIMIT = 200_000;
+
+/**
+ * A textarea with a line-number gutter kept in step by mirroring its scroll,
+ * and — since 0.18 — Prism's colours behind it.
+ *
+ * The highlighting is the standard overlay: a `<pre>` painted underneath and a
+ * textarea with transparent text on top, the two kept in register by sharing
+ * every metric that moves a glyph (family, size, line height, padding, tab
+ * size, no wrapping) and by mirroring the textarea's scroll onto the layer
+ * below. The caret, the selection and every keystroke still belong to the
+ * textarea, which is what keeps this a text box that happens to have colour
+ * rather than an editor that has to reimplement one.
+ */
+function Editor({
+  value,
+  onChange,
+  onSave,
+  path,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onSave: () => void;
+  path: string;
+}) {
   const gutterRef = useRef<HTMLDivElement>(null);
+  const layerRef = useRef<HTMLDivElement>(null);
+  const isLight = useIsLightMode();
   const lines = useMemo(() => value.split("\n").length, [value]);
   const numbers = useMemo(() => Array.from({ length: lines }, (_, i) => i + 1).join("\n"), [lines]);
+  const language = languageOf(path);
+  const highlight = language !== null && value.length <= HIGHLIGHT_LIMIT;
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
@@ -313,6 +496,21 @@ function Editor({ value, onChange, onSave }: { value: string; onChange: (v: stri
     }
   }
 
+  // Every metric that decides where a glyph lands, in one object, applied to
+  // the textarea and to the layer under it. They drift the moment they are
+  // written down twice.
+  const metrics: React.CSSProperties = {
+    fontFamily: "inherit",
+    fontSize: "inherit",
+    lineHeight: "inherit",
+    padding: "8px",
+    tabSize: 2,
+    whiteSpace: "pre",
+    wordBreak: "normal",
+    overflowWrap: "normal",
+    border: 0,
+  };
+
   return (
     <div className="flex min-h-0 flex-1 font-mono text-[12px] leading-[1.55]">
       <div
@@ -322,19 +520,47 @@ function Editor({ value, onChange, onSave }: { value: string; onChange: (v: stri
       >
         <pre className="m-0 font-[inherit] text-[inherit]">{numbers}</pre>
       </div>
-      <textarea
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={onKeyDown}
-        onScroll={(e) => {
-          if (gutterRef.current) gutterRef.current.scrollTop = e.currentTarget.scrollTop;
-        }}
-        spellCheck={false}
-        autoCapitalize="off"
-        autoCorrect="off"
-        wrap="off"
-        className="h-full min-w-0 flex-1 resize-none overflow-auto bg-transparent px-2 py-2 text-[var(--color-text)] outline-none"
-      />
+      <div className="relative min-w-0 flex-1">
+        {highlight && (
+          <div ref={layerRef} aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
+            <SyntaxHighlighter
+              language={language}
+              style={isLight ? oneLight : oneDark}
+              customStyle={{ ...metrics, margin: 0, background: "transparent", overflow: "visible" }}
+              codeTagProps={{ style: { ...metrics, padding: 0, background: "transparent" } }}
+            >
+              {/* A file ending in a newline loses its last (empty) line to the
+                  tokeniser, which shifts nothing but does make the layer one
+                  line shorter than the textarea; a space keeps them equal. */}
+              {value.endsWith("\n") ? `${value} ` : value}
+            </SyntaxHighlighter>
+          </div>
+        )}
+        <textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={onKeyDown}
+          onScroll={(e) => {
+            if (gutterRef.current) gutterRef.current.scrollTop = e.currentTarget.scrollTop;
+            if (layerRef.current) {
+              layerRef.current.scrollTop = e.currentTarget.scrollTop;
+              layerRef.current.scrollLeft = e.currentTarget.scrollLeft;
+            }
+          }}
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+          wrap="off"
+          style={{
+            ...metrics,
+            // The text is the layer's job; the caret and the selection are
+            // still this element's, so both are given explicitly.
+            color: highlight ? "transparent" : "var(--color-text)",
+            caretColor: "var(--color-text)",
+          }}
+          className="absolute inset-0 h-full w-full resize-none overflow-auto bg-transparent outline-none selection:bg-[var(--color-accent)]/30"
+        />
+      </div>
     </div>
   );
 }

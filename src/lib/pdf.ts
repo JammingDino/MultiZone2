@@ -17,6 +17,43 @@ const TARGET_LONG_EDGE = 1568;
  */
 const JPEG_QUALITY = 0.95;
 
+/**
+ * Open a PDF for on-screen viewing, by URL (the `mzfile` scheme) rather than by
+ * bytes: pdf.js fetches it in ranges, so a long document starts drawing without
+ * the whole file being read into the window first.
+ *
+ * It lives here rather than in the viewer so that the worker configuration at
+ * the top of this file stays the one place pdf.js is set up.
+ */
+export function openPdf(url: string) {
+  return pdfjsLib.getDocument({ url }).promise;
+}
+
+/** Draw one page into a canvas at `cssWidth`, sharp on a HiDPI screen. */
+export async function drawPdfPage(
+  doc: pdfjsLib.PDFDocumentProxy,
+  n: number,
+  canvas: HTMLCanvasElement,
+  cssWidth: number,
+): Promise<void> {
+  const page = await doc.getPage(n);
+  try {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const base = page.getViewport({ scale: 1 });
+    const viewport = page.getViewport({ scale: (cssWidth * dpr) / base.width });
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+    canvas.style.aspectRatio = `${base.width} / ${base.height}`;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("could not create canvas context");
+    await page.render({ canvasContext: ctx, viewport } as any).promise;
+  } finally {
+    page.cleanup();
+  }
+}
+
+export type PdfDoc = pdfjsLib.PDFDocumentProxy;
+
 export interface PdfRenderProgress {
   page: number;
   total: number;

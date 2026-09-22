@@ -88,6 +88,14 @@ function Tab({
 }) {
   return (
     <div
+      // Middle-click anywhere on the tab closes it, as it does everywhere else
+      // that has tabs — including on the close button, so the aim does not
+      // have to be good. `onMouseDown` only to stop Windows dropping into
+      // autoscroll; the close is on `onAuxClick`, which is the event a
+      // non-primary button actually completes on. The chat tab has no
+      // `onClose`, so there it does nothing.
+      onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }}
+      onAuxClick={(e) => { if (e.button === 1) onClose?.(); }}
       className={`flex h-9 shrink-0 items-center gap-1.5 border-b-2 border-r border-r-[var(--color-border)] pl-2.5 text-xs ${
         onClose ? "pr-1" : "pr-2.5"
       } ${

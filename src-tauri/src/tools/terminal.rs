@@ -386,8 +386,11 @@ impl Terminal {
     /// Wait until `pattern` matches the output after `from`, the timeout expires,
     /// or the process exits. Returns (new output, matched).
     ///
-    /// The pattern case of [`wait_until`](Self::wait_until), kept under its own
-    /// name because "wait for the prompt" is what most callers are doing.
+    /// The pattern case of [`wait_until`](Self::wait_until). Only the tests call
+    /// it now — every shipping caller wants `wait_until`'s reason string, not
+    /// just a bool — so it is compiled for them and not for a release build,
+    /// where it would be dead code.
+    #[cfg(test)]
     async fn wait_for_pattern(
         &self,
         from: u64,

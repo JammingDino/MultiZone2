@@ -37,9 +37,6 @@ pub struct Prepared {
     /// decide how to decode, so a converted file has to stop claiming to be
     /// the format it no longer is.
     pub file_name: String,
-    /// False when the bytes are the caller's originals — either because they
-    /// needed nothing doing, or because nothing could be done.
-    pub converted: bool,
     /// Set when a conversion was wanted and could not happen, so the caller can
     /// say why if the provider goes on to refuse the upload.
     pub note: Option<String>,
@@ -88,7 +85,7 @@ fn ffmpeg_program() -> String {
 pub async fn prepare_for_transcription(bytes: Vec<u8>, file_name: &str) -> Prepared {
     let extension = extension_of(file_name);
     if already_prepared(&extension) {
-        return Prepared { bytes, file_name: file_name.to_string(), converted: false, note: None };
+        return Prepared { bytes, file_name: file_name.to_string(), note: None };
     }
 
     let program = ffmpeg_program();
@@ -129,7 +126,6 @@ pub async fn prepare_for_transcription(bytes: Vec<u8>, file_name: &str) -> Prepa
             return Prepared {
                 bytes,
                 file_name: file_name.to_string(),
-                converted: false,
                 note: Some(format!(
                     "ffmpeg was not found on this computer, so the recording was sent as {extension} \
                      without being converted to the 16 kHz mono WAV most local transcription \
@@ -159,7 +155,6 @@ pub async fn prepare_for_transcription(bytes: Vec<u8>, file_name: &str) -> Prepa
             return Prepared {
                 bytes,
                 file_name: file_name.to_string(),
-                converted: false,
                 note: Some(format!("ffmpeg could not convert the recording: {e}")),
             };
         }
@@ -172,7 +167,6 @@ pub async fn prepare_for_transcription(bytes: Vec<u8>, file_name: &str) -> Prepa
         return Prepared {
             bytes,
             file_name: file_name.to_string(),
-            converted: false,
             note: Some(format!("ffmpeg could not read the recording ({detail}).")),
         };
     }
@@ -185,7 +179,6 @@ pub async fn prepare_for_transcription(bytes: Vec<u8>, file_name: &str) -> Prepa
     Prepared {
         bytes: output.stdout,
         file_name: converted_name(file_name),
-        converted: true,
         note: None,
     }
 }
@@ -236,7 +229,6 @@ mod tests {
         let prepared = prepare_for_transcription(bytes.clone(), "dictation.wav").await;
         assert_eq!(prepared.bytes, bytes);
         assert_eq!(prepared.file_name, "dictation.wav");
-        assert!(!prepared.converted);
         assert!(prepared.note.is_none());
     }
 
@@ -278,8 +270,9 @@ mod tests {
         }
 
         let prepared = prepare_for_transcription(source.stdout, "dictation.webm").await;
-        assert!(prepared.converted, "note: {:?}", prepared.note);
-        assert_eq!(prepared.file_name, "dictation.wav");
+        // The name is the record of the conversion: a converted upload has to
+        // stop claiming to be the format it no longer is.
+        assert_eq!(prepared.file_name, "dictation.wav", "note: {:?}", prepared.note);
         assert!(prepared.note.is_none());
 
         let wav = &prepared.bytes;
@@ -305,7 +298,6 @@ mod tests {
 
         assert_eq!(prepared.bytes, bytes, "the recording is still sent");
         assert_eq!(prepared.file_name, "dictation.webm", "still claiming its real format");
-        assert!(!prepared.converted);
         let note = prepared.note.expect("a reason to quote if the provider refuses");
         assert!(note.contains("ffmpeg"), "the note names what is missing: {note}");
     }

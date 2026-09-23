@@ -492,13 +492,16 @@ export function describeTool(item: TraceToolItem): ToolDescription {
     outcome: null,
   };
 
-  switch (name) {
+  // On the canonical name, not the raw one: history from before 0.18 carries
+  // `read_file` and `list_directory`, and the label above already resolves
+  // them. A switch on the raw name gave those turns a label and then no
+  // subject and no outcome, which reads as a tool that did nothing.
+  switch (canonicalToolName(name)) {
     case "read":
     case "write":
     case "edit":
     case "delete_file":
     case "present_file":
-    case "read":
     case "create_folder":
       desc.subject = str(args?.path) ? shortPath(str(args!.path)!) : null;
       break;
@@ -637,24 +640,24 @@ function describeOutcome(
   const results = Array.isArray(body.results) ? body.results : null;
   if (results) return results.length ? plural(results.length, "result") : "no results";
 
-  switch (name) {
+  switch (canonicalToolName(name)) {
     case "update_plan": {
       const done = typeof body.done === "number" ? body.done : null;
       const total = typeof body.total === "number" ? body.total : null;
       return done !== null && total !== null ? `${done} of ${total} done` : null;
     }
+    // One `read` does both jobs since 0.18 — a file's text, or a directory's
+    // entries — so the result shape is what says which happened, not the name.
     case "read": {
       const content = str(body.content) ?? str(body.text);
-      return content ? `${plural(countLines(content), "line")} read` : null;
+      if (content) return `${plural(countLines(content), "line")} read`;
+      const entries = Array.isArray(body.entries) ? body.entries.length : null;
+      return entries !== null ? plural(entries, "entry", "entries") : null;
     }
     case "write":
     case "edit": {
       const bytes = typeof body.bytes === "number" ? body.bytes : null;
       return bytes !== null ? `${formatBytes(bytes)} written` : "saved";
-    }
-    case "read": {
-      const entries = Array.isArray(body.entries) ? body.entries.length : null;
-      return entries !== null ? plural(entries, "entry", "entries") : null;
     }
     case "glob": {
       const files = Array.isArray(body.files) ? body.files.length : null;

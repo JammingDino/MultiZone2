@@ -321,9 +321,7 @@ function Preview({
   }
   if (kind === "svg") {
     return (
-      <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4">
-        <img src={svgSrc} alt={name} style={{ zoom }} className="max-h-full max-w-full" />
-      </div>
+      <ZoomableImage src={svgSrc} alt={name} zoom={zoom} checker />
     );
   }
   return (
@@ -343,6 +341,109 @@ function Preview({
  * A remote window has no such scheme, so it says so rather than showing a
  * broken image.
  */
+/**
+ * An image that zoom actually scales, fitted to the pane at 100%.
+ *
+ * The first attempt put CSS `zoom` on the frame and left `max-width: 100%` on
+ * the picture, which does nothing at all: `zoom` shrinks the available space in
+ * local coordinates, the max-width clamp follows it down by exactly the same
+ * factor, and then zoom scales the result back up. A fitted image came out
+ * identical at every level — and only an image small enough for the clamp not
+ * to bind appeared to zoom, which is why this looked like it worked.
+ *
+ * So the width is computed instead of clamped. The fit factor is measured once
+ * per pane size, never above 1 (a small image is not blown up to fill the
+ * column), and `width = natural x fit x zoom` is the whole model: 100% is what
+ * fits, 200% is twice that, and the pane scrolls.
+ *
+ * The frame is centred with `margin: auto` rather than `justify-center`, which
+ * is the one way to centre inside a scroll container without making the
+ * overflow past the start edge unreachable.
+ */
+function ZoomableImage({
+  src,
+  alt,
+  zoom,
+  checker,
+  onError,
+}: {
+  src: string;
+  alt: string;
+  zoom: number;
+  /** Behind a format that can be transparent, so transparency reads as itself. */
+  checker?: boolean;
+  onError?: () => void;
+}) {
+  const paneRef = useRef<HTMLDivElement>(null);
+  const [pane, setPane] = useState<{ w: number; h: number } | null>(null);
+  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
+
+  useEffect(() => {
+    const el = paneRef.current;
+    if (!el) return;
+    // `contentRect` is the content box, so the pane's own padding is already
+    // out of the numbers the fit is computed from.
+    const ro = new ResizeObserver(([entry]) => {
+      setPane({ w: entry.contentRect.width, h: entry.contentRect.height });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  useEffect(() => setNatural(null), [src]);
+
+  const fit =
+    natural && pane && natural.w > 0 && natural.h > 0
+      ? Math.min(1, pane.w / natural.w, pane.h / natural.h)
+      : 1;
+
+  return (
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <div ref={paneRef} className="flex min-h-0 flex-1 overflow-auto p-4">
+        <div
+          className="m-auto shrink-0"
+          style={
+            checker
+              ? {
+                  backgroundImage:
+                    "repeating-conic-gradient(var(--color-panel) 0% 25%, var(--color-bg) 0% 50%)",
+                  backgroundSize: "16px 16px",
+                }
+              : undefined
+          }
+        >
+          <img
+            src={src}
+            alt={alt}
+            onLoad={(e) =>
+              setNatural({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })
+            }
+            onError={onError}
+            className="block"
+            style={{
+              // Floored: a fractional width can overflow by a sub-pixel, which
+              // raises a scrollbar, which narrows the pane, which refits
+              // smaller, which drops the scrollbar — a loop worth one Math.floor.
+              width: natural ? Math.floor(natural.w * fit * zoom) : undefined,
+              // Only until the natural size is known: an unconstrained 4000px
+              // image would blow the column out for a frame first. Once it is
+              // known the clamp goes, because a clamp is what cancelled zoom.
+              maxWidth: natural ? "none" : "100%",
+              height: "auto",
+            }}
+          />
+        </div>
+      </div>
+      {/* Outside the scroller, so it stays put while the picture moves. */}
+      {natural && (
+        <span className="pointer-events-none absolute bottom-1.5 left-1.5 rounded bg-[var(--color-bg)]/85 px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-text-muted)]">
+          {natural.w}×{natural.h}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function ImagePreview({
   path,
   name,
@@ -354,17 +455,13 @@ function ImagePreview({
   savedAt: number | null;
   zoom: number;
 }) {
-  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   const [failed, setFailed] = useState(false);
   const url = useMemo(() => {
     const u = api.previewUrl(path);
     return u ? `${u}${u.includes("?") ? "&" : "?"}v=${savedAt ?? 0}` : null;
   }, [path, savedAt]);
 
-  useEffect(() => {
-    setSize(null);
-    setFailed(false);
-  }, [path]);
+  useEffect(() => setFailed(false), [path]);
 
   if (!url) {
     return (
@@ -377,42 +474,7 @@ function ImagePreview({
     return <Notice icon={<AlertCircle size={12} />} danger>Could not decode {name}.</Notice>;
   }
 
-  return (
-    <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-auto p-4">
-      {/* The checkered frame is the size of the image, not the size of the
-          pane. It is there to show a transparent PNG's transparency, and a
-          checker stretched across the whole column showed nothing except how
-          much emptiness surrounded a 200px GIF. `w-fit` on a flex-centred
-          child is what keeps it to the picture. */}
-      <div
-        className="w-fit shrink-0"
-        // Zoom scales the framed picture, so at 100% the image still fits the
-        // pane and above it the pane scrolls — the same gesture as every other
-        // pane here, rather than a bespoke fit/actual toggle.
-        style={{
-          zoom,
-          backgroundImage:
-            "repeating-conic-gradient(var(--color-panel) 0% 25%, var(--color-bg) 0% 50%)",
-          backgroundSize: "16px 16px",
-        }}
-      >
-        <img
-          src={url}
-          alt={name}
-          onLoad={(e) => setSize({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
-          onError={() => setFailed(true)}
-          // Never upscaled at 100%: an image too big for the pane shrinks to
-          // fit, a small one is left at its own size.
-          className="max-h-full max-w-full"
-        />
-      </div>
-      {size && (
-        <span className="pointer-events-none absolute bottom-1.5 left-1.5 rounded bg-[var(--color-bg)]/85 px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-text-muted)]">
-          {size.w}×{size.h}
-        </span>
-      )}
-    </div>
-  );
+  return <ZoomableImage src={url} alt={name} zoom={zoom} checker onError={() => setFailed(true)} />;
 }
 
 /**

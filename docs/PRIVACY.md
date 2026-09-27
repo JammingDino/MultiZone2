@@ -18,7 +18,7 @@ All of it is on your machine, in your OS application-data directory:
 
 | What | Where |
 | --- | --- |
-| Chats, zones, projects, tags, skills, memory, settings, usage | `multizone.db` — a single local SQLite file |
+| Chats, zones, projects, tags, skills, memory, scheduled runs, settings, usage | `multizone.db` — a single local SQLite file |
 | Attachments, exports, generated reports | The paths you chose, plus the app data directory |
 | Knowledge-base indexes and embeddings | Local, alongside the database |
 | OCR models | `<app data>/ocr_models/` |
@@ -45,6 +45,7 @@ you, or a model acting on a message you sent, asked for it.
 | --- | --- | --- |
 | **Sending a message to a cloud model** | The conversation, system prompt, attachments and tool results — everything in that turn's context | The provider you configured (OpenAI, Anthropic, …) |
 | **Sending a message to a local model** | The same, over `localhost` | Nowhere — it stays on the machine |
+| **A scheduled run** (0.18) | The same as sending a message — at the time you set, whether or not the window is open | The provider of the run's zone |
 | **Web search** (`smart_search`) | Your search query | DuckDuckGo, Bing, Brave, Yandex, Ecosia, Yahoo and Wikipedia, queried in parallel |
 | **Page reading** (`smart_fetch`, `smart_crawl`) | An ordinary page request, with a browser-like fingerprint | The site being read |
 | **API calls** (`http_request`) | Whatever the model was asked to send | The host in the request |
@@ -80,6 +81,11 @@ are offline it stays silent.
 You can switch this off in Settings → Data. With it off, the app makes no
 network request you did not initiate, and update checks happen only when you
 press the button.
+
+A **scheduled run** (0.18) is initiated — you, or an agent you approved, set
+it up — but it sends at a time you are not necessarily present for, and closing
+the window hides the app to the tray rather than quitting it. Every scheduled
+run is listed in Settings → Schedules, where it can be switched off or deleted.
 
 ---
 

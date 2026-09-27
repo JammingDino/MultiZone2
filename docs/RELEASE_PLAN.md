@@ -1166,6 +1166,62 @@ Found by installing the APK and using it, not by reading the code.
 
 ---
 
+## 0.18.x — Runs nobody is watching
+
+The point of a long agentic run is not to sit watching it, and five things
+still assumed someone was: closing the window ended the run, nothing could
+start a run on its own, a long run either overflowed or paid a model to
+summarize itself, and Stop did nothing until the model had spoken.
+
+### 0.18.0 — Running in the background, on a clock, in a context that stays small
+
+**Close to tray**
+- [x] The close button (and Alt+F4) hides the window; `CloseRequested` is handled in Rust, so every close path agrees
+- [x] Tray icon: left-click shows the window, menu has Show and Quit
+- [x] Only hides when the tray icon actually exists — a platform without one still quits
+- [x] `closeToTray` setting, on by default (Settings → Chat → Closing the window)
+- [x] Single-instance plugin: a second launch shows the running copy instead of opening the database twice
+- [ ] Seen on Windows: hide, restore from the icon, quit from the menu, relaunch while hidden
+- [ ] macOS / Linux tray behaviour (unbuilt here)
+
+**Stop, straight away**
+- [x] The request, every stream read and the Smart-routing call are raced against the cancel flag — Stop works during prefill and before any response
+- [x] The window settles the turn locally (`stopChat`) instead of waiting for the backend's `cancelled`
+- [x] The queue is dropped at the moment of the stop (`cancel_chat`), so a message sent while the old turn unwinds is delivered, not discarded
+- [x] The HTTP API's cancel goes through the same function — it used to only flip the flag, leaving approvals and background sub-agents running
+- [ ] Seen against a slow local prefill: Stop, type, send, and the new message runs once the old turn has let go
+
+**Smart compaction**
+- [x] Rule-based rewrite before `smart_compact_through`: superseded results dropped, tool output trimmed head+tail, long tool inputs hidden, old thinking stripped
+- [x] Deterministic and request-only, so the prefix cache survives and nothing on screen changes
+- [x] `smart_compact` tool in the compact group (safe); the compact button under the composer offers it and a summary
+- [x] Auto-compaction trims first and summarizes only if still over the window; an overflow retries trimmed, then summarized
+- [x] A compaction mid-turn is picked up at the next step
+- [x] The meter subtracts what the rewrite removes (`trimmedTokens`)
+- [x] Knobs in Settings → Chat → Smart compaction
+- [ ] Measured on a real long coding chat: tokens before/after, and whether the model re-reads what was trimmed
+
+**Rolling context**
+- [x] Per-chat limit (`rolling_context_tokens`, inheriting `rollingContextTokens`); past it the cutoff jumps to 70% of the limit, on a unit boundary
+- [x] The latest user message is never forgotten
+- [x] `mark_important` / `forget_important`, offered automatically while a chat rolls; notes shown at the top of the kept history, and a pinned tool result that was forgotten comes back as text
+- [x] A standing system-prompt section against re-verifying finished work
+- [x] Rebuilt mid-turn when a long turn outgrows the limit
+- [x] Per-chat control and the notes list in the compact popover; global default in Settings → Chat
+- [ ] Watched on a long agentic run: does the model mark what it verified, and does it stop re-running the same tests
+
+**Scheduled runs**
+- [x] `scheduled_runs` table: once / every N minutes / daily / weekdays; new chat or append to a chat; optional chat to report on
+- [x] A 20-second scheduler; rescheduled before firing; a run missed while closed fires once
+- [x] Fires through `run_send_entry`, with a hidden note saying it came from a schedule
+- [x] Settings → Schedules: create, edit, enable, run now, delete, last run and last error
+- [x] `schedule` tool group — `schedule_run` dangerous (always asks), defaults to once in this chat; list (safe) and cancel (moderate)
+- [x] API: `/api/schedules`, `/api/schedules/:id`, `/api/schedules/:id/run`
+- [ ] Seen firing from the tray with the window hidden
+- [ ] A notification when a scheduled run finishes, if people want one (a finished turn deliberately does not notify today — see 0.14.3)
+
+---
+
 ## 1.0.0 — Hardening & Public Release
 
 *How each open item below can actually be closed — including the three that a manual pass cannot honestly close at all — is worked through in [TEST_STRATEGY.md](TEST_STRATEGY.md). Summary: build the mock streaming provider first (it turns "no dropped tokens" from an unfalsifiable claim into a diff, and needs no provider, key or network), run `npm run build` and `cargo test --lib` on every change (37 files of Rust tests exist and nothing ran them; this is now a pair of git hooks rather than a CI job), and test the updater against a local two-build loop rather than the release pipeline, where a build is a publish.*

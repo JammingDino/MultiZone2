@@ -107,6 +107,38 @@ The clock icon in the chat header opens **Replay** — the run as it actually ha
 
 From 0.12.3 it carries the conversation too, woven into the same timeline: what you asked, what each zone answered, and every tool call with its **arguments, its output and how long it took**. That is the point — "where did that number come from?" is answerable after the fact and not only while it scrolls past. Each row shows elapsed time from the first event alongside the wall clock; **Play** steps at a fixed cadence for skimming, and the chips filter by kind.
 
+## Running in the background
+
+*0.18.* Closing the window hides it to the **notification-area tray** instead of quitting. Nothing that runs a turn lives in the window, so agents keep streaming, running tools and spawning sub-agents while it is hidden, and scheduled runs keep firing. Click the tray icon to bring the window back; quit from the icon's menu. Launching MultiZone again while it is in the tray shows the running copy rather than starting a second one.
+
+Prefer the close button to quit? **Settings → Chat → Closing the window**.
+
+**Stop means stop, right away.** The stop button releases the composer the moment you press it — including while a local server is still prefilling a long prompt, or a provider has not answered at all. The request is dropped on the app's side (which also tells llama.cpp-style servers to abandon the prefill), and anything you send before the old turn has finished unwinding is queued behind it and delivered, not lost.
+
+## Scheduled runs
+
+*0.18.* A prompt on a clock: once at a given time, every N minutes, every day, or on chosen weekdays. Each firing either **starts a new chat** (an inbox sweep every day at 12:00) or **adds to an existing chat** (a reminder an agent leaves itself). A new-chat run can also **report on another chat** — each firing is handed the latest of that chat's conversation, which is what a half-hourly progress report on a long-running agent needs.
+
+Set them up under **Settings → Schedules**: create, edit, switch off, *Run now*, and see when each last ran and whether it failed. A run fires through the same path as a message you typed, so its zone's tools, approvals and the stop button all behave as usual; the model is told the message came from a schedule and that nobody may be watching.
+
+Agents can schedule runs too, with the **Schedule** tool group (`schedule_run`, `list_scheduled_runs`, `cancel_scheduled_run`). It is classed *dangerous* — a scheduled run is a turn nobody typed — so it is never on by default and every `schedule_run` asks for your approval. From a tool, a run defaults to **once, in this chat**.
+
+Runs fire only while MultiZone is running (in the tray counts). A run that came due while the app was closed fires once at the next start, not once per missed time.
+
+## Keeping long chats small
+
+Three ways to shrink what the model re-reads, none of which change what you see — the whole conversation stays on screen and in the database:
+
+| | Costs | What it does |
+|---|---|---|
+| **Smart compaction** (0.18) | Nothing — no model call | Older tool results are trimmed to their head and tail; a call repeated later with the same arguments keeps only its newest result (the same file read twice); long tool inputs — the whole file a `write` carried — are replaced by their length; inline thinking is stripped from old answers. |
+| **Summary** (0.9.3) | One request the size of the chat | The model writes a summary that stands in for the earlier turns. |
+| **Rolling context** (0.18) | Nothing | Past a token limit, the oldest messages are forgotten — except what the model **marked important**. |
+
+The **compact button** under the composer (the folding-arrows icon) runs either compaction on demand and holds the chat's rolling-context setting. Automatic compaction, which kicks in as a chat nears its model's window, now trims first and only pays for a summary when trimming was not enough. The model can do either itself with `smart_compact` and `compact_context` (the *Condense a long chat* tool group). Tune the trimming under **Settings → Chat → Smart compaction**.
+
+**Rolling context** suits long unattended runs. Set a default under **Settings → Chat → Rolling context** (0 is off) or per chat from the compact button. While a chat is rolling, the model gets `mark_important` and `forget_important`, and its notes are shown at the top of what it can still see, whatever has been forgotten — a note can carry the exact text of a tool result too. Its system prompt is mostly about using that well: record what is decided, found and **verified**, check the notes before exploring or testing, and do not re-verify what a note says is done. That is the loop a forgetting agent otherwise falls into — explore, test, forget, explore again. The latest message you sent is never forgotten; in a long agentic turn, it is the task.
+
 ## Editing a message
 
 Hover any message and hit **Edit**. The editor is the composer you already use: the same box, the same paperclip, the same microphone, with the message's attachments shown as chips above it. Remove one and it is gone from the resent turn; drop another in — or paste a screenshot — and it goes with it. Editing one of your own turns re-runs the conversation from that point; editing an answer just corrects the text in place.

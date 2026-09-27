@@ -252,6 +252,40 @@ so what needs eyes is the rendering and the approval path.
 - [ ] 🔁 The approval prompt's diff matches what actually lands, including for a whitespace-tolerant match (preview and execution now share `resolve_edit` — if these ever disagree, that sharing has been broken)
 - [ ] Review mode: staging, narrowing to some hunks, and applying still work against the shared resolver
 
+## 11e. Unattended runs (0.18.0)
+
+Typechecks, builds and passes `cargo test --lib` (next-run arithmetic, the rolling
+cut, smart-compaction rules); none of it has been seen in the Tauri shell.
+
+**Tray and Stop**
+
+- [ ] The close button hides the window; the tray icon brings it back; the tray menu's Quit quits
+- [ ] A turn started before closing is still streaming, and finished, when the window comes back
+- [ ] Launching the app again while it is in the tray shows the running window — no second window, no second tray icon
+- [ ] With *Close to the tray* off, the close button quits
+- [ ] 🔁 Stop during a long prefill (a local model, a big prompt) releases the composer immediately; a message sent straight after runs once the old turn has let go
+- [ ] Stop while the provider is retrying, and while Smart routing is choosing a zone, both release at once
+- [ ] Something queued *before* pressing Stop is dropped; something sent *after* it is delivered
+
+**Compaction and rolling context**
+
+- [ ] The compact button → *Smart compact* moves the context meter down, with the transcript unchanged on screen
+- [ ] *Summarize* still works from the same popover
+- [ ] After a smart compaction the next turn's request (Replay → a tool call's input) shows trimmed output and hidden inputs for old calls only
+- [ ] Set a chat's rolling context to ~8k and run a long tool-heavy task: old messages drop out, the model calls `mark_important`, and the notes appear in the popover
+- [ ] 🔁 A rolling chat never fails with "tool must follow tool_calls" — the cut never splits a call from its result
+- [ ] The task you sent survives even after everything around it is forgotten
+
+**Scheduled runs**
+
+- [ ] Settings → Schedules: a once-run two minutes out fires, creates a titled chat, and shows *Last ran*
+- [ ] A daily run shows the right *next* time, and editing its time moves it
+- [ ] *Add to an existing chat* while that chat is busy queues the prompt behind the running turn
+- [ ] *Report on a chat* hands the run that chat's latest conversation (ask it what the other chat is doing)
+- [ ] An agent's `schedule_run` asks for approval, then the run appears in Settings → Schedules
+- [ ] Fires with the window hidden in the tray
+- [ ] A run due while the app was closed fires once at the next start
+
 ## 12. Performance
 
 - [ ] Cold start time recorded: ______

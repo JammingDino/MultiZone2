@@ -5,6 +5,77 @@ alone. Newest first. Detail belongs in the linked docs; this is the thread.
 
 ---
 
+## 2026-09-28 (0.18.0) — Runs nobody is watching
+
+Five changes for the run that is left alone. Each landed as its own commit.
+
+**Stop, before the first token.** The cancel flag was read once per stream
+chunk, so a server prefilling a long prompt — minutes on a local model — or a
+provider that never answered held Stop, and the composer, for as long as it
+liked. The request, every chunk wait and the Smart-routing call are now raced
+against the flag (polled every 100 ms; the flag is a plain `AtomicBool` every
+caller already shares). Dropping the request closes the connection, which is
+also how llama.cpp learns to abandon the prefill. The window no longer waits
+for the backend's `cancelled` either: `stopChat` settles the turn locally.
+That opened one hole worth closing: a message sent while the old turn was
+still unwinding was queued behind it and then *dropped*, because a cancelled
+turn discarded its queue. The queue is now dropped at the moment of the stop,
+in `cancel_chat` — shared with the HTTP API, whose cancel only ever flipped the
+flag — so what is left at the end was sent after the stop and is delivered.
+
+**Close to tray.** `CloseRequested` is handled in Rust, so the title bar's X,
+Alt+F4 and the taskbar all agree. It hides only once a tray icon actually
+exists. The single-instance plugin came with it: with the app usually still
+running when someone "reopens" it, a second launch would otherwise be a second
+process on the same database — and, once schedules existed, a second scheduler
+firing every run twice.
+
+**Smart compaction.** Four rules before a `smart_compact_through` cutoff:
+superseded results (same call, same arguments, later) dropped; tool output
+trimmed to head and tail; long argument values replaced by their length; old
+inline thinking stripped. Request-only and deterministic, like the summary
+cutoff, so the prefix cache holds. Auto-compaction now tries it first and only
+writes a summary when trimming did not bring the chat under its window; an
+overflow error retries once trimmed, then once summarized. The meter was the
+awkward part: its conversation estimate is computed in TypeScript from the
+messages it holds, and duplicating the rules there would be a second copy to
+drift. The backend reports `trimmedTokens` instead and the meter subtracts it.
+
+**Rolling context.** A per-chat limit; past it the cutoff jumps to 70% of the
+limit, only ever on a unit boundary, so the provider never sees a result
+without its call and the prefix holds still between moves. The latest user
+message is exempt — in a long agentic turn it is the task. A turn that
+outgrows the limit mid-run is rebuilt at the next step. `mark_important` notes
+are shown at the top of what is kept; a pinned *result* that has been
+forgotten comes back as text, since a bare tool message would be rejected by
+every provider. The standing prompt is mostly the user's point: check your
+notes before exploring or testing, and do not re-verify what a note says is
+done.
+
+**Scheduled runs.** Once, every N minutes, daily, or on weekdays; into a new
+chat or appended to one; optionally handed the tail of another chat, for
+progress reports. A 20-second scheduler reschedules each run *before* firing
+it, so a crash cannot fire it twice, and a run missed while the app was closed
+fires once rather than once per miss. Firing goes through `run_send_entry`,
+so a scheduled turn is an ordinary turn. `schedule_run` is dangerous and
+always asks.
+
+**Verified:** `cargo test --lib` (427, including new tests for the next-run
+arithmetic with a weekday skip, the rolling cut against a real database and
+the smart-compaction rules), `tsc -b`, `npm test`, and the route-map drift
+check.
+
+**Not verified:** any of it in the running app. The tray, the scheduler firing
+with the window hidden, and Stop against a real prefill all need a pass —
+listed in TEST_CHECKLIST §11e.
+
+**Deliberately not done:** a notification when a scheduled run finishes (a
+finished turn does not notify, on purpose — 0.14.3); rolling context for
+multi-model chats, whose transcript is built differently; saved-run templates
+as scheduled prompts.
+
+---
+
 ## 2026-08-17 (0.14.5) — What the agent knows before it starts
 
 Five things an agent should have had before its first step, and until now had

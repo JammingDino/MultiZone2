@@ -42,6 +42,7 @@ Semantic versioning. Each release is tagged `vMAJOR.MINOR.PATCH`.
 | **1.0.0** | Hardening & Public Release | Planned |
 | **1.2.x** | Signed-in connectors — OAuth, keychain, per-scope consent | Planned |
 | **Post-1.0** | Code interface + edit engine, study mode, shared mode surface, moddable app surface, Diffusion LLM | Backlog |
+| **0.18.x** | Runs nobody is watching — close to tray, scheduled runs, smart compaction, rolling context, a Stop that works before the first token | Built — runtime testing open |
 | **0.17.x** | The phone as a second window: LAN bind, pairing, device registry, the remote transport, the Android shell. 0.17.5 closed what a week of real use found — a response envelope that was erasing settings, Android's back button, and desktop-side audio conversion for dictation | Built |
 
 ---
@@ -185,6 +186,14 @@ The remainder of the comparison: cross-chat search, a command palette, fork scop
 `render_graph` draws diagrams and plots functions. It cannot draw *data* — the case where a model has numbers and wants to show them — so models fall back to Mermaid approximations or hand-written SVG, and the app looks thinner in chat than tools with a fraction of its capability. A charting renderer takes a data spec rather than a diagram source, themed from the active app theme so it reads correctly in light and dark and never distinguishes series by colour alone. Tables the model has already produced offer to become charts, because the common case is that the numbers exist and only the presentation is missing. Charts survive export rather than degrading to a placeholder.
 
 **Done when:** a model that has numbers can show them, in any of the ordinary chart types, without writing markup by hand — and the result is still there in the exported PDF.
+
+---
+
+### 0.18.x — Runs nobody is watching
+
+Everything up to here assumed someone was at the window. Closing it ended the run; nothing could start a run on its own; a long run either overflowed its model or paid that model to summarize itself; and Stop did nothing until the model had spoken. This release is for the run that is left alone: the window hides to the tray and the agents carry on, prompts can be put on a clock (an inbox sweep at noon, a progress report on another agent every half hour), context is shrunk by rule before anyone pays for a summary, and a chat can roll — forgetting its oldest part but never what the model marked important, with a prompt that tells it not to re-verify what it already recorded as done.
+
+**Done when:** a run started before closing the window is finished when it is reopened; a scheduled run fires with the window hidden; a long agentic chat stays inside its model's window without a summary request; and Stop releases the composer immediately against a server that is still prefilling.
 
 ---
 

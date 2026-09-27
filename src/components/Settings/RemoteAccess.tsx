@@ -30,6 +30,7 @@ import { useApp } from "@/store/app";
 import { Toggle, ToggleRow } from "@/components/common/Toggle";
 import type { PairedDevice, PairingView, RemoteStatus } from "@/lib/types";
 import { ErrorNote } from "@/components/common/ErrorNote";
+import { reportError } from "@/lib/reportError";
 
 /** How the applying half of the API tab hands control down. */
 export interface RemoteAccessProps {
@@ -628,7 +629,10 @@ export function CopyableAddress({ value }: { value: string }) {
           await navigator.clipboard.writeText(value);
           setCopied(true);
           setTimeout(() => setCopied(false), 1500);
-        } catch {}
+        } catch (e) {
+          // A copy that silently failed leaves the old clipboard to be pasted.
+          reportError("Couldn't copy to the clipboard")(e);
+        }
       }}
       className="flex items-center gap-1.5 font-mono text-xs text-[var(--color-text-muted)] hover:text-[var(--color-accent)]"
     >

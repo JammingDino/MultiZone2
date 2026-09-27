@@ -3817,7 +3817,10 @@ function ApiTab() {
       await navigator.clipboard.writeText(appSettings.apiToken);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    } catch {}
+    } catch (e) {
+      // A copy that silently failed leaves the old clipboard to be pasted.
+      reportError("Couldn't copy to the clipboard")(e);
+    }
   }
 
   const curlExample = `curl -N -X POST ${baseUrl}/api/chats/CHAT_ID/messages \\\n  -H "Authorization: Bearer ${appSettings.apiToken || "YOUR_TOKEN"}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"text":"Hello"}'`;

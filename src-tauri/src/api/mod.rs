@@ -254,6 +254,7 @@ fn build_router(state: ApiState) -> Router {
         .route("/api/chats/:id/events", get(h::list_session_events))
         .route("/api/chats/:id/title", post(h::rename_chat))
         .route("/api/chats/:id/generate-title", post(h::generate_title))
+        .route("/api/chats/:id/compact", post(h::compact_chat))
         .route("/api/chats/:id/project", post(h::set_chat_project))
         .route("/api/chats/:id/project-context", post(h::set_chat_project_context))
         .route("/api/chats/:id/knowledge", post(h::set_chat_knowledge))

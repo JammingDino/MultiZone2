@@ -703,6 +703,12 @@ export interface AgentUsage {
   overheadParts: OverheadPart[];
   /** The tool schemas by the group that put them there, largest first. */
   toolParts: OverheadPart[];
+  /**
+   * What smart compaction and rolling context take out of the next request
+   * (0.18). Already subtracted from `totalTokens`; the meter subtracts it from
+   * its live estimate of the conversation.
+   */
+  trimmedTokens: number;
   /** The model this chat's turns go to, when its zone resolves. */
   model: string | null;
   /** How much that model can carry, when anything knows (0.17.9). */
@@ -912,6 +918,20 @@ export interface AppSettings {
    * unattended. Checked at step boundaries, never mid-call.
    */
   maxSessionTokens: number;
+  /**
+   * Smart compaction's rules (0.18) — see `tools/smart_compact.rs`. Applied
+   * to messages before a chat's smart-compaction cutoff.
+   */
+  smartCompact: {
+    /** A compacted tool result keeps this many characters, head and tail. */
+    outputChars: number;
+    /** A tool-call argument longer than this is replaced by its length. */
+    inputChars: number;
+    /** Drop results of calls repeated later with the same arguments. */
+    dedupe: boolean;
+    /** Strip inline thinking from old answers. */
+    stripThinking: boolean;
+  };
   /**
    * How PDF files are processed when attached in the input bar.
    * "images" — render each page to a JPEG and send visually (default)
@@ -1247,6 +1267,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   closeToTray: true,
   maxToolSteps: 30,
   maxSessionTokens: 0,
+  smartCompact: { outputChars: 1500, inputChars: 300, dedupe: true, stripThinking: true },
   pdfMode: "images",
   pdfExportDetail: "steps",
   pdfExportTheme: "app",
@@ -1659,7 +1680,7 @@ export const ALL_TOOLS: ToolInfo[] = [
   // Knowledge
   { id: "skills",       label: "Skills",              category: "Knowledge", safety: 0, description: "Load a set of instructions from your Skills catalog when a task calls for it, including the reference files of installed multi-file skills — and write a new skill when the assistant works out a procedure worth keeping (saved disabled for your review)." },
   { id: "memory",       label: "Remember things",     category: "Knowledge", safety: 0, description: "Save, read, and delete facts that persist across turns — scoped to this chat, this project, or everywhere." },
-  { id: "compact",      label: "Condense a long chat", category: "Knowledge", safety: 1, description: "When a conversation grows long, let the assistant summarize the earlier turns so it keeps its thread instead of quietly losing the oldest messages. You still see the whole conversation — only what the model re-reads is condensed." },
+  { id: "compact",      label: "Condense a long chat", category: "Knowledge", safety: 1, description: "When a conversation grows long, let the assistant shrink what it re-reads: smart compaction trims its old tool output for free, or it can summarize the earlier turns. You still see the whole conversation — only what the model re-reads is condensed." },
   { id: "context_usage", label: "Read its own context meter", category: "Knowledge", safety: 0, description: "Let the assistant read the same figures the workspace panel's Context section shows — what the next request is made of, every tool schema's size, what the chat has spent and how full the model's window is — so it can answer why a conversation is expensive and what to do about it." },
 
   // Agents

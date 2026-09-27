@@ -37,7 +37,7 @@ const PER_MESSAGE_TOKENS: i64 = 4;
 /// URL is megabytes of base64 that the model never reads as text — counting
 /// those characters would swamp everything else. Matches `IMAGE_TOKEN_ESTIMATE`
 /// in the frontend.
-const IMAGE_TOKENS: i64 = 1000;
+pub const IMAGE_TOKENS: i64 = 1000;
 
 /// Believable bounds for a learned chars-per-token ratio. A model that reports
 /// nonsense (or a single freak sample) must not be able to drag the estimate

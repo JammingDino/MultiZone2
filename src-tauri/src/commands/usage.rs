@@ -97,6 +97,10 @@ pub struct AgentUsage {
     /// The tool schemas by the group that put them there, largest first — the
     /// unit the zone editor can switch off (0.18.1).
     pub tool_parts: Vec<OverheadPart>,
+    /// What smart compaction and rolling context take out of the next request
+    /// (0.18) — already subtracted from `total_tokens`, reported so the meter
+    /// can subtract it from its own live estimate of the conversation.
+    pub trimmed_tokens: i64,
     /// Everything: conversation plus baseline.
     pub total_tokens: i64,
     /// What the chat has actually spent, measured on the requests themselves
@@ -486,6 +490,7 @@ pub async fn session_usage(db: &SqlitePool, chat_id: &str) -> AppResult<SessionU
             }
         }
 
+        let trimmed_tokens = crate::commands::messages::trimmed_tokens(db, &id).await;
         agents.push(AgentUsage {
             chat_id: id.clone(),
             title: title.clone(),
@@ -502,7 +507,8 @@ pub async fn session_usage(db: &SqlitePool, chat_id: &str) -> AppResult<SessionU
             overhead_tokens,
             overhead_parts,
             tool_parts,
-            total_tokens: input + output + overhead_tokens,
+            trimmed_tokens,
+            total_tokens: (input + output - trimmed_tokens).max(0) + overhead_tokens,
             spent,
             model: None,
             context_window: None,

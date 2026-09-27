@@ -52,7 +52,7 @@ const fn open(method: &'static str, path: &'static str, description: &'static st
 
 /// Bumped whenever a route is added, removed or changes shape, so a caller can
 /// tell "the app is older than my script" from "my script is wrong".
-pub const ROUTE_SET_VERSION: u32 = 10;
+pub const ROUTE_SET_VERSION: u32 = 11;
 
 pub const ROUTES: &[RouteDef] = &[
     // Discovery — deliberately unauthenticated. A caller debugging a broken
@@ -113,6 +113,7 @@ pub const ROUTES: &[RouteDef] = &[
     r("GET", "/api/chats/:id/events", "The session event log — every tool call, approval, error and plan decision in order (?limit=N for the tail)"),
     r("POST", "/api/chats/:id/title", "Rename a chat"),
     r("POST", "/api/chats/:id/generate-title", "Have the model title the chat"),
+    r("POST", "/api/chats/:id/compact", "Compact the chat's context ({method}: \"smart\" trims old tool output for free, \"summary\" has the model summarize)"),
     r("POST", "/api/chats/:id/project", "Move the chat into a project (or out of one)"),
     r("POST", "/api/chats/:id/project-context", "Toggle project context injection"),
     r("POST", "/api/chats/:id/knowledge", "Toggle the knowledge tool for this chat"),
@@ -312,6 +313,7 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("chats::get_messages", Route("GET /api/chats/:id/messages")),
     ("chats::rename_chat", Route("POST /api/chats/:id/title")),
     ("chats::generate_title", Route("POST /api/chats/:id/generate-title -> title")),
+    ("chats::compact_chat", Route("POST /api/chats/:id/compact")),
     ("chats::set_chat_zone", Route("POST /api/chats/:id/zone")),
     ("chats::set_chat_smart", Route("POST /api/chats/:id/smart")),
     ("messages::set_chat_spend_limit", Route("POST /api/chats/:id/spend-limit")),
@@ -673,6 +675,16 @@ pub async fn generate_title(
     )
     .await?;
     Ok(Json(json!({ "title": title })).into_response())
+}
+
+pub async fn compact_chat(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> ApiResult<Response> {
+    let method = s(&body, "method").unwrap_or_else(|| "smart".into());
+    let report = commands::chats::compact_chat(st.app.clone(), app_state(&st), id, method).await?;
+    Ok(Json(report).into_response())
 }
 
 // ── Plan mode (0.12.0) ───────────────────────────────────────────────────────

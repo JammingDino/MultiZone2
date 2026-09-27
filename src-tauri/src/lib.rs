@@ -332,6 +332,7 @@ pub fn run() {
             commands::chats::delete_participant_messages,
             commands::chats::get_messages,
             commands::chats::generate_title,
+            commands::chats::compact_chat,
             commands::diagram::fix_diagram,
             commands::projects::list_projects,
             commands::projects::upsert_project,

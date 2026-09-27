@@ -21,6 +21,7 @@ pub mod plan_mode;
 pub mod http;
 pub mod citations;
 pub mod compact;
+pub mod smart_compact;
 pub mod context_usage;
 pub mod wsl;
 pub mod terminal;
@@ -275,7 +276,7 @@ impl ToolId {
             Self::FileSearch => filesystem::search_definitions(ctx.project_dir.as_deref()),
             Self::Plan => vec![plan::definition()],
             Self::HttpRequest => vec![http::definition()],
-            Self::Compact => vec![compact::definition()],
+            Self::Compact => vec![compact::definition(), smart_compact::definition()],
             Self::ContextUsage => vec![context_usage::definition()],
             Self::Teamwork => teamwork::definitions(),
             Self::Terminal => terminal::definitions(),
@@ -409,6 +410,9 @@ pub fn tool_safety_by_name(name: &str) -> u8 {
         | "create_skill"
         // The context meter is a read of the app's own accounting.
         | "read_context"
+        // Smart compaction costs nothing and hides nothing from the user; it
+        // only trims what the model re-reads of its own old tool traffic.
+        | "smart_compact"
         // `search_knowledge` is the pre-0.9.0 name for `search_local_files`;
         // stored tool-call history still carries it.
         | "search_local_files" | "search_knowledge" => 0,
@@ -646,6 +650,11 @@ async fn dispatch_inner(
             sink.notify_chats_changed();
             out
         }
+        "smart_compact" => {
+            let out = smart_compact::run(args, db, chat_id).await;
+            sink.notify_chats_changed();
+            out
+        }
         "read_context" => context_usage::run(args, db, chat_id, http).await,
         "spawn_subagent" => subchat::spawn(args, ctx, sink, caller_zone_id, chat_id).await,
         "send_subchat_message" => subchat::send(args, ctx, sink).await,
@@ -761,7 +770,9 @@ mod tests {
         // description spends its bytes on when to call it and on which of the
         // figures are estimates, because a model that reads an estimate as the
         // provider's word draws the wrong conclusion from it. Same slack.
-        const BUDGET_BYTES: usize = 43_300;
+        // 0.18 adds `smart_compact` beside `compact_context`: one function, one
+        // optional argument, 750 bytes.
+        const BUDGET_BYTES: usize = 44_100;
 
         let ctx = ToolContext {
             project_dir: Some(r"C:\Users\me\project".to_string()),

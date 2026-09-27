@@ -33,6 +33,7 @@ export const ROUTE_MAP: Record<string, RouteBinding> = {
   clear_global_knowledge: { method: "DELETE", path: "/api/knowledge" },
   clear_project_knowledge: { method: "DELETE", path: "/api/projects/:id/knowledge" },
   close_pairing: { method: "DELETE", path: "/api/pairing" },
+  compact_chat: { method: "POST", path: "/api/chats/:id/compact" },
   connect_mcp_server: { method: "POST", path: "/api/mcp/servers/:id/connect" },
   create_chat: { method: "POST", path: "/api/chats" },
   delete_chat: { method: "DELETE", path: "/api/chats/:id" },

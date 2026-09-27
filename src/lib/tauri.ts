@@ -505,6 +505,10 @@ export const regenerateParticipant = (chatId: string, zoneId: string | null) =>
 /** Delete one participant's latest-round messages (null = primary, otherwise a perspective zone). */
 export const deleteParticipantMessages = (chatId: string, zoneId: string | null) =>
   invoke<void>("delete_participant_messages", { chatId, zoneId });
+/** Compact a chat's context (0.18): `smart` is free, `summary` is a model call. */
+export const compactChat = (chatId: string, method: "smart" | "summary") =>
+  invoke<{ method: string; messages: number }>("compact_chat", { chatId, method });
+
 export const cancelStream = (chatId: string) =>
   invoke<void>("cancel_stream", { chatId });
 /**

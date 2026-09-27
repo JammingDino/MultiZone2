@@ -76,11 +76,14 @@ export function useContextUsage(chatId: string, live: boolean) {
     if (!streaming && !live) return () => { cancelled = true; };
     const id = setInterval(load, REFRESH_MS);
     return () => { cancelled = true; clearInterval(id); };
-  }, [chatId, streaming, live]);
+    // `chat` so a compaction (which re-pulls the chat list) re-reads the
+    // backend's trimmed figure straight away.
+  }, [chatId, streaming, live, chat]);
 
   const current: AgentUsage | null = usage?.agents.find((a) => a.isCurrent) ?? null;
   const baseline = current?.overheadTokens ?? 0;
-  const chatTotal = est.totalTokens + baseline;
+  const trimmed = current?.trimmedTokens ?? 0;
+  const chatTotal = Math.max(0, est.totalTokens - trimmed) + baseline;
 
   // Spend, shown whenever anything has been sent — team or not. A single chat
   // that ran a forty-step turn is exactly the case where the context reading and
@@ -106,7 +109,7 @@ export function useContextUsage(chatId: string, live: boolean) {
   // current. Swapping one for the other keeps the session total consistent with
   // the per-chat number shown right above it.
   const sessionTotal = showTeam && usage
-    ? usage.totalTokens - (current?.messageTokens ?? 0) + est.totalTokens
+    ? usage.totalTokens - Math.max(0, (current?.messageTokens ?? 0) - trimmed) + Math.max(0, est.totalTokens - trimmed)
     : null;
 
   // The spend chip tracks whichever scope the context chip beside it is showing,
@@ -143,6 +146,7 @@ export function useContextUsage(chatId: string, live: boolean) {
 
   return {
     est,
+    trimmed,
     usage,
     current,
     baseline,

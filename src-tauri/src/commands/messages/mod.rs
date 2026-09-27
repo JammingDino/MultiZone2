@@ -1625,6 +1625,18 @@ fn push_system_note(api_messages: &mut Vec<ChatMessage>, text: String) {
     });
 }
 
+/// Every cutoff that changes what the history builder sends, as one value to
+/// compare between steps.
+async fn compaction_epoch(db: &SqlitePool, chat_id: &str) -> (Option<i64>, Option<i64>) {
+    sqlx::query_as("SELECT context_summary_through, smart_compact_through FROM chats WHERE id = ?1")
+        .bind(chat_id)
+        .fetch_optional(db)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or((None, None))
+}
+
 /// The chat that spawned this one, when it is a sub-agent's subchat rather than
 /// a branch. Branches share the `parent_chat_id` link and have no owning zone,
 /// which is what `initiated_by_zone_id` distinguishes.
@@ -1879,6 +1891,12 @@ async fn run_participant_turn(
     // Overflow recovery (0.18): a provider refusing the request as too long is
     // compacted and retried once per turn, whatever the configured window says.
     let mut compacted_for_overflow = false;
+    let mut trimmed_for_overflow = false;
+    // What the history was built against. A compaction mid-turn — the model's
+    // own tool call, or the user's button while the turn runs — moves one of
+    // these, and the next step rebuilds from the database so it takes effect
+    // now rather than next turn (0.18).
+    let mut context_epoch = compaction_epoch(&ctx.db, chat_id).await;
     // Citation numbering for this turn. Every citing tool numbers its own
     // results from 1, so without a shared counter a search and a `read` in
     // the same turn would both tell the model to write `[1]`. See
@@ -1909,6 +1927,14 @@ async fn run_participant_turn(
         if cancel.load(Ordering::Relaxed) {
             sink.emit_for(chat_id, persp, StreamPayload::Cancelled);
             return Ok(());
+        }
+
+        if persp.is_none() && step > 0 {
+            let epoch = compaction_epoch(&ctx.db, chat_id).await;
+            if epoch != context_epoch {
+                context_epoch = epoch;
+                api_messages = build_message_history(&ctx.db, chat_id, &zone, false).await?;
+            }
         }
 
         // Only the primary reads the user's mid-turn notes. A perspective zone
@@ -2094,6 +2120,36 @@ async fn run_participant_turn(
         let response = match sent {
             Ok(res) => res,
             Err(e)
+                if !trimmed_for_overflow
+                    && persp.is_none()
+                    && crate::tools::compact::is_context_overflow(&e.to_string()) =>
+            {
+                // Overflow, first time this turn: try the free rewrite before
+                // paying for a summary (0.18). If that was not enough, the retry
+                // overflows again and lands in the arm below.
+                trimmed_for_overflow = true;
+                let keep = crate::tools::smart_compact::DEFAULT_KEEP_RECENT;
+                match crate::tools::smart_compact::compact(&ctx.db, chat_id, keep).await {
+                    Ok(Some(n)) => {
+                        crate::events::record(
+                            &ctx.db,
+                            chat_id,
+                            Some(&turn_id),
+                            persp,
+                            "compacted",
+                            format!("The model's context window overflowed; trimmed old tool output across {n} messages and retried"),
+                            None,
+                        )
+                        .await;
+                        sink.notify_chats_changed();
+                        api_messages = build_message_history(&ctx.db, chat_id, &zone, false).await?;
+                        context_epoch = compaction_epoch(&ctx.db, chat_id).await;
+                        continue;
+                    }
+                    _ => return Err(e),
+                }
+            }
+            Err(e)
                 if !compacted_for_overflow
                     && persp.is_none()
                     && crate::tools::compact::is_context_overflow(&e.to_string()) =>
@@ -2119,6 +2175,7 @@ async fn run_participant_turn(
                         .await;
                         sink.notify_chats_changed();
                         api_messages = build_message_history(&ctx.db, chat_id, &zone, false).await?;
+                        context_epoch = compaction_epoch(&ctx.db, chat_id).await;
                         continue;
                     }
                     Ok(None) => return Err(e),
@@ -3175,16 +3232,29 @@ async fn run_participant_turn(
     if !cancelled_turn && persp.is_none() && !is_multi_model(&ctx.db, chat_id).await {
         let window = crate::tools::compact::context_window_tokens(&ctx.http, &provider, &zone.model).await;
         if crate::tools::compact::should_compact(last_context_tokens, window) {
-            match crate::tools::compact::auto_compact(&ctx.db, &ctx.http, chat_id, &zone, &provider).await {
-                Ok(Some(n)) => {
+            use crate::tools::compact::Condensed;
+            match crate::tools::compact::condense(
+                &ctx.db, &ctx.http, chat_id, &zone, &provider, last_context_tokens, window,
+            )
+            .await
+            {
+                Ok(Some(how)) => {
+                    let text = match how {
+                        Condensed::Trimmed(n) => format!(
+                            "Trimmed old tool output across {n} messages to stay inside the context window (no model call)"
+                        ),
+                        Condensed::Summarized(n) => format!(
+                            "Condensed {n} earlier messages to stay inside the context window"
+                        ),
+                    };
                     crate::events::record(
                         &ctx.db,
                         chat_id,
                         Some(&turn_id),
                         None,
                         "compacted",
-                        format!("Condensed {n} earlier messages to stay inside the context window"),
-                        Some(serde_json::json!({ "messages": n, "contextTokens": last_context_tokens, "window": window })),
+                        text,
+                        Some(serde_json::json!({ "contextTokens": last_context_tokens, "window": window })),
                     )
                     .await;
                     sink.notify_chats_changed();

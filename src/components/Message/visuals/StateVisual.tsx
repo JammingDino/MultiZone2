@@ -173,6 +173,17 @@ export function ChangeVisual({
     );
   }
 
+  if (name === "smart_compact") {
+    const compacted = result.messages_compacted;
+    return (
+      <Line icon={Layers}>
+        {typeof compacted === "number"
+          ? `Trimmed old tool output across ${compacted} messages`
+          : str(result.note) || "Nothing to compact yet"}
+      </Line>
+    );
+  }
+
   if (name === "read_context") {
     return <ContextReadout result={result} />;
   }

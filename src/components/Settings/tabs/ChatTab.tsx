@@ -102,6 +102,63 @@ export function ChatTab() {
       </section>
 
       <section>
+        <h3 className="mb-1 text-sm font-medium">Smart compaction</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          Shrinks what the model re-reads of a long chat by rule, with no model call: old tool
+          output is trimmed to its head and tail, long tool inputs are hidden, and results of calls
+          repeated later are dropped. Runs from the compact button under the composer, when the
+          model calls <code>smart_compact</code>, and automatically before a chat outgrows its
+          model's window — a summary is only written if trimming was not enough.
+        </p>
+        <div className="mb-2 flex flex-wrap items-center gap-3 text-xs text-[var(--color-text-muted)]">
+          <label className="flex items-center gap-2">
+            Keep
+            <input
+              type="number"
+              min={100}
+              step={100}
+              value={appSettings.smartCompact.outputChars}
+              onChange={(e) => {
+                const n = Math.round(Number(e.target.value));
+                if (Number.isFinite(n)) setAppSettings({ smartCompact: { ...appSettings.smartCompact, outputChars: Math.max(100, n) } });
+              }}
+              className="w-24 rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1.5 text-sm text-[var(--color-text)]"
+            />
+            characters of each old tool result
+          </label>
+          <label className="flex items-center gap-2">
+            Hide tool inputs over
+            <input
+              type="number"
+              min={100}
+              step={50}
+              value={appSettings.smartCompact.inputChars}
+              onChange={(e) => {
+                const n = Math.round(Number(e.target.value));
+                if (Number.isFinite(n)) setAppSettings({ smartCompact: { ...appSettings.smartCompact, inputChars: Math.max(100, n) } });
+              }}
+              className="w-20 rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1.5 text-sm text-[var(--color-text)]"
+            />
+            characters
+          </label>
+        </div>
+        <div className="flex flex-col gap-2">
+          <ToggleRow
+            label="Drop results of repeated calls"
+            description="The same file read twice keeps only the newer read."
+            checked={appSettings.smartCompact.dedupe}
+            onChange={(v) => setAppSettings({ smartCompact: { ...appSettings.smartCompact, dedupe: v } })}
+          />
+          <ToggleRow
+            label="Strip old thinking"
+            description="Inline reasoning from compacted answers is left out, whatever the zone's setting."
+            checked={appSettings.smartCompact.stripThinking}
+            onChange={(v) => setAppSettings({ smartCompact: { ...appSettings.smartCompact, stripThinking: v } })}
+          />
+        </div>
+      </section>
+
+      <section>
         <h3 className="mb-1 text-sm font-medium">Session token limit</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
           A ceiling on what one session — a chat and every sub-agent under it — may spend before the

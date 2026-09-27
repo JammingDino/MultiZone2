@@ -1678,3 +1678,57 @@ mod fork_tests {
         assert_eq!(grandkids, 1, "the branch of the branch re-linked onto the new middle chat");
     }
 }
+
+/// What a manual compaction did.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompactReport {
+    pub method: String,
+    /// Messages now at or before the cutoff; 0 when there was nothing to do.
+    pub messages: i64,
+}
+
+/// Compact a chat's context on the user's say-so (0.18), from the button under
+/// the composer. `smart` is the free rule-based rewrite; `summary` asks the
+/// chat's model to write one, which is a full-context request.
+#[tauri::command]
+pub async fn compact_chat(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    chat_id: String,
+    method: String,
+) -> AppResult<CompactReport> {
+    let (n, text) = match method.as_str() {
+        "smart" => {
+            let keep = crate::tools::smart_compact::DEFAULT_KEEP_RECENT;
+            let n = crate::tools::smart_compact::compact(&state.db, &chat_id, keep).await?;
+            (n, "You trimmed old tool output (smart compaction)")
+        }
+        "summary" => {
+            let (zone, provider) =
+                crate::commands::messages::effective_zone_and_provider(&state.db, &chat_id).await?;
+            let n = crate::tools::compact::auto_compact(&state.db, &state.http, &chat_id, &zone, &provider)
+                .await?;
+            (n, "You had the model summarize the earlier conversation")
+        }
+        other => {
+            return Err(crate::error::AppError::Invalid(format!(
+                "unknown compaction method '{other}' (expected smart or summary)"
+            )))
+        }
+    };
+    if let Some(count) = n {
+        crate::events::record(
+            &state.db,
+            &chat_id,
+            None,
+            None,
+            "compacted",
+            format!("{text} across {count} messages"),
+            Some(serde_json::json!({ "method": method, "messages": count })),
+        )
+        .await;
+    }
+    let _ = app.emit("chats-changed", serde_json::json!({}));
+    Ok(CompactReport { method, messages: n.unwrap_or(0) })
+}

@@ -495,6 +495,13 @@ pub async fn turn_overhead(db: &SqlitePool, chat_id: &str) -> AppResult<TurnOver
     })
 }
 
+/// Tokens the request-time rewrites (smart compaction, rolling context) take
+/// out of what the stored messages add up to — the meter's correction (0.18).
+pub(crate) async fn trimmed_tokens(db: &SqlitePool, chat_id: &str) -> i64 {
+    crate::tools::smart_compact::saved_tokens(db, chat_id, crate::llm::tokens::DEFAULT_CHARS_PER_TOKEN)
+        .await
+}
+
 pub(crate) async fn build_message_history(
     db: &SqlitePool,
     chat_id: &str,
@@ -561,6 +568,12 @@ pub(crate) async fn build_message_history(
                 name: None,
             });
         }
+    }
+
+    // Smart compaction (0.18): old tool traffic trimmed by rule, not by a model.
+    if let Some(through) = crate::tools::smart_compact::cutoff(db, chat_id).await {
+        let opts = crate::tools::smart_compact::options(db).await;
+        crate::tools::smart_compact::apply(&mut rows, through, &opts);
     }
 
     // A tool result whose call is no longer in the history is fatal, not

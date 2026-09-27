@@ -224,6 +224,38 @@ pub fn is_context_overflow(error: &str) -> bool {
     .any(|p| e.contains(p))
 }
 
+/// How a chat was brought back under its window.
+pub enum Condensed {
+    /// Smart compaction was enough — no model call (0.18).
+    Trimmed(i64),
+    /// A model-written summary now stands in for this many messages.
+    Summarized(i64),
+}
+
+/// Harness-driven condensing after a turn (0.18): the free rewrite first, and
+/// a summary — a full-context request — only when trimming was not enough.
+/// `None` when neither changed anything.
+pub async fn condense(
+    db: &SqlitePool,
+    http: &reqwest::Client,
+    chat_id: &str,
+    zone: &crate::db::models::Zone,
+    provider: &crate::db::models::Provider,
+    context_tokens: i64,
+    window: Option<i64>,
+) -> AppResult<Option<Condensed>> {
+    use crate::tools::smart_compact as smart;
+    let cpt = crate::llm::tokens::chars_per_token(db, &zone.model).await;
+    let before = smart::saved_tokens(db, chat_id, cpt).await;
+    if let Some(n) = smart::compact(db, chat_id, smart::DEFAULT_KEEP_RECENT).await? {
+        let freed = smart::saved_tokens(db, chat_id, cpt).await - before;
+        if !should_compact(context_tokens - freed, window) {
+            return Ok(Some(Condensed::Trimmed(n)));
+        }
+    }
+    Ok(auto_compact(db, http, chat_id, zone, provider).await?.map(Condensed::Summarized))
+}
+
 /// The summarisation instruction. pi's template: structured, and explicit that
 /// exact names, paths and error text must survive.
 const SUMMARY_INSTRUCTION: &str = "The conversation above is being condensed so it fits in your \

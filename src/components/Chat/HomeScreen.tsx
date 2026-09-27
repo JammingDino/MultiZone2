@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Send, ChevronDown, Zap, Check, Layers, Settings as SettingsIcon, Loader2, Brain, Paperclip, Tag, X, SplitSquareHorizontal, Crown, Users, Upload, ScanText, Folder } from "lucide-react";
 import { useApp } from "@/store/app";
+import { reportError } from "@/lib/reportError";
 import * as api from "@/lib/tauri";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import { CHROME_ACTIVE, CHROME_OUTLINED, CHROME_QUIET, PRIMARY_ACTION } from "@/lib/chrome";
@@ -146,6 +147,7 @@ export function HomeScreen() {
   const newChatTimestamp = useApp((s) => s.newChatTimestamp);
   const homeScreenDraft = useApp((s) => s.homeScreenDraft);
   const setHomeScreenDraft = useApp((s) => s.setHomeScreenDraft);
+  const setComposerDraft = useApp((s) => s.setComposerDraft);
   const homeScreenAttachments = useApp((s) => s.homeScreenAttachments);
   const setHomeScreenAttachments = useApp((s) => s.setHomeScreenAttachments);
 
@@ -405,7 +407,7 @@ export function HomeScreen() {
       if (currentLeaderSelected) {
         const ids = [...currentSubagentIds].filter((id) => id !== zoneId);
         if (ids.length > 0) {
-          await api.setChatSubagents(chat.id, ids).catch(console.error);
+          await api.setChatSubagents(chat.id, ids).catch(reportError("Couldn't give the leader its sub-agents"));
         }
       } else {
         // Add perspective zones BEFORE sending so the first turn already runs
@@ -416,13 +418,13 @@ export function HomeScreen() {
           try {
             await api.addPerspectiveZone(chat.id, zid);
           } catch (e) {
-            console.error(e);
+            reportError("Couldn't add a perspective zone")(e);
           }
         }
       }
       // Assign selected tags (fire-and-forget; non-critical).
       for (const tagId of currentTagIds) {
-        addChatTag(chat.id, tagId).catch(console.error);
+        addChatTag(chat.id, tagId).catch(reportError("Couldn't tag the chat"));
       }
       await refreshChats();
       await setActiveChat(chat.id);
@@ -435,9 +437,16 @@ export function HomeScreen() {
       setHomeScreenDraft("");
       setHomeScreenAttachments([]);
       tray.clear();
-      api.sendMessage(chat.id, parts).catch(console.error);
+      // The home screen is gone by the time this settles. A failed turn shows
+      // its reason in the new chat's error card; the text goes into that chat's
+      // composer so it can be sent again, rather than vanishing with the page.
+      const sentText = currentText;
+      api.sendMessage(chat.id, parts).catch((e) => {
+        console.error("first message failed:", e);
+        if (sentText.trim()) setComposerDraft(sentText, "append");
+      });
     } catch (e) {
-      console.error("failed to start chat:", e);
+      reportError("Couldn't start the chat")(e);
       setSending(false);
     }
   }

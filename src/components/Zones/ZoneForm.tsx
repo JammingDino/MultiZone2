@@ -15,6 +15,8 @@ import { ALL_TOOLS, TOOL_CATEGORIES, mcpToolEnableId } from "@/lib/types";
 import { useApp } from "@/store/app";
 import { DEFAULT_ZONES } from "@/lib/defaultZones";
 import { EMPTY_APPROVALS, parseApprovals, serializeApprovals } from "@/lib/approvals";
+import { ErrorNote } from "@/components/common/ErrorNote";
+import { reportError } from "@/lib/reportError";
 
 /** Zone override categories, short labels — the long descriptions live in
  * Settings, where the global policy is set and explained. */
@@ -386,7 +388,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
   const [usage, setUsage] = useState<ToolUsage[]>([]);
 
   useEffect(() => {
-    api.listToolFunctions().then(setToolFns).catch(console.error);
+    api.listToolFunctions().then(setToolFns).catch(reportError("Couldn't list the tools"));
   }, []);
 
   useEffect(() => {
@@ -435,6 +437,8 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
   const [models, setModels] = useState<string[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Why the last autosave failed, until one succeeds. Shown where "Saving…" is.
+  const [saveError, setSaveError] = useState<unknown>(null);
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
   const templateBtnRef = useRef<HTMLButtonElement>(null);
   /** Which tool groups are expanded. Missing key = collapsed. */
@@ -651,8 +655,10 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
       try {
         await api.upsertZone(buildPayload());
         await refreshZones();
+        setSaveError(null);
       } catch (e) {
         console.error("zone autosave failed", e);
+        setSaveError(e);
       } finally {
         setSaving(false);
       }
@@ -1418,11 +1424,13 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
       </div>
 
       <div className="flex items-center justify-end gap-2 border-t border-[var(--color-border)] px-4 py-3">
-        {zone && (
+        {zone && (saveError ? (
+          <ErrorNote error={saveError} context="Not saved" className="mr-auto text-[11px] text-[var(--color-danger)]" />
+        ) : (
           <span className="mr-auto text-[11px] text-[var(--color-text-muted)]">
             {saving ? "Saving…" : "Changes save as you make them"}
           </span>
-        )}
+        ))}
         {zone && (
           <button
             onClick={handleDelete}

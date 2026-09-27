@@ -32,6 +32,7 @@ import {
 } from "@/components/Chat/Attachments";
 import { useDictation, MicButton, DictationMeter } from "@/components/Chat/useDictation";
 import { CHROME_QUIET, PRIMARY_ACTION } from "@/lib/chrome";
+import { reportError } from "@/lib/reportError";
 
 export function EditComposer({
   initialText,
@@ -100,7 +101,7 @@ export function EditComposer({
     try {
       await onSave(next, tray.pending);
     } catch (e) {
-      console.error(e);
+      reportError("Couldn't save the edit")(e);
       setSaving(false);
     }
   }

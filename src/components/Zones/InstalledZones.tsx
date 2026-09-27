@@ -6,6 +6,7 @@ import * as api from "@/lib/tauri";
 import type { Zone } from "@/lib/types";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import { exportZoneJson, zoneTeamName } from "@/lib/zoneLibrary";
+import { reportError } from "@/lib/reportError";
 
 /**
  * The list of installed zones, shared by every place that shows one — the
@@ -91,7 +92,7 @@ export function useZoneActions({
       await refreshZones();
       onNotify?.(`Renamed to “${next}”`);
     } catch (e) {
-      console.error(e);
+      reportError("Couldn't rename the zone")(e);
     }
   }
 
@@ -102,7 +103,7 @@ export function useZoneActions({
       await refreshZones();
       onNotify?.(`Deleted “${zone.name}”`);
     } catch (e) {
-      console.error(e);
+      reportError("Couldn't delete the zone")(e);
     }
   }
 

@@ -3,6 +3,7 @@ import { Terminal, FileText, Loader2 } from "lucide-react";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import type { McpPrompt, McpResource } from "@/lib/types";
+import { reportError } from "@/lib/reportError";
 
 /**
  * MCP prompts and resources in the composer (0.15.3).
@@ -120,7 +121,7 @@ export function SlashMenu({
           : await api.readMcpResource(e.serverId, e.resource.uri);
       onPick(text);
     } catch (err) {
-      console.error(err);
+      reportError("Couldn't fetch that from the MCP server")(err);
       onClose();
     }
   }

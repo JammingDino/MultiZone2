@@ -24,6 +24,7 @@ import { Markdown } from "@/components/Renderers/Markdown";
 import { openPath } from "@/lib/tauri";
 import { CHROME_QUIET, PRIMARY_ACTION } from "@/lib/chrome";
 import { usePersistentBool } from "@/lib/uiState";
+import { reportError } from "@/lib/reportError";
 
 /**
  * The plan the model filed, waiting on the user (0.12.0, rebuilt in 0.14.6).
@@ -158,7 +159,7 @@ export function PlanReview({
           </div>
           {plan.docPath && (
             <button
-              onClick={() => void openPath(plan.docPath!).catch(console.error)}
+              onClick={() => void openPath(plan.docPath!).catch(reportError("Couldn't open it"))}
               title={`Open the plan document — ${plan.docPath}`}
               className={`shrink-0 rounded p-1 ${CHROME_QUIET}`}
               aria-label="Open the plan document"

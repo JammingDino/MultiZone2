@@ -5,6 +5,7 @@ import type { ApplyOutcome, StagedEdit } from "@/lib/types";
 import { DiffView } from "@/components/common/DiffView";
 import { PRIMARY_ACTION } from "@/lib/chrome";
 import { errorText } from "@/lib/errors";
+import { reportError } from "@/lib/reportError";
 
 /**
  * The review queue (0.10.2).
@@ -29,7 +30,7 @@ export function ReviewQueue({ chatId, embedded }: { chatId: string; embedded?: b
     try {
       setEdits(await api.listStagedEdits(chatId));
     } catch (e) {
-      console.error(e);
+      reportError("Couldn't load the staged edits")(e);
     }
   }, [chatId]);
 

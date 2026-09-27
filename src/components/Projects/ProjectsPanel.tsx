@@ -14,6 +14,7 @@ import { PRIMARY_ACTION } from "@/lib/chrome";
 import { useIsNarrow } from "@/lib/useIsNarrow";
 import { useBackDismiss } from "@/lib/useBackDismiss";
 import { ErrorNote } from "@/components/common/ErrorNote";
+import { reportError } from "@/lib/reportError";
 
 export function ProjectsPanel() {
   const { zones, projects, tags, closeProjectsPanel, refreshProjects, refreshTags } = useApp(
@@ -243,6 +244,7 @@ function ProjectForm({
   const [lintCommand, setLintCommand] = useState("");
   const [testCommand, setTestCommand] = useState("");
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<unknown>(null);
   const refreshProjects = useApp((s) => s.refreshProjects);
 
   useEffect(() => {
@@ -304,6 +306,9 @@ function ProjectForm({
     setSaving(true);
     try {
       onSaved(await api.upsertProject(payload()));
+      setSaveError(null);
+    } catch (e) {
+      setSaveError(e);
     } finally { setSaving(false); }
   }
 
@@ -316,8 +321,10 @@ function ProjectForm({
       try {
         await api.upsertProject(payload());
         await refreshProjects();
+        setSaveError(null);
       } catch (e) {
         console.error("project autosave failed", e);
+        setSaveError(e);
       } finally { setSaving(false); }
     }, 600);
     return () => clearTimeout(timer);
@@ -495,11 +502,13 @@ function ProjectForm({
       </div>
 
       <div className="flex items-center justify-end gap-2 border-t border-[var(--color-border)] px-4 py-3">
-        {project && (
+        {project && (saveError ? (
+          <ErrorNote error={saveError} context="Not saved" className="mr-auto text-[11px] text-[var(--color-danger)]" />
+        ) : (
           <span className="mr-auto text-[11px] text-[var(--color-text-muted)]">
             {saving ? "Saving…" : "Changes save as you make them"}
           </span>
-        )}
+        ))}
         {project && (
           <button onClick={onDelete} className="flex items-center gap-1 rounded border border-[var(--color-danger)] px-3 py-1.5 text-xs text-[var(--color-danger)] hover:bg-[var(--color-danger)] hover:text-white">
             <Trash2 size={12} /> Delete
@@ -548,7 +557,7 @@ function KnowledgeSection({ project }: { project: Project }) {
       setStatus(st);
       setDocs(ds);
     } catch (e) {
-      console.error(e);
+      reportError("Couldn't load the knowledge base")(e);
     }
   }
 
@@ -890,6 +899,7 @@ function TagForm({
   const [color, setColor] = useState<string | null>(null);
   const [contextSnippet, setContextSnippet] = useState("");
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<unknown>(null);
   const refreshTags = useApp((s) => s.refreshTags);
 
   useEffect(() => {
@@ -903,6 +913,9 @@ function TagForm({
     try {
       const saved = await api.upsertTag({ id: tag?.id, name: name.trim(), color, contextSnippet: contextSnippet.trim() || null });
       onSaved(saved);
+      setSaveError(null);
+    } catch (e) {
+      setSaveError(e);
     } finally { setSaving(false); }
   }
 
@@ -914,8 +927,10 @@ function TagForm({
       try {
         await api.upsertTag({ id: tag.id, name: name.trim(), color, contextSnippet: contextSnippet.trim() || null });
         await refreshTags();
+        setSaveError(null);
       } catch (e) {
         console.error("tag autosave failed", e);
+        setSaveError(e);
       } finally { setSaving(false); }
     }, 600);
     return () => clearTimeout(timer);
@@ -954,11 +969,13 @@ function TagForm({
       </div>
 
       <div className="flex items-center justify-end gap-2 border-t border-[var(--color-border)] px-4 py-3">
-        {tag && (
+        {tag && (saveError ? (
+          <ErrorNote error={saveError} context="Not saved" className="mr-auto text-[11px] text-[var(--color-danger)]" />
+        ) : (
           <span className="mr-auto text-[11px] text-[var(--color-text-muted)]">
             {saving ? "Saving…" : "Changes save as you make them"}
           </span>
-        )}
+        ))}
         {tag && (
           <button onClick={onDelete} className="flex items-center gap-1 rounded border border-[var(--color-danger)] px-3 py-1.5 text-xs text-[var(--color-danger)] hover:bg-[var(--color-danger)] hover:text-white">
             <Trash2 size={12} /> Delete

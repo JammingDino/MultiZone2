@@ -8,6 +8,7 @@ import { getZoneIcon } from "@/lib/zoneIcons";
 import { usePersistentSet } from "@/lib/uiState";
 import { Popover, pointRect } from "@/components/common/Popover";
 import { useChatExport } from "@/lib/useChatExport";
+import { reportError } from "@/lib/reportError";
 
 interface Props {
   chats: Chat[];
@@ -108,7 +109,7 @@ export function ChatList({ chats, activeId, onSelect, projectId }: Props) {
     setMenu(null);
     // A user asking for a new title is judging the chat as it stands, so this
     // reads the whole conversation rather than just the opening message.
-    try { await regenerateTitle(chatId, true); } catch (e) { console.error(e); }
+    try { await regenerateTitle(chatId, true); } catch (e) { reportError("Couldn't regenerate the title")(e); }
   }
 
   async function onMoveToProject(chatId: string, targetProjectId: string | null) {

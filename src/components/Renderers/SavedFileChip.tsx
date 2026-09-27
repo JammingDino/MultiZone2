@@ -3,6 +3,7 @@ import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { CHROME_OUTLINED, PRIMARY_ACTION } from "@/lib/chrome";
 import { iconFor } from "@/components/Workspace/FilesPanel";
+import { reportError } from "@/lib/reportError";
 
 /** Shape of the `present_file` tool result the backend renders. */
 export interface SavedOutput {
@@ -47,14 +48,14 @@ export function SavedFileChip({ output }: { output: SavedOutput }) {
           <PanelRightOpen size={11} /> {showing ? "Showing" : "View"}
         </button>
         <button
-          onClick={() => api.openPath(output.path).catch((e) => console.error(e))}
+          onClick={() => api.openPath(output.path).catch(reportError("Couldn't open it"))}
           className={`flex items-center gap-1 rounded px-2 py-0.5 ${CHROME_OUTLINED}`}
           title={output.format === "html" ? "Open in the browser" : "Open in the default app"}
         >
           <ExternalLink size={11} /> Open
         </button>
         <button
-          onClick={() => api.revealPath(output.path).catch((e) => console.error(e))}
+          onClick={() => api.revealPath(output.path).catch(reportError("Couldn't show it in Explorer"))}
           className={`flex items-center gap-1 rounded px-2 py-0.5 ${CHROME_OUTLINED}`}
           title="Show in file explorer"
         >

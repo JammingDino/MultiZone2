@@ -10,6 +10,7 @@ import type { Citation } from "@/lib/citations";
 import { citationPlugin } from "@/lib/remarkCitations";
 import { normalizeMath } from "@/lib/normalizeMath";
 import { openPath, revealPath } from "@/lib/tauri";
+import { reportError } from "@/lib/reportError";
 
 /** http(s) links can't navigate inside the Tauri webview — route them through
  *  the OS default browser. Other hrefs (in-page anchors) fall through to default. */
@@ -44,7 +45,7 @@ const MD_COMPONENTS: Components = {
         onClick={(e) => {
           if (isExternal(href)) {
             e.preventDefault();
-            openPath(href).catch((err) => console.error("openPath failed", err));
+            openPath(href).catch(reportError("Couldn't open it"));
           }
         }}
       />
@@ -128,7 +129,7 @@ export function Markdown({
     const path = el?.dataset.revealPath;
     if (!path) return;
     e.preventDefault();
-    revealPath(path).catch((err) => console.error("revealPath failed", err));
+    revealPath(path).catch(reportError("Couldn't show it in Explorer"));
   }
 
   return (

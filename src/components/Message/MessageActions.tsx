@@ -11,6 +11,7 @@ import { formatTokens } from "@/lib/format";
 import { estimateTokens } from "@/lib/tokens";
 import { ACTION_ICON, CHROME_OUTLINED, CHROME_QUIET } from "@/lib/chrome";
 import { errorText } from "@/lib/errors";
+import { reportError } from "@/lib/reportError";
 
 interface Props {
   /** Used for copy. */
@@ -148,7 +149,7 @@ export function MessageActions({
           : null,
       );
     } catch (e) {
-      console.error(e);
+      reportError("Couldn't rewind")(e);
     } finally {
       setBranching(false);
     }

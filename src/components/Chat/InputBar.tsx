@@ -3,6 +3,7 @@ import { Paperclip, Send, X, Loader2, Square, SlidersHorizontal, Zap, Brain, Sca
 import { Popover } from "@/components/common/Popover";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
+import { reportError } from "@/lib/reportError";
 import { useTts } from "@/store/tts";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
 import { CHROME_ACTIVE, CHROME_OUTLINED, CHROME_QUIET, PRIMARY_ACTION } from "@/lib/chrome";
@@ -307,10 +308,13 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
       await api.sendMessage(chatId, parts, { zoneId: overrideZoneId, model: overrideModel });
       refreshChats();
     } catch (e) {
+      // The reason is already on screen: a failed turn lands in the chat's
+      // error card (TurnErrorNotice). What is left to do here is give the
+      // message back for a retry — but only into an empty composer. The turn
+      // may have run for minutes, and anything typed since is newer than this.
       console.error("send failed:", e);
-      // Restore input so the user doesn't lose their message
-      setText(savedText);
-      tray.setPending(savedPending);
+      setText((cur) => (cur.trim() ? cur : savedText));
+      tray.setPending((cur) => (cur.length ? cur : savedPending));
       setSending(false);
     }
   }
@@ -336,8 +340,8 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
         refreshChats();
       }
     } catch (e) {
-      console.error("queueing failed:", e);
-      setText(body);
+      reportError("Couldn't queue the message")(e);
+      setText((cur) => (cur.trim() ? cur : body));
     } finally {
       setSending(false);
     }
@@ -626,7 +630,7 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
                 <Send size={16} />
               </button>
               <button
-                onClick={() => api.cancelStream(chatId).catch(console.error)}
+                onClick={() => api.cancelStream(chatId).catch(reportError("Couldn't stop the run"))}
                 className="flex items-center gap-1 rounded bg-[var(--color-panel-hover)] p-1.5 text-[var(--color-text)] hover:bg-[var(--color-border)]"
                 title="Stop generating"
               >

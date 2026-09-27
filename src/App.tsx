@@ -12,6 +12,7 @@ import { ImportSettingsDialog } from "./components/Settings/ImportSettingsDialog
 import { UpdatePrompt } from "./components/UpdatePrompt";
 import { ShortcutsHelpModal } from "./components/common/ShortcutsHelpModal";
 import { CommandPalette } from "@/components/CommandPalette";
+import { ErrorToasts } from "@/components/common/ErrorToasts";
 import { PairingScreen } from "@/components/Remote/PairingScreen";
 import { ConnectionBanner } from "@/components/Remote/ConnectionBanner";
 import { ApprovalQueue } from "@/components/Remote/ApprovalQueue";
@@ -266,6 +267,8 @@ export default function App() {
       {/* Checks for a new release shortly after launch and only appears if it
           finds one — see UpdatePrompt for why the failures stay quiet. */}
       <UpdatePrompt />
+      {/* Failures of one-off actions that have no panel to show them in. */}
+      <ErrorToasts />
       {/* Last child, and above everything: it covers the window while the first
           frame settles. */}
       <BootSplash />

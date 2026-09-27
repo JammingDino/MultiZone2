@@ -36,6 +36,7 @@ import { formatBytes, formatCount, formatTokens } from "@/lib/format";
 import { PRIMARY_ACTION } from "@/lib/chrome";
 import { errorText } from "@/lib/errors";
 import { ErrorNote } from "@/components/common/ErrorNote";
+import { reportError } from "@/lib/reportError";
 
 type Tab = "providers" | "zones" | "appearance" | "chat" | "voice" | "speech" | "skills" | "mcp" | "knowledge" | "memory" | "remote" | "api" | "data";
 
@@ -1376,7 +1377,7 @@ function VoiceTab() {
   }, [appSettings.sttProviderId]);
 
   useEffect(() => {
-    refreshVoiceInputDevices().catch(console.error);
+    refreshVoiceInputDevices().catch(reportError("Couldn't list microphones"));
   }, [refreshVoiceInputDevices]);
 
   return (
@@ -2034,7 +2035,7 @@ function SkillsTab() {
   const [editing, setEditing] = useState<Skill | null>(null);
   const [creating, setCreating] = useState<SkillSeed | null>(null);
 
-  useEffect(() => { refreshSkills().catch(console.error); }, [refreshSkills]);
+  useEffect(() => { refreshSkills().catch(reportError("Couldn't load skills")); }, [refreshSkills]);
 
   async function importFile(file: File) {
     const raw = await file.text();
@@ -2203,8 +2204,8 @@ function SkillPacksSection() {
   const extraDirs = appSettings.skillPackDirs ?? [];
 
   useEffect(() => {
-    refreshSkillPacks().catch(console.error);
-    api.skillPacksRoot().then(setRoot).catch(console.error);
+    refreshSkillPacks().catch(reportError("Couldn't load skill packs"));
+    api.skillPacksRoot().then(setRoot).catch(reportError("Couldn't find the skill packs folder"));
   }, [refreshSkillPacks]);
 
   async function togglePack(pack: SkillPack) {
@@ -2246,7 +2247,7 @@ function SkillPacksSection() {
         <h3 className="text-sm font-medium">Installed skill folders</h3>
         <div className="flex items-center gap-1">
           <button
-            onClick={() => refreshSkillPacks().catch(console.error)}
+            onClick={() => refreshSkillPacks().catch(reportError("Couldn't load skill packs"))}
             className="flex items-center gap-1 rounded px-2 py-1 text-[11px] text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)]"
             title="Rescan the folders below"
           >
@@ -2302,7 +2303,7 @@ function SkillPacksSection() {
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {root && (
           <button
-            onClick={() => api.openPath(root).catch(console.error)}
+            onClick={() => api.openPath(root).catch(reportError("Couldn't open the folder"))}
             className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-3 py-1.5 text-xs transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
             title={root}
           >
@@ -2372,7 +2373,7 @@ function SkillPacksSection() {
                     <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all duration-200 ${pack.enabled ? "translate-x-4" : ""}`} />
                   </button>
                   <button
-                    onClick={() => api.openPath(pack.dir).catch(console.error)}
+                    onClick={() => api.openPath(pack.dir).catch(reportError("Couldn't open the folder"))}
                     className="rounded p-1 text-[var(--color-text-muted)] hover:text-[var(--color-accent)]"
                     title="Open folder"
                   >
@@ -2420,6 +2421,7 @@ function SkillEditor({
   const [content, setContent] = useState(skill?.content ?? seed?.content ?? "");
   const [enabled, setEnabled] = useState(skill?.enabled ?? true);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<unknown>(null);
   const refreshSkills = useApp((s) => s.refreshSkills);
 
   async function onCreate() {
@@ -2440,8 +2442,10 @@ function SkillEditor({
       try {
         await api.upsertSkill({ id: skill.id, name: name.trim(), description: description.trim() || null, content, enabled });
         await refreshSkills();
+        setSaveError(null);
       } catch (e) {
         console.error("skill autosave failed", e);
+        setSaveError(e);
       } finally { setSaving(false); }
     }, 600);
     return () => clearTimeout(timer);
@@ -2499,9 +2503,13 @@ function SkillEditor({
         )}
         {skill ? (
           <>
-            <span className="text-[11px] text-[var(--color-text-muted)]">
-              {saving ? "Saving…" : "Changes save as you make them"}
-            </span>
+            {saveError ? (
+              <ErrorNote error={saveError} context="Not saved" className="text-[11px] text-[var(--color-danger)]" />
+            ) : (
+              <span className="text-[11px] text-[var(--color-text-muted)]">
+                {saving ? "Saving…" : "Changes save as you make them"}
+              </span>
+            )}
             <button onClick={onDone} className="rounded px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)]">Done</button>
           </>
         ) : (
@@ -2550,13 +2558,13 @@ function McpTab() {
   const [errorById, setErrorById] = useState<Record<string, string>>({});
   const [diagById, setDiagById] = useState<Record<string, McpDiagnosis>>({});
 
-  useEffect(() => { refreshMcpServers().catch(console.error); }, [refreshMcpServers]);
+  useEffect(() => { refreshMcpServers().catch(reportError("Couldn't load MCP servers")); }, [refreshMcpServers]);
 
   // The launch autostart connects servers in parallel and reports each one as it
   // settles. Opening this tab while that is still in flight would otherwise show
   // stale "Disconnected" pills that never update.
   useEffect(() => {
-    const un = api.onMcpStatusChanged(() => { refreshMcpServers().catch(console.error); });
+    const un = api.onMcpStatusChanged(() => { refreshMcpServers().catch(reportError("Couldn't load MCP servers")); });
     return () => { un.then((f) => f()).catch(() => {}); };
   }, [refreshMcpServers]);
 
@@ -2869,7 +2877,7 @@ function ConnectorCatalogPanel({ onDone, onCancel }: { onDone: () => void; onCan
       setError(String(e));
     }
   }
-  useEffect(() => { load().catch(console.error); }, []);
+  useEffect(() => { load().catch(reportError("Couldn't load this page")); }, []);
 
   async function runImport() {
     if (!importUrl.trim()) return;
@@ -3388,8 +3396,8 @@ function KnowledgeTab() {
   }
 
   useEffect(() => {
-    reload().catch(console.error);
-    const un = api.onKnowledgeUpdated(() => reload().catch(console.error));
+    reload().catch(reportError("Couldn't load the knowledge base"));
+    const un = api.onKnowledgeUpdated(() => reload().catch(reportError("Couldn't load the knowledge base")));
     return () => { un.then((f) => f()).catch(() => {}); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -3610,8 +3618,8 @@ function MemoryTab() {
   const [draft, setDraft] = useState("");
 
   useEffect(() => {
-    refreshMemories().catch(console.error);
-    const un = api.onMemoryUpdated(() => refreshMemories().catch(console.error));
+    refreshMemories().catch(reportError("Couldn't load memories"));
+    const un = api.onMemoryUpdated(() => refreshMemories().catch(reportError("Couldn't load memories")));
     return () => { un.then((f) => f()).catch(() => {}); };
   }, [refreshMemories]);
 
@@ -3722,7 +3730,7 @@ function ApiTab() {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const refreshBind = () => api.apiBindState().then(setBind).catch(console.error);
+  const refreshBind = () => api.apiBindState().then(setBind).catch(reportError("Couldn't read the API server state"));
   useEffect(() => { void refreshBind(); }, []);
 
   // The address it is *actually* bound to, not the one it used to always be.
@@ -4017,8 +4025,8 @@ function DataTab() {
 
   useEffect(() => {
     setLoadingStats(true);
-    api.getDbStats().then(setStats).catch(console.error).finally(() => setLoadingStats(false));
-    api.lifetimeTokenUsage().then(setTokens).catch(console.error);
+    api.getDbStats().then(setStats).catch(reportError("Couldn't read storage usage")).finally(() => setLoadingStats(false));
+    api.lifetimeTokenUsage().then(setTokens).catch(reportError("Couldn't read token usage"));
   }, []);
 
   /** Run a full re-mirror, surfacing a short status line. */
@@ -4030,7 +4038,7 @@ function DataTab() {
       setMirrorMsg(`Mirrored ${n} chat${n === 1 ? "" : "s"}.`);
     } catch (e) {
       console.error(e);
-      setMirrorMsg("Mirror failed — see console.");
+      setMirrorMsg(`Mirror failed. ${errorText(e)}`);
     } finally {
       setMirrorBusy(false);
     }
@@ -4064,7 +4072,7 @@ function DataTab() {
       closeSettings();
     } catch (e) {
       console.error(e);
-      setImportMsg("Import failed — see console.");
+      setImportMsg(`Import failed. ${errorText(e)}`);
     } finally {
       setImportBusy(false);
     }
@@ -4075,7 +4083,7 @@ function DataTab() {
     try {
       await api.resetDatabase();
     } catch (e) {
-      console.error(e);
+      reportError("Couldn't reset the database")(e);
       setResetStage("idle");
     }
   }
@@ -4312,7 +4320,7 @@ function CheckpointStorageSection() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
-  const refresh = () => api.checkpointUsage().then(setUsage).catch(console.error);
+  const refresh = () => api.checkpointUsage().then(setUsage).catch(reportError("Couldn't read checkpoint usage"));
   useEffect(() => { void refresh(); }, []);
 
   async function runPrune() {
@@ -4328,7 +4336,7 @@ function CheckpointStorageSection() {
       await refresh();
     } catch (e) {
       console.error(e);
-      setMsg("Clean-up failed — see console.");
+      setMsg(`Clean-up failed. ${errorText(e)}`);
     } finally {
       setBusy(false);
     }
@@ -4911,6 +4919,8 @@ function ProviderForm({ value, onClose, onDeleted }: { value: Partial<Provider>;
   const [models, setModels] = useState<string[]>([]);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
+  // Why the last autosave failed — a duplicate name, say — until one succeeds.
+  const [saveError, setSaveError] = useState<unknown>(null);
   const [presetId, setPresetId] = useState<string | null>(null);
 
   // Auto-load the model list when editing an existing provider.
@@ -4945,8 +4955,10 @@ function ProviderForm({ value, onClose, onDeleted }: { value: Partial<Provider>;
         });
         if (!id) setId(saved.id);
         await refreshProviders();
+        setSaveError(null);
       } catch (e) {
         console.error("provider autosave failed", e);
+        setSaveError(e);
       }
     }, 500);
     return () => clearTimeout(timer);
@@ -5064,6 +5076,7 @@ function ProviderForm({ value, onClose, onDeleted }: { value: Partial<Provider>;
       {testResult && (
         <div className="my-2 rounded bg-[var(--color-panel)] p-2 text-xs text-[var(--color-text-muted)]">{testResult}</div>
       )}
+      <ErrorNote error={saveError} context="Not saved" className="my-2 rounded border border-red-600/40 bg-red-600/10 p-2 text-[11px] text-red-500" />
       <div className="mt-3 flex justify-end gap-2">
         <button onClick={onDelete} className="flex items-center gap-1 rounded border border-[var(--color-danger)] px-2 py-1 text-xs text-[var(--color-danger)] hover:bg-[var(--color-danger)] hover:text-white">
           <Trash2 size={12} /> {id ? "Delete" : "Discard"}

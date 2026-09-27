@@ -5,6 +5,7 @@ import { useApp } from "@/store/app";
 import { revealPath } from "@/lib/tauri";
 import { CHROME_QUIET } from "@/lib/chrome";
 import { errorText } from "@/lib/errors";
+import { reportError } from "@/lib/reportError";
 
 /**
  * What a turn did to the filesystem, and the way back (0.10.1).
@@ -142,7 +143,7 @@ function FileRow({
     <li className="flex items-center gap-2 px-3 py-1.5">
       <Icon size={12} className="shrink-0 text-[var(--color-text-muted)]" />
       <button
-        onClick={() => revealPath(file.path).catch((e) => console.error("revealPath failed", e))}
+        onClick={() => revealPath(file.path).catch(reportError("Couldn't show it in Explorer"))}
         className="truncate text-left hover:underline"
         title={file.displayPath}
       >

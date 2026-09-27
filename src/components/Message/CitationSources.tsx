@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ChevronDown, ChevronRight, Link2, FileType, Database } from "lucide-react";
 import { citationKey, type Citation } from "@/lib/citations";
 import { openPath, revealPath } from "@/lib/tauri";
+import { reportError } from "@/lib/reportError";
 
 function hostname(url: string): string {
   try {
@@ -99,7 +100,7 @@ function SourceRow({ c, numbered = false }: { c: Citation; numbered?: boolean })
           rel="noopener noreferrer"
           onClick={(e) => {
             e.preventDefault();
-            openPath(c.url!).catch((err) => console.error("openPath failed", err));
+            openPath(c.url!).catch(reportError("Couldn't open it"));
           }}
           className="flex min-w-0 items-baseline gap-1 text-[var(--color-accent)] hover:underline"
           title={c.url}
@@ -116,7 +117,7 @@ function SourceRow({ c, numbered = false }: { c: Citation; numbered?: boolean })
         // or in the worst case run a script.
         <button
           onClick={() =>
-            revealPath(c.absPath!).catch((err) => console.error("revealPath failed", err))
+            revealPath(c.absPath!).catch(reportError("Couldn't show it in Explorer"))
           }
           className="flex min-w-0 items-baseline gap-1 text-left text-[var(--color-accent)] hover:underline"
           title={`Show in file manager — ${c.absPath}`}

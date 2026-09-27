@@ -134,7 +134,7 @@ docs/
 Background effects live in a single file, [`src/components/BackgroundEffect.tsx`](src/components/BackgroundEffect.tsx). Adding one is three edits:
 
 1. Add the id to the `BackgroundEffect` union in [`src/store/app.ts`](src/store/app.ts).
-2. Add `[id, "Label"]` to `BACKGROUND_EFFECTS` in [`src/components/Settings/SettingsModal.tsx`](src/components/Settings/SettingsModal.tsx), and to the density-slider list if it has a meaningful density.
+2. Add `[id, "Label"]` to `BACKGROUND_EFFECTS` in [`src/components/Settings/tabs/AppearanceTab.tsx`](src/components/Settings/tabs/AppearanceTab.tsx), and to the density-slider list if it has a meaningful density.
 3. In `BackgroundEffect.tsx`, add the id to `CANVAS_EFFECTS` (canvas-drawn) or branch on it at the bottom (CSS-driven), then write a `draw*` function and wire it into the `frame()` switch.
 
 Conventions the existing effects follow, and new ones should too:

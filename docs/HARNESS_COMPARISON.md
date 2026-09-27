@@ -4,7 +4,7 @@ What each harness sends to the model before the user says a word: the system
 prompt and the default tool set. Sources read at HEAD on 2026-09-17:
 `badlogic/pi-mono` (`packages/coding-agent/src/core/`), `anomalyco/opencode`
 (`packages/opencode/src/{session,tool,agent}/`), and our
-`src-tauri/src/{commands/messages.rs,tools/}`.
+`src-tauri/src/{commands/messages/,tools/}`.
 
 Figures for MultiZone were measured by building the actual tool list and
 system snippets for three zone shapes in a test (bare zone prompt, no

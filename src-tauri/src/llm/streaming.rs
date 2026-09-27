@@ -159,6 +159,15 @@ impl InlineThinkParser {
     }
 }
 
+/// Resolves once `cancel` is set. Polled rather than notified because the flag
+/// is a plain `AtomicBool` shared with every caller that already holds one;
+/// a tenth of a second is below what anyone pressing Stop can notice.
+pub async fn until_cancelled(cancel: &AtomicBool) {
+    while !cancel.load(Ordering::Relaxed) {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+}
+
 pub async fn consume_stream<F>(
     stream: LlmStream,
     cancel: Arc<AtomicBool>,
@@ -181,11 +190,19 @@ where
 
     let mut stream = stream.response.bytes_stream().eventsource();
 
-    while let Some(event) = stream.next().await {
+    loop {
+        // Raced against the stop flag rather than checked after each chunk: a
+        // server still prefilling a long prompt sends nothing for minutes, and
+        // a check that only runs when a chunk arrives never runs (0.18).
+        let event = tokio::select! {
+            ev = stream.next() => ev,
+            _ = until_cancelled(&cancel) => None,
+        };
         if cancel.load(Ordering::Relaxed) {
             agg.cancelled = true;
             break;
         }
+        let Some(event) = event else { break };
         match event {
             Ok(ev) => {
                 let data = ev.data;

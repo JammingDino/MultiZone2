@@ -630,7 +630,7 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
                 <Send size={16} />
               </button>
               <button
-                onClick={() => api.cancelStream(chatId).catch(reportError("Couldn't stop the run"))}
+                onClick={() => useApp.getState().stopChat(chatId).catch(reportError("Couldn't stop the run"))}
                 className="flex items-center gap-1 rounded bg-[var(--color-panel-hover)] p-1.5 text-[var(--color-text)] hover:bg-[var(--color-border)]"
                 title="Stop generating"
               >

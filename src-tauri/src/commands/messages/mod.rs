@@ -443,13 +443,30 @@ impl StreamSink {
 }
 
 #[tauri::command]
-pub async fn cancel_stream(state: State<'_, AppState>, chat_id: String) -> AppResult<()> {
+pub async fn cancel_stream(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    chat_id: String,
+) -> AppResult<()> {
+    cancel_chat(&app, &state.active_streams, &state.tool_approvals, &chat_id).await;
+    Ok(())
+}
+
+/// Stop a chat's turn and everything it started. Shared by the window and the
+/// HTTP API, which used to only flip the flag — leaving an approval prompt and
+/// every background sub-agent running behind a "stopped" chat.
+pub async fn cancel_chat(
+    app: &AppHandle,
+    active_streams: &RwLock<HashMap<String, Arc<AtomicBool>>>,
+    tool_approvals: &ApprovalGate,
+    chat_id: &str,
+) {
     // Background sub-agents (0.9.10) outlive the tool call that started them, so
     // stopping the chat that spawned them has to stop them too — otherwise Stop
     // looks like it did nothing while five detached turns keep streaming tokens
     // into subchats the user can't cancel from anywhere.
-    let mut targets = vec![chat_id.clone()];
-    let mut frontier = vec![chat_id.clone()];
+    let mut targets = vec![chat_id.to_string()];
+    let mut frontier = vec![chat_id.to_string()];
     // Bounded so a cyclic parent link can't spin here.
     for _ in 0..crate::tools::subchat::MAX_CANCEL_DEPTH {
         let mut next = Vec::new();
@@ -464,17 +481,32 @@ pub async fn cancel_stream(state: State<'_, AppState>, chat_id: String) -> AppRe
     }
 
     {
-        let map = state.active_streams.read().await;
+        let map = active_streams.read().await;
         for id in &targets {
             if let Some(flag) = map.get(id) {
                 flag.store(true, Ordering::Relaxed);
             }
         }
     }
+    // Stop means stop, including whatever was queued behind the turn — so the
+    // queue is dropped *now*, not when the turn finishes unwinding (0.18). That
+    // is what lets a message typed after pressing Stop survive: the window
+    // releases the composer immediately, and anything sent before the backend
+    // has caught up is queued behind the dying turn and delivered once it ends.
+    for id in &targets {
+        let dropped = crate::commands::pending::take_all(id);
+        if !dropped.is_empty() {
+            let ids: Vec<String> = dropped.into_iter().map(|p| p.id).collect();
+            let _ = app.emit(
+                "stream",
+                serde_json::json!({ "chatId": id, "event": StreamPayload::PendingCleared { ids } }),
+            );
+        }
+    }
     // Deny every pending tool approval for the cancelled chats — the primary
     // (keyed by chat id) and any perspective zones (keyed `chat_id::zone_id`) —
     // so no participant's loop is left blocked waiting on the user.
-    let mut approvals = state.tool_approvals.lock().await;
+    let mut approvals = tool_approvals.lock().await;
     let keys: Vec<String> = approvals
         .keys()
         .filter(|k| targets.iter().any(|id| approval_key_belongs_to_chat(k, id)))
@@ -485,7 +517,6 @@ pub async fn cancel_stream(state: State<'_, AppState>, chat_id: String) -> AppRe
             let _ = pending.responder.send(ApprovalAnswer::denied());
         }
     }
-    Ok(())
 }
 
 /// Rewrite a file-writing call's arguments to only the hunks the user took.
@@ -730,7 +761,7 @@ pub async fn run_regenerate_entry(
     if let Err(e) = &result {
         sink.emit(chat_id, StreamPayload::Error { message: e.to_string() });
     }
-    flush_pending_after(ctx, sink, chat_id, cancel.load(Ordering::Relaxed)).await;
+    flush_pending_after(ctx, sink, chat_id).await;
     result
 }
 
@@ -786,7 +817,7 @@ pub async fn run_regenerate_participant_entry(
     }
     // This path bypasses run_turn, so mirror here too (0.7.2).
     crate::commands::mirror::mirror_chat_best_effort(&ctx.db, chat_id).await;
-    flush_pending_after(ctx, sink, chat_id, cancel.load(Ordering::Relaxed)).await;
+    flush_pending_after(ctx, sink, chat_id).await;
     result
 }
 
@@ -902,7 +933,10 @@ pub async fn run_send_entry(
         }
         let ids: Vec<String> = queued.iter().map(|p| p.id.clone()).collect();
         sink.emit(chat_id, StreamPayload::PendingCleared { ids });
-        if cancel.load(Ordering::Relaxed) || result.is_err() {
+        // Not "was this turn cancelled": `cancel_chat` empties the queue at the
+        // moment of the stop, so anything here was sent *after* it and is the
+        // user's next message, not part of what they stopped.
+        if result.is_err() {
             return result;
         }
 
@@ -918,22 +952,15 @@ pub async fn run_send_entry(
 
 /// Send anything the user queued during a turn that did not go through
 /// [`run_send_entry`] (regenerate, and per-participant regenerate). Same rule:
-/// a cancelled turn drops the queue, anything else delivers it as a new turn.
-async fn flush_pending_after(
-    ctx: &EngineCtx,
-    sink: &StreamSink,
-    chat_id: &str,
-    cancelled: bool,
-) {
+/// the queue a stop left behind was dropped by `cancel_chat`, so whatever is
+/// here now is delivered as a new turn.
+async fn flush_pending_after(ctx: &EngineCtx, sink: &StreamSink, chat_id: &str) {
     let queued = crate::commands::pending::take_all(chat_id);
     if queued.is_empty() {
         return;
     }
     let ids: Vec<String> = queued.iter().map(|p| p.id.clone()).collect();
     sink.emit(chat_id, StreamPayload::PendingCleared { ids });
-    if cancelled {
-        return;
-    }
     let text = queued
         .iter()
         .map(|p| p.text.as_str())
@@ -1528,8 +1555,17 @@ async fn run_agentic_loop(
     if is_smart {
         sink.emit(chat_id, StreamPayload::RoutingStarted);
     }
-    let (zone, provider) =
-        zone_for_mode(&ctx.db, &ctx.http, chat_id, &mode, ov.model.as_deref()).await?;
+    // Smart routing is a model call of its own, so it is as stoppable as the
+    // turn it precedes.
+    let routed = tokio::select! {
+        r = zone_for_mode(&ctx.db, &ctx.http, chat_id, &mode, ov.model.as_deref()) => Some(r),
+        _ = crate::llm::streaming::until_cancelled(&cancel) => None,
+    };
+    let Some(routed) = routed else {
+        sink.emit(chat_id, StreamPayload::Cancelled);
+        return Ok(());
+    };
+    let (zone, provider) = routed?;
     if is_smart {
         sink.emit(chat_id, StreamPayload::RoutingDone {
             zone_id: zone.id.clone(),
@@ -2041,7 +2077,21 @@ async fn run_participant_turn(
             true
         };
 
-        let response = match client.chat_stream(&req, &on_retry).await {
+        // Stop has to work before the first byte too (0.18). A local server
+        // prefilling a long prompt, or a provider that never answers, holds this
+        // await for minutes — and until 0.18 the flag was only read once the
+        // stream opened, so Stop did nothing visible until the model spoke.
+        // Dropping the request here closes the connection, which is also what
+        // tells llama.cpp and friends to abandon the prefill.
+        let sent = tokio::select! {
+            r = client.chat_stream(&req, &on_retry) => Some(r),
+            _ = crate::llm::streaming::until_cancelled(&cancel) => None,
+        };
+        let Some(sent) = sent else {
+            sink.emit_for(chat_id, persp, StreamPayload::Cancelled);
+            return Ok(());
+        };
+        let response = match sent {
             Ok(res) => res,
             Err(e)
                 if !compacted_for_overflow

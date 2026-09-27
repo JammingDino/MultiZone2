@@ -31,7 +31,7 @@ use sqlx::SqlitePool;
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{oneshot, RwLock};
@@ -739,10 +739,8 @@ async fn remove_perspective(
 }
 
 async fn cancel(State(st): State<ApiState>, Path(chat_id): Path<String>) -> StatusCode {
-    let map = st.active_streams.read().await;
-    if let Some(flag) = map.get(&chat_id) {
-        flag.store(true, Ordering::Relaxed);
-    }
+    crate::commands::messages::cancel_chat(&st.app, &st.active_streams, &st.tool_approvals, &chat_id)
+        .await;
     StatusCode::NO_CONTENT
 }
 

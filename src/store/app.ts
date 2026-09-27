@@ -589,6 +589,11 @@ interface AppStore {
   editMessage: (chatId: string, messageId: string, text: string) => Promise<void>;
   loadMessages: (chatId: string) => Promise<void>;
   applyStreamEvent: (chatId: string, event: import("@/lib/types").StreamEvent, perspectiveZoneId?: string) => void;
+  /**
+   * Stop a chat's turn and release the window from it at once (0.18) — the
+   * backend is told, but the composer does not wait to hear back.
+   */
+  stopChat: (chatId: string) => Promise<void>;
   setChatTitle: (chatId: string, title: string) => void;
   setChatZone: (chatId: string, zoneId: string | null) => Promise<void>;
   setChatSmart: (chatId: string, smart: boolean) => Promise<void>;
@@ -1315,6 +1320,25 @@ export const useApp = create<AppStore>((set, get) => ({
     await get().loadCheckpoints(chatId);
     return report;
   },
+  async stopChat(chatId) {
+    // Settle the turn locally first, the same way a `cancelled` event would.
+    // A server still prefilling, or one that never answers, used to hold the
+    // stop button — and the composer — until it did; whatever the backend
+    // saves on its way out still lands in the thread when it gets there, and
+    // anything sent meanwhile is queued behind it rather than lost.
+    const s = get();
+    for (const zoneId of Object.keys(s.perspectiveStreamsByChat[chatId] ?? {})) {
+      s.applyStreamEvent(chatId, { type: "cancelled" }, zoneId);
+    }
+    s.applyStreamEvent(chatId, { type: "cancelled" });
+    set((st) => {
+      const retryByChat = { ...st.retryByChat };
+      delete retryByChat[chatId];
+      return { retryByChat, routingByChat: { ...st.routingByChat, [chatId]: null } };
+    });
+    await api.cancelStream(chatId);
+  },
+
   applyStreamEvent(chatId, event, perspectiveZoneId) {
     // Tell the user when a run has stopped and is waiting for *them* (0.14.3).
     // Done before the reducers and outside them, because a notification is a

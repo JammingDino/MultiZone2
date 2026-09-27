@@ -895,6 +895,12 @@ export interface AppSettings {
    * two that mean a run is blocked on them.
    */
   notifyWhenWaiting: boolean;
+  /**
+   * The window's close button hides it to the tray instead of quitting
+   * (0.18), so running agents and scheduled runs carry on. Read by the
+   * backend, which handles the close request.
+   */
+  closeToTray: boolean;
   maxToolSteps: number;
   /**
    * Ceiling on the billed tokens one session — a chat plus every sub-agent
@@ -1238,6 +1244,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   autoApproveLevel: "all",
   approvals: { categories: {}, shellAllow: [], shellDeny: [], editAllow: [], editDeny: [] },
   notifyWhenWaiting: true,
+  closeToTray: true,
   maxToolSteps: 30,
   maxSessionTokens: 0,
   pdfMode: "images",

@@ -71,6 +71,8 @@ mod stt_api;
 #[cfg(desktop)]
 mod transcode;
 #[cfg(desktop)]
+mod tray;
+#[cfg(desktop)]
 mod tts_api;
 #[cfg(desktop)]
 mod updater_token;
@@ -172,6 +174,11 @@ pub fn run() {
     tracing::info!("MultiZone {} starting", env!("CARGO_PKG_VERSION"));
 
     tauri::Builder::default()
+        // First, so a second launch is handed over before it initialises
+        // anything of its own.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            tray::show_main(app)
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         // Auto-update from GitHub Releases (1.0). `process` is what lets the app
@@ -224,6 +231,10 @@ pub fn run() {
                     }
                 };
                 handle.manage(state);
+                tray::sync(&handle.state::<AppState>().db).await;
+                if let Err(e) = tray::init(&handle) {
+                    tracing::warn!("no tray icon, so closing the window quits: {e}");
+                }
                 // Launch the HTTP API server if the user has enabled it.
                 commands::api::start_if_enabled(&handle).await;
                 // Bring every enabled MCP server up (0.14.0). Returns as soon as
@@ -259,6 +270,14 @@ pub fn run() {
                 commands::mirror::resync().await;
             });
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if tray::hide_on_close() {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::providers::list_providers,

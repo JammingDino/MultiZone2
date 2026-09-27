@@ -113,6 +113,7 @@ pub async fn set_setting(
         // Re-evaluate the markdown two-way-sync watch (mirror dir / enabled may
         // have changed).
         crate::commands::mirror::resync().await;
+        crate::tray::sync(&state.db).await;
     }
     // Mirror user-facing preferences to the installer-safe backup so they survive
     // a version update that clears the per-app data dir. Best-effort — a failed

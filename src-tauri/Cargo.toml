@@ -22,7 +22,9 @@ tauri-build = { version = "2.0", features = [] }
 # not compile SQLite, BoringSSL, an OCR engine and an audio stack in order to
 # host a web view.
 [dependencies]
-tauri = { version = "2.1", features = [] }
+# `tray-icon` for close-to-tray (0.18). Tauri gates the tray on `desktop`
+# itself, so the phone build carries the feature flag and none of the code.
+tauri = { version = "2.1", features = ["tray-icon"] }
 tauri-plugin-dialog = "2.0"
 tauri-plugin-fs = "2.0"
 # Mobile too: the moment a run stops for an approval is exactly the moment the
@@ -136,6 +138,11 @@ wreq = "5.3.0"
 wreq-util = "2.2.6"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+# Close-to-tray (0.18) makes a second launch the common case — the app is
+# still running, just out of sight — and a second process on the same
+# database is two schedulers firing every run twice. This hands the second
+# launch to the first, which shows its window.
+tauri-plugin-single-instance = "2"
 similar = { version = "3.1.2", default-features = false, features = ["text"] }
 
 # Remote access (0.17.0) — a phone as a second window onto this desktop.

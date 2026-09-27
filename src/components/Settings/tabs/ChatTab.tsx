@@ -186,6 +186,20 @@ export function ChatTab() {
       </section>
 
       <section>
+        <h3 className="mb-1 text-sm font-medium">Closing the window</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          Agents and scheduled runs keep working while the window is hidden. Click the tray icon to
+          bring it back; quit from the tray icon's menu.
+        </p>
+        <ToggleRow
+          label="Close to the tray"
+          description="Off makes the close button quit MultiZone, stopping anything still running."
+          checked={appSettings.closeToTray}
+          onChange={(v) => setAppSettings({ closeToTray: v })}
+        />
+      </section>
+
+      <section>
         <h3 className="mb-1 text-sm font-medium">Command rules</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
           One command prefix per line, matched on whole words. <strong>Longest match wins</strong>,

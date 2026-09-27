@@ -200,6 +200,7 @@ function useTouchDragRegion(onToggleMaximize: () => void) {
 export function TitleBar() {
   const [maximized, setMaximized] = useState(false);
   const accent = useApp((s) => s.theme.accent);
+  const closeToTray = useApp((s) => s.appSettings.closeToTray);
   // Create the window handle once and keep it stable across renders
   const appWindow = useRef(getCurrentWindow()).current;
 
@@ -251,7 +252,7 @@ export function TitleBar() {
         <WinBtn title={maximized ? "Restore" : "Maximize"} onClick={toggleMaximize}>
           {maximized ? <Square size={11} /> : <Maximize2 size={11} />}
         </WinBtn>
-        <WinBtn title="Close" onClick={() => { appWindow.close().catch(() => {}); }} danger>
+        <WinBtn title={closeToTray ? "Close to tray" : "Close"} onClick={() => { appWindow.close().catch(() => {}); }} danger>
           <X size={12} />
         </WinBtn>
       </div>

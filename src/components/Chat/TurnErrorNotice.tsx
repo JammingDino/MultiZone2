@@ -2,6 +2,14 @@ import { useState } from "react";
 import { AlertCircle, AlertTriangle, ChevronDown, ChevronRight, RotateCw, Settings as SettingsIcon, X } from "lucide-react";
 import { useApp } from "@/store/app";
 import { CHROME_QUIET } from "@/lib/chrome";
+import { friendlyError } from "@/lib/errors";
+
+/** A provider error nothing recognised: say what failed rather than "something". */
+const TURN_FAILED = {
+  headline: "The response failed",
+  hint: "The provider returned an error instead of a reply.",
+  action: "retry" as const,
+};
 
 /**
  * What went wrong with the last turn (1.0).
@@ -90,77 +98,6 @@ function RunawayCard({
   );
 }
 
-/** Turn a raw provider/transport error into something worth reading. */
-function explain(raw: string): { headline: string; hint: string; action: "settings" | "retry" } {
-  const s = raw.toLowerCase();
-
-  if (s.includes("401") || s.includes("unauthorized") || s.includes("invalid_api_key") || s.includes("invalid api key")) {
-    return {
-      headline: "The provider rejected your API key",
-      hint: "Check the key for this provider in Settings → Providers.",
-      action: "settings",
-    };
-  }
-  if (s.includes("403") || s.includes("forbidden")) {
-    return {
-      headline: "The provider refused the request",
-      hint: "The key may lack access to this model, or the account may be restricted.",
-      action: "settings",
-    };
-  }
-  if (s.includes("429") || s.includes("rate limit") || s.includes("quota")) {
-    return {
-      headline: "Rate limited or out of quota",
-      hint: "The provider is asking you to slow down, or the account is out of credit. Wait a moment and try again.",
-      action: "retry",
-    };
-  }
-  if (s.includes("404") || s.includes("model_not_found") || s.includes("does not exist")) {
-    return {
-      headline: "That model isn't available on this provider",
-      hint: "The zone's model name may be wrong, or the provider may not serve it. Check the zone's model in Settings.",
-      action: "settings",
-    };
-  }
-  if (s.includes("context length") || s.includes("context_length") || s.includes("too many tokens") || s.includes("maximum context")) {
-    return {
-      headline: "The conversation is too long for this model",
-      hint: "Start a new chat, or switch to a model with a larger context window.",
-      action: "settings",
-    };
-  }
-  if (
-    s.includes("connection refused") || s.includes("dns") || s.includes("timed out") ||
-    s.includes("timeout") || s.includes("unreachable") || s.includes("error sending request") ||
-    s.includes("tcp connect") || s.includes("network")
-  ) {
-    return {
-      headline: "Couldn't reach the provider",
-      hint: "Check the base URL, and that the server is running if it's a local one like Ollama or LM Studio.",
-      action: "retry",
-    };
-  }
-  if (s.includes("no provider") || s.includes("no default model") || s.includes("not configured")) {
-    return {
-      headline: "This chat has no model configured",
-      hint: "Pick a provider and model for this zone in Settings.",
-      action: "settings",
-    };
-  }
-  if (s.includes("500") || s.includes("502") || s.includes("503") || s.includes("overloaded")) {
-    return {
-      headline: "The provider had a server error",
-      hint: "This is on their end. Trying again usually works.",
-      action: "retry",
-    };
-  }
-  return {
-    headline: "The response failed",
-    hint: "The provider returned an error instead of a reply.",
-    action: "retry",
-  };
-}
-
 function ErrorCard({
   message, zoneName, onDismiss, onOpenSettings,
 }: {
@@ -170,7 +107,7 @@ function ErrorCard({
   onOpenSettings: () => void;
 }) {
   const [showRaw, setShowRaw] = useState(false);
-  const { headline, hint, action } = explain(message);
+  const { headline, hint, action } = friendlyError(message, TURN_FAILED);
 
   return (
     <div className="rounded-lg border border-[var(--color-danger)]/40 bg-[var(--color-danger)]/5 p-3">

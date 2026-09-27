@@ -18,6 +18,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { check, type Update } from "@tauri-apps/plugin-updater";
+import { errorText } from "@/lib/errors";
 import { relaunch } from "@tauri-apps/plugin-process";
 
 export type UpdateStage =
@@ -101,7 +102,7 @@ export function useUpdater() {
     if (/signature|verif/i.test(raw)) {
       return "The update failed signature verification and was not installed.";
     }
-    return raw;
+    return errorText(raw);
   };
 
   /**
@@ -177,7 +178,7 @@ export function useUpdater() {
     try {
       await relaunch();
     } catch (e) {
-      set({ stage: "error", error: e instanceof Error ? e.message : String(e) });
+      set({ stage: "error", error: errorText(e) });
     }
   }, [set]);
 

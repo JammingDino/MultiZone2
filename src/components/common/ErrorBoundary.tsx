@@ -47,12 +47,15 @@ export class ErrorBoundary extends React.Component<Props, State> {
           {this.props.label ? `${this.props.label} failed to open` : "Something failed to render"}
         </div>
         <p className="text-xs text-[var(--color-text-muted)]">
-          The rest of the app is unaffected. If this keeps happening, the message below is the
-          thing to report.
+          This is a bug in MultiZone, not something you did. The rest of the app is unaffected,
+          and trying again usually works. If it keeps happening, the details are what to report.
         </p>
-        <pre className="max-h-40 w-full overflow-auto rounded border border-[var(--color-border)] bg-[var(--color-panel)] p-2 text-left font-mono text-[11px] text-[var(--color-text-muted)]">
-          {error.message || String(error)}
-        </pre>
+        <details className="w-full text-left">
+          <summary className="cursor-pointer text-center text-[11px] text-[var(--color-text-muted)]">Details</summary>
+          <pre className="mt-1.5 max-h-40 w-full overflow-auto rounded border border-[var(--color-border)] bg-[var(--color-panel)] p-2 font-mono text-[11px] text-[var(--color-text-muted)]">
+            {error.message || String(error)}
+          </pre>
+        </details>
         <button
           onClick={() => this.setState({ error: null })}
           className="rounded border border-[var(--color-border)] px-3 py-1.5 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"

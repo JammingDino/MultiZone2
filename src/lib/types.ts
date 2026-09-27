@@ -102,8 +102,22 @@ export interface Chat {
    * since spend is counted across a chat and every sub-agent under it.
    */
   spendLimit: number | null;
+  /**
+   * Rolling context limit in tokens (0.18), or null to use the global
+   * `rollingContextTokens` default. `0` is off for this chat.
+   */
+  rollingContextTokens: number | null;
   createdAt: number;
   updatedAt: number;
+}
+
+/** A note the model marked important in a rolling-context chat (0.18). */
+export interface ContextPin {
+  id: string;
+  note: string;
+  /** A tool result pinned with the note, if any. */
+  messageId: string | null;
+  createdAt: number;
 }
 
 /** One step of a plan (0.12.0). */
@@ -922,6 +936,12 @@ export interface AppSettings {
    * Smart compaction's rules (0.18) — see `tools/smart_compact.rs`. Applied
    * to messages before a chat's smart-compaction cutoff.
    */
+  /**
+   * Rolling context default (0.18): chats keep their conversation under this
+   * many tokens by forgetting the oldest messages, except what the model marks
+   * important. 0 is off; a chat can set its own.
+   */
+  rollingContextTokens: number;
   smartCompact: {
     /** A compacted tool result keeps this many characters, head and tail. */
     outputChars: number;
@@ -1267,6 +1287,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   closeToTray: true,
   maxToolSteps: 30,
   maxSessionTokens: 0,
+  rollingContextTokens: 0,
   smartCompact: { outputChars: 1500, inputChars: 300, dedupe: true, stripThinking: true },
   pdfMode: "images",
   pdfExportDetail: "steps",

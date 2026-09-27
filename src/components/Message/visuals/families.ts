@@ -87,6 +87,8 @@ export const FAMILY: Record<string, Family> = {
   app_read: "state",
   compact_context: "state",
   smart_compact: "state",
+  mark_important: "state",
+  forget_important: "state",
   read_context: "state",
   get_current_datetime: "state",
   enter_plan_mode: "state",

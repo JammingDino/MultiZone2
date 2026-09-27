@@ -120,6 +120,9 @@ pub struct Chat {
     /// Read from and written to the session root, since spend is counted across
     /// a chat and every sub-agent under it.
     pub spend_limit: Option<i64>,
+    /// Rolling context limit in tokens (0.18). `None` inherits the global
+    /// default, `Some(0)` is off. See `tools::rolling`.
+    pub rolling_context_tokens: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
 }

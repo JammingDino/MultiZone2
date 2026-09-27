@@ -12,7 +12,7 @@ use tauri::{AppHandle, Emitter, State};
 /// `commands::messages` — `query_as::<Chat>` fails to decode if the list and the
 /// struct drift, so there must only ever be one of these.
 pub const CHAT_COLS: &str =
-    "id, title, zone_id, project_id, project_context_enabled, knowledge_enabled, perspective_mode, smart_routing, parent_chat_id, branched_from_message_id, initiated_by_zone_id, context_summary, context_summary_through, plan_mode, spend_limit, created_at, updated_at";
+    "id, title, zone_id, project_id, project_context_enabled, knowledge_enabled, perspective_mode, smart_routing, parent_chat_id, branched_from_message_id, initiated_by_zone_id, context_summary, context_summary_through, plan_mode, spend_limit, rolling_context_tokens, created_at, updated_at";
 
 /// The global default for whether new chats start with knowledge enabled, read
 /// from the `knowledgeDefaultEnabled` field of the `app_settings` JSON blob.
@@ -1731,4 +1731,43 @@ pub async fn compact_chat(
     }
     let _ = app.emit("chats-changed", serde_json::json!({}));
     Ok(CompactReport { method, messages: n.unwrap_or(0) })
+}
+
+/// Set (or clear, with `None`) a chat's rolling context limit (0.18). `0`
+/// turns rolling off for this chat whatever the global default says.
+#[tauri::command]
+pub async fn set_chat_rolling_context(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    chat_id: String,
+    tokens: Option<i64>,
+) -> AppResult<()> {
+    sqlx::query("UPDATE chats SET rolling_context_tokens = ?1, updated_at = ?2 WHERE id = ?3")
+        .bind(tokens.map(|n| n.max(0)))
+        .bind(now_ts())
+        .bind(&chat_id)
+        .execute(&state.db)
+        .await?;
+    let _ = app.emit("chats-changed", serde_json::json!({}));
+    Ok(())
+}
+
+/// What the model marked important in a chat (0.18), oldest first.
+#[tauri::command]
+pub async fn list_context_pins(
+    state: State<'_, AppState>,
+    chat_id: String,
+) -> AppResult<Vec<crate::tools::rolling::Pin>> {
+    Ok(crate::tools::rolling::pins(&state.db, &chat_id).await)
+}
+
+/// Remove a note from a chat's marked-important list.
+#[tauri::command]
+pub async fn delete_context_pin(
+    state: State<'_, AppState>,
+    chat_id: String,
+    pin_id: String,
+) -> AppResult<()> {
+    crate::tools::rolling::delete(&state.db, &chat_id, &pin_id).await?;
+    Ok(())
 }

@@ -113,6 +113,9 @@ pub const ROUTES: &[RouteDef] = &[
     r("GET", "/api/chats/:id/events", "The session event log — every tool call, approval, error and plan decision in order (?limit=N for the tail)"),
     r("POST", "/api/chats/:id/title", "Rename a chat"),
     r("POST", "/api/chats/:id/generate-title", "Have the model title the chat"),
+    r("POST", "/api/chats/:id/rolling-context", "This chat's rolling context limit ({tokens}: a number, 0 for off, null to inherit the global default)"),
+    r("GET", "/api/chats/:id/pins", "What the model marked important in this chat (rolling context)"),
+    r("DELETE", "/api/chats/:id/pins/:pinId", "Remove a marked-important note"),
     r("POST", "/api/chats/:id/compact", "Compact the chat's context ({method}: \"smart\" trims old tool output for free, \"summary\" has the model summarize)"),
     r("POST", "/api/chats/:id/project", "Move the chat into a project (or out of one)"),
     r("POST", "/api/chats/:id/project-context", "Toggle project context injection"),
@@ -314,6 +317,9 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("chats::rename_chat", Route("POST /api/chats/:id/title")),
     ("chats::generate_title", Route("POST /api/chats/:id/generate-title -> title")),
     ("chats::compact_chat", Route("POST /api/chats/:id/compact")),
+    ("chats::set_chat_rolling_context", Route("POST /api/chats/:id/rolling-context")),
+    ("chats::list_context_pins", Route("GET /api/chats/:id/pins")),
+    ("chats::delete_context_pin", Route("DELETE /api/chats/:id/pins/:pinId")),
     ("chats::set_chat_zone", Route("POST /api/chats/:id/zone")),
     ("chats::set_chat_smart", Route("POST /api/chats/:id/smart")),
     ("messages::set_chat_spend_limit", Route("POST /api/chats/:id/spend-limit")),
@@ -685,6 +691,32 @@ pub async fn compact_chat(
     let method = s(&body, "method").unwrap_or_else(|| "smart".into());
     let report = commands::chats::compact_chat(st.app.clone(), app_state(&st), id, method).await?;
     Ok(Json(report).into_response())
+}
+
+pub async fn set_chat_rolling_context(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> ApiResult<StatusCode> {
+    let tokens = body.get("tokens").and_then(Value::as_i64);
+    commands::chats::set_chat_rolling_context(st.app.clone(), app_state(&st), id, tokens).await?;
+    Ok(NO_CONTENT)
+}
+
+pub async fn list_context_pins(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+) -> ApiResult<Response> {
+    let pins = commands::chats::list_context_pins(app_state(&st), id).await?;
+    Ok(Json(pins).into_response())
+}
+
+pub async fn delete_context_pin(
+    State(st): State<ApiState>,
+    Path((id, pin_id)): Path<(String, String)>,
+) -> ApiResult<StatusCode> {
+    commands::chats::delete_context_pin(app_state(&st), id, pin_id).await?;
+    Ok(NO_CONTENT)
 }
 
 // ── Plan mode (0.12.0) ───────────────────────────────────────────────────────

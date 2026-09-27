@@ -1785,9 +1785,19 @@ async fn run_participant_turn(
         .flatten()
         .is_some();
 
+    // Rolling context (0.18): the primary of a single-conversation chat only,
+    // which is the only history the builder rolls.
+    let rolling_limit = if persp.is_none() && rolling_active(&ctx.db, chat_id).await {
+        crate::tools::rolling::limit(&ctx.db, chat_id).await
+    } else {
+        0
+    };
     let mut tools = build_tools_for_zone(&ctx.db, &zone, &tool_ctx).await;
     if knowledge_available {
         tools.push(crate::tools::knowledge::definition());
+    }
+    if rolling_limit > 0 {
+        tools.extend(crate::tools::rolling::definitions());
     }
     if suppress_ask_user {
         strip_ask_user(&mut tools);
@@ -1931,9 +1941,17 @@ async fn run_participant_turn(
 
         if persp.is_none() && step > 0 {
             let epoch = compaction_epoch(&ctx.db, chat_id).await;
-            if epoch != context_epoch {
-                context_epoch = epoch;
+            // A rolling chat that has outgrown its limit mid-turn is rebuilt
+            // too: the builder moves the cutoff, and a long agentic turn is
+            // exactly where the limit is reached (0.18).
+            let outgrown = rolling_limit > 0
+                && crate::tools::rolling::request_weight(
+                    &api_messages,
+                    crate::llm::tokens::DEFAULT_CHARS_PER_TOKEN,
+                ) > rolling_limit;
+            if epoch != context_epoch || outgrown {
                 api_messages = build_message_history(&ctx.db, chat_id, &zone, false).await?;
+                context_epoch = compaction_epoch(&ctx.db, chat_id).await;
             }
         }
 
@@ -2230,6 +2248,9 @@ async fn run_participant_turn(
                 tools = build_tools_for_zone(&ctx.db, &zone, &tool_ctx).await;
                 if knowledge_available {
                     tools.push(crate::tools::knowledge::definition());
+                }
+                if rolling_limit > 0 {
+                    tools.extend(crate::tools::rolling::definitions());
                 }
                 if suppress_ask_user {
                     strip_ask_user(&mut tools);
@@ -3121,6 +3142,9 @@ async fn run_participant_turn(
             if knowledge_available {
                 tools.push(crate::tools::knowledge::definition());
             }
+            if rolling_limit > 0 {
+                tools.extend(crate::tools::rolling::definitions());
+            }
             if suppress_ask_user {
                 strip_ask_user(&mut tools);
             }
@@ -3155,6 +3179,9 @@ async fn run_participant_turn(
                         tools = build_tools_for_zone(&ctx.db, &zone, &tool_ctx).await;
                         if knowledge_available {
                             tools.push(crate::tools::knowledge::definition());
+                        }
+                        if rolling_limit > 0 {
+                            tools.extend(crate::tools::rolling::definitions());
                         }
                         if suppress_ask_user {
                             strip_ask_user(&mut tools);

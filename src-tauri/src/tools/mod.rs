@@ -22,6 +22,7 @@ pub mod http;
 pub mod citations;
 pub mod compact;
 pub mod smart_compact;
+pub mod rolling;
 pub mod context_usage;
 pub mod wsl;
 pub mod terminal;
@@ -413,6 +414,8 @@ pub fn tool_safety_by_name(name: &str) -> u8 {
         // Smart compaction costs nothing and hides nothing from the user; it
         // only trims what the model re-reads of its own old tool traffic.
         | "smart_compact"
+        // Rolling context's notes are the model's own bookkeeping (0.18).
+        | "mark_important" | "forget_important"
         // `search_knowledge` is the pre-0.9.0 name for `search_local_files`;
         // stored tool-call history still carries it.
         | "search_local_files" | "search_knowledge" => 0,
@@ -655,6 +658,8 @@ async fn dispatch_inner(
             sink.notify_chats_changed();
             out
         }
+        "mark_important" => rolling::mark(args, db, chat_id).await,
+        "forget_important" => rolling::forget(args, db, chat_id).await,
         "read_context" => context_usage::run(args, db, chat_id, http).await,
         "spawn_subagent" => subchat::spawn(args, ctx, sink, caller_zone_id, chat_id).await,
         "send_subchat_message" => subchat::send(args, ctx, sink).await,

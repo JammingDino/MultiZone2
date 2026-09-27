@@ -184,6 +184,15 @@ export function ChangeVisual({
     );
   }
 
+  if (name === "mark_important" || name === "forget_important") {
+    const note = str(args?.note);
+    return (
+      <Line icon={Layers}>
+        {name === "mark_important" ? `Marked important: ${note || "…"}` : "Dropped an important note"}
+      </Line>
+    );
+  }
+
   if (name === "read_context") {
     return <ContextReadout result={result} />;
   }

@@ -27,6 +27,9 @@ pub enum SnippetKind {
     DefaultRules,
     /// Where the tools act: working directory, platform, date (0.18).
     Env,
+    /// The chat forgets its oldest messages past a limit; how to work with
+    /// that (0.18).
+    RollingContext,
     Skills,
     Knowledge,
     /// The ranked map of what this project defines (0.14.5).
@@ -62,6 +65,7 @@ impl SnippetKind {
             Self::Continuity => "Agent-loop preamble",
             Self::DefaultRules => "Default rules",
             Self::Env => "Environment",
+            Self::RollingContext => "Rolling context",
             Self::Leader => "Sub-agent roster",
             Self::Memory => "Memories",
             Self::Identity => "Multi-zone identity",
@@ -263,6 +267,12 @@ pub async fn build_system_snippets(
         snippets.push((SnippetKind::Env, env_block(dir.as_deref())));
     }
 
+    // Rolling context (0.18): standing instructions, stable for as long as the
+    // chat is rolling. The notes themselves change and go with the history.
+    if rolling_active(db, chat_id).await {
+        snippets.push((SnippetKind::RollingContext, crate::tools::rolling::INSTRUCTIONS.to_string()));
+    }
+
     // Plan mode and its aftermath (0.12.0), directly after the loop preamble
     // because both change what the rest of the turn is *for*. They are mutually
     // exclusive by construction: approving a plan is what clears the mode.
@@ -455,6 +465,9 @@ pub async fn turn_overhead(db: &SqlitePool, chat_id: &str) -> AppResult<TurnOver
             tools.push(crate::tools::knowledge::definition());
         }
     }
+    if rolling_active(db, chat_id).await {
+        tools.extend(crate::tools::rolling::definitions());
+    }
 
     // Function name → the group it belongs to, over the zone's enabled ids.
     // Anything not found there came from elsewhere: `mcp__<server>__<tool>`
@@ -479,6 +492,7 @@ pub async fn turn_overhead(db: &SqlitePool, chat_id: &str) -> AppResult<TurnOver
                     .map(|server| format!("mcp: {server}"))
                     .unwrap_or_else(|| match name.as_str() {
                         "search_local_files" => "knowledge".to_string(),
+                        "mark_important" | "forget_important" => "rolling context".to_string(),
                         _ => "plan mode".to_string(),
                     })
             });
@@ -497,9 +511,29 @@ pub async fn turn_overhead(db: &SqlitePool, chat_id: &str) -> AppResult<TurnOver
 
 /// Tokens the request-time rewrites (smart compaction, rolling context) take
 /// out of what the stored messages add up to — the meter's correction (0.18).
+/// Read-only: a rolling cutoff that is due is simulated, not saved.
 pub(crate) async fn trimmed_tokens(db: &SqlitePool, chat_id: &str) -> i64 {
-    crate::tools::smart_compact::saved_tokens(db, chat_id, crate::llm::tokens::DEFAULT_CHARS_PER_TOKEN)
-        .await
+    use crate::tools::{rolling, smart_compact};
+    let cpt = crate::llm::tokens::DEFAULT_CHARS_PER_TOKEN;
+    let mut rows = smart_compact::primary_rows(db, chat_id).await;
+    let before = smart_compact::weight(&rows, cpt);
+    if let Some(through) = smart_compact::cutoff(db, chat_id).await {
+        smart_compact::apply(&mut rows, through, &smart_compact::options(db).await);
+    }
+    if rolling_active(db, chat_id).await {
+        let limit = rolling::limit(db, chat_id).await;
+        let stored = rolling::stored_through(db, chat_id).await;
+        let through = rolling::advance(&rows, stored, limit, cpt).or(stored);
+        rolling::split(&mut rows, through);
+    }
+    (before - smart_compact::weight(&rows, cpt)).max(0)
+}
+
+/// Whether rolling context applies to this chat: a limit is set, and it is a
+/// single-conversation chat (a multi-model transcript is built differently and
+/// never rolls).
+pub(crate) async fn rolling_active(db: &SqlitePool, chat_id: &str) -> bool {
+    crate::tools::rolling::limit(db, chat_id).await > 0 && !is_multi_model(db, chat_id).await
 }
 
 pub(crate) async fn build_message_history(
@@ -574,6 +608,12 @@ pub(crate) async fn build_message_history(
     if let Some(through) = crate::tools::smart_compact::cutoff(db, chat_id).await {
         let opts = crate::tools::smart_compact::options(db).await;
         crate::tools::smart_compact::apply(&mut rows, through, &opts);
+    }
+
+    // Rolling context (0.18): past the chat's limit the oldest messages drop
+    // out, and what the model marked important is put in front of the rest.
+    if let Some(block) = crate::tools::rolling::apply(db, chat_id, &mut rows).await {
+        out.push(block);
     }
 
     // A tool result whose call is no longer in the history is fatal, not

@@ -33,6 +33,8 @@ const TOOL_LABELS: Record<string, string> = {
   change_zone: "Switching zone",
   compact_context: "Compacting context",
   smart_compact: "Trimming old tool output",
+  mark_important: "Marking something important",
+  forget_important: "Dropping an important note",
   read_context: "Reading context usage",
   copy_file: "Copying file",
   write: "Writing file",

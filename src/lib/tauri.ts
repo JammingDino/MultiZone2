@@ -132,6 +132,13 @@ export const setChatSmart = (id: string, smart: boolean) =>
  */
 export const setChatSpendLimit = (chatId: string, limit: number | null) =>
   invoke<void>("set_chat_spend_limit", { chatId, limit });
+// Rolling context (0.18)
+export const setChatRollingContext = (chatId: string, tokens: number | null) =>
+  invoke<void>("set_chat_rolling_context", { chatId, tokens });
+export const listContextPins = (chatId: string) =>
+  invoke<import("./types").ContextPin[]>("list_context_pins", { chatId });
+export const deleteContextPin = (chatId: string, pinId: string) =>
+  invoke<void>("delete_context_pin", { chatId, pinId });
 // Plan mode & plans (0.12.0)
 export const setChatPlanMode = (chatId: string, on: boolean) =>
   invoke<void>("set_chat_plan_mode", { chatId, on });

@@ -446,6 +446,11 @@ pub fn allowed_in_plan_mode(name: &str) -> bool {
             // anything the mode exists to protect.
             | "draft_plan_step"
             | "read_plan"
+            // Context bookkeeping (0.18): what the model keeps in view, not
+            // anything the mode protects.
+            | "smart_compact"
+            | "mark_important"
+            | "forget_important"
     )
 }
 

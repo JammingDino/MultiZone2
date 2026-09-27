@@ -102,6 +102,31 @@ export function ChatTab() {
       </section>
 
       <section>
+        <h3 className="mb-1 text-sm font-medium">Rolling context</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          Keeps a chat's conversation under a fixed size by forgetting its oldest messages as it
+          grows — except what the model marks important, which it is always shown. Suits long
+          unattended runs, where a chat would otherwise outgrow the model. The model is told to
+          record what it has finished and verified, and not to redo it. <strong>0 is off</strong>;
+          each chat can set its own from the compact button under the composer.
+        </p>
+        <div className="flex items-center gap-3">
+          <input
+            type="number"
+            min={0}
+            step={4000}
+            value={appSettings.rollingContextTokens}
+            onChange={(e) => {
+              const n = Math.round(Number(e.target.value));
+              if (Number.isFinite(n)) setAppSettings({ rollingContextTokens: Math.max(0, n) });
+            }}
+            className="w-28 rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1.5 text-sm"
+          />
+          <span className="text-xs text-[var(--color-text-muted)]">tokens of conversation per chat by default</span>
+        </div>
+      </section>
+
+      <section>
         <h3 className="mb-1 text-sm font-medium">Smart compaction</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
           Shrinks what the model re-reads of a long chat by rule, with no model call: old tool

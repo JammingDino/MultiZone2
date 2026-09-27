@@ -91,6 +91,10 @@ pub const ROUTES: &[RouteDef] = &[
     r("GET", "/api/runs", "Every saved parameterised run"),
     r("POST", "/api/runs", "Create or update a saved run"),
     r("DELETE", "/api/runs/:id", "Delete a saved run"),
+    r("GET", "/api/schedules", "Every scheduled run"),
+    r("POST", "/api/schedules", "Create or update a scheduled run"),
+    r("DELETE", "/api/schedules/:id", "Delete a scheduled run"),
+    r("POST", "/api/schedules/:id/run", "Fire a scheduled run now"),
     r("POST", "/api/runs/:id/render", "Fill a run's template. Body: { \"values\"? }"),
     r("POST", "/api/chats", "Create a chat"),
     r("DELETE", "/api/chats/:id", "Delete a chat"),
@@ -311,6 +315,10 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("runs::upsert_saved_run", Route("POST /api/runs")),
     ("runs::delete_saved_run", Route("DELETE /api/runs/:id")),
     ("runs::render_saved_run", Route("POST /api/runs/:id/render")),
+    ("schedules::list_scheduled_runs", Route("GET /api/schedules")),
+    ("schedules::upsert_scheduled_run", Route("POST /api/schedules")),
+    ("schedules::delete_scheduled_run", Route("DELETE /api/schedules/:id")),
+    ("schedules::run_scheduled_now", Route("POST /api/schedules/:id/run")),
     ("chats::create_chat", Route("POST /api/chats")),
     ("chats::delete_chat", Route("DELETE /api/chats/:id")),
     ("chats::get_messages", Route("GET /api/chats/:id/messages")),
@@ -691,6 +699,37 @@ pub async fn compact_chat(
     let method = s(&body, "method").unwrap_or_else(|| "smart".into());
     let report = commands::chats::compact_chat(st.app.clone(), app_state(&st), id, method).await?;
     Ok(Json(report).into_response())
+}
+
+pub async fn list_scheduled_runs(State(st): State<ApiState>) -> ApiResult<Response> {
+    let runs = commands::schedules::list_scheduled_runs(app_state(&st)).await?;
+    Ok(Json(runs).into_response())
+}
+
+pub async fn upsert_scheduled_run(
+    State(st): State<ApiState>,
+    Json(body): Json<Value>,
+) -> ApiResult<Response> {
+    let run = serde_json::from_value(body)
+        .map_err(|e| ApiError(crate::error::AppError::Invalid(format!("not a scheduled run: {e}"))))?;
+    let out = commands::schedules::upsert_scheduled_run(st.app.clone(), app_state(&st), run).await?;
+    Ok(Json(out).into_response())
+}
+
+pub async fn delete_scheduled_run(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+) -> ApiResult<StatusCode> {
+    commands::schedules::delete_scheduled_run(st.app.clone(), app_state(&st), id).await?;
+    Ok(NO_CONTENT)
+}
+
+pub async fn run_scheduled_now(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+) -> ApiResult<StatusCode> {
+    commands::schedules::run_scheduled_now(st.app.clone(), app_state(&st), id).await?;
+    Ok(NO_CONTENT)
 }
 
 pub async fn set_chat_rolling_context(

@@ -45,6 +45,8 @@ mod repomap;
 #[cfg(desktop)]
 mod runs;
 #[cfg(desktop)]
+mod schedule;
+#[cfg(desktop)]
 mod search;
 #[cfg(desktop)]
 mod review;
@@ -235,6 +237,9 @@ pub fn run() {
                 if let Err(e) = tray::init(&handle) {
                     tracing::warn!("no tray icon, so closing the window quits: {e}");
                 }
+                // Scheduled runs (0.18). Started after the state is managed,
+                // since a firing needs the database and the engine.
+                schedule::start(handle.clone());
                 // Launch the HTTP API server if the user has enabled it.
                 commands::api::start_if_enabled(&handle).await;
                 // Bring every enabled MCP server up (0.14.0). Returns as soon as
@@ -294,6 +299,10 @@ pub fn run() {
             commands::runs::upsert_saved_run,
             commands::runs::delete_saved_run,
             commands::runs::render_saved_run,
+            commands::schedules::list_scheduled_runs,
+            commands::schedules::upsert_scheduled_run,
+            commands::schedules::delete_scheduled_run,
+            commands::schedules::run_scheduled_now,
             commands::mcp::list_mcp_resources,
             commands::mcp::read_mcp_resource,
             commands::mcp::list_mcp_prompts,

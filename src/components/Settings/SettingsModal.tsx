@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Server, Smartphone, Palette, MessageSquare, Database, Globe, Brain, Sparkles, Plug, Library, Layers, Mic, Volume2 } from "lucide-react";
+import { Server, Smartphone, Palette, MessageSquare, Database, Globe, Brain, Sparkles, Plug, Library, Layers, Mic, Volume2, CalendarClock } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { Modal, ModalTitle } from "@/components/common/Modal";
@@ -13,19 +13,20 @@ import { McpTab } from "./tabs/McpTab";
 import { MemoryTab } from "./tabs/MemoryTab";
 import { ProvidersTab } from "./tabs/ProvidersTab";
 import { RemoteTab } from "./tabs/RemoteTab";
+import { SchedulesTab } from "./tabs/SchedulesTab";
 import { SkillsTab } from "./tabs/SkillsTab";
 import { SpeechTab } from "./tabs/SpeechTab";
 import { VoiceTab } from "./tabs/VoiceTab";
 import { ZonesTab } from "./tabs/ZonesTab";
 
-type Tab = "providers" | "zones" | "appearance" | "chat" | "voice" | "speech" | "skills" | "mcp" | "knowledge" | "memory" | "remote" | "api" | "data";
+type Tab = "providers" | "zones" | "appearance" | "chat" | "schedules" | "voice" | "speech" | "skills" | "mcp" | "knowledge" | "memory" | "remote" | "api" | "data";
 
-const TAB_IDS: Tab[] = ["providers", "zones", "appearance", "chat", "voice", "speech", "skills", "mcp", "knowledge", "memory", "remote", "api", "data"];
+const TAB_IDS: Tab[] = ["providers", "zones", "appearance", "chat", "schedules", "voice", "speech", "skills", "mcp", "knowledge", "memory", "remote", "api", "data"];
 
 /** The nav label for each tab, reused when a tab fails to render so the message
  * names the screen the user actually clicked. */
 const TAB_LABELS: Record<Tab, string> = {
-  providers: "Providers", zones: "Zones", appearance: "Appearance", chat: "Chat",
+  providers: "Providers", zones: "Zones", appearance: "Appearance", chat: "Chat", schedules: "Schedules",
   voice: "Dictation", speech: "Speech", skills: "Skills", mcp: "MCP",
   knowledge: "Knowledge", memory: "Memory", remote: "Phone & remote", api: "API", data: "Data",
 };
@@ -83,6 +84,7 @@ export function SettingsModal() {
             <NavGroup label="Interface" />
             <TabButton active={tab === "appearance"} icon={<Palette size={14} />} label="Appearance" onClick={() => setTab("appearance")} />
             <TabButton active={tab === "chat"} icon={<MessageSquare size={14} />} label="Chat" onClick={() => setTab("chat")} />
+            <TabButton active={tab === "schedules"} icon={<CalendarClock size={14} />} label="Schedules" onClick={() => setTab("schedules")} />
             <TabButton active={tab === "voice"} icon={<Mic size={14} />} label="Dictation" onClick={() => setTab("voice")} />
             <TabButton active={tab === "speech"} icon={<Volume2 size={14} />} label="Speech" onClick={() => setTab("speech")} />
 
@@ -111,6 +113,7 @@ export function SettingsModal() {
                 {tab === "zones" && <ZonesTab />}
                 {tab === "appearance" && <AppearanceTab />}
                 {tab === "chat" && <ChatTab />}
+                {tab === "schedules" && <SchedulesTab />}
                 {tab === "voice" && <VoiceTab />}
                 {tab === "speech" && <SpeechTab />}
                 {tab === "skills" && <SkillsTab />}

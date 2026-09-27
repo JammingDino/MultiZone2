@@ -23,6 +23,7 @@ pub mod citations;
 pub mod compact;
 pub mod smart_compact;
 pub mod rolling;
+pub mod schedule;
 pub mod context_usage;
 pub mod wsl;
 pub mod terminal;
@@ -168,6 +169,8 @@ pub enum ToolId {
     /// providers, projects, skills, settings. Everything the user can do in the
     /// app, because it is served by the same router the API is.
     AppControl,
+    /// 0.18 — prompts put on a clock: once, every N minutes, daily, weekly.
+    Schedule,
 }
 
 impl ToolId {
@@ -207,6 +210,7 @@ impl ToolId {
             "teamwork" => Some(Self::Teamwork),
             "terminal" => Some(Self::Terminal),
             "app_control" => Some(Self::AppControl),
+            "schedule" => Some(Self::Schedule),
             // `save_output` is the legacy id for this group (briefly shipped as a
             // write+present tool); it now maps to the present-only tool.
             "present_file" | "save_output" => Some(Self::PresentFile),
@@ -241,6 +245,7 @@ impl ToolId {
             Self::Teamwork => "teamwork",
             Self::Terminal => "terminal",
             Self::AppControl => "app_control",
+            Self::Schedule => "schedule",
         }
     }
 
@@ -282,6 +287,7 @@ impl ToolId {
             Self::Teamwork => teamwork::definitions(),
             Self::Terminal => terminal::definitions(),
             Self::AppControl => app_control::definitions(),
+            Self::Schedule => schedule::definitions(),
         }
     }
 
@@ -325,8 +331,10 @@ impl ToolId {
             // rewrites it: the group is dangerous so it never lands in a default
             // toolset, and per-call gating keeps reading the route table cheap
             // while every change prompts.
+            // Schedule starts turns later with nobody at the keyboard; every
+            // `schedule_run` prompts, listing is a read.
             Self::CodeExec | Self::Shell | Self::FileManage | Self::HttpRequest | Self::Wsl
-            | Self::Terminal | Self::AppControl => 2,
+            | Self::Terminal | Self::AppControl | Self::Schedule => 2,
         }
     }
 }
@@ -334,7 +342,7 @@ impl ToolId {
 /// Every built-in tool group. The single source of truth for enumerating tools
 /// (e.g. `list_tool_functions`, which flattens each group into the functions the
 /// model actually sees). Keep in step with the `ToolId` variants.
-pub const ALL_TOOL_IDS: [ToolId; 24] = [
+pub const ALL_TOOL_IDS: [ToolId; 25] = [
     ToolId::DateTime,
     ToolId::SmartSearch,
     ToolId::SmartFetch,
@@ -359,6 +367,7 @@ pub const ALL_TOOL_IDS: [ToolId; 24] = [
     ToolId::Teamwork,
     ToolId::Terminal,
     ToolId::AppControl,
+    ToolId::Schedule,
 ];
 
 /// Tool ids classified as "safe" (safety level 0). Used as the default toolset
@@ -416,6 +425,7 @@ pub fn tool_safety_by_name(name: &str) -> u8 {
         | "smart_compact"
         // Rolling context's notes are the model's own bookkeeping (0.18).
         | "mark_important" | "forget_important"
+        | "list_scheduled_runs"
         // `search_knowledge` is the pre-0.9.0 name for `search_local_files`;
         // stored tool-call history still carries it.
         | "search_local_files" | "search_knowledge" => 0,
@@ -431,10 +441,12 @@ pub fn tool_safety_by_name(name: &str) -> u8 {
         // Reading the app's own state is a read like any other; changing it is
         // the user's app being rewritten, so it prompts.
         | "app_read"
-        | "terminal_stop" => 1,
+        | "terminal_stop"
+        | "cancel_scheduled_run" => 1,
         "execute_code" | "bash" | "delete_file" | "http_request"
         | "app_control"
-        | "terminal_start" | "terminal_write" => 2,
+        | "terminal_start" | "terminal_write"
+        | "schedule_run" => 2,
         _ => 1,
     }
 }
@@ -658,6 +670,9 @@ async fn dispatch_inner(
             sink.notify_chats_changed();
             out
         }
+        "schedule_run" => schedule::schedule(args, db, chat_id, caller_zone_id).await,
+        "list_scheduled_runs" => schedule::list(db).await,
+        "cancel_scheduled_run" => schedule::cancel(args, db).await,
         "mark_important" => rolling::mark(args, db, chat_id).await,
         "forget_important" => rolling::forget(args, db, chat_id).await,
         "read_context" => context_usage::run(args, db, chat_id, http).await,
@@ -777,7 +792,9 @@ mod tests {
         // provider's word draws the wrong conclusion from it. Same slack.
         // 0.18 adds `smart_compact` beside `compact_context`: one function, one
         // optional argument, 750 bytes.
-        const BUDGET_BYTES: usize = 44_100;
+        // 0.18 also adds the `schedule` group: `schedule_run` carries a real
+        // schema (when, how often, where), and list/cancel are one line each.
+        const BUDGET_BYTES: usize = 46_600;
 
         let ctx = ToolContext {
             project_dir: Some(r"C:\Users\me\project".to_string()),

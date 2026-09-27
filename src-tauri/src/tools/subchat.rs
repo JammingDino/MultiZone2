@@ -872,7 +872,7 @@ async fn build_parts(
 }
 
 /// Plain-text transcript of a chat's primary user/assistant turns.
-async fn transcript(db: &SqlitePool, chat_id: &str) -> AppResult<String> {
+pub(crate) async fn transcript(db: &SqlitePool, chat_id: &str) -> AppResult<String> {
     let rows: Vec<(String, String)> = sqlx::query_as(
         "SELECT role, content FROM messages
          WHERE chat_id = ?1 AND zone_id IS NULL AND role IN ('user', 'assistant')

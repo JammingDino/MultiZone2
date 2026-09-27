@@ -193,6 +193,10 @@ export function ChangeVisual({
     );
   }
 
+  if (name === "schedule_run" && typeof result.next_run === "string") {
+    return <Line icon={Clock}>{`Scheduled “${str(result.name)}” — next ${str(result.next_run)}`}</Line>;
+  }
+
   if (name === "read_context") {
     return <ContextReadout result={result} />;
   }

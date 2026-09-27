@@ -101,6 +101,13 @@ export const getMcpPrompt = (id: string, name: string, args: Record<string, stri
 
 // Saved parameterised runs (0.15.4).
 export const listSavedRuns = () => invoke<SavedRun[]>("list_saved_runs");
+// Scheduled runs (0.18)
+export const listScheduledRuns = () =>
+  invoke<import("./types").ScheduledRun[]>("list_scheduled_runs");
+export const upsertScheduledRun = (run: import("./types").ScheduleInput) =>
+  invoke<import("./types").ScheduledRun>("upsert_scheduled_run", { run });
+export const deleteScheduledRun = (id: string) => invoke<void>("delete_scheduled_run", { id });
+export const runScheduledNow = (id: string) => invoke<void>("run_scheduled_now", { id });
 export const upsertSavedRun = (run: {
   id?: string;
   name: string;
@@ -814,6 +821,10 @@ export function onChatZoneUpdated(
   return listen<{ chatId: string; zoneId: string }>("chat-zone-updated", (e) =>
     handler(e.payload),
   );
+}
+/** A scheduled run was added, changed, or fired (0.18). */
+export function onSchedulesChanged(handler: () => void): Promise<UnlistenFn> {
+  return listen("schedules-changed", () => handler());
 }
 /** Emitted when the chat list changes server-side (e.g. a subchat was spawned). */
 export function onChatsChanged(handler: () => void): Promise<UnlistenFn> {

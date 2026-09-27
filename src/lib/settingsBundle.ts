@@ -32,6 +32,7 @@
 import type { AppSettings, McpServerView, Memory, Provider, Skill, Zone } from "./types";
 import type { ThemePrefs } from "@/store/app";
 import * as api from "./tauri";
+import { errorText } from "@/lib/errors";
 
 export const BUNDLE_KIND = "multizone.settings";
 /** v2 added `memories`, `providerNames` and per-section export selection. */
@@ -568,7 +569,7 @@ export async function applySettingsBundle(
       liveProviderIds.add(p.id);
       result.providers++;
     } catch (e) {
-      result.failures.push(`provider "${p.name}": ${e}`);
+      result.failures.push(`provider "${p.name}": ${errorText(e)}`);
     }
   }
 
@@ -592,7 +593,7 @@ export async function applySettingsBundle(
       await api.upsertZone({ ...z, providerId: mapProvider(z.providerId, z.name) });
       result.zones++;
     } catch (e) {
-      result.failures.push(`zone "${z.name}": ${e}`);
+      result.failures.push(`zone "${z.name}": ${errorText(e)}`);
     }
   }
 
@@ -602,7 +603,7 @@ export async function applySettingsBundle(
       await api.upsertSkill(row.item);
       result.skills++;
     } catch (e) {
-      result.failures.push(`skill "${row.item.name}": ${e}`);
+      result.failures.push(`skill "${row.item.name}": ${errorText(e)}`);
     }
   }
 
@@ -612,7 +613,7 @@ export async function applySettingsBundle(
       await api.upsertMcpServer(row.item);
       result.mcpServers++;
     } catch (e) {
-      result.failures.push(`MCP server "${row.item.name}": ${e}`);
+      result.failures.push(`MCP server "${row.item.name}": ${errorText(e)}`);
     }
   }
 
@@ -622,14 +623,14 @@ export async function applySettingsBundle(
       await api.upsertMemory({ id: row.item.id, scope: "global", content: row.item.content });
       result.memories++;
     } catch (e) {
-      result.failures.push(`memory: ${e}`);
+      result.failures.push(`memory: ${errorText(e)}`);
     }
   }
 
   try {
     if (plan.includeTheme) await setTheme(bundle.theme);
   } catch (e) {
-    result.failures.push(`theme: ${e}`);
+    result.failures.push(`theme: ${errorText(e)}`);
   }
 
   try {
@@ -651,7 +652,7 @@ export async function applySettingsBundle(
       await setAppSettings(settings);
     }
   } catch (e) {
-    result.failures.push(`preferences: ${e}`);
+    result.failures.push(`preferences: ${errorText(e)}`);
   }
 
   return result;

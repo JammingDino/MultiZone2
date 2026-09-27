@@ -4,6 +4,8 @@ import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import type { TerminalInfo } from "@/lib/types";
 import { usePersistentBool } from "@/lib/uiState";
+import { errorText } from "@/lib/errors";
+import { ErrorNote } from "@/components/common/ErrorNote";
 
 /**
  * The chat's terminals, first-hand (0.17.9).
@@ -179,7 +181,7 @@ export function TerminalPanel({ chatId, embedded }: { chatId: string; embedded?:
       )}
 
       {error && (
-        <div className="border-t border-[var(--color-border)] px-2.5 py-1 text-xs text-red-500">{error}</div>
+        <ErrorNote error={error} className="border-t border-[var(--color-border)] px-2.5 py-1 text-xs text-red-500" />
       )}
 
       {!folded && current && (
@@ -273,7 +275,7 @@ function TerminalView({
     try {
       await api.writeTerminal(chatId, term.id, body, true);
     } catch (e) {
-      setText((prev) => `${prev}\n[input failed: ${String(e)}]\n`);
+      setText((prev) => `${prev}\n[input failed: ${errorText(e)}]\n`);
     }
   };
 

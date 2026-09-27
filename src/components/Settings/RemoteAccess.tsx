@@ -29,6 +29,7 @@ import { currentSession, disconnect, isRemote } from "@/lib/remote/transport";
 import { useApp } from "@/store/app";
 import { Toggle, ToggleRow } from "@/components/common/Toggle";
 import type { PairedDevice, PairingView, RemoteStatus } from "@/lib/types";
+import { ErrorNote } from "@/components/common/ErrorNote";
 
 /** How the applying half of the API tab hands control down. */
 export interface RemoteAccessProps {
@@ -273,7 +274,7 @@ export function RemoteAccess({ apply, busy }: RemoteAccessProps) {
       {error && (
         <div className="flex items-start gap-2 rounded border border-[var(--color-danger)]/50 bg-[var(--color-danger)]/5 px-2.5 py-2 text-xs">
           <AlertTriangle size={13} className="mt-0.5 shrink-0 text-[var(--color-danger)]" />
-          <span>{error}</span>
+          <ErrorNote error={error} className="min-w-0" />
         </div>
       )}
 

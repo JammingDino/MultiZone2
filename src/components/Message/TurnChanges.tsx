@@ -4,6 +4,7 @@ import type { Checkpoint, CheckpointFile, RestoreReport } from "@/lib/types";
 import { useApp } from "@/store/app";
 import { revealPath } from "@/lib/tauri";
 import { CHROME_QUIET } from "@/lib/chrome";
+import { errorText } from "@/lib/errors";
 
 /**
  * What a turn did to the filesystem, and the way back (0.10.1).
@@ -72,7 +73,7 @@ export function TurnChanges({ chatId, messageIds }: { chatId: string; messageIds
       // that succeeded should not stay armed for a forced retry.
       setForced(new Set());
     } catch (e) {
-      setResult(String(e));
+      setResult(errorText(e));
     } finally {
       setBusy(null);
     }

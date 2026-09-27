@@ -4,6 +4,7 @@ import * as api from "@/lib/tauri";
 import type { ApplyOutcome, StagedEdit } from "@/lib/types";
 import { DiffView } from "@/components/common/DiffView";
 import { PRIMARY_ACTION } from "@/lib/chrome";
+import { errorText } from "@/lib/errors";
 
 /**
  * The review queue (0.10.2).
@@ -72,7 +73,7 @@ export function ReviewQueue({ chatId, embedded }: { chatId: string; embedded?: b
       );
       await refresh();
     } catch (e) {
-      setNote(String(e));
+      setNote(errorText(e));
     } finally {
       setBusy(null);
     }
@@ -95,7 +96,7 @@ export function ReviewQueue({ chatId, embedded }: { chatId: string; embedded?: b
       setNote(summarise(await api.applyAllStagedEdits(chatId)));
       await refresh();
     } catch (e) {
-      setNote(String(e));
+      setNote(errorText(e));
     } finally {
       setBusy(null);
     }

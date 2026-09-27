@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
+import { errorText } from "@/lib/errors";
 
 /**
  * Text-to-speech playback (0.8.1). A single-active-session player that
@@ -185,7 +186,7 @@ function pump(token: number) {
         console.error("[tts] synthesis failed:", e);
         const failedId = sessionMessageId;
         stopEngine();
-        store?.set({ error: String(e), errorMessageId: failedId });
+        store?.set({ error: errorText(e), errorMessageId: failedId });
       })
       .finally(() => {
         inFlight--;

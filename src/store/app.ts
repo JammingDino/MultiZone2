@@ -9,6 +9,7 @@ import { clearAttention, notifyWaiting } from "@/lib/notify";
 import { shade } from "@/lib/color";
 import { normalizeApprovals } from "@/lib/approvals";
 import type { PendingAttachment } from "@/lib/attachFiles";
+import { errorText } from "@/lib/errors";
 
 /**
  * Chats whose opening turn has already kicked off an auto-title, so the check
@@ -2105,7 +2106,7 @@ export const useApp = create<AppStore>((set, get) => ({
       if (!get().appSettingsLoaded) {
         throw new Error(
           "settings could not be read back, so nothing was changed — " +
-            (e instanceof Error ? e.message : String(e)),
+            errorText(e),
         );
       }
       console.warn("failed to re-read app settings before write", e);
@@ -2157,7 +2158,7 @@ export const useApp = create<AppStore>((set, get) => ({
       const sessionId = await dictation.start(deviceName);
       set({ voiceSessionId: sessionId, voiceRecording: true });
     } catch (e) {
-      set({ voiceError: String(e) });
+      set({ voiceError: errorText(e) });
       throw e;
     }
   },
@@ -2168,7 +2169,7 @@ export const useApp = create<AppStore>((set, get) => ({
     try {
       return await dictation.stop(sessionId);
     } catch (e) {
-      set({ voiceError: String(e) });
+      set({ voiceError: errorText(e) });
       throw e;
     }
   },

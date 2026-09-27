@@ -13,6 +13,7 @@ import { Modal } from "@/components/common/Modal";
 import { PRIMARY_ACTION } from "@/lib/chrome";
 import { useIsNarrow } from "@/lib/useIsNarrow";
 import { useBackDismiss } from "@/lib/useBackDismiss";
+import { ErrorNote } from "@/components/common/ErrorNote";
 
 export function ProjectsPanel() {
   const { zones, projects, tags, closeProjectsPanel, refreshProjects, refreshTags } = useApp(
@@ -743,7 +744,7 @@ function KnowledgeSection({ project }: { project: Project }) {
         </div>
       )}
 
-      {error && <div className="mb-2 text-[11px] text-[var(--color-danger)]">{error}</div>}
+      <ErrorNote error={error} className="mb-2 text-[11px] text-[var(--color-danger)]" />
 
       {/* Document viewer */}
       {docs.length > 0 && (

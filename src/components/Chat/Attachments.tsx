@@ -30,6 +30,7 @@ import {
 } from "@/lib/attachFiles";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 import { CHROME_QUIET, PRIMARY_ACTION } from "@/lib/chrome";
+import { errorText } from "@/lib/errors";
 
 /**
  * Staged attachments for one composer.
@@ -111,8 +112,8 @@ export function useAttachments({
         ),
       );
     } catch (e) {
-      const message = String(e);
-      setAttachError(`Couldn't transcribe ${file.name}: ${message}`);
+      const message = errorText(e);
+      setAttachError(`Couldn't transcribe ${file.name}. ${message}`);
       setPending((p) =>
         p.map((a) => (a.id === id ? { ...a, audio: { ...a.audio, status: "failed", error: message } } : a)),
       );

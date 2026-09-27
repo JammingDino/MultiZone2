@@ -10,6 +10,7 @@ import { Popover } from "@/components/common/Popover";
 import { formatTokens } from "@/lib/format";
 import { estimateTokens } from "@/lib/tokens";
 import { ACTION_ICON, CHROME_OUTLINED, CHROME_QUIET } from "@/lib/chrome";
+import { errorText } from "@/lib/errors";
 
 interface Props {
   /** Used for copy. */
@@ -431,7 +432,7 @@ function TurnHistory({
     try {
       setNote(await fn());
     } catch (e) {
-      setNote(String(e));
+      setNote(errorText(e));
     } finally {
       setBusy(false);
     }

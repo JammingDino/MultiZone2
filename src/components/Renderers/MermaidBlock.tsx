@@ -761,7 +761,7 @@ function MermaidErrorView({
   return (
     <div className="my-2 rounded border border-[var(--color-danger)] bg-[var(--color-panel)] p-3 text-xs">
       <div className="mb-1 flex items-center justify-between gap-2">
-        <span className="text-[var(--color-danger)]">Mermaid render error</span>
+        <span className="text-[var(--color-danger)]">This diagram couldn't be drawn — its source has a mistake</span>
         {canRepair && (
           <button
             onClick={onRepair}
@@ -777,10 +777,13 @@ function MermaidErrorView({
           The model couldn't correct this one. Trying again asks it fresh.
         </div>
       )}
-      <pre className="whitespace-pre-wrap text-[var(--color-text-muted)]">
-        {error}
-      </pre>
       <details className="mt-2">
+        <summary className="cursor-pointer text-[var(--color-text-muted)]">
+          Details
+        </summary>
+        <pre className="mt-1 whitespace-pre-wrap text-[var(--color-text-muted)]">{error}</pre>
+      </details>
+      <details className="mt-1">
         <summary className="cursor-pointer text-[var(--color-text-muted)]">
           Source
         </summary>

@@ -18,6 +18,7 @@ import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { formatBytes } from "@/lib/format";
 import type { DirEntry } from "@/lib/types";
+import { ErrorNote } from "@/components/common/ErrorNote";
 
 /**
  * The chat's working directory as a tree (0.17.9, reworked 0.18).
@@ -116,7 +117,7 @@ function Dir({ path, depth, open }: { path: string; depth: number; open: boolean
 
   if (!open) return null;
   const pad = { paddingLeft: `${depth * 14 + 26}px` };
-  if (error) return <div style={pad} className="py-0.5 text-[10px] text-[var(--color-danger)]">{error}</div>;
+  if (error) return <div style={pad}><ErrorNote error={error} className="py-0.5 text-[10px] text-[var(--color-danger)]" /></div>;
   if (entries === null) return <div style={pad} className="py-0.5 text-[10px] text-[var(--color-text-muted)]">…</div>;
   if (entries.length === 0) return <div style={pad} className="py-0.5 text-[10px] italic text-[var(--color-text-muted)]">empty</div>;
 

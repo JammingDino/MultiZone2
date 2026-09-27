@@ -34,6 +34,8 @@ import { type SkillSeed, serializeSkill, parseSkill } from "@/lib/skillFile";
 import type { ApiBindState, ApprovalCategory, ApprovalPolicy, CheckpointUsage, ConnectorCatalog, ConnectorEntry, ConnectorField, DbStats, GlobalKbView, IndexSummary, KbDocument, LifetimeUsage, McpDiagnosis, McpServerView, McpTool, Provider, Skill, SkillPack } from "@/lib/types";
 import { formatBytes, formatCount, formatTokens } from "@/lib/format";
 import { PRIMARY_ACTION } from "@/lib/chrome";
+import { errorText } from "@/lib/errors";
+import { ErrorNote } from "@/components/common/ErrorNote";
 
 type Tab = "providers" | "zones" | "appearance" | "chat" | "voice" | "speech" | "skills" | "mcp" | "knowledge" | "memory" | "remote" | "api" | "data";
 
@@ -1853,7 +1855,7 @@ function VoiceCloningSettings() {
       const text = await api.transcribeAudioFile(audioPath);
       setRefText(text);
     } catch (e) {
-      setMsg({ kind: "err", text: `Transcription failed: ${e}` });
+      setMsg({ kind: "err", text: `Transcription failed. ${errorText(e)}` });
     } finally {
       setBusy(null);
     }
@@ -1868,7 +1870,7 @@ function VoiceCloningSettings() {
       setName(""); setAudioPath(null); setRefText("");
       refreshVoices();
     } catch (e) {
-      setMsg({ kind: "err", text: String(e) });
+      setMsg({ kind: "err", text: errorText(e) });
     } finally {
       setBusy(null);
     }
@@ -2715,9 +2717,7 @@ function McpTab() {
               </div>
 
               {errorById[s.id] && (
-                <div className="mt-2 rounded border border-red-600/40 bg-red-600/10 p-2 text-[11px] text-red-500">
-                  {errorById[s.id]}
-                </div>
+                <ErrorNote error={errorById[s.id]} className="mt-2 rounded border border-red-600/40 bg-red-600/10 p-2 text-[11px] text-red-500" />
               )}
 
               {diagById[s.id] && (
@@ -2996,7 +2996,7 @@ function ConnectorCatalogPanel({ onDone, onCancel }: { onDone: () => void; onCan
       </section>
 
       {note && <div className="rounded border border-green-600/40 bg-green-600/10 p-2 text-[11px] text-green-500">{note}</div>}
-      {error && <div className="rounded border border-red-600/40 bg-red-600/10 p-2 text-[11px] text-red-500">{error}</div>}
+      {error && <ErrorNote error={error} className="rounded border border-red-600/40 bg-red-600/10 p-2 text-[11px] text-red-500" />}
     </div>
   );
 }
@@ -3115,7 +3115,7 @@ function ConnectorInstallForm({
         </label>
       )}
 
-      {error && <div className="rounded border border-red-600/40 bg-red-600/10 p-2 text-[11px] text-red-500">{error}</div>}
+      {error && <ErrorNote error={error} className="rounded border border-red-600/40 bg-red-600/10 p-2 text-[11px] text-red-500" />}
 
       <div className="flex items-center justify-end gap-2 border-t border-[var(--color-border)] pt-3">
         <button onClick={onCancel} className="rounded px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)]">Cancel</button>
@@ -3324,7 +3324,7 @@ function McpServerEditor({
       </label>
 
       {error && (
-        <div className="rounded border border-red-600/40 bg-red-600/10 p-2 text-[11px] text-red-500">{error}</div>
+        <ErrorNote error={error} className="rounded border border-red-600/40 bg-red-600/10 p-2 text-[11px] text-red-500" />
       )}
 
       <div className="flex items-center justify-end gap-2 border-t border-[var(--color-border)] pt-3">
@@ -3572,7 +3572,7 @@ function KnowledgeTab() {
         )}
 
         {error && (
-          <div className="mt-2 rounded border border-red-600/40 bg-red-600/10 p-2 text-[11px] text-red-500">{error}</div>
+          <ErrorNote error={error} className="mt-2 rounded border border-red-600/40 bg-red-600/10 p-2 text-[11px] text-red-500" />
         )}
 
         {docs.length > 0 && (
@@ -3777,7 +3777,7 @@ function ApiTab() {
       setStatus(merged.apiEnabled ? "Running." : "Stopped.");
       await refreshBind();
     } catch (e: any) {
-      setStatus(`Error: ${e?.message || String(e)}`);
+      setStatus(errorText(e));
       // Roll the toggle back if start failed. Same for the LAN bind: a refused
       // bind that left the switch reading "on the network" would be the exact
       // dishonesty the persisted bind outcome was added to end.
@@ -3986,7 +3986,7 @@ function RemoteTab() {
       {error && (
         <div className="flex items-start gap-2 rounded border border-[var(--color-danger)]/50 bg-[var(--color-danger)]/5 px-2.5 py-2 text-xs">
           <AlertTriangle size={13} className="mt-0.5 shrink-0 text-[var(--color-danger)]" />
-          <span>{error}</span>
+          <ErrorNote error={error} className="min-w-0" />
         </div>
       )}
       <RemoteAccess apply={apply} busy={busy} />
@@ -4457,7 +4457,7 @@ function SettingsTransferSection() {
       if (saved) setMsg(`Exported ${describeCounts(bundleCounts(bundle))}.`);
     } catch (e) {
       console.error(e);
-      setMsg(`Export failed: ${e}`);
+      setMsg(`Export failed. ${errorText(e)}`);
     } finally {
       setBusy(false);
     }
@@ -4471,7 +4471,7 @@ function SettingsTransferSection() {
       if (picked) stageImport(picked);
     } catch (e) {
       console.error(e);
-      setMsg(String(e instanceof Error ? e.message : e));
+      setMsg(errorText(e));
     } finally {
       setBusy(false);
     }
@@ -4925,7 +4925,7 @@ function ProviderForm({ value, onClose, onDeleted }: { value: Partial<Provider>;
         setModels(list);
         setTestResult(`Found ${list.length} model${list.length === 1 ? "" : "s"}.`);
       })
-      .catch((e: any) => { if (!cancelled) setTestResult(`Error: ${e?.message || String(e)}`); })
+      .catch((e: any) => { if (!cancelled) setTestResult(errorText(e)); })
       .finally(() => { if (!cancelled) setTesting(false); });
     return () => { cancelled = true; };
   }, [value.id]);
@@ -4966,7 +4966,7 @@ function ProviderForm({ value, onClose, onDeleted }: { value: Partial<Provider>;
       setModels(list);
       setTestResult(`Found ${list.length} model${list.length === 1 ? "" : "s"}.`);
     } catch (e: any) {
-      setTestResult(`Error: ${e?.message || String(e)}`);
+      setTestResult(errorText(e));
     } finally { setTesting(false); }
   }
 

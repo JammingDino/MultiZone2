@@ -47,6 +47,7 @@ import {
   type SavedConnection,
 } from "@/lib/remote/transport";
 import { discoverDesktops, type FoundDesktop } from "@/lib/remote/discovery";
+import { ErrorNote } from "@/components/common/ErrorNote";
 
 /** What the desktop should call this device. Editable, because "Pixel 8" is a
  *  better answer than a model number and "my phone" is a better one still. */
@@ -129,7 +130,7 @@ export function PairingScreen({ onPaired }: { onPaired: () => void }) {
       {error && (
         <div className="mb-4 flex items-start gap-2 rounded-lg border border-[var(--color-danger)]/50 bg-[var(--color-danger)]/5 px-3 py-2.5 text-sm">
           <AlertTriangle size={15} className="mt-0.5 shrink-0 text-[var(--color-danger)]" />
-          <span>{error}</span>
+          <ErrorNote error={error} className="min-w-0" />
         </div>
       )}
 

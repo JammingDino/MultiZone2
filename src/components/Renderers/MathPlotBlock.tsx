@@ -72,8 +72,11 @@ export function MathPlotBlock(props: SpecProps | DataProps) {
     const msg = isError ? parsed.error : error;
     return (
       <div className="my-2 rounded border border-[var(--color-danger)] bg-[var(--color-panel)] p-3 text-xs">
-        <div className="mb-1 text-[var(--color-danger)]">MathPlot error:</div>
-        <pre className="whitespace-pre-wrap">{msg}</pre>
+        <div className="mb-1 text-[var(--color-danger)]">This plot couldn't be drawn — its definition has a mistake</div>
+        <details>
+          <summary className="cursor-pointer text-[var(--color-text-muted)]">Details</summary>
+          <pre className="mt-1 whitespace-pre-wrap">{msg}</pre>
+        </details>
       </div>
     );
   }

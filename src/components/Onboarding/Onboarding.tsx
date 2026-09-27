@@ -15,6 +15,7 @@ import {
   type ProviderPreset,
 } from "@/lib/providerPresets";
 import { PRIMARY_ACTION } from "@/lib/chrome";
+import { errorText } from "@/lib/errors";
 
 /**
  * First-run setup: connect a provider and pick a default model, the minimum
@@ -78,11 +79,11 @@ export function Onboarding() {
         setModels(list);
         if (list.length > 0 && !model) setModel(list[0]);
       } catch (e: any) {
-        setError(`Couldn't reach the provider to list models (${e?.message || e}). You can type a model name manually.`);
+        setError(`Couldn't list this provider's models. ${errorText(e)} You can type a model name instead.`);
       }
       setStep("model");
     } catch (e: any) {
-      setError(`Failed to save provider: ${e?.message || String(e)}`);
+      setError(`Couldn't save the provider. ${errorText(e)}`);
     } finally {
       setBusy(false);
     }
@@ -108,7 +109,7 @@ export function Onboarding() {
       // The gate condition (provider with default model) is now satisfied, so
       // this overlay unmounts on the next render.
     } catch (e: any) {
-      setError(`Failed to finish setup: ${e?.message || String(e)}`);
+      setError(`Couldn't finish setup. ${errorText(e)}`);
       setBusy(false);
     }
   }
@@ -125,7 +126,7 @@ export function Onboarding() {
       const picked = await pickBundleFile();
       if (picked) stageImport(picked);
     } catch (e: any) {
-      setError(`Couldn't read that file: ${e?.message || String(e)}`);
+      setError(`Couldn't read that file. ${errorText(e)}`);
     } finally {
       setBusy(false);
     }

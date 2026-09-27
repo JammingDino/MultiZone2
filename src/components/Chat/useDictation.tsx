@@ -8,6 +8,7 @@ import * as dictationApi from "@/lib/dictation";
 import { useApp } from "@/store/app";
 import { useTts } from "@/store/tts";
 import { CHROME_QUIET } from "@/lib/chrome";
+import { errorText } from "@/lib/errors";
 
 /**
  * Shared dictation controller for a text composer (0.8.0). Wires the mic
@@ -134,7 +135,7 @@ export function useDictation({
     try {
       await startDictation();
     } catch (e) {
-      setVoiceError(String(e));
+      setVoiceError(errorText(e));
     }
   }
 
@@ -182,7 +183,7 @@ export function useDictation({
       commitTranscript(final);
       if (final && onCommit) onCommit(final);
     } catch (e) {
-      setVoiceError(String(e));
+      setVoiceError(errorText(e));
     }
   }
 
@@ -212,7 +213,7 @@ export function useDictation({
       dictationTailRef.current = null;
       return composed;
     } catch (e) {
-      setVoiceError(String(e));
+      setVoiceError(errorText(e));
       return null;
     }
   }

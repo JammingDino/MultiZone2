@@ -13,6 +13,7 @@ import {
   type PlanRow,
 } from "@/lib/settingsBundle";
 import { PRIMARY_ACTION } from "@/lib/chrome";
+import { errorText } from "@/lib/errors";
 
 /**
  * Confirmation step for a settings import, wherever it was raised from —
@@ -60,7 +61,7 @@ export function ImportSettingsDialog() {
         if (!cancelled) setPlan(planSettingsImport(pending.bundle, local));
       })
       .catch((e) => {
-        if (!cancelled) setPlanError(String(e instanceof Error ? e.message : e));
+        if (!cancelled) setPlanError(errorText(e));
       });
     return () => { cancelled = true; };
   }, [pending]);
@@ -85,7 +86,7 @@ export function ImportSettingsDialog() {
       if (r.failures.length) console.warn("settings import failures", r.failures);
     } catch (e) {
       console.error(e);
-      setPlanError(`Import failed: ${e instanceof Error ? e.message : e}`);
+      setPlanError(`Import failed. ${errorText(e)}`);
     } finally {
       setBusy(false);
     }

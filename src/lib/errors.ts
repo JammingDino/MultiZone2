@@ -116,8 +116,9 @@ export function friendlyError(e: unknown, fallback: Fallback = GENERIC): Friendl
   return { ...fallback, raw };
 }
 
-/** Just the words, for places that show one line (a status, a notification). */
+/** Just the words, as a sentence, for places that show one line or build one. */
 export function errorText(e: unknown): string {
   const f = friendlyError(e);
-  return f.hint ? `${f.headline}. ${f.hint}` : f.headline;
+  const end = (t: string) => (/[.!?]$/.test(t) ? t : `${t}.`);
+  return f.hint ? `${end(f.headline)} ${f.hint}` : end(f.headline);
 }

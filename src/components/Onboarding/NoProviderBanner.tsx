@@ -4,6 +4,7 @@ import { useApp } from "@/store/app";
 import { pickBundleFile } from "@/lib/importSettings";
 import { CHROME_QUIET, PRIMARY_ACTION } from "@/lib/chrome";
 import { FREE_TIER_PRESETS } from "@/lib/providerPresets";
+import { errorText } from "@/lib/errors";
 
 /**
  * Standing notice for an install with no provider configured (1.0).
@@ -28,7 +29,7 @@ export function NoProviderBanner() {
       const picked = await pickBundleFile();
       if (picked) stageImport(picked);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorText(e));
     }
   }
 

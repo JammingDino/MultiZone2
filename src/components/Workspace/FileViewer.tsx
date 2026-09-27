@@ -10,6 +10,8 @@ import { useIsLightMode } from "@/components/Renderers/CodeBlock";
 import { openPdf, drawPdfPage, type PdfDoc } from "@/lib/pdf";
 import type { FileText as FileTextData } from "@/lib/types";
 import { iconFor } from "./FilesPanel";
+import { errorText } from "@/lib/errors";
+import { ErrorNote } from "@/components/common/ErrorNote";
 
 /**
  * The zoom ladder, in place of a percentage that can be any number. Every stop
@@ -143,7 +145,7 @@ export function FileViewer({ path }: { path: string }) {
       setDraft(f.content);
       setSavedAt(Date.now());
     } catch (e) {
-      setSaveError(String(e));
+      setSaveError(errorText(e));
     } finally {
       setSaving(false);
     }
@@ -200,7 +202,7 @@ export function FileViewer({ path }: { path: string }) {
             saveError ? "text-[var(--color-danger)]" : "text-[var(--color-text-muted)]"
           }`}
         >
-          {saveError ? `Could not save: ${saveError}` : `Saved ${new Date(savedAt!).toLocaleTimeString()}`}
+          {saveError ? `Couldn't save. ${saveError}` : `Saved ${new Date(savedAt!).toLocaleTimeString()}`}
         </div>
       )}
 
@@ -217,7 +219,7 @@ export function FileViewer({ path }: { path: string }) {
           <PdfPreview path={path} name={name} zoom={zoom} />
         ) : error ? (
           <Notice icon={<AlertCircle size={12} />} danger>
-            {error}
+            <ErrorNote error={error} className="" />
           </Notice>
         ) : !file ? (
           <Notice icon={<Loader2 size={12} className="animate-spin text-[var(--color-accent)]" />}>Loading…</Notice>
@@ -526,7 +528,7 @@ function PdfPreview({ path, name, zoom }: { path: string; name: string; zoom: nu
       </Notice>
     );
   }
-  if (error) return <Notice icon={<AlertCircle size={12} />} danger>Could not open {name}: {error}</Notice>;
+  if (error) return <Notice icon={<AlertCircle size={12} />} danger><ErrorNote error={error} context={`Couldn't open ${name}`} className="" /></Notice>;
   if (!doc) {
     return (
       <Notice icon={<Loader2 size={12} className="animate-spin text-[var(--color-accent)]" />}>

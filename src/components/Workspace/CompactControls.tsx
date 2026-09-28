@@ -76,7 +76,7 @@ export function CompactControls({ chatId }: { chatId: string }) {
       </div>
       {result && <p className="mt-1 text-[10px] text-[var(--color-text-muted)]">{result}</p>}
 
-      <div className="mt-2 flex items-center gap-2">
+      <div className="mt-2 flex items-center gap-2 text-xs">
         <span className="text-[var(--color-text-muted)]" title="Past the limit the oldest messages are forgotten, except what the model marks important.">
           Rolling limit
         </span>
@@ -86,7 +86,7 @@ export function CompactControls({ chatId }: { chatId: string }) {
             const v = e.target.value;
             setLimit(v === "default" ? null : v === "off" ? 0 : limit > 0 ? limit : 32000);
           }}
-          className="ml-auto rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-1.5 py-0.5"
+          className="ml-auto rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-1.5 py-0.5 text-xs"
         >
           <option value="default">Default ({fallback > 0 ? `${fallback.toLocaleString()}` : "off"})</option>
           <option value="off">Off</option>
@@ -102,7 +102,7 @@ export function CompactControls({ chatId }: { chatId: string }) {
               const n = Math.round(Number(e.target.value));
               if (Number.isFinite(n) && n > 0 && n !== own) setLimit(n);
             }}
-            className="w-20 rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-1.5 py-0.5"
+            className="w-20 rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-1.5 py-0.5 text-xs"
           />
         )}
       </div>

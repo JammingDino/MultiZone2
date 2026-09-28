@@ -29,8 +29,25 @@ the same arrangement vision already had. Settings → Chat was split into Chat,
 Runs and Approvals; the setting keys did not change.
 
 **Left alone.** A shared settings-section component (the tabs already agree by
-convention); chat exports mentioning recordings; a notification click that
-opens the chat (the desktop notification plugin has no click action).
+convention); a notification click that opens the chat (the desktop
+notification plugin has no click action).
+
+**Second pass, same day.** From a look at the running build:
+
+- The composer's top rule and the sidebar footer's ran across the window at
+  different heights; the composer's is gone.
+- Same rail component was not the same rail: Configure Zones is now a page of
+  Settings, its items nested under "Zones". `settingsTab` moved into the store
+  so "edit this zone" from anywhere can land there; the separate modal, its
+  back-to-settings breadcrumb and the old Zones tab were deleted.
+- The chat sidebar snapped shut because the collapsed `<aside>` dropped the
+  transition class; the workspace panel unmounted instantly. Both slide now.
+- Thinking defaults on, and hosted models get a fallback chain of four request
+  shapes plus a per-model manual choice — the case was OpenCode Go, where the
+  one guessed field was refused and thinking silently went away. The
+  catalogue's `reasoning` flag is read for models the name does not identify.
+  Which shape OpenCode Go actually accepts has not been tried against it.
+- Exports now mention recordings and videos.
 
 ---
 

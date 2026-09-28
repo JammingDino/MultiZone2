@@ -1263,12 +1263,16 @@ a guard is blocked on the user as surely as an approval is.
 - [x] Configure Zones uses the Settings rail (`common/NavRail.tsx`): Library and New zone are rail items, installed zones are rail rows, team names are group labels
 - [x] Every help paragraph cut to a short line, or removed where the title says it — Settings, the zone editor and the project editor (~14k characters)
 - [x] Chat split in three: Chat keeps the chat basics; Runs (task length, rolling context, compaction, spend limit, repository map, sub-agents) and Approvals move under a new Agents group with Schedules
-- [ ] A shared `SettingSection` component — not done; the tabs already share the same heading and spacing classes by convention
+- [x] ~~A shared `SettingSection` component~~ — dropped: the tabs already share the same heading and spacing classes, and a wrapper would only rename them
+- [x] Configure Zones is a Settings page: its library, New zone and installed zones nest under "Zones" in the one rail, and every way of opening it (sidebar, Ctrl+L, zone picker, "edit this zone") lands there
+- [x] Settings pages have bottom padding, so the last section is not flush with the panel's edge
 
 **4. Composer and in-chat chrome**
 - [x] Two rows: the prompt spans the box and grows to 40% of the window; past a few lines an expand button opens a 70% editor for reviewing it
 - [x] Attach, options and conversation mode sit in a quiet row under the prompt, mic and send on the right
 - [x] Compaction moves into the Context panel under the window meter (`Workspace/CompactControls.tsx`); the composer keeps nothing it does not need
+- [x] No rule above the composer: it ran across the window a couple of dozen pixels off the sidebar footer's; the composer's bottom inset now matches the footer's
+- [x] Both sidebars animate open *and* closed — the chat sidebar snapped shut, and the workspace panel had no animation either way
 
 **5. Audio and video as input**
 - [x] Audio and video go to the model as `input_audio` / `video_url` parts when the model takes them
@@ -1276,7 +1280,7 @@ a guard is blocked on the user as surely as an approval is.
 - [x] Audio falls back to transcription for a model that can't hear; video is refused with a reason, or transcribed when its container is also audio (mp4, webm)
 - [x] A part the chat's current model can't take becomes a line of text in the request, so switching zones never poisons the history
 - [x] The user turn shows a player; edits carry the file; token estimates count the parts
-- [ ] Chat exports (Markdown/PDF) mention the recording — today they skip it
+- [x] Chat exports (Markdown/PDF) mention the recording
 - [ ] Seen against a real Qwen-Omni / Gemini endpoint: a song, and a short clip
 
 **6. Graph tools (`plot_function`, `render_graph`)**
@@ -1290,7 +1294,17 @@ a guard is blocked on the user as surely as an approval is.
 - [x] Groups use their settings label; MCP groups use the server's name
 - [x] MCP tool calls show the tool and the server's name in the step header, running line and approval card; the qualified id stays on hover. Servers load at startup, not only once Settings → MCP is opened
 
-Verified in a browser harness (sidebar both states, settings, zones, composer, plots in both themes, context panel, media staging); `tsc -b`, script tests and `cargo test --lib` (435) pass. Not yet run in the Tauri shell.
+**8. Thinking that works through a gateway**
+
+On a router like OpenCode Go the app guessed one parameter, the gateway
+refused it, and thinking was dropped for good with nothing to configure.
+- [x] Thinking is on by default: new zones, library installs, imports that do not say, and Quick chat
+- [x] Four hosted shapes — `reasoning_effort`, `reasoning: {effort}`, `thinking: {type}`, top-level `enable_thinking` — and a refused guess falls through to the next, remembered per gateway and model
+- [x] The models.dev catalogue's `reasoning` flag settles a model the name heuristic does not know
+- [x] Zone editor → Reasoning → Parameter: pick the shape by hand, stored per model; a chosen shape is sent as chosen and never swapped
+- [ ] Seen against OpenCode Go: which shape its models accept, and whether it refuses or silently ignores the others
+
+Verified in a browser harness (sidebar both states, settings and the Zones page, the zone editor, composer, plots in both themes, context panel, media staging); `tsc -b`, script tests, `cargo test --lib` (438) and `vite build` pass. Not yet run in the Tauri shell — the unchecked "Seen …" items above are that pass.
 
 ---
 

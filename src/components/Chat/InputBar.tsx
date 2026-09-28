@@ -11,7 +11,6 @@ import { useDictation, MicButton, DictationMeter } from "@/components/Chat/useDi
 import type { InputPart, PendingMode } from "@/lib/types";
 import { attachmentToParts, type PendingAttachment } from "@/lib/attachFiles";
 import { SlashMenu, slashQuery } from "./SlashMenu";
-import { CompactMenu } from "./CompactMenu";
 import {
   appendTranscript,
   AttachError,
@@ -569,7 +568,6 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
                 </div>
             </Popover>
           </div>
-          <CompactMenu chatId={chatId} disabled={disabled} />
           {/* MCP prompts and resources (0.15.3). Opens on a `/` in the first
               column only — a path mid-sentence is not a command. */}
           {slash !== null && (

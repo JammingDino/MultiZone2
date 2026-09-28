@@ -769,6 +769,8 @@ export type StreamEvent =
 export interface OverheadPart {
   label: string;
   tokens: number;
+  /** What it is made of — each tool of a tool group (0.18.1). */
+  parts?: OverheadPart[];
 }
 
 /** One chat's share of a sub-agent session's context (see commands::usage). */

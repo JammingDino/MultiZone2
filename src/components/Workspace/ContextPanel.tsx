@@ -1,6 +1,11 @@
+import { useState } from "react";
+import { ChevronRight } from "lucide-react";
 import { useApp } from "@/store/app";
 import { formatTokens } from "@/lib/format";
 import { hitRate, useContextUsage, type ContextUsage } from "@/lib/useContextUsage";
+import { ALL_TOOLS, type McpServer, type OverheadPart } from "@/lib/types";
+import { humanizeTool, mcpServerName, parseMcpName } from "@/lib/useToolName";
+import { CompactControls } from "./CompactControls";
 
 /**
  * The context readout as bars (0.17.9).
@@ -19,6 +24,7 @@ import { hitRate, useContextUsage, type ContextUsage } from "@/lib/useContextUsa
 export function ContextPanel({ chatId }: { chatId: string }) {
   const u = useContextUsage(chatId, true);
   const setActiveChat = useApp((s) => s.setActiveChat);
+  const servers = useApp((s) => s.mcpServers);
 
   if (u.empty) {
     return <p className="text-[11px] text-[var(--color-text-muted)]">Nothing sent yet.</p>;
@@ -73,9 +79,8 @@ export function ContextPanel({ chatId }: { chatId: string }) {
               <span>{formatTokens(u.chatTotal)} in use</span>
               <span>{formatTokens(win.tokens)} window</span>
             </div>
-            <p className="mt-1 text-[10px] leading-relaxed text-[var(--color-text-muted)]">
-              {WINDOW_SOURCE[win.source]}
-              {winPct >= 0.8 && " Compaction or a fresh chat will be needed soon."}
+            <p className="mt-1 text-[10px] leading-relaxed text-[var(--color-text-muted)]" title={WINDOW_SOURCE[win.source]}>
+              {winPct >= 0.8 ? "Nearly full — compact below, or start a fresh chat." : WINDOW_SOURCE_SHORT[win.source]}
             </p>
           </>
         ) : (
@@ -83,6 +88,12 @@ export function ContextPanel({ chatId }: { chatId: string }) {
             Neither the provider, the models.dev catalogue nor the model's name says how much it can carry.
           </p>
         )}
+      </div>
+
+      {/* ── Compact ───────────────────────────────────────────────────── */}
+      <div>
+        <Heading title="Compact" />
+        <CompactControls chatId={chatId} />
       </div>
 
       {/* ── Next request ──────────────────────────────────────────────── */}
@@ -94,30 +105,22 @@ export function ContextPanel({ chatId }: { chatId: string }) {
         />
         <StackedBar segments={composition} total={u.chatTotal} />
         <Legend items={composition} total={u.chatTotal} />
-        {u.current && u.current.overheadParts.length > 1 && (
-          <div className="mt-1.5 flex flex-col gap-0.5 pl-3">
-            {u.current.overheadParts.map((p) => (
-              <MiniBar
-                key={p.label}
-                label={p.label}
-                value={p.tokens}
-                max={systemTokens}
-                color="var(--viz-1)"
-              />
-            ))}
-          </div>
-        )}
-        {u.current && u.current.toolParts.length > 1 && (
-          <div className="mt-1.5 flex flex-col gap-0.5 pl-3">
-            {u.current.toolParts.map((p) => (
-              <MiniBar
-                key={p.label}
-                label={p.label}
-                value={p.tokens}
-                max={toolsTokens}
-                color="var(--viz-2)"
-              />
-            ))}
+        {u.current && (
+          <div className="mt-2 flex flex-col gap-0.5">
+            <PartRow
+              part={{ label: "System prompt", tokens: systemTokens, parts: u.current.overheadParts }}
+              max={u.chatTotal}
+              color="var(--viz-1)"
+            />
+            <PartRow
+              part={{
+                label: `Tool schemas · ${u.current.toolCount}`,
+                tokens: toolsTokens,
+                parts: u.current.toolParts.map((g) => namedGroup(g, servers)),
+              }}
+              max={u.chatTotal}
+              color="var(--viz-2)"
+            />
           </div>
         )}
         {u.est.compacted && (
@@ -159,10 +162,9 @@ export function ContextPanel({ chatId }: { chatId: string }) {
             />
             <MiniBar label="Output" value={u.chatSpent.outputTokens} max={u.chatSpent.totalTokens} color="var(--viz-4)" />
           </div>
-          <p className="mt-1 text-[10px] leading-relaxed text-[var(--color-text-muted)]">
-            Every step of a turn re-sends the whole context, so spend runs far ahead of context.
-            {!u.spendIsMeasured && " This provider reports no counts, so it is estimated too."}
-          </p>
+          {!u.spendIsMeasured && (
+            <p className="mt-1 text-[10px] text-[var(--color-text-muted)]">Estimated — this provider reports no counts.</p>
+          )}
         </div>
       )}
 
@@ -249,10 +251,6 @@ export function ContextPanel({ chatId }: { chatId: string }) {
         </div>
       )}
 
-      <p className="text-[10px] leading-relaxed text-[var(--color-text-muted)]">
-        Context is the size of the next request, estimated from text length.
-        {u.showTeam && " Each agent carries its own."}
-      </p>
     </div>
   );
 }
@@ -266,6 +264,59 @@ const WINDOW_SOURCE: Record<NonNullable<ContextUsage["contextWindow"]>["source"]
   catalog: "From the models.dev catalogue; the provider itself does not say.",
   heuristic: "Guessed from the model's name — the usual figure for its family.",
 };
+
+const WINDOW_SOURCE_SHORT: Record<NonNullable<ContextUsage["contextWindow"]>["source"], string> = {
+  provider: "From the provider.",
+  ollama: "From Ollama.",
+  lmstudio: "From LM Studio.",
+  catalog: "From the models.dev catalogue.",
+  heuristic: "Guessed from the model's name.",
+};
+
+/** A tool group as a person reads it: its settings label, or its MCP server's
+ *  name — and each tool in it by its own name rather than its wire id. */
+function namedGroup(g: OverheadPart, servers: McpServer[]): OverheadPart {
+  const short = g.label.startsWith("mcp: ") ? g.label.slice(5) : null;
+  const label = short
+    ? `${mcpServerName(servers, short) ?? "MCP server"} (MCP)`
+    : ALL_TOOLS.find((t) => t.id === g.label)?.label ?? humanizeTool(g.label);
+  return {
+    label,
+    tokens: g.tokens,
+    parts: g.parts?.map((t) => ({ label: humanizeTool(parseMcpName(t.label)?.tool ?? t.label), tokens: t.tokens })),
+  };
+}
+
+/** One line of the breakdown; a line with parts opens to show them. */
+function PartRow({ part, max, color, depth = 0 }: { part: OverheadPart; max: number; color: string; depth?: number }) {
+  const [open, setOpen] = useState(false);
+  const kids = part.parts ?? [];
+  const bar = <MiniBar label={part.label} value={part.tokens} max={max} color={color} />;
+  if (kids.length === 0) return <div style={{ paddingLeft: depth * 12 + 14 }}>{bar}</div>;
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-1 rounded text-left hover:bg-[var(--color-panel-hover)]"
+        style={{ paddingLeft: depth * 12 }}
+      >
+        <ChevronRight
+          size={11}
+          className={`shrink-0 text-[var(--color-text-muted)] transition-transform ${open ? "rotate-90" : ""}`}
+        />
+        <div className="min-w-0 flex-1">{bar}</div>
+      </button>
+      {open && (
+        <div className="mt-0.5 flex flex-col gap-0.5">
+          {kids.map((k) => (
+            <PartRow key={k.label} part={k} max={part.tokens} color={color} depth={depth + 1} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function Heading({ title, right, sub }: { title: string; right?: React.ReactNode; sub?: string }) {
   return (

@@ -426,7 +426,8 @@ pub struct TurnOverhead {
     /// (`file_system`, `subchat`, an MCP server…) — the unit the user can
     /// actually switch off. On a fifty-tool zone the schemas are five times
     /// the prompt, and a total says nothing about where to trim (0.18.1).
-    pub tool_parts: Vec<(String, usize)>,
+    /// `(group, function name, chars)`.
+    pub tool_parts: Vec<(String, String, usize)>,
 }
 
 /// Measure a chat's fixed per-turn cost without running anything.
@@ -497,7 +498,7 @@ pub async fn turn_overhead(db: &SqlitePool, chat_id: &str) -> AppResult<TurnOver
                     })
             });
             let chars = serde_json::to_string(t).map(|s| s.chars().count()).unwrap_or(0);
-            (group, chars)
+            (group, name.clone(), chars)
         })
         .collect();
 

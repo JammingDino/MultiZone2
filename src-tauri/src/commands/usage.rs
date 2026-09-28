@@ -64,6 +64,9 @@ pub(crate) fn estimate_tokens(chars: i64) -> i64 {
 pub struct OverheadPart {
     pub label: String,
     pub tokens: i64,
+    /// What this part is made of — each tool in a tool group (0.18.1).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub parts: Vec<OverheadPart>,
 }
 
 /// One chat's share of the session's context.
@@ -293,7 +296,7 @@ async fn chat_overhead(
         // Several tags each contribute their own snippet; they read as one line.
         match parts.iter_mut().find(|p| p.label == kind.label()) {
             Some(existing) => existing.tokens += tokens,
-            None => parts.push(OverheadPart { label: kind.label().to_string(), tokens }),
+            None => parts.push(OverheadPart { label: kind.label().to_string(), tokens, parts: Vec::new() }),
         }
     }
     // Largest first, so the reason a chat is expensive is the first line of the
@@ -301,14 +304,21 @@ async fn chat_overhead(
     parts.sort_by(|a, b| b.tokens.cmp(&a.tokens));
 
     let mut tool_parts: Vec<OverheadPart> = Vec::new();
-    for (group, chars) in &overhead.tool_parts {
+    for (group, name, chars) in &overhead.tool_parts {
         let tokens = estimate_tokens(*chars as i64);
+        let tool = OverheadPart { label: name.clone(), tokens, parts: Vec::new() };
         match tool_parts.iter_mut().find(|p| &p.label == group) {
-            Some(existing) => existing.tokens += tokens,
-            None => tool_parts.push(OverheadPart { label: group.clone(), tokens }),
+            Some(existing) => {
+                existing.tokens += tokens;
+                existing.parts.push(tool);
+            }
+            None => tool_parts.push(OverheadPart { label: group.clone(), tokens, parts: vec![tool] }),
         }
     }
     tool_parts.sort_by(|a, b| b.tokens.cmp(&a.tokens));
+    for group in &mut tool_parts {
+        group.parts.sort_by(|a, b| b.tokens.cmp(&a.tokens));
+    }
 
     let tools_tokens = estimate_tokens(overhead.tools_json.chars().count() as i64);
     Ok((system_tokens, tools_tokens, overhead.tool_count as i64, parts, tool_parts))

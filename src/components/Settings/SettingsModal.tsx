@@ -121,7 +121,10 @@ export function SettingsModal() {
           ) : (
           <>
           {rail()}
-          <div className="flex flex-1 overflow-y-auto p-5">
+          {/* `items-start`: a flex row stretches its child to the scroller's
+              own height, which put the page's bottom padding at the bottom
+              of the view instead of after the last section. */}
+          <div className="flex flex-1 items-start overflow-y-auto p-5">
             {/* Per tab, and remounted when the tab changes: one screen that
                 throws is one screen, not the window. The bottom padding keeps
                 the last section off the panel's edge. */}

@@ -63,6 +63,10 @@ export function Sidebar() {
     })),
   );
   const triggerNewChat = useApp((s) => s.triggerNewChat);
+  // Tool calls and the context panel name MCP servers, so the list is needed
+  // from the start rather than only once Settings → MCP has been opened.
+  const refreshMcpServers = useApp((s) => s.refreshMcpServers);
+  useEffect(() => { refreshMcpServers().catch(() => {}); }, [refreshMcpServers]);
 
   const baseZoneId = useApp((s) => s.appSettings.baseZoneId);
   const quickAvailable = !!resolveBaseModel(providers, zones, baseZoneId);
@@ -138,12 +142,13 @@ export function Sidebar() {
       else if (path.startsWith("/api/projects")) refreshProjects();
       else if (path.startsWith("/api/tags")) refreshTags();
       else if (path.startsWith("/api/skills")) refreshSkills();
+      else if (path.startsWith("/api/mcp")) refreshMcpServers().catch(() => {});
       // A chat route can move a chat between projects or retag it, so the chat
       // list and its tag links both have to come back.
       else if (path.startsWith("/api/chats")) { refreshChats(); refreshTags(); }
     });
     return () => { unlisten.then((fn) => fn()); };
-  }, [refreshZones, refreshProviders, refreshProjects, refreshTags, refreshSkills, refreshChats]);
+  }, [refreshZones, refreshProviders, refreshProjects, refreshTags, refreshSkills, refreshChats, refreshMcpServers]);
 
   async function onNewChat(projectId?: string) {
     triggerNewChat(projectId ?? null);

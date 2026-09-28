@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import type { Step, ToolStep, ThinkingStep } from "@/lib/grouping";
 import { analyzeToolStep } from "@/lib/stepSummary";
+import { useToolName } from "@/lib/useToolName";
 import { useThrottledStreaming } from "@/lib/useThrottledStreaming";
 import { MathPlotBlock, toMathPlotData } from "@/components/Renderers/MathPlotBlock";
 import { ChartBlock } from "@/components/Renderers/ChartBlock";
@@ -178,6 +179,7 @@ function ToolStepView({
       : null;
 
   const status = baseStatus === "done" && mermaidFailed ? "error" : baseStatus;
+  const shown = useToolName(name);
   // A run of twenty steps was a column of identical wrenches; the family glyph
   // is the one thing that makes a collapsed rail scannable.
   const StepIcon = familyIcon(name);
@@ -204,9 +206,14 @@ function ToolStepView({
           size={12}
           className={`text-[var(--color-accent)]${pending ? " animate-pulse" : ""}`}
         />
-        <span className="text-[var(--color-text-muted)]">
-          Step {index} ·{" "}
-          <code className="text-[var(--color-text)]">{name}</code>
+        <span className="flex min-w-0 items-center gap-1.5 text-[var(--color-text-muted)]" title={name}>
+          <span className="shrink-0">Step {index} ·</span>
+          <span className="truncate text-[var(--color-text)]">{shown.label}</span>
+          {shown.server && (
+            <span className="shrink-0 rounded-full border border-[var(--color-border)] px-1.5 text-[10px] leading-4">
+              {shown.server}
+            </span>
+          )}
           {pending && (
             <span className="ml-1 text-[10px] uppercase tracking-wide text-[var(--color-accent)]">
               streaming
@@ -234,7 +241,7 @@ function ToolStepView({
         <div className="border-t border-[var(--color-border)] px-3 py-2.5 text-xs">
           <div className="flex items-center gap-2 text-[var(--color-text-muted)]">
             <Loader2 size={12} className="animate-spin text-[var(--color-accent)]" />
-            <span>Executing <code className="text-[var(--color-text)]">{name}</code>…</span>
+            <span>Running <span className="text-[var(--color-text)]">{shown.label}</span>{shown.server ? ` on ${shown.server}` : ""}…</span>
           </div>
         </div>
       )}

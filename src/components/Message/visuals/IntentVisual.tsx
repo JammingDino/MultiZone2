@@ -1,6 +1,7 @@
 import { Terminal, FileText, FolderTree, Search, Globe, Send, Users, Plug, Wrench } from "lucide-react";
 import { familyOf } from "./families";
 import { Shaped } from "./Shaped";
+import { humanizeTool, useToolName } from "@/lib/useToolName";
 
 /**
  * What a tool call is *about to do*, drawn from its arguments alone (0.14.3).
@@ -20,6 +21,7 @@ import { Shaped } from "./Shaped";
 export function IntentVisual({ name, args }: { name: string; args: any }): React.ReactElement {
   const a = (args ?? {}) as Record<string, unknown>;
   const str = (k: string): string => (typeof a[k] === "string" ? (a[k] as string) : "");
+  const shown = useToolName(name);
 
   switch (familyOf(name)) {
     case "terminal": {
@@ -111,9 +113,8 @@ export function IntentVisual({ name, args }: { name: string; args: any }): React
 
   // MCP tools carry a server-defined schema we know nothing about, so the
   // arguments themselves are the intent — shaped, not stringified.
-  const isMcp = name.startsWith("mcp__");
   return (
-    <Frame icon={isMcp ? Plug : Wrench} title={label(name)}>
+    <Frame icon={shown.server ? Plug : Wrench} title={shown.label} subtitle={shown.server ?? undefined}>
       {Object.keys(a).length > 0 ? (
         <Shaped value={a} />
       ) : (
@@ -123,13 +124,9 @@ export function IntentVisual({ name, args }: { name: string; args: any }): React
   );
 }
 
-/** A tool name as a person reads it. MCP names carry their own prefix. */
+/** A built-in tool's name as a person reads it. */
 function label(name: string): string {
-  if (name.startsWith("mcp__")) {
-    const tool = name.split("__").slice(2).join("__");
-    return `${tool || name} (MCP)`;
-  }
-  return name.replace(/_/g, " ");
+  return humanizeTool(name);
 }
 
 function Frame({

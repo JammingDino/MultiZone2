@@ -379,7 +379,9 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
     // No rule above the composer (0.18.1): the box carries its own outline,
     // and a second line across the window sat a few pixels off the sidebar
     // footer's. The bottom inset is the footer's, so the two bottoms agree.
-    <div className="bg-[var(--color-bg)] px-2 pb-2 pt-1 sm:px-4">
+    // No fill either: only the prompt box is opaque, and the background shows
+    // either side of it.
+    <div className="px-2 pb-2 pt-1 sm:px-4">
       <div className="mx-auto w-full max-w-3xl">
         {notice}
         <AttachError tray={tray} />

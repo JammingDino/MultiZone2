@@ -1,5 +1,5 @@
 import { canonicalToolName } from "@/components/Message/visuals/families";
-import { parseFileAttachments } from "@/lib/attachmentParts";
+import { parseFileAttachments, mediaNote } from "@/lib/attachmentParts";
 import type { ContentPart, Message, ToolCall } from "@/lib/types";
 
 /**
@@ -184,6 +184,8 @@ export function buildTrace(messages: Message[]): TraceUnit[] {
       if (text) items.push({ kind: "text", text, timestamp: m.createdAt });
       const images = visibleImageCount(m);
       if (images > 0) items.push({ kind: "images", count: images, timestamp: m.createdAt });
+      const media = mediaNote(parseParts(m.content));
+      if (media) items.push({ kind: "text", text: `_${media}_`, timestamp: m.createdAt });
       const files = attachmentsOf(m);
       if (files.length > 0) items.push({ kind: "attachments", files, timestamp: m.createdAt });
       if (items.length === 0) continue;

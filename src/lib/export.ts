@@ -25,7 +25,7 @@ import {
   Wrench,
   type LucideIcon,
 } from "lucide-react";
-import { parseFileAttachments, type FileAttachment } from "@/lib/attachmentParts";
+import { mediaNote, parseFileAttachments, type FileAttachment } from "@/lib/attachmentParts";
 import type { Chat, ContentPart, Message, SessionEvent } from "@/lib/types";
 import { saveTextFile } from "@/lib/saveFile";
 import { chatContextEstimate, estimateTokens } from "@/lib/tokens";
@@ -156,6 +156,8 @@ interface RenderedMessage {
   /** `render_chart` arguments from this turn, written out as ```chart fences. */
   charts: unknown[];
   imageCount: number;
+  /** Recordings and videos the turn sent as themselves, as one line. */
+  media: string | null;
   /** Files attached to the turn, recovered from its hidden parts. */
   attachments: FileAttachment[];
   /** Sub-agent conversations this turn started, nested under it. */
@@ -367,11 +369,12 @@ function renderMessages(
     const text = visibleText(m);
     const images = imageCount(m);
     const attachments = parseFileAttachments(parseParts(m.content));
+    const media = mediaNote(parseParts(m.content));
     const subchats = (spawns.get(m.id) ?? [])
       .map((id) => index.take(id))
       .filter((s): s is ExportSubchat => s !== null);
     const charts = chartsIn(m);
-    if (!text && images === 0 && attachments.length === 0 && subchats.length === 0 && charts.length === 0)
+    if (!text && images === 0 && !media && attachments.length === 0 && subchats.length === 0 && charts.length === 0)
       continue;
 
     let zoneLabel: string | null = null;
@@ -393,6 +396,7 @@ function renderMessages(
       text,
       charts,
       imageCount: images,
+      media,
       attachments,
       subchats,
       timestamp: m.createdAt,
@@ -568,6 +572,7 @@ function conversationMarkdown(
     if (m.imageCount > 0) {
       body.push(`_${m.imageCount} image${m.imageCount === 1 ? "" : "s"} attached_`, "");
     }
+    if (m.media) body.push(`_${m.media}_`, "");
     // Named, so the transcript records which document the turn was about.
     for (const att of m.attachments) {
       const note =

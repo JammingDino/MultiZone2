@@ -49,6 +49,21 @@ export function audioTranscriptMarker(fileName: string, text: string): string {
   return `Transcript: ${fileName} (audio)\n\`\`\`\n${text}\n\`\`\``;
 }
 
+/**
+ * What a turn sent the model as sound or video (0.18.1), as the line an export
+ * writes for it — `1 recording attached`, `2 videos attached` — or null. The
+ * file itself is not written out: a transcript records that it was there.
+ */
+export function mediaNote(parts: ContentPart[]): string | null {
+  const audio = parts.filter((p) => p.type === "input_audio").length;
+  const video = parts.filter((p) => p.type === "video_url").length;
+  const bits = [
+    audio > 0 ? `${audio} recording${audio === 1 ? "" : "s"}` : null,
+    video > 0 ? `${video} video${video === 1 ? "" : "s"}` : null,
+  ].filter(Boolean);
+  return bits.length > 0 ? `${bits.join(" and ")} attached` : null;
+}
+
 export function parseFileAttachments(parts: ContentPart[]): FileAttachment[] {
   return splitAttachments(parts).attachments;
 }

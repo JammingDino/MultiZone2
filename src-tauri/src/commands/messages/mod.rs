@@ -740,6 +740,27 @@ pub enum MediaKind {
     Video,
 }
 
+/// What decides a model's thinking shape besides its name (0.18.1): the
+/// user's `thinkingOverrides` entry for it, and the models.dev catalogue's
+/// `reasoning` flag.
+pub(crate) async fn thinking_hint(db: &SqlitePool, model: &str) -> crate::llm::thinking::Hint {
+    let raw: Option<Option<String>> =
+        sqlx::query_scalar("SELECT value FROM settings WHERE key = 'app_settings'")
+            .fetch_optional(db)
+            .await
+            .ok()
+            .flatten();
+    let control = raw
+        .flatten()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.get("thinkingOverrides")?.get(model).cloned())
+        .and_then(|v| serde_json::from_value::<crate::llm::thinking::Control>(v).ok());
+    crate::llm::thinking::Hint {
+        control,
+        catalog_reasoning: crate::llm::context_window::catalog_reasoning(model),
+    }
+}
+
 /// Look up the user's manual vision override for a model, from the
 /// `visionOverrides` map in app settings: `Some("on")` = always send images,
 /// `Some("off")` = always OCR to text, `None` = auto (use the name heuristic).
@@ -1184,7 +1205,7 @@ fn simple_zone(provider: &Provider) -> AppResult<Zone> {
         tools_enabled: serde_json::to_string(&tools::safe_tool_ids())
             .unwrap_or_else(|_| "[]".to_string()),
         tool_config: "{}".to_string(),
-        thinking_enabled: false,
+        thinking_enabled: true,
         thinking_effort: "medium".to_string(),
         include_thinking_in_context: false,
         icon: None,
@@ -1383,6 +1404,8 @@ async fn route_zone_id(
         tool_choice: None,
         reasoning_effort: None,
         chat_template_kwargs: None,
+        thinking_extra: Default::default(),
+        thinking_ask: None,
         stream_options: None,
         stream: false,
     };
@@ -2095,14 +2118,17 @@ async fn run_participant_turn(
         // models and hosted gateways, a chat-template toggle for local Qwen and
         // DeepSeek servers, nothing at all for Gemma (inline tags) or gpt-4o
         // (no reasoning to switch on). See `llm::thinking::profile`.
-        let thinking = crate::llm::thinking::controls(
+        let thinking = crate::llm::thinking::controls_with(
             &zone.model,
             &provider.base_url,
             zone.thinking_enabled,
             &zone.thinking_effort,
+            thinking_hint(&ctx.db, &zone.model).await,
         );
         let reasoning_effort = thinking.reasoning_effort;
         let chat_template_kwargs = thinking.chat_template_kwargs;
+        let thinking_extra = thinking.extra;
+        let thinking_ask = thinking.ask;
         let parse_inline_think = thinking.parse_inline;
 
         let req = ChatRequest {
@@ -2134,6 +2160,8 @@ async fn run_participant_turn(
             tool_choice: None,
             reasoning_effort,
             chat_template_kwargs,
+            thinking_extra,
+            thinking_ask,
             // Ask the provider for its own token counts. Exact where ours are
             // estimated, and the only way to see prompt cache hits — which on a
             // long agentic turn are most of what gets billed.

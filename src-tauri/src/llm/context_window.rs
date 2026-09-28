@@ -298,6 +298,8 @@ pub struct Catalog {
     hosts: HashMap<String, String>,
     /// Model id → every (provider id, context) pair that lists it.
     models: HashMap<String, Vec<(String, i64)>>,
+    /// Model id → whether any provider lists it as a reasoning model (0.18.1).
+    reasoning: HashMap<String, bool>,
 }
 
 #[derive(Deserialize)]
@@ -312,6 +314,8 @@ struct CatalogProvider {
 struct CatalogModel {
     #[serde(default)]
     limit: Option<CatalogLimit>,
+    #[serde(default)]
+    reasoning: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -325,17 +329,21 @@ impl Catalog {
         let raw: HashMap<String, CatalogProvider> = serde_json::from_str(json).ok()?;
         let mut hosts = HashMap::new();
         let mut models: HashMap<String, Vec<(String, i64)>> = HashMap::new();
+        let mut reasoning: HashMap<String, bool> = HashMap::new();
         for (pid, p) in raw {
             if let Some(api) = p.api.as_deref() {
                 hosts.insert(pid.clone(), host_of(api));
             }
             for (mid, m) in p.models {
+                if let Some(r) = m.reasoning {
+                    *reasoning.entry(mid.to_lowercase()).or_insert(false) |= r;
+                }
                 if let Some(ctx) = m.limit.and_then(|l| l.context).filter(|c| *c > 0) {
                     models.entry(mid.to_lowercase()).or_default().push((pid.clone(), ctx));
                 }
             }
         }
-        Some(Catalog { hosts, models })
+        Some(Catalog { hosts, models, reasoning })
     }
 
     /// The ceiling for `model` on the provider at `base`, or the commonest
@@ -381,6 +389,21 @@ impl Catalog {
         }
         None
     }
+}
+
+/// Whether the catalogue lists `model` as a reasoning model, if it is loaded
+/// and knows the model. Same id fallbacks as [`Catalog::find`].
+pub fn catalog_reasoning(model: &str) -> Option<bool> {
+    let cat = catalog_slot().lock().ok()?.clone()?;
+    let m = model.to_lowercase();
+    let mut ids: Vec<&str> = vec![&m];
+    if let Some((_, rest)) = m.rsplit_once('/') {
+        ids.push(rest);
+    }
+    if let Some((stem, _)) = m.split_once(':') {
+        ids.push(stem);
+    }
+    ids.iter().find_map(|id| cat.reasoning.get(*id).copied())
 }
 
 /// First-party hosts whose catalogue entry carries no `api` field.

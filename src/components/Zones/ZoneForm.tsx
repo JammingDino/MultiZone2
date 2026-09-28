@@ -10,7 +10,7 @@ import { ModelCombobox } from "@/components/common/ModelCombobox";
 import { MediaOverrideSelect, VisionOverrideSelect } from "@/components/common/VisionOverrideSelect";
 import { IconPicker } from "@/components/common/IconPicker";
 import { ColorPicker } from "@/components/common/ColorPicker";
-import type { ApprovalCategory, ApprovalPolicy, Provider, ToolFunctionInfo, ToolUsage, Zone, ThinkingEffort, ThinkingProfile } from "@/lib/types";
+import type { ApprovalCategory, ApprovalPolicy, Provider, ToolFunctionInfo, ToolUsage, Zone, ThinkingEffort, ThinkingControl, ThinkingProfile } from "@/lib/types";
 import { ALL_TOOLS, TOOL_CATEGORIES, mcpToolEnableId } from "@/lib/types";
 import { useApp } from "@/store/app";
 import { DEFAULT_ZONES } from "@/lib/defaultZones";
@@ -413,6 +413,17 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
   // which owns the model→knob table, so the editor can never disagree with
   // the request builder about it (0.17.9).
   const [thinkingProfile, setThinkingProfile] = useState<ThinkingProfile | null>(null);
+  const thinkingOverrides = useApp((s) => s.appSettings.thinkingOverrides);
+  const setAppSettings = useApp((s) => s.setAppSettings);
+  const thinkingOverride = thinkingOverrides[model.trim()] ?? "";
+  function setThinkingOverride(next: string) {
+    const m = model.trim();
+    if (!m) return;
+    const map = { ...thinkingOverrides };
+    if (next) map[m] = next as ThinkingControl;
+    else delete map[m];
+    void setAppSettings({ thinkingOverrides: map });
+  }
   useEffect(() => {
     const m = model.trim();
     if (!m) {
@@ -426,7 +437,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
         .catch(() => { if (live) setThinkingProfile(null); });
     }, 250);
     return () => { live = false; clearTimeout(timer); };
-  }, [providerId, model]);
+  }, [providerId, model, thinkingOverride]);
   const [includeThinkingInContext, setIncludeThinkingInContext] = useState(false);
   const [isLeader, setIsLeader] = useState(false);
   const [fallbackZoneId, setFallbackZoneId] = useState<string | null>(null);
@@ -805,7 +816,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
                 />
                 Enable thinking
               </label>
-              {(thinkingProfile === null || thinkingProfile.control === "effort") && (
+              {(thinkingProfile === null || thinkingProfile.control === "effort" || thinkingProfile.control === "reasoning_object") && (
                 <select
                   value={thinkingEffort}
                   onChange={(e) => setThinkingEffort(e.target.value as ThinkingEffort)}
@@ -819,6 +830,26 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
                 </select>
               )}
             </div>
+            {/* The backup for a gateway neither the name nor the catalogue
+                gets right (0.18.1): say which parameter it reads. Stored per
+                model, like image input, so every zone on it agrees. */}
+            <select
+              value={thinkingOverride}
+              onChange={(e) => setThinkingOverride(e.target.value)}
+              disabled={!model.trim()}
+              title="Which request parameter turns thinking on for this model. Auto guesses from the name and the models.dev catalogue, and tries the other shapes if the provider refuses one."
+              className="mt-1.5 h-[30px] w-full rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-1.5 text-xs text-[var(--color-text)] disabled:opacity-50"
+            >
+              <option value="">Parameter: auto{thinkingProfile && !thinkingOverride ? ` (${thinkingProfile.family})` : ""}</option>
+              <option value="effort">reasoning_effort</option>
+              <option value="reasoning_object">reasoning: {"{ effort }"} — OpenRouter style</option>
+              <option value="thinking_object">thinking: {"{ type }"} — GLM, DeepSeek, Kimi</option>
+              <option value="enable_thinking">enable_thinking — Qwen on DashScope</option>
+              <option value="toggle">chat_template_kwargs — local servers</option>
+              <option value="inline">Inline &lt;think&gt; tags only</option>
+              <option value="always">Always reasons — send nothing</option>
+              <option value="none">No reasoning mode</option>
+            </select>
             {thinkingProfile && (
               <div className="mt-1 text-[10px] leading-snug text-[var(--color-text-muted)]">
                 <span className="font-medium">{thinkingProfile.family}:</span> {thinkingProfile.note}

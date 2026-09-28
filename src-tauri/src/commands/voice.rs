@@ -620,6 +620,8 @@ Respond with ONLY the spoken summary — no preamble, no markdown.\n\nResponse:\
         tool_choice: None,
         reasoning_effort: None,
         chat_template_kwargs: None,
+        thinking_extra: Default::default(),
+        thinking_ask: None,
         stream_options: None,
         stream: false,
     };

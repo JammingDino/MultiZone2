@@ -131,6 +131,14 @@ pub struct ChatRequest {
     /// fields, so anything that sets this must be able to retry without it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub chat_template_kwargs: Option<Value>,
+    /// The other thinking shapes (0.18.1) — `reasoning`, `thinking`,
+    /// `enable_thinking` — as top-level fields. Empty for most requests.
+    #[serde(flatten)]
+    pub thinking_extra: serde_json::Map<String, Value>,
+    /// How the thinking fields were chosen, so the client can re-express a
+    /// refused guess in the next shape. Never sent.
+    #[serde(skip)]
+    pub thinking_ask: Option<crate::llm::thinking::Ask>,
     /// OpenAI's `stream_options`, set to `{"include_usage": true}` so the
     /// provider appends a final chunk carrying its own token counts. Those are
     /// exact where ours are estimated, and they are the only way to see prompt

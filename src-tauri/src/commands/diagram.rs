@@ -78,6 +78,8 @@ pub async fn fix_diagram(
         })),
         reasoning_effort: None,
         chat_template_kwargs: None,
+        thinking_extra: Default::default(),
+        thinking_ask: None,
         stream_options: None,
         stream: false,
     };

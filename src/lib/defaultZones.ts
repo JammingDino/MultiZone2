@@ -737,7 +737,7 @@ export async function seedDefaultZones(
         topP: null,
         toolsEnabled: JSON.stringify(z.tools),
         toolConfig: "{}",
-        thinkingEnabled: z.thinking ?? false,
+        thinkingEnabled: z.thinking ?? true,
         includeThinkingInContext: false,
         isLeader: z.isLeader ?? false,
         icon: z.icon,

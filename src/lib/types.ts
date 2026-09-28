@@ -1227,6 +1227,9 @@ export interface AppSettings {
   /** Per-model audio and video input, like `visionOverrides` (0.18.1). Absent = the name heuristic. */
   audioOverrides: Record<string, "on" | "off">;
   videoOverrides: Record<string, "on" | "off">;
+  /** Per-model thinking parameter (0.18.1), for gateways the name heuristic
+   * and the catalogue both get wrong. Absent = automatic. */
+  thinkingOverrides: Record<string, ThinkingControl>;
   /**
    * Dictation input (0.8.0). The id of one of this app's own `Provider` rows —
    * the same providers zones already point at — so any provider exposing an
@@ -1415,6 +1418,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   visionOverrides: {},
   audioOverrides: {},
   videoOverrides: {},
+  thinkingOverrides: {},
   onboardingSkipped: false,
   updateCheckOnLaunch: true,
   sttProviderId: null,
@@ -1962,9 +1966,14 @@ export type ThinkingEffort = "low" | "medium" | "high";
  * local server's enable_thinking), `inline` (Gemma's tags, no parameter),
  * `always` (reasons regardless) or `none` (no reasoning mode at all).
  */
+/** How a model is asked to think — see `llm::thinking::Control`. */
+export type ThinkingControl =
+  | "effort" | "reasoning_object" | "thinking_object" | "enable_thinking"
+  | "toggle" | "inline" | "always" | "none";
+
 export interface ThinkingProfile {
   family: string;
-  control: "effort" | "toggle" | "inline" | "always" | "none";
+  control: ThinkingControl;
   levels: string[];
   canDisable: boolean;
   note: string;

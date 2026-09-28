@@ -2,17 +2,31 @@ use crate::error::{AppError, AppResult};
 use crate::llm::responses::{self, Dialect};
 use crate::llm::types::*;
 use reqwest::Client;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-/// (base URL, model) pairs that rejected the thinking fields
-/// (`reasoning_effort` / `chat_template_kwargs`). The profile in
-/// `llm::thinking` is a guess from the model's name; a provider that says no
-/// is believed, once, and not asked again.
-fn no_thinking_controls() -> &'static Mutex<HashSet<(String, String)>> {
-    static SET: OnceLock<Mutex<HashSet<(String, String)>>> = OnceLock::new();
-    SET.get_or_init(|| Mutex::new(HashSet::new()))
+/// What each (base URL, model) pair was found to accept for thinking. The
+/// profile in `llm::thinking` is a guess from the model's name; a refusal is
+/// believed, once. `Some(shape)` is the shape to try after the guess was
+/// refused (0.18.1); `None` means every shape was refused and nothing is sent
+/// again. A shape the user chose is never recorded here.
+fn thinking_learned() -> &'static Mutex<HashMap<(String, String), Option<crate::llm::thinking::Control>>> {
+    static MAP: OnceLock<Mutex<HashMap<(String, String), Option<crate::llm::thinking::Control>>>> = OnceLock::new();
+    MAP.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Swap a request's thinking fields for another shape, or strip them.
+fn set_thinking(req: &mut ChatRequest, shape: Option<crate::llm::thinking::Control>) {
+    req.reasoning_effort = None;
+    req.chat_template_kwargs = None;
+    req.thinking_extra.clear();
+    let (Some(shape), Some(ask)) = (shape, req.thinking_ask.as_mut()) else { return };
+    let c = crate::llm::thinking::fields_for(shape, ask.enabled, &ask.level, ask.family);
+    req.reasoning_effort = c.reasoning_effort;
+    req.chat_template_kwargs = c.chat_template_kwargs;
+    req.thinking_extra = c.extra;
+    ask.style = shape;
 }
 
 /// Base URLs that rejected `stream_options`. Asking for token counts is not
@@ -338,14 +352,20 @@ impl<'a> LlmClient<'a> {
         {
             req.stream_options = None;
         }
-        if no_thinking_controls().lock().map(|s| s.contains(&key)).unwrap_or(false) {
-            req.reasoning_effort = None;
-            req.chat_template_kwargs = None;
+        // Only a guess is corrected from memory. A shape the user picked is
+        // sent as picked every time — they may have picked it *because* the
+        // guesses all failed.
+        if req.thinking_ask.is_some() {
+            if let Some(learned) = thinking_learned().lock().ok().and_then(|m| m.get(&key).copied()) {
+                set_thinking(&mut req, learned);
+            }
         }
 
         loop {
             let has_usage = req.stream_options.is_some();
-            let has_thinking = req.reasoning_effort.is_some() || req.chat_template_kwargs.is_some();
+            let has_thinking = req.reasoning_effort.is_some()
+                || req.chat_template_kwargs.is_some()
+                || !req.thinking_extra.is_empty();
             match self.post_stream(&req).await {
                 Ok(res) => return Ok(res),
                 // Only an "I don't understand this request" answer is evidence
@@ -359,16 +379,24 @@ impl<'a> LlmClient<'a> {
                     let blame_thinking = has_thinking
                         && (!has_usage || crate::llm::thinking::rejection_names_thinking(&body));
                     if blame_thinking {
+                        // A guessed shape falls through to the next one a
+                        // gateway might speak; a chosen one, or the last, is
+                        // dropped.
+                        let next = req
+                            .thinking_ask
+                            .as_ref()
+                            .and_then(|a| crate::llm::thinking::next_style(a.style));
                         tracing::debug!(
-                            "{} refused thinking fields for {} ({body}); retrying without",
+                            "{} refused thinking fields for {} ({body}); retrying with {next:?}",
                             self.base_url,
                             req.model,
                         );
-                        if let Ok(mut set) = no_thinking_controls().lock() {
-                            set.insert(key.clone());
+                        if req.thinking_ask.is_some() {
+                            if let Ok(mut map) = thinking_learned().lock() {
+                                map.insert(key.clone(), next);
+                            }
                         }
-                        req.reasoning_effort = None;
-                        req.chat_template_kwargs = None;
+                        set_thinking(&mut req, next);
                     } else {
                         tracing::debug!(
                             "{} refused stream_options ({body}); retrying without usage reporting",

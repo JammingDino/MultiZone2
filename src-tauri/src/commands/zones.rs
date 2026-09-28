@@ -52,7 +52,10 @@ pub async fn upsert_zone(state: State<'_, AppState>, zone: ZoneInput) -> AppResu
     let now = now_ts();
     let tools_enabled = zone.tools_enabled.unwrap_or_else(|| "[]".to_string());
     let tool_config = zone.tool_config.unwrap_or_else(|| "{}".to_string());
-    let thinking_enabled = zone.thinking_enabled.unwrap_or(false);
+    // Thinking is on unless a zone says otherwise (0.18.1): the profile turns
+    // it into nothing for a model with no reasoning mode, so on costs nothing
+    // there, and off hid the feature from every model that has one.
+    let thinking_enabled = zone.thinking_enabled.unwrap_or(true);
     let thinking_effort = match zone.thinking_effort.as_deref().map(str::trim) {
         Some("low") => "low",
         Some("high") => "high",
@@ -161,5 +164,6 @@ pub async fn thinking_profile(
                 .await?
         }
     };
-    Ok(crate::llm::thinking::profile(&model, base_url.as_deref().unwrap_or("")))
+    let hint = crate::commands::messages::thinking_hint(&state.db, &model).await;
+    Ok(crate::llm::thinking::profile_with(&model, base_url.as_deref().unwrap_or(""), hint))
 }

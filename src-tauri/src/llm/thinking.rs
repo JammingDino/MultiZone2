@@ -23,16 +23,25 @@
 //! `LlmClient::chat_stream_once`). The guess only has to be right often enough
 //! that the retry is rare.
 
-use serde::Serialize;
-use serde_json::{json, Value};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Map, Value};
 
 /// The knob a model exposes for its reasoning, if any.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Control {
     /// `reasoning_effort` with a level. OpenAI o-series/gpt-5/gpt-oss, Claude
     /// and Gemini through OpenAI-compatible gateways, Grok's mini models.
     Effort,
+    /// `reasoning: {"effort": level}` — OpenRouter's shape, and the one several
+    /// routers copied (0.18.1).
+    ReasoningObject,
+    /// `thinking: {"type": "enabled" | "disabled"}` — GLM on Z.ai, DeepSeek and
+    /// Kimi on the hosts that expose a switch (0.18.1).
+    ThinkingObject,
+    /// A top-level `enable_thinking: bool` — DashScope and SiliconFlow's Qwen
+    /// (0.18.1).
+    EnableThinking,
     /// `chat_template_kwargs: {"enable_thinking": bool}` — a local server's
     /// chat template decides. Qwen3, DeepSeek distills, GLM, Nemotron.
     Toggle,
@@ -67,8 +76,37 @@ pub struct Profile {
 pub struct Controls {
     pub reasoning_effort: Option<String>,
     pub chat_template_kwargs: Option<Value>,
+    /// Other top-level fields: `reasoning`, `thinking`, `enable_thinking`.
+    pub extra: Map<String, Value>,
     /// Watch the content stream for inline `<think>` tags and split them out.
     pub parse_inline: bool,
+    /// Set when the shape was a guess the client may swap for the next one in
+    /// [`FALLBACK_CHAIN`] if the provider refuses it.
+    pub ask: Option<Ask>,
+}
+
+/// What a zone asked for, kept so a refused shape can be re-expressed.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Ask {
+    pub enabled: bool,
+    pub level: String,
+    pub style: Control,
+    pub family: &'static str,
+}
+
+/// The hosted shapes, in the order a refusal walks them (0.18.1). Every one
+/// is some gateway's native dialect, and a gateway that does not understand a
+/// field usually says so with a 400 — which is what lets the client move on
+/// instead of giving up on thinking altogether.
+pub const FALLBACK_CHAIN: &[Control] =
+    &[Control::Effort, Control::ReasoningObject, Control::ThinkingObject, Control::EnableThinking];
+
+/// Evidence beyond the name: the user's per-model choice, and whether the
+/// models.dev catalogue lists the model as a reasoning model.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Hint {
+    pub control: Option<Control>,
+    pub catalog_reasoning: Option<bool>,
 }
 
 /// Is this base URL a server on this machine or LAN, rather than a hosted API?
@@ -110,6 +148,57 @@ pub fn is_local_server(base_url: &str) -> bool {
 
 /// Work out the family and its knob from a model name and where it is served.
 pub fn profile(model: &str, base_url: &str) -> Profile {
+    profile_with(model, base_url, Hint::default())
+}
+
+/// [`profile`], corrected by what the user chose and what the catalogue says.
+pub fn profile_with(model: &str, base_url: &str, hint: Hint) -> Profile {
+    let mut p = guess(model, base_url);
+    if let Some(control) = hint.control {
+        p.control = control;
+        p.levels = match control {
+            Control::Effort | Control::ReasoningObject if p.levels.is_empty() => vec!["low", "medium", "high"],
+            Control::Effort | Control::ReasoningObject => p.levels,
+            _ => vec![],
+        };
+        p.can_disable = !matches!(control, Control::Always | Control::None | Control::Inline);
+        p.note = format!("Set by you: {}.", describe(control));
+        return p;
+    }
+    // An unrecognised model is the case the catalogue can settle: it knows
+    // most gateway models by id, and whether they reason.
+    if p.family == "hosted model" {
+        match hint.catalog_reasoning {
+            Some(false) => {
+                p.control = Control::None;
+                p.levels = vec![];
+                p.note = "The models.dev catalogue lists this model as not reasoning; nothing is sent.".into();
+            }
+            Some(true) => {
+                p.family = "reasoning model";
+                p.note = "The models.dev catalogue lists this as a reasoning model. Asked as reasoning_effort first; a gateway that refuses it is tried with the other common shapes.".into();
+            }
+            None => {}
+        }
+    }
+    p
+}
+
+/// What a shape sends, for the editor's note.
+fn describe(control: Control) -> &'static str {
+    match control {
+        Control::Effort => "sent as reasoning_effort",
+        Control::ReasoningObject => "sent as reasoning: {effort}",
+        Control::ThinkingObject => "sent as thinking: {type: enabled/disabled}",
+        Control::EnableThinking => "sent as enable_thinking",
+        Control::Toggle => "sent as chat_template_kwargs.enable_thinking",
+        Control::Inline => "read from inline <think> tags, nothing sent",
+        Control::Always => "the model always reasons, nothing sent",
+        Control::None => "nothing is sent",
+    }
+}
+
+fn guess(model: &str, base_url: &str) -> Profile {
     let m = model.to_lowercase();
     // Gateways prefix a vendor ("openai/gpt-5", "anthropic/claude-…"); the
     // last path segment is the model that decides.
@@ -176,7 +265,7 @@ pub fn profile(model: &str, base_url: &str) -> Profile {
             "Unrecognised model on a local server: switched with enable_thinking in chat_template_kwargs, which a template that does not read it ignores.".into())
     } else {
         p("hosted model", Control::Effort, levels3, true,
-            "Unrecognised hosted model: asked for as reasoning_effort when on, nothing when off. A provider that rejects the field gets the request again without it.".into())
+            "Unrecognised hosted model: asked as reasoning_effort first; a gateway that refuses it is tried with reasoning, thinking and enable_thinking in turn. If none works, set the parameter by hand.".into())
     }
 }
 
@@ -185,29 +274,62 @@ pub fn profile(model: &str, base_url: &str) -> Profile {
 /// `effort` is the zone's level (`low`/`medium`/`high`); a level the model does
 /// not offer is snapped to the nearest one it does.
 pub fn controls(model: &str, base_url: &str, enabled: bool, effort: &str) -> Controls {
-    let prof = profile(model, base_url);
-    let effort = effort.trim().to_lowercase();
-    match prof.control {
-        Control::Inline => Controls { parse_inline: enabled, ..Default::default() },
-        Control::None | Control::Always => Controls::default(),
-        Control::Toggle => Controls {
-            chat_template_kwargs: Some(json!({ "enable_thinking": enabled })),
-            ..Default::default()
-        },
+    controls_with(model, base_url, enabled, effort, Hint::default())
+}
+
+/// [`controls`] with the user's choice and the catalogue taken into account.
+/// Only a hosted guess carries an [`Ask`]: a shape the user picked is theirs,
+/// and a local server ignores what it does not read rather than refusing it.
+pub fn controls_with(model: &str, base_url: &str, enabled: bool, effort: &str, hint: Hint) -> Controls {
+    let prof = profile_with(model, base_url, hint);
+    let level = snap_level(&effort.trim().to_lowercase(), &prof.levels);
+    let mut c = fields_for(prof.control, enabled, &level, prof.family);
+    let sends_something =
+        c.reasoning_effort.is_some() || c.chat_template_kwargs.is_some() || !c.extra.is_empty();
+    if hint.control.is_none() && sends_something && FALLBACK_CHAIN.contains(&prof.control) && enabled {
+        c.ask = Some(Ask { enabled, level, style: prof.control, family: prof.family });
+    }
+    c
+}
+
+/// The request fields one shape uses to say "think at this level" or "don't".
+pub fn fields_for(style: Control, enabled: bool, level: &str, family: &'static str) -> Controls {
+    let mut c = Controls::default();
+    match style {
+        Control::Inline => c.parse_inline = enabled,
+        Control::None | Control::Always => {}
+        Control::Toggle => c.chat_template_kwargs = Some(json!({ "enable_thinking": enabled })),
         Control::Effort => {
-            let level = if enabled {
-                Some(snap_level(&effort, &prof.levels))
+            c.reasoning_effort = if enabled {
+                Some(level.to_string())
             } else {
-                match prof.family {
+                match family {
                     "gpt-oss" => Some("low".to_string()),
                     "GPT-5" => Some("minimal".to_string()),
                     "Gemini" => Some("none".to_string()),
                     _ => None,
                 }
             };
-            Controls { reasoning_effort: level, ..Default::default() }
+        }
+        Control::ReasoningObject => {
+            let v = if enabled { json!({ "effort": level }) } else { json!({ "enabled": false }) };
+            c.extra.insert("reasoning".into(), v);
+        }
+        Control::ThinkingObject => {
+            let t = if enabled { "enabled" } else { "disabled" };
+            c.extra.insert("thinking".into(), json!({ "type": t }));
+        }
+        Control::EnableThinking => {
+            c.extra.insert("enable_thinking".into(), json!(enabled));
         }
     }
+    c
+}
+
+/// The shape to try after `style` was refused, if any is left.
+pub fn next_style(style: Control) -> Option<Control> {
+    let i = FALLBACK_CHAIN.iter().position(|c| *c == style)?;
+    FALLBACK_CHAIN.get(i + 1).copied()
 }
 
 /// The nearest level a model offers to the one asked for. Levels are ordered
@@ -300,6 +422,36 @@ mod tests {
         assert!(is_local_server("http://box.local:8000"));
         assert!(!is_local_server("https://api.openai.com/v1"));
         assert!(!is_local_server("https://172.5.5.5/v1"));
+    }
+
+    #[test]
+    fn a_refused_guess_walks_the_other_shapes() {
+        let c = controls("mystery-9000", "https://gateway.example.com/v1", true, "high");
+        let ask = c.ask.expect("a hosted guess can be re-expressed");
+        assert_eq!(ask.style, Control::Effort);
+        assert_eq!(next_style(Control::Effort), Some(Control::ReasoningObject));
+        assert_eq!(next_style(Control::EnableThinking), None);
+        let r = fields_for(Control::ReasoningObject, true, "high", ask.family);
+        assert_eq!(r.extra.get("reasoning"), Some(&json!({ "effort": "high" })));
+        let t = fields_for(Control::ThinkingObject, false, "high", ask.family);
+        assert_eq!(t.extra.get("thinking"), Some(&json!({ "type": "disabled" })));
+    }
+
+    #[test]
+    fn a_users_choice_is_sent_as_chosen_and_never_swapped() {
+        let hint = Hint { control: Some(Control::ThinkingObject), catalog_reasoning: None };
+        let c = controls_with("glm-4.6", "https://opencode.ai/zen/go/v1", true, "medium", hint);
+        assert_eq!(c.extra.get("thinking"), Some(&json!({ "type": "enabled" })));
+        assert_eq!(c.reasoning_effort, None);
+        assert!(c.ask.is_none());
+    }
+
+    #[test]
+    fn the_catalogue_settles_an_unrecognised_model() {
+        let no = Hint { control: None, catalog_reasoning: Some(false) };
+        assert_eq!(profile_with("mystery-9000", "https://x.example/v1", no).control, Control::None);
+        let yes = Hint { control: None, catalog_reasoning: Some(true) };
+        assert_eq!(profile_with("mystery-9000", "https://x.example/v1", yes).family, "reasoning model");
     }
 
     #[test]

@@ -541,7 +541,7 @@ export function HomeScreen() {
             rows={2}
             autoFocus
             placeholder="Send a message…"
-            className="max-h-48 min-h-[52px] w-full resize-none bg-transparent px-2 py-1.5 text-sm outline-none"
+            className="max-h-[40vh] min-h-[52px] w-full resize-none bg-transparent px-2 py-1.5 text-sm leading-relaxed outline-none"
           />
           <div className="flex items-center gap-2 px-1 pt-1">
             {/* Attach */}

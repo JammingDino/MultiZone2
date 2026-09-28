@@ -5,6 +5,35 @@ alone. Newest first. Detail belongs in the linked docs; this is the thread.
 
 ---
 
+## 2026-09-28 (0.18.1) — Visual coherence
+
+A feature request written from an annotated walk-through of the app, then
+worked through one commit per section; the checklist is in
+[RELEASE_PLAN.md](RELEASE_PLAN.md) under 0.18.1. The version was already
+0.18.1 — CI bumps it after a release — so nothing was bumped.
+
+**Verified how.** A browser harness (a scratch Vite entry, not committed)
+mounted the sidebar, settings, zones, composer, plots, context panel and the
+attachment tray with seeded store state, and headless Chrome screenshotted
+them. It caught one real bug before commit: media staging went through the
+image reader, which decodes to downscale and so rejected every recording.
+`tsc -b`, the script tests (a new one for notification endings) and
+`cargo test --lib` (435, new tests for plot normalisation and the media wire
+shapes) pass. Nothing here has run in the Tauri shell yet.
+
+**Worth knowing.** `plot_function` used to echo its arguments; it now
+normalises and validates them, and the renderer prefers the result over the
+arguments — older saved calls still draw from their arguments. Audio/video
+capability is a name heuristic kept in two places (`ocr.rs`, `lib/media.ts`),
+the same arrangement vision already had. Settings → Chat was split into Chat,
+Runs and Approvals; the setting keys did not change.
+
+**Left alone.** A shared settings-section component (the tabs already agree by
+convention); chat exports mentioning recordings; a notification click that
+opens the chat (the desktop notification plugin has no click action).
+
+---
+
 ## 2026-09-28 (0.18.0) — Runs nobody is watching
 
 Five changes for the run that is left alone. Each landed as its own commit.

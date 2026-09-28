@@ -1230,7 +1230,7 @@ summarize itself, and Stop did nothing until the model had spoken.
 - [x] `schedule` tool group — `schedule_run` dangerous (always asks), defaults to once in this chat; list (safe) and cancel (moderate)
 - [x] API: `/api/schedules`, `/api/schedules/:id`, `/api/schedules/:id/run`
 - [ ] Seen firing from the tray with the window hidden
-- [ ] A notification when a scheduled run finishes, if people want one (a finished turn deliberately does not notify today — see 0.14.3) — taken up in 0.18.1
+- [x] A notification when a scheduled run finishes — 0.18.1, *Run finished*
 
 ### 0.18.1 — Visual coherence: nothing breaks the flow
 
@@ -1244,47 +1244,53 @@ bumped it after the 0.18.0 release).
 Runs now continue with the window closed, so "the agent is waiting for you"
 has more than two causes. A run that has finished, failed or been stopped by
 a guard is blocked on the user as surely as an approval is.
-- [ ] Settings → Chat → Notifications: *Needs input* (approvals, questions — as today) and *Run finished* (final answer, error, loop guard, spend limit) as two toggles
-- [ ] The finished notification carries the chat title and the first line of the answer
-- [ ] Sub-agents never notify on their own finish — only the run the user started
-- [ ] A Stop the user pressed never notifies
-- [ ] Tool names in notifications read as labels, not ids
+- [x] Settings → Chat → Notifications: *Needs my input* (approvals, questions, and now plans) and *Run finished* (final answer, error, loop guard, spend limit) as two toggles, both on by default
+- [x] The finished notification carries the chat title and the first line of the answer
+- [x] Sub-agents and perspectives never notify on their own finish — only the run the user started
+- [x] A Stop the user pressed never notifies; a question is announced once, not again as "finished" (`scripts/notify.test.mjs`)
+- [x] Tool names in notifications read as labels, not ids
+- [ ] Seen from the tray: a scheduled run finishing with the window hidden raises one toast
 
 **2. Sidebar**
-- [ ] One row style for projects and chats: same font size, height, padding and chevron
-- [ ] Chats lose their per-row icon; children (branches, sub-agents) hang off a thin guide line instead
-- [ ] One chevron, trailing, rotating — the same glyph for projects and for chats with children
-- [ ] Projects show their five most recent chats, then *Show N more*
-- [ ] New chat and Search are the same height and chrome
-- [ ] Tags filter from a popover listing every tag, not a sideways-scrolling strip
-- [ ] Zones and Settings live in a footer in both states, so collapsing moves nothing but the labels
+- [x] One row style (h-8, text-sm) for projects and chats, and one trailing chevron that rotates
+- [x] Chats lose their per-row icon; branches and sub-agents hang off a split bar, coloured by the driving zone for a sub-agent; tag dots sit inline
+- [x] Projects show their five most recent chats, then *Show N more*
+- [x] New chat and Search are the same height and outline; New project moves to the Projects heading
+- [x] Tags filter from a popover beside Search listing every tag
+- [x] Zones and Settings live in a footer in both states; the collapsed rail keeps New chat and Search where the open sidebar has them
 
 **3. Settings and Configure Zones**
-- [ ] Configure Zones uses the Settings rail: same width, rows, group labels and active state
-- [ ] Every help paragraph cut to a short line, or removed where the title says it
-- [ ] Shared `SettingSection` so spacing and headings match on every tab
+- [x] Configure Zones uses the Settings rail (`common/NavRail.tsx`): Library and New zone are rail items, installed zones are rail rows, team names are group labels
+- [x] Every help paragraph cut to a short line, or removed where the title says it — Settings, the zone editor and the project editor (~14k characters)
+- [x] Chat split in three: Chat keeps the chat basics; Runs (task length, rolling context, compaction, spend limit, repository map, sub-agents) and Approvals move under a new Agents group with Schedules
+- [ ] A shared `SettingSection` component — not done; the tabs already share the same heading and spacing classes by convention
 
 **4. Composer and in-chat chrome**
-- [ ] The prompt box grows to half the chat height and can be expanded to a full-height editor for reviewing long prompts
-- [ ] Attach is a small, quiet button beside the mic rather than a leading one of the same weight as Send
-- [ ] Compaction controls move into the Context panel beside the window meter they act on; the composer keeps nothing it does not need
+- [x] Two rows: the prompt spans the box and grows to 40% of the window; past a few lines an expand button opens a 70% editor for reviewing it
+- [x] Attach, options and conversation mode sit in a quiet row under the prompt, mic and send on the right
+- [x] Compaction moves into the Context panel under the window meter (`Workspace/CompactControls.tsx`); the composer keeps nothing it does not need
 
 **5. Audio and video as input**
-- [ ] Audio and video attachments go to the model as `input_audio` / `video_url` parts when the model takes them
-- [ ] Capability by name heuristic (omni, audio, gemini, voxtral, *-vl for video) with per-model overrides, like vision
-- [ ] Audio falls back to transcription for a model that can't hear; video is refused with a reason for one that can't see it
-- [ ] The user turn shows a player; token estimates and exports account for the parts
+- [x] Audio and video go to the model as `input_audio` / `video_url` parts when the model takes them
+- [x] Capability by name heuristic (omni, audio, voxtral, gemini, *-vl…), mirrored in `ocr.rs` and `lib/media.ts`, with Audio input / Video input overrides beside Image input
+- [x] Audio falls back to transcription for a model that can't hear; video is refused with a reason, or transcribed when its container is also audio (mp4, webm)
+- [x] A part the chat's current model can't take becomes a line of text in the request, so switching zones never poisons the history
+- [x] The user turn shows a player; edits carry the file; token estimates count the parts
+- [ ] Chat exports (Markdown/PDF) mention the recording — today they skip it
+- [ ] Seen against a real Qwen-Omni / Gemini endpoint: a song, and a short clip
 
 **6. Graph tools (`plot_function`, `render_graph`)**
-- [ ] `plot_function`: y range optional (sampled from the curves), common expression forms normalised (`**`, `Math.sin`, `ln`), parametric/polar/implicit supported
-- [ ] Bad expressions are refused in the tool result so the model can fix them, instead of a blank plot the model believes worked
-- [ ] Theme palette, a legend, responsive width, and no wheel-zoom hijacking the chat's scroll
-- [ ] The group reads as "Charts & graphs", not `render_graph`
+- [x] `plot_function`: expressions tokenised and normalised in the tool (`**`, `Math.`/`np.`, `ln`, `pi`, `e`, `2x`, `y = …`); y range optional (fitted to the 2nd–98th percentile); parametric, polar and implicit curves
+- [x] An unknown name or unbalanced bracket comes back as a tool error the model can fix (`plot_tests` in `render_graph.rs`)
+- [x] Chart palette, a legend, the column's width, smooth lines, equal scales for geometric plots, and no wheel-zoom capturing the chat's scroll
+- [x] The group reads as "Charts & graphs"
 
 **7. Context panel and MCP legibility**
-- [ ] Tool schemas and system prompt parts are collapsible groups, expandable down to each tool
-- [ ] Groups use their display labels; MCP groups use the server's name
-- [ ] MCP tool calls show the tool's name and the server's name everywhere a tool is named (step header, approval card, notifications) — the qualified id stays on hover
+- [x] System prompt and tool schemas are rows that open into their parts, and a tool group opens into its tools (the backend now reports each function under its group)
+- [x] Groups use their settings label; MCP groups use the server's name
+- [x] MCP tool calls show the tool and the server's name in the step header, running line and approval card; the qualified id stays on hover. Servers load at startup, not only once Settings → MCP is opened
+
+Verified in a browser harness (sidebar both states, settings, zones, composer, plots in both themes, context panel, media staging); `tsc -b`, script tests and `cargo test --lib` (435) pass. Not yet run in the Tauri shell.
 
 ---
 

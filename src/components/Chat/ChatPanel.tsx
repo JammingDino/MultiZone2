@@ -236,6 +236,28 @@ export function ChatPanel() {
     return null;
   }, [activeChatId, messagesByChat]);
 
+  // The plain composer floats over the bottom of the thread (0.18.1): the
+  // transcript runs to the window's edge and shows either side of the box,
+  // instead of stopping at a line above it. The thread is padded by the
+  // composer's measured height so its last message can still scroll clear.
+  // Anything else in that slot — an approval, a question, an open file, a
+  // banner — keeps the old stacked layout, where nothing sits on top of it.
+  const floatComposer =
+    !activeFile && elsewhereApprovals.length === 0 && pendingApprovals.length === 0 && !pendingAskUser;
+  const [composerEl, setComposerEl] = useState<HTMLDivElement | null>(null);
+  const [composerHeight, setComposerHeight] = useState(0);
+  useEffect(() => {
+    if (!composerEl || !floatComposer) {
+      setComposerHeight(0);
+      return;
+    }
+    const apply = () => setComposerHeight(composerEl.offsetHeight);
+    apply();
+    const obs = new ResizeObserver(apply);
+    obs.observe(composerEl);
+    return () => obs.disconnect();
+  }, [composerEl, floatComposer]);
+
   // The plan waiting on the user in this chat (0.12.0). Read from the store
   // rather than scanned out of the transcript like `ask_user` above: a plan
   // outlives the turn that filed it — close the chat, come back tomorrow, it is
@@ -459,7 +481,7 @@ export function ChatPanel() {
       onDrop={onDrop}
     >
       {activeChat ? (
-        <div key={activeChat.id} className="mz-view-in flex min-h-0 flex-1 flex-col">
+        <div key={activeChat.id} className="mz-view-in relative flex min-h-0 flex-1 flex-col">
           <header className="mz-drop-in flex min-h-12 flex-wrap items-center gap-2 border-b border-[var(--color-border)] px-3 py-1.5 sm:flex-nowrap sm:gap-3 sm:px-4">
             {/* A floor on the title so the controls cannot squeeze it to
                 nothing, and no ceiling: it takes whatever they leave. */}
@@ -500,7 +522,7 @@ export function ChatPanel() {
           {activeFile ? (
             <FileViewer key={activeFile} path={activeFile} />
           ) : (
-            <MessageThread key={activeChat.id} chatId={activeChat.id} />
+            <MessageThread key={activeChat.id} chatId={activeChat.id} bottomInset={composerHeight} />
           )}
           {elsewhereApprovals.length > 0 && (
             <div className="border-t border-amber-500/40 bg-amber-500/10 px-4 py-2">
@@ -576,7 +598,10 @@ export function ChatPanel() {
           ) : (
             // The composer arrives a beat after the thread it belongs to, so the
             // eye finishes on the thing the user is about to type into.
-            <div className="mz-view-in mz-delay-60 shrink-0">
+            <div
+              ref={setComposerEl}
+              className={`mz-view-in mz-delay-60 ${floatComposer ? "absolute inset-x-0 bottom-0 z-10" : "shrink-0"}`}
+            >
               <InputBar
                 chatId={activeChat.id}
                 disabled={inputDisabled}

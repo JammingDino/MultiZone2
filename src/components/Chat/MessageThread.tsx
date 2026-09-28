@@ -19,7 +19,12 @@ const PIN_THRESHOLD_PX = 60;
 const EMPTY_MESSAGES: Message[] = [];
 const EMPTY_PERSPECTIVE_STREAMS: Record<string, StreamingState> = {};
 
-export function MessageThread({ chatId }: { chatId: string }) {
+export function MessageThread({ chatId, bottomInset = 0 }: {
+  chatId: string;
+  /** Height of whatever floats over the bottom of the thread — the composer
+   *  (0.18.1). The transcript is padded by it so nothing ends up beneath. */
+  bottomInset?: number;
+}) {
   // Selected per-chat (rather than destructuring the whole store) so a token
   // streaming into a different chat, or any unrelated store update, doesn't
   // force this thread — and its whole message list — to re-render.
@@ -114,6 +119,13 @@ export function MessageThread({ chatId }: { chatId: string }) {
       if (c) c.scrollTop = c.scrollHeight;
     });
   }, [chatId]);
+
+  // The composer grows as a prompt gets longer, and the padding with it. Stay
+  // on the latest message if that is where the reader was.
+  useEffect(() => {
+    const c = containerRef.current;
+    if (c && pinnedRef.current) c.scrollTop = c.scrollHeight;
+  }, [bottomInset]);
 
   // Track scroll position. Distinguish user scrolls from our own.
   useEffect(() => {
@@ -274,7 +286,11 @@ export function MessageThread({ chatId }: { chatId: string }) {
       {/* `mz-thread` is the container-query context the assistant turns measure
           to decide whether there is room to hang their avatar outside the
           message column (see styles.css). */}
-      <div className="mz-thread flex-1 overflow-y-auto px-3 py-4 sm:px-6" ref={containerRef}>
+      <div
+        className="mz-thread flex-1 overflow-y-auto px-3 pt-4 sm:px-6"
+        style={{ paddingBottom: bottomInset + 16 }}
+        ref={containerRef}
+      >
         <div
           className={`mx-auto flex w-full flex-col gap-5 ${columnsMode ? "" : "max-w-3xl"}`}
           style={columnsMode ? { maxWidth: columnsMaxWidth } : undefined}
@@ -326,7 +342,8 @@ export function MessageThread({ chatId }: { chatId: string }) {
       {!pinned && (
         <button
           onClick={scrollToBottom}
-          className="absolute bottom-4 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-1.5 text-xs text-[var(--color-text)] shadow-lg"
+          style={{ bottom: bottomInset + 16 }}
+          className="absolute left-1/2 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-1.5 text-xs text-[var(--color-text)] shadow-lg"
           title="Jump to latest"
         >
           <ArrowDown size={12} className="text-[var(--color-accent)]" />

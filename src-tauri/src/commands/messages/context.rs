@@ -659,6 +659,12 @@ pub(crate) async fn build_message_history(
         _ => crate::ocr::is_vision_capable(&zone.model),
     };
     let ocr_lang = if vision_capable { String::new() } else { ocr_language(db).await };
+    // Audio and video (0.18.1) are decided the same way. A recording sent
+    // while a listening model was on stays in the history; if the chat later
+    // moves to a model that cannot take it, the part becomes a line of text
+    // rather than a request the provider refuses outright.
+    let hears = super::model_media_capable(db, &zone.model, super::MediaKind::Audio).await;
+    let sees_video = super::model_media_capable(db, &zone.model, super::MediaKind::Video).await;
 
     for m in rows.into_iter() {
         let mut content_parts: Vec<ContentPart> =
@@ -694,6 +700,12 @@ pub(crate) async fn build_message_history(
                 ContentPart::HiddenImage { image_url } => {
                     promoted.push(ContentPart::ImageUrl { image_url })
                 }
+                ContentPart::InputAudio { .. } if !hears => promoted.push(ContentPart::Text {
+                    text: "[Audio attachment — the active model cannot take audio.]".to_string(),
+                }),
+                ContentPart::VideoUrl { .. } if !sees_video => promoted.push(ContentPart::Text {
+                    text: "[Video attachment — the active model cannot take video.]".to_string(),
+                }),
                 other => promoted.push(other),
             }
         }

@@ -7,7 +7,7 @@ import type { LucideIcon } from "lucide-react";
 import { Popover } from "@/components/common/Popover";
 import * as api from "@/lib/tauri";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
-import { VisionOverrideSelect } from "@/components/common/VisionOverrideSelect";
+import { MediaOverrideSelect, VisionOverrideSelect } from "@/components/common/VisionOverrideSelect";
 import { IconPicker } from "@/components/common/IconPicker";
 import { ColorPicker } from "@/components/common/ColorPicker";
 import type { ApprovalCategory, ApprovalPolicy, Provider, ToolFunctionInfo, ToolUsage, Zone, ThinkingEffort, ThinkingProfile } from "@/lib/types";
@@ -770,13 +770,17 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
           </Field>
         </div>
 
-        {/* Image input and reasoning share a row. Reasoning used to be two
-            paragraph-sized cards further down the form; the long-form rationale
-            now lives in tooltips so the choice reads as the pair of switches it
-            actually is. */}
+        {/* What the model takes as input — images, audio, video — and
+            reasoning, in one grid. The long-form rationale lives in tooltips. */}
         <div className="grid grid-cols-2 gap-3">
           <Field label="Image input">
             <VisionOverrideSelect model={model} />
+          </Field>
+          <Field label="Audio input">
+            <MediaOverrideSelect model={model} kind="audio" />
+          </Field>
+          <Field label="Video input">
+            <MediaOverrideSelect model={model} kind="video" />
           </Field>
           <div className="mb-3">
             <div className="mb-1 flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">

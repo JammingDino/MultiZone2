@@ -205,6 +205,10 @@ pub enum InputPart {
     HiddenText { text: String },
     /// Image sent to the model but hidden from the chat UI.
     HiddenImage { data_url: String },
+    /// A recording for a model that hears (0.18.1).
+    Audio { data: String, format: String },
+    /// A video for a model that watches (0.18.1).
+    Video { data_url: String },
 }
 
 /// One event of a streamed turn, as the frontend receives it.
@@ -705,6 +709,37 @@ pub(crate) async fn model_vision_capable(db: &SqlitePool, model: &str) -> bool {
     }
 }
 
+/// Can this model take audio (or video) as input? The `audioOverrides` /
+/// `videoOverrides` app settings beat the name heuristic, exactly as
+/// `visionOverrides` does for images (0.18.1).
+pub(crate) async fn model_media_capable(db: &SqlitePool, model: &str, kind: MediaKind) -> bool {
+    let key = match kind {
+        MediaKind::Audio => "audioOverrides",
+        MediaKind::Video => "videoOverrides",
+    };
+    let raw: Option<Option<String>> =
+        sqlx::query_scalar("SELECT value FROM settings WHERE key = 'app_settings'")
+            .fetch_optional(db)
+            .await
+            .ok()
+            .flatten();
+    let ov = raw
+        .flatten()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.get(key)?.get(model)?.as_str().map(String::from));
+    match ov.as_deref() {
+        Some("on") => true,
+        Some("off") => false,
+        _ => crate::ocr::is_media_capable(model, kind),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MediaKind {
+    Audio,
+    Video,
+}
+
 /// Look up the user's manual vision override for a model, from the
 /// `visionOverrides` map in app settings: `Some("on")` = always send images,
 /// `Some("off")` = always OCR to text, `None` = auto (use the name heuristic).
@@ -1015,6 +1050,12 @@ async fn run_send(
             InputPart::HiddenText { text } => ContentPart::HiddenText { text },
             InputPart::HiddenImage { data_url } => ContentPart::HiddenImage {
                 image_url: ImageUrl { url: data_url, detail: None },
+            },
+            InputPart::Audio { data, format } => ContentPart::InputAudio {
+                input_audio: crate::llm::types::InputAudio { data, format },
+            },
+            InputPart::Video { data_url } => ContentPart::VideoUrl {
+                video_url: crate::llm::types::VideoUrl { url: data_url },
             },
         })
         .collect();

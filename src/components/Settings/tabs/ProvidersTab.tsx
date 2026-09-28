@@ -5,7 +5,7 @@ import { useApp } from "@/store/app";
 import { useShallow } from "zustand/react/shallow";
 import * as api from "@/lib/tauri";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
-import { VisionOverrideSelect } from "@/components/common/VisionOverrideSelect";
+import { MediaOverrideSelect, VisionOverrideSelect } from "@/components/common/VisionOverrideSelect";
 import { resolveBaseProvider } from "@/lib/baseZone";
 import { PROVIDER_PRESETS, presetForBaseUrl, type ProviderPreset } from "@/lib/providerPresets";
 import type { Provider } from "@/lib/types";
@@ -304,9 +304,17 @@ function ProviderForm({ value, onClose, onDeleted }: { value: Partial<Provider>;
         />
       </Field>
       {defaultModel.trim() && (
-        <Field label="Image input (default model)">
-          <VisionOverrideSelect model={defaultModel} />
-        </Field>
+        <div className="grid grid-cols-3 gap-2">
+          <Field label="Image input">
+            <VisionOverrideSelect model={defaultModel} />
+          </Field>
+          <Field label="Audio input">
+            <MediaOverrideSelect model={defaultModel} kind="audio" />
+          </Field>
+          <Field label="Video input">
+            <MediaOverrideSelect model={defaultModel} kind="video" />
+          </Field>
+        </div>
       )}
       {testResult && (
         <div className="my-2 rounded bg-[var(--color-panel)] p-2 text-xs text-[var(--color-text-muted)]">{testResult}</div>

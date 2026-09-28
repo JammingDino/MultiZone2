@@ -1251,6 +1251,10 @@ async fn build_title_context(
                 | crate::llm::types::ContentPart::HiddenImage { image_url } => {
                     images.push(image_url);
                 }
+                // A title model is not asked to listen or watch; the words
+                // around a recording say what it is.
+                crate::llm::types::ContentPart::InputAudio { .. }
+                | crate::llm::types::ContentPart::VideoUrl { .. } => {}
             }
         }
 
@@ -1344,6 +1348,8 @@ fn is_image_only(convo: &[ChatMessage]) -> bool {
                                 return false;
                             }
                         }
+                        crate::llm::types::ContentPart::InputAudio { .. }
+                        | crate::llm::types::ContentPart::VideoUrl { .. } => return false,
                     }
                 }
             }

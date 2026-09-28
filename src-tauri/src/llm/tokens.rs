@@ -85,6 +85,9 @@ fn message_chars(m: &ChatMessage) -> (i64, i64) {
                         chars += text.chars().count() as i64;
                     }
                     ContentPart::ImageUrl { .. } | ContentPart::HiddenImage { .. } => images += 1,
+                    // ponytail: a recording or clip is costed like one image;
+                    // its real cost scales with duration, which is not stored.
+                    ContentPart::InputAudio { .. } | ContentPart::VideoUrl { .. } => images += 1,
                 }
             }
         }

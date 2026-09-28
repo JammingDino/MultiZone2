@@ -13,12 +13,13 @@
  */
 
 import { useRef, useState } from "react";
-import { AudioLines, FileText, Image as ImageIcon, FileType, Loader2, X, ZoomIn } from "lucide-react";
+import { AudioLines, FileText, Film, Image as ImageIcon, FileType, Loader2, Music, X, ZoomIn } from "lucide-react";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { renderPdfToJpegs, extractPdfText } from "@/lib/pdf";
 import {
   attachmentKind,
+  fileExtension,
   AudioRejectedError,
   checkAudioLimits,
   formatDuration,
@@ -54,7 +55,16 @@ export function useAttachments({
   pdfAsText = false,
   onTranscript,
   initial,
-}: { pdfAsText?: boolean; onTranscript?: (text: string) => void; initial?: PendingAttachment[] } = {}) {
+  media = { audio: false, video: false },
+}: {
+  pdfAsText?: boolean;
+  onTranscript?: (text: string) => void;
+  initial?: PendingAttachment[];
+  /** What the chosen model takes as itself (0.18.1). Audio it can't hear is
+   *  transcribed; video it can't watch is refused, or transcribed if it is an
+   *  audio container too. */
+  media?: { audio: boolean; video: boolean };
+} = {}) {
   const pdfMode = useApp((s) => s.appSettings.pdfMode);
   const [pending, setPending] = useState<PendingAttachment[]>(initial ?? []);
   /** Why the last attempted attachment didn't stage. Shown until the next try —
@@ -124,8 +134,34 @@ export function useAttachments({
     if (!files) return;
     setAttachError(null);
     for (const file of Array.from(files)) {
-      const kind = attachmentKind(file);
+      let kind = attachmentKind(file);
       const id = crypto.randomUUID();
+
+      // Sent as itself when the model takes it (0.18.1): transcribing a song
+      // loses the song. Held to the same size ceiling as an audio upload.
+      if ((kind === "audio" && media.audio) || (kind === "video" && media.video)) {
+        const mediaKind = kind;
+        if (file.size > Math.max(1, maxMb) * 1024 * 1024) {
+          setAttachError(`${file.name} is over the ${maxMb} MB upload limit (Settings → Dictation).`);
+          continue;
+        }
+        const ext = fileExtension(file);
+        const format = ext === "mpga" || ext === "mpeg" ? "mp3" : ext || (mediaKind === "video" ? "mp4" : "wav");
+        // Not `readFileAsDataUrl`: that one decodes an image to downscale it.
+        const mime = file.type || (mediaKind === "video" ? `video/${format}` : `audio/${format}`);
+        const dataUrl = `data:${mime};base64,${await readFileAsBase64(file)}`;
+        setPending((p) => [...p, { id, fileName: file.name, fileType: "media", payload: dataUrl, media: { kind: mediaKind, format } }]);
+        continue;
+      }
+      if (kind === "video") {
+        // A clip in an audio container still has something to say to a model
+        // that cannot watch it: its soundtrack, transcribed.
+        if (["mp4", "webm", "mpeg"].includes(fileExtension(file))) kind = "audio";
+        else {
+          setAttachError(`${file.name} is a video, and this model can't take video. If it can, turn Video input on in its zone.`);
+          continue;
+        }
+      }
 
       if (kind === "pdf") {
         // Staged before it is read, so a long render shows a chip with a page
@@ -389,6 +425,8 @@ export function AttachmentChip({
       <ImageIcon size={12} />
     ) : attachment.fileType === "pdf" ? (
       <FileType size={12} />
+    ) : attachment.fileType === "media" ? (
+      attachment.media?.kind === "video" ? <Film size={12} /> : <Music size={12} />
     ) : attachment.fileType === "audio" ? (
       audio?.status === "transcribing" ? <Loader2 size={12} className="animate-spin" /> : <AudioLines size={12} />
     ) : (
@@ -510,6 +548,13 @@ export function AttachmentPreview({
         </div>
       </div>
     );
+  } else if (attachment.fileType === "media") {
+    body =
+      attachment.media?.kind === "video" ? (
+        <video src={attachment.payload as string} controls className="max-h-[70vh] max-w-[75vw] rounded" />
+      ) : (
+        <audio src={attachment.payload as string} controls className="w-[min(480px,75vw)]" />
+      );
   } else if (attachment.fileType === "image") {
     body = (
       <img

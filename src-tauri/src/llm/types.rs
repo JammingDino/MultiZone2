@@ -21,6 +21,29 @@ pub enum ContentPart {
     HiddenImage {
         image_url: ImageUrl,
     },
+    /// A recording sent to the model as sound (0.18.1), OpenAI's
+    /// `input_audio` shape — what Qwen-Omni, Gemini and vLLM accept.
+    InputAudio {
+        input_audio: InputAudio,
+    },
+    /// A video sent to the model as frames and sound (0.18.1) — the
+    /// `video_url` part vLLM and DashScope accept, here as a data URL.
+    VideoUrl {
+        video_url: VideoUrl,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InputAudio {
+    /// Bare base64, no `data:` prefix.
+    pub data: String,
+    /// `wav`, `mp3`, … — the file's own format.
+    pub format: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VideoUrl {
+    pub url: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -241,4 +264,34 @@ pub struct ModelList {
 #[derive(Debug, Clone, Deserialize)]
 pub struct ModelEntry {
     pub id: String,
+}
+
+#[cfg(test)]
+mod media_part_tests {
+    use super::*;
+
+    /// The shapes providers parse — OpenAI's `input_audio`, vLLM's `video_url`.
+    #[test]
+    fn audio_and_video_serialise_as_the_providers_expect() {
+        let a = ContentPart::InputAudio { input_audio: InputAudio { data: "AAA".into(), format: "wav".into() } };
+        assert_eq!(
+            serde_json::to_value(&a).unwrap(),
+            serde_json::json!({ "type": "input_audio", "input_audio": { "data": "AAA", "format": "wav" } })
+        );
+        let v = ContentPart::VideoUrl { video_url: VideoUrl { url: "data:video/mp4;base64,AAA".into() } };
+        assert_eq!(
+            serde_json::to_value(&v).unwrap(),
+            serde_json::json!({ "type": "video_url", "video_url": { "url": "data:video/mp4;base64,AAA" } })
+        );
+    }
+
+    #[test]
+    fn listening_models_are_recognised_and_text_models_are_not() {
+        use crate::commands::messages::MediaKind::{Audio, Video};
+        assert!(crate::ocr::is_media_capable("Qwen3-Omni-30B-A3B-Instruct", Audio));
+        assert!(crate::ocr::is_media_capable("qwen2.5-vl-7b", Video));
+        assert!(crate::ocr::is_media_capable("gemini-2.5-flash", Video));
+        assert!(!crate::ocr::is_media_capable("qwen3-32b", Audio));
+        assert!(!crate::ocr::is_media_capable("qwen2.5-vl-7b", Audio));
+    }
 }

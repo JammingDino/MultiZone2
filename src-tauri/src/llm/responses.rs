@@ -87,6 +87,14 @@ fn input_parts(content: &Option<MessageContent>) -> Vec<Value> {
                     }
                     v
                 }
+                // The Responses API has no audio or video input part; say so
+                // rather than send a shape it rejects.
+                ContentPart::InputAudio { .. } => {
+                    json!({ "type": "input_text", "text": "[Audio attachment — not supported by this API.]" })
+                }
+                ContentPart::VideoUrl { .. } => {
+                    json!({ "type": "input_text", "text": "[Video attachment — not supported by this API.]" })
+                }
             })
             .collect(),
         None => vec![],

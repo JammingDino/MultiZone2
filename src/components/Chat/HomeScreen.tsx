@@ -17,6 +17,7 @@ import {
   useAttachments,
 } from "@/components/Chat/Attachments";
 import { useDictation, MicButton, DictationMeter } from "@/components/Chat/useDictation";
+import { resolveMediaCapable } from "@/lib/media";
 import { resolveVisionCapable } from "@/lib/vision";
 import { resolveBaseModel, resolveBaseZone } from "@/lib/baseZone";
 import { claimSettingsDrop } from "@/lib/importSettings";
@@ -173,9 +174,13 @@ export function HomeScreen() {
   const [text, setText] = useState(homeScreenDraft);
   // Starting a chat from a voice note: the transcript becomes the opening
   // message, same as it does in the in-chat composer (0.12.0).
+  // Filled in below, once the answering model is known; the tray reads it when
+  // a file is dropped, not when it is created.
+  const mediaCaps = useRef({ audio: false, video: false }).current;
   const tray = useAttachments({
     onTranscript: (t) => appendTranscript(setText, t),
     initial: homeScreenAttachments,
+    media: mediaCaps,
   });
   const pending = tray.pending;
   const [menuOpen, setMenuOpen] = useState(false);
@@ -211,6 +216,8 @@ export function HomeScreen() {
   }, [focusComposerNonce]);
   const isFirstNewChatTick = useRef(true);
   const visionOverrides = useApp((s) => s.appSettings.visionOverrides);
+  const audioOverrides = useApp((s) => s.appSettings.audioOverrides);
+  const videoOverrides = useApp((s) => s.appSettings.videoOverrides);
   const dragDepth = useRef(0);
   const [isDragOver, setIsDragOver] = useState(false);
 
@@ -287,6 +294,8 @@ export function HomeScreen() {
       : selectedZone?.model ?? null;
   const ocrFallback =
     effectiveModel != null && !resolveVisionCapable(effectiveModel, visionOverrides);
+  mediaCaps.audio = resolveMediaCapable(effectiveModel, "audio", audioOverrides);
+  mediaCaps.video = resolveMediaCapable(effectiveModel, "video", videoOverrides);
   const hasVisualAttachment = pending.some((a) => a.fileType === "image" || a.fileType === "pdf");
 
   // One of the phrases for this hour, chosen per mount — so it changes when you

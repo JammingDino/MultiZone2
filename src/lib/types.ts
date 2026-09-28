@@ -662,7 +662,11 @@ export type ContentPart =
   | { type: "text"; text: string }
   | { type: "image_url"; image_url: { url: string; detail?: string } }
   | { type: "hidden_text"; text: string }
-  | { type: "hidden_image"; image_url: { url: string; detail?: string } };
+  | { type: "hidden_image"; image_url: { url: string; detail?: string } }
+  /** A recording sent as sound, to a model that hears (0.18.1). `data` is bare base64. */
+  | { type: "input_audio"; input_audio: { data: string; format: string } }
+  /** A clip sent as video, to a model that watches (0.18.1). */
+  | { type: "video_url"; video_url: { url: string } };
 
 export interface ToolCall {
   id: string;
@@ -686,7 +690,9 @@ export type InputPart =
   | { type: "text"; text: string }
   | { type: "image"; data_url: string }
   | { type: "hidden_text"; text: string }
-  | { type: "hidden_image"; data_url: string };
+  | { type: "hidden_image"; data_url: string }
+  | { type: "audio"; data: string; format: string }
+  | { type: "video"; data_url: string };
 
 /**
  * What kind of work a tool does, from the user's point of view — a different
@@ -1218,6 +1224,9 @@ export interface AppSettings {
    * from the map use the automatic name heuristic (lib/vision.ts).
    */
   visionOverrides: Record<string, "on" | "off">;
+  /** Per-model audio and video input, like `visionOverrides` (0.18.1). Absent = the name heuristic. */
+  audioOverrides: Record<string, "on" | "off">;
+  videoOverrides: Record<string, "on" | "off">;
   /**
    * Dictation input (0.8.0). The id of one of this app's own `Provider` rows —
    * the same providers zones already point at — so any provider exposing an
@@ -1404,6 +1413,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   repoMapTokens: 1000,
   checkpointMaxMb: 512,
   visionOverrides: {},
+  audioOverrides: {},
+  videoOverrides: {},
   onboardingSkipped: false,
   updateCheckOnLaunch: true,
   sttProviderId: null,

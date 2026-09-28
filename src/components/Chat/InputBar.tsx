@@ -8,6 +8,7 @@ import { useTts } from "@/store/tts";
 import { ModelCombobox } from "@/components/common/ModelCombobox";
 import { CHROME_ACTIVE, CHROME_OUTLINED, CHROME_QUIET, PRIMARY_ACTION } from "@/lib/chrome";
 import { useDictation, MicButton, DictationMeter } from "@/components/Chat/useDictation";
+import { resolveMediaCapable } from "@/lib/media";
 import type { InputPart, PendingMode } from "@/lib/types";
 import { attachmentToParts, type PendingAttachment } from "@/lib/attachFiles";
 import { SlashMenu, slashQuery } from "./SlashMenu";
@@ -84,6 +85,8 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
   const providers = useApp((s) => s.providers);
   const baseZoneId = useApp((s) => s.appSettings.baseZoneId);
   const visionOverrides = useApp((s) => s.appSettings.visionOverrides);
+  const audioOverrides = useApp((s) => s.appSettings.audioOverrides);
+  const videoOverrides = useApp((s) => s.appSettings.videoOverrides);
   const planMode = !!chats.find((c) => c.id === chatId)?.planMode;
   const fileRef = useRef<HTMLInputElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -223,6 +226,10 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
   const tray = useAttachments({
     pdfAsText: ocrFallback,
     onTranscript: (t) => appendTranscript(setText, t),
+    media: {
+      audio: resolveMediaCapable(effectiveModel, "audio", audioOverrides),
+      video: resolveMediaCapable(effectiveModel, "video", videoOverrides),
+    },
   });
   const pending = tray.pending;
   const hasVisualAttachment = pending.some((a) => a.fileType === "image" || a.fileType === "pdf");

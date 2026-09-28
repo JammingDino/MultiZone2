@@ -48,6 +48,10 @@ const AUDIO_EXTS = [
   "mp3", "mp4", "mpeg", "mpga", "m4a", "wav", "webm", "flac", "ogg", "oga", "opus", "aac",
 ];
 
+/** Containers that are video whatever the MIME type says. `mp4` and `webm` are
+ *  decided by MIME, since both are also how voice recorders save audio. */
+const VIDEO_EXTS = ["mov", "mkv", "avi", "m4v", "wmv"];
+
 /** How a staged audio file's transcription is going. */
 export interface AudioState {
   status: "transcribing" | "ready" | "failed";
@@ -67,10 +71,13 @@ export interface AudioState {
 export interface PendingAttachment {
   id: string;
   fileName: string;
-  fileType: "image" | "pdf" | "text" | "audio";
+  fileType: "image" | "pdf" | "text" | "audio" | "media";
   /** For image: a data URL. For PDF: page data URLs, or extracted text. For
-   *  text: the file's contents. For audio: the transcript. */
+   *  text: the file's contents. For audio: the transcript. For media: the
+   *  file itself as a data URL. */
   payload: string | string[];
+  /** Media only (0.18.1): a recording or clip sent to the model as itself. */
+  media?: { kind: "audio" | "video"; format: string };
   progress?: { page: number; total: number };
   /** Audio only: transcription state. Absent on every other kind. */
   audio?: AudioState;
@@ -90,12 +97,13 @@ export function fileExtension(file: File): string {
  * list. The MIME type is consulted alongside the extension because a dropped or
  * pasted file often arrives with a useful `type` and a useless name.
  */
-export function attachmentKind(file: File): PendingAttachment["fileType"] {
+export function attachmentKind(file: File): "image" | "pdf" | "text" | "audio" | "video" {
   const ext = fileExtension(file);
   if (ext === "pdf" || file.type === "application/pdf") return "pdf";
   if (IMAGE_EXTS.includes(ext)) return "image";
   // `image/svg+xml` is excluded by the `svg` check, not by this prefix.
   if (ext !== "svg" && file.type.startsWith("image/")) return "image";
+  if (VIDEO_EXTS.includes(ext) || file.type.startsWith("video/")) return "video";
   if (AUDIO_EXTS.includes(ext) || file.type.startsWith("audio/")) return "audio";
   return "text";
 }
@@ -291,6 +299,11 @@ export function attachmentToParts(att: PendingAttachment): InputPart[] {
     }
     case "image":
       return [{ type: "image", data_url: att.payload as string }];
+    case "media": {
+      const url = att.payload as string;
+      if (att.media?.kind === "video") return [{ type: "video", data_url: url }];
+      return [{ type: "audio", data: url.slice(url.indexOf(",") + 1), format: att.media?.format ?? "wav" }];
+    }
     case "pdf": {
       if (typeof att.payload === "string") {
         return [{ type: "hidden_text", text: pdfTextMarker(att.fileName, att.payload) }];

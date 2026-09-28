@@ -52,6 +52,25 @@ pub fn set_models_dir(dir: PathBuf) {
 /// errs toward OCR for unrecognised models (the common case for local text-only
 /// models like base llama / mistral / qwen-coder); a vision model mistakenly
 /// classified as text-only only loses some image fidelity, never correctness.
+/// Heuristic: does this model take audio or video input directly (0.18.1)?
+/// Mirrors `lib/media.ts` — keep the two in sync. Unrecognised models are
+/// treated as unable, so their audio is transcribed and their video refused
+/// rather than sent to an endpoint that will reject the whole request.
+pub fn is_media_capable(model: &str, kind: crate::commands::messages::MediaKind) -> bool {
+    let m = model.to_lowercase();
+    let markers: &[&str] = match kind {
+        crate::commands::messages::MediaKind::Audio => &[
+            "omni", "audio", "voxtral", "gemini", "phi-4-multimodal", "ultravox", "minicpm-o", "gemma-3n",
+            "gpt-realtime", "kimi-audio", "step-audio",
+        ],
+        crate::commands::messages::MediaKind::Video => &[
+            "omni", "gemini", "video", "minicpm-v", "minicpm-o", "internvl", "gemma-3n", "qwen2-vl",
+            "qwen2.5-vl", "qwen3-vl", "qwen2.5vl", "qwen3vl", "glm-4.5v", "glm-4.1v",
+        ],
+    };
+    markers.iter().any(|k| m.contains(k))
+}
+
 /// The `visionOverrides` app setting lets the user force either answer per model.
 ///
 /// Real model ids bury the family name mid-string ("gemma-4-26B-A4B-it-MLX-4bit",

@@ -96,6 +96,16 @@ function UserMessageImpl({ message }: { message: Message }) {
   const images = parts.filter(
     (p): p is Extract<ContentPart, { type: "image_url" }> => p.type === "image_url",
   );
+  // Recordings and clips the model received as themselves (0.18.1), as a
+  // playable source and the format the part carried.
+  type Media = { kind: "audio" | "video"; format: string; url: string };
+  const media = parts.flatMap((p: ContentPart): Media[] =>
+    p.type === "input_audio"
+      ? [{ kind: "audio", format: p.input_audio.format, url: `data:audio/${p.input_audio.format};base64,${p.input_audio.data}` }]
+      : p.type === "video_url"
+        ? [{ kind: "video", format: "mp4", url: p.video_url.url }]
+        : [],
+  );
   // hidden_text and hidden_image parts are never rendered — they are sent to
   // the model but kept invisible in the chat UI.
   // Hidden parts carry the attachments. `unclaimedHidden` is whatever they also
@@ -130,6 +140,13 @@ function UserMessageImpl({ message }: { message: Message }) {
         fileName: "image",
         fileType: "image" as const,
         payload: img.image_url.url,
+      })),
+      ...media.map((m) => ({
+        id: crypto.randomUUID(),
+        fileName: m.kind === "video" ? "video" : `recording.${m.format}`,
+        fileType: "media" as const,
+        payload: m.url,
+        media: { kind: m.kind, format: m.format },
       })),
       ...fileAttachments.map(fileAttachmentToPending),
     ],
@@ -231,6 +248,13 @@ function UserMessageImpl({ message }: { message: Message }) {
                 </button>
               ))}
             </div>
+          )}
+          {media.map((m, i) =>
+            m.kind === "video" ? (
+              <video key={`m${i}`} src={m.url} controls className="max-h-64 max-w-full rounded border border-[var(--color-border)]" />
+            ) : (
+              <audio key={`m${i}`} src={m.url} controls className="w-72 max-w-full" />
+            ),
           )}
           {fileAttachments.length > 0 && (
             <div className="flex flex-wrap justify-end gap-1.5">

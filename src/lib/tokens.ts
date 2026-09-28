@@ -37,6 +37,8 @@ function contentChars(json: string): { chars: number; images: number } {
     for (const p of parts) {
       if (p.type === "text" || p.type === "hidden_text") chars += p.text.length;
       else if (p.type === "image_url" || p.type === "hidden_image") images += 1;
+      // Costed like an image, as the backend does (see `message_chars`).
+      else if (p.type === "input_audio" || p.type === "video_url") images += 1;
     }
     return { chars, images };
   } catch {

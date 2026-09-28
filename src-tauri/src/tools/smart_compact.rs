@@ -268,6 +268,11 @@ pub fn apply(rows: &mut [Message], through: i64, opts: &Options) {
                                     text: "[Image removed by smart compaction.]".into(),
                                 }
                             }
+                            ContentPart::InputAudio { .. } | ContentPart::VideoUrl { .. } => {
+                                ContentPart::Text {
+                                    text: "[Media removed by smart compaction.]".into(),
+                                }
+                            }
                         })
                         .collect()
                 };

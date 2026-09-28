@@ -1230,7 +1230,61 @@ summarize itself, and Stop did nothing until the model had spoken.
 - [x] `schedule` tool group — `schedule_run` dangerous (always asks), defaults to once in this chat; list (safe) and cancel (moderate)
 - [x] API: `/api/schedules`, `/api/schedules/:id`, `/api/schedules/:id/run`
 - [ ] Seen firing from the tray with the window hidden
-- [ ] A notification when a scheduled run finishes, if people want one (a finished turn deliberately does not notify today — see 0.14.3)
+- [ ] A notification when a scheduled run finishes, if people want one (a finished turn deliberately does not notify today — see 0.14.3) — taken up in 0.18.1
+
+### 0.18.1 — Visual coherence: nothing breaks the flow
+
+A pass over everything a person sees between sending a message and reading
+the answer. The bar: clean, minimal, one visual language, and no identifier
+on screen that only the computer can read. Version is already 0.18.1 (CI
+bumped it after the 0.18.0 release).
+
+**1. Notify on every blocking moment**
+
+Runs now continue with the window closed, so "the agent is waiting for you"
+has more than two causes. A run that has finished, failed or been stopped by
+a guard is blocked on the user as surely as an approval is.
+- [ ] Settings → Chat → Notifications: *Needs input* (approvals, questions — as today) and *Run finished* (final answer, error, loop guard, spend limit) as two toggles
+- [ ] The finished notification carries the chat title and the first line of the answer
+- [ ] Sub-agents never notify on their own finish — only the run the user started
+- [ ] A Stop the user pressed never notifies
+- [ ] Tool names in notifications read as labels, not ids
+
+**2. Sidebar**
+- [ ] One row style for projects and chats: same font size, height, padding and chevron
+- [ ] Chats lose their per-row icon; children (branches, sub-agents) hang off a thin guide line instead
+- [ ] One chevron, trailing, rotating — the same glyph for projects and for chats with children
+- [ ] Projects show their five most recent chats, then *Show N more*
+- [ ] New chat and Search are the same height and chrome
+- [ ] Tags filter from a popover listing every tag, not a sideways-scrolling strip
+- [ ] Zones and Settings live in a footer in both states, so collapsing moves nothing but the labels
+
+**3. Settings and Configure Zones**
+- [ ] Configure Zones uses the Settings rail: same width, rows, group labels and active state
+- [ ] Every help paragraph cut to a short line, or removed where the title says it
+- [ ] Shared `SettingSection` so spacing and headings match on every tab
+
+**4. Composer and in-chat chrome**
+- [ ] The prompt box grows to half the chat height and can be expanded to a full-height editor for reviewing long prompts
+- [ ] Attach is a small, quiet button beside the mic rather than a leading one of the same weight as Send
+- [ ] Compaction controls move into the Context panel beside the window meter they act on; the composer keeps nothing it does not need
+
+**5. Audio and video as input**
+- [ ] Audio and video attachments go to the model as `input_audio` / `video_url` parts when the model takes them
+- [ ] Capability by name heuristic (omni, audio, gemini, voxtral, *-vl for video) with per-model overrides, like vision
+- [ ] Audio falls back to transcription for a model that can't hear; video is refused with a reason for one that can't see it
+- [ ] The user turn shows a player; token estimates and exports account for the parts
+
+**6. Graph tools (`plot_function`, `render_graph`)**
+- [ ] `plot_function`: y range optional (sampled from the curves), common expression forms normalised (`**`, `Math.sin`, `ln`), parametric/polar/implicit supported
+- [ ] Bad expressions are refused in the tool result so the model can fix them, instead of a blank plot the model believes worked
+- [ ] Theme palette, a legend, responsive width, and no wheel-zoom hijacking the chat's scroll
+- [ ] The group reads as "Charts & graphs", not `render_graph`
+
+**7. Context panel and MCP legibility**
+- [ ] Tool schemas and system prompt parts are collapsible groups, expandable down to each tool
+- [ ] Groups use their display labels; MCP groups use the server's name
+- [ ] MCP tool calls show the tool's name and the server's name everywhere a tool is named (step header, approval card, notifications) — the qualified id stays on hover
 
 ---
 

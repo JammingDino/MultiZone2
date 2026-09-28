@@ -984,15 +984,17 @@ export interface AppSettings {
   approvals: ApprovalPolicy;
   /**
    * Notify when a run stops and waits for you — a tool approval or an
-   * `ask_user` (0.14.3). The window's taskbar entry is highlighted, and an OS
+   * `ask_user` (0.14.3). The taskbar entry is highlighted, and an OS
    * notification is posted if the window is in the background.
-   *
-   * Only those two events, and only when you are looking elsewhere. A finished
-   * turn does not notify: completion is the expected outcome, and a toast for
-   * every one of them teaches people to dismiss toasts unread — including the
-   * two that mean a run is blocked on them.
    */
   notifyWhenWaiting: boolean;
+  /**
+   * Notify when a run the user started ends — a final answer, an error, a
+   * loop guard or the spend limit (0.18.1). With the window closed to the tray
+   * a finished run is as blocked on the user as an approval is. Sub-agent
+   * turns never notify, and neither does a Stop the user pressed.
+   */
+  notifyWhenFinished: boolean;
   /**
    * The window's close button hides it to the tray instead of quitting
    * (0.18), so running agents and scheduled runs carry on. Read by the
@@ -1367,6 +1369,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   autoApproveLevel: "all",
   approvals: { categories: {}, shellAllow: [], shellDeny: [], editAllow: [], editDeny: [] },
   notifyWhenWaiting: true,
+  notifyWhenFinished: true,
   closeToTray: true,
   maxToolSteps: 30,
   maxSessionTokens: 0,

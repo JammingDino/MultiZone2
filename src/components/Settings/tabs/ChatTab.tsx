@@ -254,17 +254,21 @@ export function ChatTab() {
 
       <section>
         <h3 className="mb-1 text-sm font-medium">Notifications</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          A run that needs you stops until you answer — an approval times out after five minutes and
-          the agent behind it stalls with no visible cause. Since the reason to start a long run is
-          not to sit watching it, the app says so.
-        </p>
-        <ToggleRow
-          label="Tell me when a run is waiting on me"
-          description="Approvals and questions only, and only when the window is in the background. Finished turns never notify."
-          checked={appSettings.notifyWhenWaiting}
-          onChange={(v) => setAppSettings({ notifyWhenWaiting: v })}
-        />
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">Only while the window is in the background.</p>
+        <div className="flex flex-col gap-2">
+          <ToggleRow
+            label="Needs my input"
+            description="Approvals, questions and plans."
+            checked={appSettings.notifyWhenWaiting}
+            onChange={(v) => setAppSettings({ notifyWhenWaiting: v })}
+          />
+          <ToggleRow
+            label="Run finished"
+            description="A final answer, an error, or a run stopped by a limit."
+            checked={appSettings.notifyWhenFinished}
+            onChange={(v) => setAppSettings({ notifyWhenFinished: v })}
+          />
+        </div>
       </section>
 
       <section>

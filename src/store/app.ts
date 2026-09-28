@@ -5,7 +5,8 @@ import * as api from "@/lib/tauri";
 // on a phone that means the WebView rather than the machine running the app.
 import * as dictation from "@/lib/dictation";
 import type { SettingsBundle } from "@/lib/settingsBundle";
-import { clearAttention, notifyWaiting } from "@/lib/notify";
+import { clearAttention, finishedNotice, notifyWaiting } from "@/lib/notify";
+import { toolLabel } from "@/lib/stepSummary";
 import { shade } from "@/lib/color";
 import { normalizeApprovals } from "@/lib/approvals";
 import type { PendingAttachment } from "@/lib/attachFiles";
@@ -1340,20 +1341,28 @@ export const useApp = create<AppStore>((set, get) => ({
   },
 
   applyStreamEvent(chatId, event, perspectiveZoneId) {
-    // Tell the user when a run has stopped and is waiting for *them* (0.14.3).
-    // Done before the reducers and outside them, because a notification is a
-    // side effect and the reducers below must stay pure — and because both of
-    // these are the same event whether the primary or a perspective raised it.
-    if (get().appSettings.notifyWhenWaiting) {
-      if (event.type === "tool_approval_required") {
-        const chat = get().chats.find((c) => c.id === chatId);
-        void notifyWaiting(
-          "Waiting for your approval",
-          `${event.name.replace(/_/g, " ")} in ${chat?.title || "a chat"}`,
-        );
-      } else if (event.type === "tool_call_result" && event.name === "ask_user") {
-        const chat = get().chats.find((c) => c.id === chatId);
-        void notifyWaiting("A question for you", chat?.title || "A chat is waiting on an answer");
+    // Tell the user when a run is blocked on *them* (0.14.3, 0.18.1): it needs
+    // an answer, or it has ended. Done before the reducers and outside them,
+    // because a notification is a side effect and the reducers must stay pure.
+    {
+      const s = get();
+      const chat = s.chats.find((c) => c.id === chatId);
+      const where = chat?.title || "a chat";
+      if (s.appSettings.notifyWhenWaiting) {
+        if (event.type === "tool_approval_required") {
+          void notifyWaiting("Waiting for your approval", `${toolLabel(event.name)} in ${where}`);
+        } else if (event.type === "tool_call_result" && event.name === "ask_user") {
+          void notifyWaiting("A question for you", where);
+        } else if (event.type === "tool_call_result" && event.name === "exit_plan_mode") {
+          void notifyWaiting("A plan to review", where);
+        }
+      }
+      // Only the run the user started: a sub-agent finishing is a step of
+      // someone else's turn, and a perspective ends alongside its primary.
+      // A Stop never gets here as `done` — `stopChat` settles it as `cancelled`.
+      if (s.appSettings.notifyWhenFinished && !perspectiveZoneId && !chat?.initiatedByZoneId) {
+        const ended = finishedNotice(chatId, event, s.messagesByChat[chatId] ?? []);
+        if (ended) void notifyWaiting(`${ended.title} · ${where}`, ended.body);
       }
     }
     // A file the model presents opens in the workspace panel's viewer (0.17.9)

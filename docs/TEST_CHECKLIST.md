@@ -276,6 +276,16 @@ cut, smart-compaction rules); none of it has been seen in the Tauri shell.
 - [ ] 🔁 A rolling chat never fails with "tool must follow tool_calls" — the cut never splits a call from its result
 - [ ] The task you sent survives even after everything around it is forgotten
 
+**Dictation on this computer**
+
+- [ ] Settings → Dictation → *Download and use* with Base (English): progress shows, then *In use for dictation*
+- [ ] The mic button transcribes with no provider configured anywhere, and no console window flashes up
+- [ ] Live partials appear while speaking, and the first dictation after launch starts only one `whisper-server` (Task Manager)
+- [ ] Cancel mid-download leaves no half file; a second attempt succeeds
+- [ ] After ten idle minutes `whisper-server` is gone; the next dictation starts it again
+- [ ] Quitting from the tray leaves no `whisper-server` running
+- [ ] Deleting the model in use turns local dictation off rather than leaving it broken
+
 **Scheduled runs**
 
 - [ ] Settings → Schedules: a once-run two minutes out fires, creates a titled chat, and shows *Last ran*

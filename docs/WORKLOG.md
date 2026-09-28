@@ -74,6 +74,27 @@ finished turn does not notify, on purpose — 0.14.3); rolling context for
 multi-model chats, whose transcript is built differently; saved-run templates
 as scheduled prompts.
 
+**Later the same day — dictation on this computer.** One click in Settings →
+Dictation downloads whisper.cpp's prebuilt server and a model and makes it the
+dictation provider. The alternatives were weighed and dropped: embedding
+whisper.cpp through `whisper-rs` is what 0.8.0 removed for needing libclang at
+build time, and a pure-Rust whisper (candle) is a large dependency plus a
+decoder loop to maintain. The prebuilt server needed no client work at all —
+`--inference-path /v1/audio/transcriptions` makes it answer the request
+`stt_api` already sends, including `verbose_json` — so the whole feature is a
+downloader, a process supervisor, and one branch in `stt_config`.
+
+Both downloads are pinned and verified: the engine to the SHA-256 GitHub
+publishes for the v1.9.2 asset, the models to Hugging Face's content hashes
+at one repository commit. Checked by hand (the archive layouts, the server's
+flags, a live request) and by an opt-in test that starts the downloaded
+server the way dictation does and transcribes `jfk.wav` — 0.7 s, one line.
+Two things only the live run showed: whisper.cpp joins segments with `"\n "`,
+which would have put line breaks mid-sentence in the composer; and Git Bash
+rewrites a `/v1/...` argument into a Windows path, which looked like the
+server ignoring `--inference-path` (it does not affect the app, which spawns
+without a shell).
+
 ---
 
 ## 2026-08-17 (0.14.5) — What the agent knows before it starts

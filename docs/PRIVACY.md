@@ -51,6 +51,7 @@ you, or a model acting on a message you sent, asked for it.
 | **API calls** (`http_request`) | Whatever the model was asked to send | The host in the request |
 | **Remote MCP servers** | Tool arguments, plus any credential you configured for that server | The MCP server's operator |
 | **Voice** (STT/TTS) | Recorded audio, or the text to be spoken | The provider you pointed it at — which can be a local one |
+| **Setting up dictation on this computer** (0.18) | Two downloads when you press *Download and use*: whisper.cpp from GitHub, the model from Hugging Face. Nothing about you is sent; afterwards dictation stays on the machine | GitHub and Hugging Face |
 | **Embeddings** | The text being indexed | Local, unless you configured an API embedding provider |
 
 Two consequences worth stating plainly, because they are easy to miss:

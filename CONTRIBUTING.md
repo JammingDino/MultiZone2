@@ -27,7 +27,7 @@ On Windows: `choco install nasm` (in an **elevated** shell) or [download it](htt
 
 This is the one place the project accepts a native toolchain dependency, and it is a deliberate trade: keyless search engines fingerprint an ordinary Rust HTTP client's TLS as "not a browser" and answer it with an anti-bot challenge, so without a real browser fingerprint the web tools return nothing. It buys search that actually works, without shipping a headless browser. `wreq` also raised the minimum Rust version to 1.85.
 
-Voice dictation (0.8.0+) adds **no** build dependencies of its own: microphone capture (`cpal`) and WAV encoding (`hound`) are pure Rust, and transcription is done by a user-configured provider's OpenAI-compatible `/audio/transcriptions` endpoint at runtime. On-device transcription is available by pointing that provider at a local server (e.g. LM Studio serving a whisper model), so there is no embedded speech engine.
+Voice dictation (0.8.0+) adds **no** build dependencies of its own: microphone capture (`cpal`) and WAV encoding (`hound`) are pure Rust, and transcription is done by a user-configured provider's OpenAI-compatible `/audio/transcriptions` endpoint at runtime. On-device transcription is available by pointing that provider at a local server (e.g. LM Studio serving a whisper model), so there is no embedded speech engine. Since 0.18 the app can also set one up itself (`src-tauri/src/local_stt.rs`): it downloads whisper.cpp's prebuilt `whisper-server` and a ggml model at runtime, both pinned and SHA-256-verified — still nothing added to the build.
 
 ## Dev
 

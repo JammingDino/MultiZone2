@@ -1210,6 +1210,15 @@ summarize itself, and Stop did nothing until the model had spoken.
 - [x] Per-chat control and the notes list in the compact popover; global default in Settings → Chat
 - [ ] Watched on a long agentic run: does the model mark what it verified, and does it stop re-running the same tests
 
+**Dictation on this computer**
+- [x] Settings → Dictation: pick a model, *Download and use*; whisper.cpp's server (pinned v1.9.2) and a ggml model (pinned repo commit), both SHA-256-verified, cancellable, with progress
+- [x] Started on the first transcription through the existing `stt_config` (sentinel provider `__local__`) with an OpenAI-shaped inference path, so mic, live partials and uploads all work unchanged; stopped after ten idle minutes and on quit; starts serialized
+- [x] Windows x64 and Linux prebuilt; a `whisper-server` on PATH elsewhere
+- [x] Verified end to end against the real binary (opt-in test: `MULTIZONE_WHISPER_TEST_DIR=… cargo test --lib local_stt -- --include-ignored`)
+- [ ] Seen in the app: download, dictate, idle stop, dictate again
+- [ ] GPU builds (CUDA/Vulkan) — the CPU build is what every machine can run; a GPU option is a 270–670 MB download
+- [ ] A child process is not reaped if the app crashes rather than quits (a Windows job object would)
+
 **Scheduled runs**
 - [x] `scheduled_runs` table: once / every N minutes / daily / weekdays; new chat or append to a chat; optional chat to report on
 - [x] A 20-second scheduler; rescheduled before firing; a run missed while closed fires once

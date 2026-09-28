@@ -1226,12 +1226,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
         </Field>
 
         <Field label="Approvals">
-          <p className="mb-2 text-[11px] text-[var(--color-text-muted)]">
-            What this zone in particular may do without asking. Everything left on{" "}
-            <strong>Inherit</strong> follows Settings → Chat. This is where a scout that only reads
-            and an implementer that may edit stop being the same policy — and where neither of them
-            gets unreviewed shell.
-          </p>
+          <p className="mb-2 text-[11px] text-[var(--color-text-muted)]">Overrides for this zone. Inherit follows Settings → Approvals.</p>
           <div className="divide-y divide-[var(--color-border)] rounded border border-[var(--color-border)]">
             {ZONE_APPROVAL_CATEGORIES.map(([cat, label]) => {
               const current = approvals.categories[cat];
@@ -1294,14 +1289,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
               </label>
             ))}
           </div>
-          <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
-            Command prefixes and paths, one per line — <strong>added to</strong> the global lists
-            rather than replacing them, since a deny list you can drop by configuring something
-            else is not a deny list. Longest match wins. In the path lists{" "}
-            <code>{"{project}"}</code> is the chat's own project directory, and anything under{" "}
-            <em>Edit without asking</em> makes those paths a boundary: an edit outside them is
-            prompted even where the Edit category says auto.
-          </p>
+          <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">Added to the global lists. One per line; <code>{"{project}"}</code> is the chat's project.</p>
         </Field>
 
         <Field label="Fallback zone">
@@ -1319,13 +1307,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
                 </option>
               ))}
           </select>
-          <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
-            Answers with instead when this zone's provider won't serve the request — rate limited,
-            host down, key rejected. Used once per turn, so pick a zone on a{" "}
-            <strong>different provider</strong>: falling back to another zone on the same dead host
-            just fails twice. In a panel this is the difference between losing a member mid-run and
-            losing the run.
-          </p>
+          <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">Answers when this zone's provider fails. Pick one on a different provider.</p>
         </Field>
 
         <Field label="Voice (read aloud)">
@@ -1337,10 +1319,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
             placeholder="Inherit global voice (e.g. alloy, nova)"
             spellCheck={false}
           />
-          <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
-            Voice used when responses from this zone are spoken. Leave empty to use the global default
-            from Settings → Voice.
-          </p>
+          <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">Empty uses the default voice.</p>
         </Field>
 
         <Field label="Tool config (JSON)">

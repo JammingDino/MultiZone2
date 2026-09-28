@@ -100,15 +100,7 @@ export function SchedulesTab() {
     <div className="flex flex-col gap-6">
       <section>
         <h3 className="mb-1 text-sm font-medium">Scheduled runs</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Prompts sent on a clock — an inbox sweep every day at noon, a progress report on a
-          long-running agent every half hour. Each run starts a fresh chat or adds to an existing
-          one, and works like a message you typed, tools and approvals included. Runs only fire
-          while MultiZone is running
-          {closeToTray ? " — closing the window keeps it running in the tray" : " — turn on close to the tray in Chat settings so closing the window does not stop them"}
-          ; a run missed while it was closed fires once at the next start. Agents with the
-          Schedule tool can add runs here too, with your approval.
-        </p>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">Prompts sent on a clock. They run only while MultiZone is running{closeToTray ? " (the tray counts)" : ""}.</p>
         {!draft && (
           <button
             onClick={() => setDraft(blank())}
@@ -217,10 +209,7 @@ export function SchedulesTab() {
                   {chats.filter((c) => !c.initiatedByZoneId).map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
                 </SettingSelect>
               </Field>
-              <p className="mb-2 text-[11px] text-[var(--color-text-muted)]">
-                Each run is handed the latest of that chat's conversation — what a progress report on
-                a long-running agent needs.
-              </p>
+              <p className="mb-2 text-[11px] text-[var(--color-text-muted)]">Each run sees that chat's latest messages.</p>
             </>
           )}
           <ToggleRow label="Enabled" checked={draft.enabled ?? true} onChange={(v) => set({ enabled: v })} />

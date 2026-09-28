@@ -119,20 +119,7 @@ export function McpTab() {
     <div className="flex flex-col gap-4">
       <section>
         <h3 className="mb-1 text-sm font-medium">MCP servers</h3>
-        <p className="text-xs text-[var(--color-text-muted)]">
-          Local commands (stdio) or remote endpoints (SSE/HTTP). Connecting fetches the server's
-          tools; give each a danger level here, then enable the ones you want per zone in the zone
-          editor. They go through the same approval pipeline as built-in tools.
-        </p>
-        <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-          Every enabled server connects on launch, so its tools and their descriptions are current
-          before the first message. Turn a server off with its own switch to stop it starting;
-          <strong> Connect</strong> here is for reconnecting after a change or a failure.
-        </p>
-        <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-          Prefer the <strong>catalog</strong>: an entry already knows the command and the variables,
-          so all it asks you for is the credential.
-        </p>
+        <p className="text-xs text-[var(--color-text-muted)]">Local commands or remote endpoints. Enable their tools per zone.</p>
       </section>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -411,11 +398,7 @@ function ConnectorCatalogPanel({ onDone, onCancel }: { onDone: () => void; onCan
         <h3 className="text-sm font-medium">Connector catalog</h3>
         <button onClick={onCancel} className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]">← Back</button>
       </div>
-      <p className="text-xs text-[var(--color-text-muted)]">
-        Each entry carries the command or URL, the variables it needs, and a link to the page each
-        credential comes from. Installing writes the server and stops — nothing runs or connects
-        until you press Connect.
-      </p>
+      <p className="text-xs text-[var(--color-text-muted)]">Installing writes the server; nothing connects until you press Connect.</p>
 
       {!catalog ? (
         <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
@@ -463,11 +446,7 @@ function ConnectorCatalogPanel({ onDone, onCancel }: { onDone: () => void; onCan
 
       <section className="rounded border border-dashed border-[var(--color-border)] p-3">
         <div className="mb-1 flex items-center gap-1.5 text-xs font-medium"><Download size={12} /> Import entries from a URL</div>
-        <p className="mb-2 text-[11px] text-[var(--color-text-muted)]">
-          A JSON file holding one entry, a list of them, or an object with an
-          <span className="font-mono"> entries </span> array. One sharing an id with a shipped entry
-          replaces it.
-        </p>
+        <p className="mb-2 text-[11px] text-[var(--color-text-muted)]">One entry, a list, or <span className="font-mono">{"{ entries: [...] }"}</span>.</p>
         <div className="flex items-center gap-2">
           <input
             value={importUrl}
@@ -618,10 +597,7 @@ function ConnectorInstallForm({
           {saving ? "Installing…" : "Install"}
         </button>
       </div>
-      <p className="text-[11px] text-[var(--color-text-muted)]">
-        Credentials are stored with the server in MultiZone's own database, like the rest of your
-        settings. Nothing is sent anywhere until you connect.
-      </p>
+      <p className="text-[11px] text-[var(--color-text-muted)]">Stored locally. Sent nowhere until you connect.</p>
     </div>
   );
 }

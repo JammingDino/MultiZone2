@@ -119,11 +119,7 @@ export function ApiTab() {
     <div className="flex flex-col gap-6">
       <section>
         <h3 className="mb-1 text-sm font-medium">Local HTTP API</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          A REST + SSE API with the same capabilities as the app — chats, zones, projects,
-          messages. It listens on 127.0.0.1 only, until you switch on remote access below. Every
-          request needs a token.
-        </p>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">A REST + SSE API for everything the app does. Local only unless remote access is on.</p>
         <div
           onClick={() => !busy && apply({ apiEnabled: !appSettings.apiEnabled })}
           className="flex cursor-pointer items-center justify-between rounded border border-[var(--color-border)] px-3 py-2.5 hover:border-[var(--color-accent)]"
@@ -150,12 +146,7 @@ export function ApiTab() {
           </div>
         )}
         {appSettings.apiEnabled && bind?.ok && (
-          <p className="mt-2 text-xs text-[var(--color-text-muted)]">
-            Listening on <span className="font-mono">{bind.address}:{bind.port}</span>. Ask it
-            about itself:{" "}
-            <span className="font-mono">GET {baseUrl}/api/health</span> and{" "}
-            <span className="font-mono">/api/routes</span> — both answer without a token.
-          </p>
+          <p className="mt-2 text-xs text-[var(--color-text-muted)]">Listening on <span className="font-mono">{bind.address}:{bind.port}</span>.</p>
         )}
       </section>
 

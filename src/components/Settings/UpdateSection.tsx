@@ -134,7 +134,7 @@ export function UpdateSection() {
 
         <ToggleRow
           label="Check for updates automatically"
-          description="A version check shortly after launch. It sends nothing about you or this machine — GitHub sees the request, as it would any download. Off means checks happen only when you press the button above, and the app makes no network request you did not start."
+          description="Checks GitHub shortly after launch. Sends nothing about you."
           checked={checkOnLaunch}
           onChange={(updateCheckOnLaunch) => void setAppSettings({ updateCheckOnLaunch })}
         />

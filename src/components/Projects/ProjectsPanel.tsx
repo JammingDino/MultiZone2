@@ -455,10 +455,6 @@ function ProjectForm({
         <div className="mt-3">
           <div className="mb-1 text-xs text-[var(--color-text-muted)]">
             Checks after an edit
-            <span className="ml-2 font-normal opacity-60">
-              (run in the project directory once a turn's edits land; the output goes back to the
-              model)
-            </span>
           </div>
           <div className="grid gap-2 sm:grid-cols-2">
             <label className="block">
@@ -482,11 +478,7 @@ function ProjectForm({
               />
             </label>
           </div>
-          <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">
-            Leave blank for none — nothing is guessed. Lint runs first, since a type error explains
-            a test failure and is cheaper to read. They run once per turn, and a failure is handed
-            back for the model to fix before it answers.
-          </p>
+          <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">One command per line, run after each turn's edits. Failures go back to the model.</p>
         </div>
 
         {/* Knowledge (RAG) — only for saved projects, since indexing needs a
@@ -637,12 +629,7 @@ function KnowledgeSection({ project }: { project: Project }) {
         <Database size={14} className="text-[var(--color-accent)]" />
         <span className="text-sm font-medium">Knowledge (document search)</span>
       </div>
-      <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-        Index this project's directory so zones can search it during a chat (the{" "}
-        <code className="rounded bg-[var(--color-bg)] px-1">search_local_files</code> tool). Pick an
-        embedding model from one of your providers — for a local model, add Ollama as a provider and
-        choose an embedding model such as <code className="rounded bg-[var(--color-bg)] px-1">nomic-embed-text</code>.
-      </p>
+      <p className="mb-3 text-xs text-[var(--color-text-muted)]">Lets zones search this project's files. For a local model, add Ollama and pick <code className="rounded bg-[var(--color-bg)] px-1">nomic-embed-text</code>.</p>
 
       {/* Embedding provider + model */}
       <div className="mb-2 grid grid-cols-2 gap-2">

@@ -50,10 +50,7 @@ export function MemoryTab() {
     <div className="flex flex-col gap-6">
       <section>
         <h3 className="mb-1 text-sm font-medium">Memory</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Facts the assistant saves with the memory tool, injected into the system prompt each turn
-          (global → project → chat). Give a zone the <span className="font-mono">Memory</span> tool to let it write here.
-        </p>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">Facts zones with the <span className="font-mono">Memory</span> tool save, shown to them every turn.</p>
         <div className="flex items-center gap-2 text-sm">
           <span className="text-[var(--color-text-muted)]">Max entries per scope</span>
           <NumberField value={limit} min={1} onCommit={(v) => setAppSettings({ memoryScopeLimit: v })} />

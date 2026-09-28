@@ -188,12 +188,7 @@ export function DataTab() {
       {/* Markdown two-way sync (0.7.2) */}
       <section>
         <h3 className="mb-1 text-sm font-medium">Plaintext markdown storage</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Every chat as a real <span className="font-mono">.md</span> file you can read, edit and
-          version. The database stays the source of truth, but the sync runs both ways — edits you
-          make on disk are pulled back in. Zone configs go alongside as JSON in{" "}
-          <span className="font-mono">zones/</span>.
-        </p>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">Every chat as an editable <span className="font-mono">.md</span> file, synced both ways.</p>
 
         <ToggleRow
           label="Store chats as markdown files"
@@ -256,9 +251,7 @@ export function DataTab() {
       {/* Reset */}
       <section>
         <h3 className="mb-1 text-sm font-medium">Reset</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Deletes the database and everything in it. The app exits, and next launch starts fresh.
-        </p>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">Deletes everything. The app exits and starts fresh.</p>
 
         {resetStage === "idle" && (
           <button
@@ -357,11 +350,7 @@ function CheckpointStorageSection() {
   return (
     <section>
       <h3 className="mb-1 text-sm font-medium">File checkpoints</h3>
-      <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-        A turn's files are kept as they were before it ran, so it can be reverted from the
-        transcript. The newest checkpoint survives the limits below, whatever they say — the turn
-        that just ran stays revertible.
-      </p>
+      <p className="mb-3 text-xs text-[var(--color-text-muted)]">Files as they were before each turn, so it can be reverted.</p>
 
       {usage && (
         <div className="mb-3 grid grid-cols-3 gap-2">
@@ -513,12 +502,7 @@ function SettingsTransferSection() {
   return (
     <section>
       <h3 className="mb-1 text-sm font-medium">Settings backup & transfer</h3>
-      <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-        Providers, zones, skills, MCP servers, global memories, preferences and theme as one JSON
-        file. Chats are not included — the markdown storage above covers those — and neither are
-        machine-specific paths or the local API token. Dropping a settings file on the window
-        imports it too.
-      </p>
+      <p className="mb-3 text-xs text-[var(--color-text-muted)]">Providers, zones, skills, MCP servers, memories and preferences as one file. Chats are not included.</p>
 
       <ToggleRow
         label="Include provider API keys"

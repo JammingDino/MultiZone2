@@ -103,13 +103,7 @@ export function KnowledgeTab() {
     <div className="flex flex-col gap-4">
       <section>
         <h3 className="mb-1 text-sm font-medium">Knowledge</h3>
-        <p className="text-xs text-[var(--color-text-muted)]">
-          New projects inherit the default embedding model, and the default directory is indexed
-          into a knowledge base that project-less chats search with{" "}
-          <code className="rounded bg-[var(--color-bg)] px-1">search_local_files</code>. To keep it
-          local, add Ollama as a provider and pick something like{" "}
-          <code className="rounded bg-[var(--color-bg)] px-1">nomic-embed-text</code>.
-        </p>
+        <p className="text-xs text-[var(--color-text-muted)]">New projects use this model. For a local one, add Ollama and pick <code className="rounded bg-[var(--color-bg)] px-1">nomic-embed-text</code>.</p>
       </section>
 
       {/* Default embedding provider + model */}

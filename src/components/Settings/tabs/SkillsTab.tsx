@@ -63,11 +63,7 @@ export function SkillsTab() {
     <div className="flex flex-col gap-4">
       <section>
         <h3 className="mb-1 text-sm font-medium">Skills</h3>
-        <p className="text-xs text-[var(--color-text-muted)]">
-          On-demand instruction sets. A zone with the <span className="font-mono">Skills</span> tool sees
-          every enabled skill's description and loads the full text itself when one matches — so write
-          the description as the use case that should trigger it.
-        </p>
+        <p className="text-xs text-[var(--color-text-muted)]">Instructions a zone with the <span className="font-mono">Skills</span> tool loads when the description matches.</p>
       </section>
 
       <div className="flex gap-2">
@@ -244,11 +240,7 @@ function SkillPacksSection() {
           </button>
         </div>
       </div>
-      <p className="text-xs text-[var(--color-text-muted)]">
-        Skills published as a folder — <span className="font-mono">SKILL.md</span> plus reference pages
-        and scripts — installed by their own CLI. They join the catalog above; edit them where they
-        were installed, not here.
-      </p>
+      <p className="text-xs text-[var(--color-text-muted)]">Installed by their own CLI; edit them where they were installed.</p>
 
       {showHelp && (
         <div className="mt-3 rounded border border-[var(--color-border)] bg-[var(--color-panel)] p-3 text-xs">

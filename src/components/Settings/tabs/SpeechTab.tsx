@@ -120,10 +120,7 @@ function SpeechSynthesisSettings() {
                 ))}
               </p>
             )}
-            <p className="text-[11px] text-[var(--color-text-muted)]">
-              A zone can override this with its own voice in the zone editor. Audio leaves your machine
-              unless the provider runs locally.
-            </p>
+            <p className="text-[11px] text-[var(--color-text-muted)]">A zone can set its own voice.</p>
           </div>
         )}
       </section>
@@ -143,10 +140,7 @@ function SpeechSynthesisSettings() {
 
       <section>
         <h3 className="mb-1 text-sm font-medium">Summarize long responses</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Condense long answers into a short spoken summary (via the chat's model) instead of reading
-          out large verbose blocks.
-        </p>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">Speak a short summary of long answers.</p>
         <ToggleRow
           label="Auto-summarize before speaking"
           checked={appSettings.ttsAutoSummarize}
@@ -169,10 +163,7 @@ function SpeechSynthesisSettings() {
 
       <section>
         <h3 className="mb-1 text-sm font-medium">Auto-speak</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Automatically speak assistant responses as they stream in. Speech is chunked by sentence so
-          it starts before the full answer completes.
-        </p>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">Reads answers aloud as they arrive.</p>
         <ToggleRow
           label="Speak responses automatically"
           checked={appSettings.ttsAutoSpeak}
@@ -182,10 +173,7 @@ function SpeechSynthesisSettings() {
 
       <section>
         <h3 className="mb-1 text-sm font-medium">Prefetch</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Sentences synthesized in parallel while the current one plays. Higher removes the gap
-          between them, at more concurrent requests.
-        </p>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">Sentences prepared ahead. Higher means fewer gaps.</p>
         <SliderRow
           label="Sentences ahead"
           value={appSettings.ttsPrefetch}
@@ -265,11 +253,7 @@ function VoiceCloningSettings() {
         <AudioLines size={14} className="text-[var(--color-accent)]" />
         <h3 className="text-sm font-medium">Voice cloning</h3>
       </div>
-      <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-        Some local models (F5-TTS, say) clone a voice from a short sample; hosted ones like OpenAI
-        only offer fixed voices. Your clip and its transcript ride along with each request, so there
-        is nothing to set up server-side.
-      </p>
+      <p className="mb-3 text-xs text-[var(--color-text-muted)]">For local models that clone a voice from a sample, like F5-TTS.</p>
       <ToggleRow
         label="My speech model supports voice cloning"
         checked={supported}
@@ -392,10 +376,7 @@ function ConversationModeSettings() {
   return (
     <section>
       <h3 className="mb-1 text-sm font-medium">Conversation mode (hands-free)</h3>
-      <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-        The mic reopens when a spoken response finishes, and speaking interrupts playback. Needs
-        both a dictation and a speech provider above.
-      </p>
+      <p className="mb-3 text-xs text-[var(--color-text-muted)]">Hands-free: the mic reopens after each answer. Needs dictation and speech.</p>
       <ToggleRow
         label="Enable conversation mode"
         checked={appSettings.voiceConversationEnabled}

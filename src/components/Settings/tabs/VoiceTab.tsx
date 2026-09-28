@@ -84,10 +84,7 @@ export function VoiceTab() {
 
       <section>
         <h3 className="mb-1 text-sm font-medium">Audio uploads</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Drop an audio file into any composer — MP3, WAV, M4A, MP4, FLAC, OGG, WebM — and the
-          transcript is sent as text, so a text-only model can take spoken input.
-        </p>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">Audio dropped into the composer is transcribed for models that can't hear.</p>
         {(!appSettings.sttProviderId || !appSettings.sttModel) && (
           <p className="mb-3 text-xs text-amber-600 dark:text-amber-400">
             Audio uploads need the transcription provider above configured first.
@@ -113,15 +110,11 @@ export function VoiceTab() {
             ["context", "As an attachment", "Model reads it as context; the message box stays yours"],
           ]}
         />
-        <p className="mt-2 text-xs text-[var(--color-text-muted)]">
-          Long recordings want “as an attachment”, so you can type the instruction —
-          “summarise this meeting” — alongside the transcript.
-        </p>
 
         <div className="mt-4">
           <ToggleRow
             label="Include timestamps and language"
-            description="Per-segment timings and the detected language. Not every server implements it."
+            description="Timings and detected language, where supported."
             checked={appSettings.sttUploadMetadata}
             onChange={(sttUploadMetadata) => setAppSettings({ sttUploadMetadata })}
           />
@@ -151,18 +144,12 @@ export function VoiceTab() {
             onChange={(sttUploadMaxMinutes) => setAppSettings({ sttUploadMaxMinutes })}
           />
         </div>
-        <p className="mt-2 text-xs text-[var(--color-text-muted)]">
-          OpenAI's hosted endpoint refuses anything over 25 MB itself — raise this only for a
-          server with its own ceiling.
-        </p>
+        <p className="mt-2 text-xs text-[var(--color-text-muted)]">OpenAI's limit is 25 MB.</p>
       </section>
 
       <section>
         <h3 className="mb-1 text-sm font-medium">Language</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          BCP-47-ish code (e.g. <span className="font-mono">en</span>). Empty auto-detects, which is
-          usually better than forcing one.
-        </p>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">e.g. <span className="font-mono">en</span>. Empty auto-detects.</p>
         <input
           type="text"
           value={appSettings.sttLanguage}
@@ -180,13 +167,7 @@ export function VoiceTab() {
              them: it records here and sends the audio over for your computer to
              transcribe with the provider above. Offering the choice anyway
              would be a picker that changes nothing. */
-          <p className="text-xs text-[var(--color-text-muted)]">
-            This device records with its own microphone and sends the audio to your computer,
-            which converts it to 16 kHz mono WAV with ffmpeg before handing it to the provider
-            above — the same format the computer's own microphone produces, so a local
-            transcription server accepts both. Without ffmpeg installed the recording is sent as
-            it was recorded, and the error says so if the provider refuses it.
-          </p>
+          <p className="text-xs text-[var(--color-text-muted)]">Recorded here, converted on your computer (needs ffmpeg).</p>
         ) : (
           <>
             <p className="mb-3 text-xs text-[var(--color-text-muted)]">

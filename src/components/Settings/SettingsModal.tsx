@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Server, Smartphone, Palette, MessageSquare, Database, Globe, Brain, Sparkles, Plug, Library, Layers, Mic, Volume2, CalendarClock } from "lucide-react";
+import { Bot, ShieldCheck, Server, Smartphone, Palette, MessageSquare, Database, Globe, Brain, Sparkles, Plug, Library, Layers, Mic, Volume2, CalendarClock } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { Modal, ModalTitle } from "@/components/common/Modal";
@@ -7,7 +7,7 @@ import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import { NavGroup, NavItem, NavRail } from "@/components/common/NavRail";
 import { ApiTab } from "./tabs/ApiTab";
 import { AppearanceTab } from "./tabs/AppearanceTab";
-import { ChatTab } from "./tabs/ChatTab";
+import { AgentsTab, ApprovalsTab, ChatTab } from "./tabs/ChatTab";
 import { DataTab } from "./tabs/DataTab";
 import { KnowledgeTab } from "./tabs/KnowledgeTab";
 import { McpTab } from "./tabs/McpTab";
@@ -20,14 +20,14 @@ import { SpeechTab } from "./tabs/SpeechTab";
 import { VoiceTab } from "./tabs/VoiceTab";
 import { ZonesTab } from "./tabs/ZonesTab";
 
-type Tab = "providers" | "zones" | "appearance" | "chat" | "schedules" | "voice" | "speech" | "skills" | "mcp" | "knowledge" | "memory" | "remote" | "api" | "data";
+type Tab = "providers" | "zones" | "appearance" | "chat" | "agents" | "approvals" | "schedules" | "voice" | "speech" | "skills" | "mcp" | "knowledge" | "memory" | "remote" | "api" | "data";
 
-const TAB_IDS: Tab[] = ["providers", "zones", "appearance", "chat", "schedules", "voice", "speech", "skills", "mcp", "knowledge", "memory", "remote", "api", "data"];
+const TAB_IDS: Tab[] = ["providers", "zones", "appearance", "chat", "agents", "approvals", "schedules", "voice", "speech", "skills", "mcp", "knowledge", "memory", "remote", "api", "data"];
 
 /** The nav label for each tab, reused when a tab fails to render so the message
  * names the screen the user actually clicked. */
 const TAB_LABELS: Record<Tab, string> = {
-  providers: "Providers", zones: "Zones", appearance: "Appearance", chat: "Chat", schedules: "Schedules",
+  providers: "Providers", zones: "Zones", appearance: "Appearance", chat: "Chat", agents: "Runs", approvals: "Approvals", schedules: "Schedules",
   voice: "Dictation", speech: "Speech", skills: "Skills", mcp: "MCP",
   knowledge: "Knowledge", memory: "Memory", remote: "Phone & remote", api: "API", data: "Data",
 };
@@ -85,9 +85,13 @@ export function SettingsModal() {
             <NavGroup label="Interface" />
             <NavItem active={tab === "appearance"} icon={<Palette size={14} />} label="Appearance" onClick={() => setTab("appearance")} />
             <NavItem active={tab === "chat"} icon={<MessageSquare size={14} />} label="Chat" onClick={() => setTab("chat")} />
-            <NavItem active={tab === "schedules"} icon={<CalendarClock size={14} />} label="Schedules" onClick={() => setTab("schedules")} />
             <NavItem active={tab === "voice"} icon={<Mic size={14} />} label="Dictation" onClick={() => setTab("voice")} />
             <NavItem active={tab === "speech"} icon={<Volume2 size={14} />} label="Speech" onClick={() => setTab("speech")} />
+
+            <NavGroup label="Agents" />
+            <NavItem active={tab === "agents"} icon={<Bot size={14} />} label="Runs" onClick={() => setTab("agents")} />
+            <NavItem active={tab === "approvals"} icon={<ShieldCheck size={14} />} label="Approvals" onClick={() => setTab("approvals")} />
+            <NavItem active={tab === "schedules"} icon={<CalendarClock size={14} />} label="Schedules" onClick={() => setTab("schedules")} />
 
             <NavGroup label="Tools & context" />
             <NavItem active={tab === "skills"} icon={<Sparkles size={14} />} label="Skills" onClick={() => setTab("skills")} />
@@ -114,6 +118,8 @@ export function SettingsModal() {
                 {tab === "zones" && <ZonesTab />}
                 {tab === "appearance" && <AppearanceTab />}
                 {tab === "chat" && <ChatTab />}
+                {tab === "agents" && <AgentsTab />}
+                {tab === "approvals" && <ApprovalsTab />}
                 {tab === "schedules" && <SchedulesTab />}
                 {tab === "voice" && <VoiceTab />}
                 {tab === "speech" && <SpeechTab />}

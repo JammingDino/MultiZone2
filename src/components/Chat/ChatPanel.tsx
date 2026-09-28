@@ -851,8 +851,8 @@ function ToolApprovalBanner({
               </button>
               <span className="text-[var(--color-text-muted)]">
                 {editPath
-                  ? "— saved to Settings → Chat → Where edits may land"
-                  : "— saved to Settings → Chat → Command rules"}
+                  ? "— saved to Settings → Approvals"
+                  : "— saved to Settings → Approvals"}
               </span>
             </div>
           )}

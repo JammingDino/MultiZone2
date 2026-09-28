@@ -75,10 +75,7 @@ function ThisConnection() {
       >
         Switch computer
       </button>
-      <p className="mt-1.5 text-[11px] text-[var(--color-text-muted)]">
-        Goes back to your saved computers. This device stays paired with all of them — nothing is
-        revoked and no code is needed to come back.
-      </p>
+      <p className="mt-1.5 text-[11px] text-[var(--color-text-muted)]">This device stays paired.</p>
     </section>
   );
 }
@@ -141,18 +138,10 @@ export function RemoteAccess({ apply, busy }: RemoteAccessProps) {
       {readOnly && <ThisConnection />}
       <section>
         <h3 className="mb-1 text-sm font-medium">Remote access</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-          Let a phone, tablet or second computer on this network drive this app. Everything still
-          runs here — its models, its files, its tools. Nothing runs on the other device and nothing
-          is stored there.
-        </p>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">Drive this app from another device on your network. Everything still runs here.</p>
 
         {readOnly && (
-          <p className="mb-3 rounded border border-[var(--color-border)] px-3 py-2.5 text-xs text-[var(--color-text-muted)]">
-            You are looking at this from a paired device. Turning remote access on or off rebinds
-            the connection you are reading this over, so it can only be changed on the computer
-            itself. Everything below still works from here.
-          </p>
+          <p className="mb-3 rounded border border-[var(--color-border)] px-3 py-2.5 text-xs text-[var(--color-text-muted)]">Change this on the computer itself.</p>
         )}
 
         <ToggleRow
@@ -242,7 +231,7 @@ export function RemoteAccess({ apply, busy }: RemoteAccessProps) {
           <div className="mt-3">
             <ToggleRow
               label="Announce on the network"
-              description="mDNS, so a device can find this machine without being told its address."
+              description="Lets devices find this computer without its address."
               checked={appSettings.apiDiscovery}
               onChange={(v) => {
                 if (readOnly) return;
@@ -372,17 +361,10 @@ function PairingSection({
   return (
     <section>
       <h3 className="mb-1 text-sm font-medium">Pair a device</h3>
-      <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-        Tap below, then open MultiZone on the device and pick this computer. A code appears here
-        when it asks — it works once, expires in a few minutes, and the device gets its own token
-        so you can revoke it on its own later.
-      </p>
+      <p className="mb-3 text-xs text-[var(--color-text-muted)]">Tap below, then pick this computer on the device. A one-time code appears here.</p>
 
       {!canPair && (
-        <p className="rounded border border-[var(--color-border)] px-3 py-2.5 text-xs text-[var(--color-text-muted)]">
-          Turn on remote access above first — a code no device can reach is a minute of typing for
-          nothing.
-        </p>
+        <p className="rounded border border-[var(--color-border)] px-3 py-2.5 text-xs text-[var(--color-text-muted)]">Turn on remote access first.</p>
       )}
 
       {canPair && !offer && (
@@ -559,9 +541,7 @@ function DeviceList({
   return (
     <section>
       <h3 className="mb-1 text-sm font-medium">Paired devices</h3>
-      <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-        Each holds its own token. Revoking one signs out that device and nothing else.
-      </p>
+      <p className="mb-3 text-xs text-[var(--color-text-muted)]">Revoking one signs out only that device.</p>
 
       {devices.length === 0 ? (
         <p className="rounded border border-[var(--color-border)] px-3 py-2.5 text-xs text-[var(--color-text-muted)]">

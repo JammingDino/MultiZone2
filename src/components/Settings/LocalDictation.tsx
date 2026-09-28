@@ -76,11 +76,7 @@ export function LocalDictation() {
       <h3 className="mb-1 flex items-center gap-1.5 text-sm font-medium">
         <Cpu size={14} /> Dictation on this computer
       </h3>
-      <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-        Run a speech model on this machine — no account, and your recordings never leave it. Pick a
-        model and it is downloaded once, then started whenever you dictate and stopped when you
-        have not for ten minutes. Powered by whisper.cpp.
-      </p>
+      <p className="mb-3 text-xs text-[var(--color-text-muted)]">Runs whisper.cpp here. Recordings never leave this computer.</p>
       {status.gpu && (
         <div className="mb-3">
           <ToggleRow

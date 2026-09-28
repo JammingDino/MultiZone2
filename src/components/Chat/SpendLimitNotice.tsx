@@ -70,7 +70,7 @@ export function SpendLimitNotice({ chatId }: { chatId: string }) {
           </div>
           <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
             Whatever you choose applies to <strong>this chat and its sub-agents only</strong> — every
-            other chat keeps the default from Settings → Chat.
+            other chat keeps the default from Settings → Runs.
           </div>
 
           <div className="mt-2 flex flex-wrap items-center gap-2">

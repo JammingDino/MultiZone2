@@ -952,7 +952,7 @@ export function HomeScreen() {
           <p className="mt-2 text-center text-xs text-[var(--color-text-muted)]">
             You'll get {selectedPerspectiveIds.size + 1} answers side by side — the
             primary plus {selectedPerspectiveIds.size} perspective
-            {selectedPerspectiveIds.size > 1 ? "s" : ""}. Run mode: {globalPerspectiveMode} (change in Settings → Chat).
+            {selectedPerspectiveIds.size > 1 ? "s" : ""}. Run mode: {globalPerspectiveMode} (change in Settings → Runs).
           </p>
         )}
         {leaderSelected && (
@@ -1051,7 +1051,7 @@ function PerspectivePicker({
             })}
             <div className="my-1 border-t border-[var(--color-border)]" />
             <div className="px-3 py-1.5 text-[11px] text-[var(--color-text-muted)]">
-              Runs {globalMode} (set in Settings → Chat). The mode picker is the primary.
+              Runs {globalMode} (set in Settings → Runs). The mode picker is the primary.
             </div>
         </div>
       </Popover>

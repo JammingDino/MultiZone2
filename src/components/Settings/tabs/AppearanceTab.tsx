@@ -326,9 +326,7 @@ export function AppearanceTab() {
                 onChange={(v) => setTheme({ glassStrength: v })}
               />
               {theme.backgroundEffect === "none" && (
-                <p className="text-[11px] text-[var(--color-text-muted)]">
-                  With no background effect there's little behind the glass to see — pick one below.
-                </p>
+                <p className="text-[11px] text-[var(--color-text-muted)]">Pick a background effect to see it.</p>
               )}
             </div>
           )}
@@ -466,21 +464,18 @@ export function AppearanceTab() {
             ["dark",  "Dark"],
           ]}
         />
-        <p className="mt-3 text-xs text-[var(--color-text-muted)]">
-          Export opens your print dialog. Set Margins to “None” for one continuous page, and
-          enable “Background graphics” so the theme’s colours are drawn.
-        </p>
+        <p className="mt-3 text-xs text-[var(--color-text-muted)]">For one page: Margins “None”, Background graphics on.</p>
 
         <div className="mt-4 flex flex-col gap-3">
           <ToggleRow
             label="Include sub-agent conversations"
-            description="Nested under the turns that spawned them, and marked as zone-to-zone. Markdown and PDF."
+            description="Nested under the turns that spawned them."
             checked={appSettings.exportSubchats}
             onChange={(exportSubchats) => setAppSettings({ exportSubchats })}
           />
           <ToggleRow
             label="Append the session log"
-            description="Closes the PDF with the run as recorded — every turn and tool, timed from the first. Evidence rather than reading, so it is off unless you want it. PDF only."
+            description="Every turn and tool, timed. PDF only."
             checked={appSettings.pdfExportSessionLog}
             onChange={(pdfExportSessionLog) => setAppSettings({ pdfExportSessionLog })}
           />
@@ -546,7 +541,7 @@ function CustomCssSection() {
         <div className="flex flex-col gap-2">
           <ToggleRow
             label="Apply custom CSS"
-            description="Loaded after the app's own, so it wins. Off restores the stock look without deleting it."
+            description="Off restores the stock look."
             checked={enabled}
             onChange={(customCssEnabled) => setTheme({ customCssEnabled })}
           />

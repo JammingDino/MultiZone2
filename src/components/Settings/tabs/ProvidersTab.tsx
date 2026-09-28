@@ -278,10 +278,7 @@ function ProviderForm({ value, onClose, onDeleted }: { value: Partial<Provider>;
       {/* Said where the key is typed rather than only in the privacy statement,
           because this is the moment someone decides whether to paste one. */}
       {apiKey.trim() !== "" && (
-        <p className="-mt-1 mb-2 text-[11px] text-[var(--color-text-muted)]">
-          Stored in plain text in this app’s local database — not encrypted, not in your OS
-          keychain. It never leaves the machine except to the provider above.
-        </p>
+        <p className="-mt-1 mb-2 text-[11px] text-[var(--color-text-muted)]">Stored unencrypted on this machine.</p>
       )}
       {preset?.keyUrl && (
         <p className="-mt-1 mb-2 text-[11px] text-[var(--color-text-muted)]">

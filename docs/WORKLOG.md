@@ -95,6 +95,17 @@ rewrites a `/v1/...` argument into a Windows path, which looked like the
 server ignoring `--inference-path` (it does not affect the app, which spawns
 without a shell).
 
+**…and on the GPU.** whisper.cpp's CUDA packages were measured rather than
+assumed. The 11.8 one (273 MB) does not ship cuBLAS: its GPU backend fails to
+load without a word and the server says "no GPU found", which on a machine with
+no CUDA toolkit is every machine. The 12.4 one (670 MB) carries cuBLAS and the
+runtime and needs only the driver. On this machine's RTX 4070 Ti SUPER, Large v3
+Turbo on the 11 s sample: ~16 s on the CPU build, ~0.13 s on the CUDA build,
+same text. With CUDA made unavailable it falls back to the CPU on its own, so
+the GPU download replaces the CPU one rather than sitting beside it, and `-ng`
+is how the toggle turns the GPU off. The opt-in test now runs in both modes
+and asserts the server reports where it actually ran.
+
 ---
 
 ## 2026-08-17 (0.14.5) — What the agent knows before it starts

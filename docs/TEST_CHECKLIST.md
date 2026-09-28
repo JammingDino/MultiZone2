@@ -285,6 +285,9 @@ cut, smart-compaction rules); none of it has been seen in the Tauri shell.
 - [ ] After ten idle minutes `whisper-server` is gone; the next dictation starts it again
 - [ ] Quitting from the tray leaves no `whisper-server` running
 - [ ] Deleting the model in use turns local dictation off rather than leaving it broken
+- [ ] ⚙️ With an NVIDIA GPU: *Use the GPU* appears naming the card; the download finishes; the section says *Running now on the GPU* after a dictation
+- [ ] ⚙️ Turning *Use the GPU* off: the next dictation says *Running now on the CPU*, with no new download
+- [ ] Without an NVIDIA GPU the toggle is not shown at all
 
 **Scheduled runs**
 

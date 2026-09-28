@@ -175,9 +175,15 @@ export interface LocalSttStatus {
   models: LocalSttModel[];
   runningModel: string | null;
   installing: boolean;
+  /** The NVIDIA GPU found, when the GPU build can be offered (Windows). */
+  gpu: string | null;
+  gpuEngineInstalled: boolean;
+  gpuEngineSize: number;
+  /** Whether the running server actually got the GPU. */
+  runningOnGpu: boolean | null;
 }
 export interface LocalSttProgress {
-  /** `engine`, `model`, or `done`. */
+  /** `engine`, `gpu`, `model`, or `done`. */
   stage: string;
   received: number;
   total: number;
@@ -1307,6 +1313,11 @@ export interface AppSettings {
    */
   voiceConversationEnabled: boolean;
   /**
+   * Local dictation uses the GPU when its GPU build is installed (0.18).
+   * Off runs the same build on the CPU.
+   */
+  sttLocalGpu: boolean;
+  /**
    * Set when the user dismisses first-run setup without configuring a provider
    * (1.0). Onboarding is a helpful default, not a toll gate — someone who wants
    * to look around first, or who is about to drop in a settings export, gets to.
@@ -1413,6 +1424,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   ttsPrefetch: 3,
   ttsSupportsCloning: false,
   voiceConversationEnabled: false,
+  sttLocalGpu: true,
 };
 
 export interface DbStats {

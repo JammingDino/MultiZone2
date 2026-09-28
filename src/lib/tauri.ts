@@ -918,7 +918,8 @@ export interface Transcription {
  */
 // Local dictation (0.18)
 export const localSttStatus = () => invoke<import("./types").LocalSttStatus>("local_stt_status");
-export const installLocalStt = (model: string) => invoke<void>("install_local_stt", { model });
+export const installLocalStt = (model: string, gpu: boolean) =>
+  invoke<void>("install_local_stt", { model, gpu });
 export const cancelLocalSttInstall = () => invoke<void>("cancel_local_stt_install");
 export const removeLocalSttModel = (model: string) => invoke<void>("remove_local_stt_model", { model });
 export function onLocalSttProgress(

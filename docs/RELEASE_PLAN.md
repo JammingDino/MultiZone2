@@ -1216,7 +1216,10 @@ summarize itself, and Stop did nothing until the model had spoken.
 - [x] Windows x64 and Linux prebuilt; a `whisper-server` on PATH elsewhere
 - [x] Verified end to end against the real binary (opt-in test: `MULTIZONE_WHISPER_TEST_DIR=… cargo test --lib local_stt -- --include-ignored`)
 - [ ] Seen in the app: download, dictate, idle stop, dictate again
-- [ ] GPU builds (CUDA/Vulkan) — the CPU build is what every machine can run; a GPU option is a 270–670 MB download
+- [x] GPU on Windows + NVIDIA: the CUDA 12.4 package (670 MB, bundles cuBLAS and the runtime — only a driver needed), offered when `nvcuda.dll` is present, toggle `sttLocalGpu`. Runs on the CPU with `-ng` or when CUDA cannot start, so one download covers both. Measured: Large v3 Turbo, 11 s clip, ~16 s CPU → ~0.13 s GPU (RTX 4070 Ti SUPER)
+- [x] The CUDA 11.8 package was tried and rejected: it does not bundle cuBLAS, so its GPU backend fails to load silently without a CUDA toolkit
+- [ ] AMD / Intel GPUs (whisper.cpp publishes no Vulkan build) and Linux GPUs
+- [ ] Deleting the GPU engine from the UI to get the 670 MB back
 - [ ] A child process is not reaped if the app crashes rather than quits (a Windows job object would)
 
 **Scheduled runs**

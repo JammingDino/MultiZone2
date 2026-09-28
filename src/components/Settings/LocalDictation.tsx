@@ -4,6 +4,7 @@ import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { reportError } from "@/lib/reportError";
 import { formatBytes } from "@/lib/format";
+import { ToggleRow } from "@/components/common/Toggle";
 import type { LocalSttProgress, LocalSttStatus } from "@/lib/types";
 
 /** The `sttProviderId` that means "the whisper server this app runs". */
@@ -21,7 +22,7 @@ export function LocalDictation() {
   const [status, setStatus] = useState<LocalSttStatus | null>(null);
   const [progress, setProgress] = useState<LocalSttProgress | null>(null);
   const active = appSettings.sttProviderId === LOCAL_STT_PROVIDER ? appSettings.sttModel : null;
-  const [picked, setPicked] = useState<string>(active || "base.en");
+  const [chosen, setPicked] = useState<string | null>(active || null);
 
   const refresh = () => api.localSttStatus().then(setStatus).catch(reportError("Couldn't read local dictation"));
 
@@ -32,8 +33,15 @@ export function LocalDictation() {
   }, []);
 
   if (!status) return null;
+  // With a GPU the largest model costs nothing in speed, so it is the default.
+  const picked = chosen ?? (status.gpu ? "large-v3-turbo-q5_0" : "base.en");
   const model = status.models.find((m) => m.id === picked);
   const installing = status.installing || progress !== null;
+  const gpu = status.gpu !== null && appSettings.sttLocalGpu !== false;
+  const needsEngine = gpu ? !status.gpuEngineInstalled : !status.engineInstalled;
+  const downloadSize =
+    (model && !model.installed ? model.sizeBytes : 0) +
+    (needsEngine ? (gpu ? status.gpuEngineSize : 9_000_000) : 0);
 
   async function select(id: string) {
     await setAppSettings({ sttProviderId: LOCAL_STT_PROVIDER, sttModel: id });
@@ -43,7 +51,7 @@ export function LocalDictation() {
     if (!model) return;
     setStatus((s) => (s ? { ...s, installing: true } : s));
     try {
-      await api.installLocalStt(model.id);
+      await api.installLocalStt(model.id, gpu);
       await select(model.id);
     } catch (e) {
       if (!String(e).includes("cancelled")) reportError("Couldn't set up local dictation")(e);
@@ -73,6 +81,23 @@ export function LocalDictation() {
         model and it is downloaded once, then started whenever you dictate and stopped when you
         have not for ten minutes. Powered by whisper.cpp.
       </p>
+      {status.gpu && (
+        <div className="mb-3">
+          <ToggleRow
+            label="Use the GPU"
+            description={`${status.gpu} found. Far faster — Large v3 Turbo goes from several seconds per sentence to a fraction of one.${
+              status.gpuEngineInstalled ? "" : ` A one-time ${formatBytes(status.gpuEngineSize)} download.`
+            } Off runs on the CPU.`}
+            checked={gpu}
+            onChange={(v) => setAppSettings({ sttLocalGpu: v })}
+          />
+        </div>
+      )}
+      {status.runningModel && (
+        <p className="mb-2 text-[11px] text-[var(--color-text-muted)]">
+          Running now on the {status.runningOnGpu ? "GPU" : "CPU"}.
+        </p>
+      )}
       {!status.supported ? (
         <p className="text-xs text-amber-600 dark:text-amber-400">
           There is no ready-made whisper.cpp for this platform. Install one so{" "}
@@ -124,7 +149,11 @@ export function LocalDictation() {
             <div className="flex flex-col gap-1.5">
               <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
                 <Loader2 size={12} className="animate-spin" />
-                {progress?.stage === "engine" ? "Downloading whisper.cpp…" : `Downloading ${model?.label ?? "the model"}…`}
+                {progress?.stage === "gpu"
+                  ? "Downloading the GPU engine…"
+                  : progress?.stage === "engine"
+                    ? "Downloading whisper.cpp…"
+                    : `Downloading ${model?.label ?? "the model"}…`}
                 {progress && progress.total > 0 && ` ${formatBytes(progress.received)} of ${formatBytes(progress.total)}`}
                 <button onClick={() => api.cancelLocalSttInstall()} className="ml-auto underline hover:text-[var(--color-text)]">
                   Cancel
@@ -137,7 +166,7 @@ export function LocalDictation() {
                 />
               </div>
             </div>
-          ) : model?.installed ? (
+          ) : model?.installed && !needsEngine ? (
             <button
               onClick={() => select(model.id).catch(reportError("Couldn't switch dictation"))}
               disabled={active === model.id}
@@ -147,7 +176,7 @@ export function LocalDictation() {
             </button>
           ) : (
             <button onClick={install} className="rounded bg-[var(--color-accent)] px-3 py-1.5 text-sm text-white">
-              Download and use{model ? ` (${formatBytes(model.sizeBytes + (status.engineInstalled ? 0 : 9_000_000))})` : ""}
+              {model?.installed ? "Download the GPU engine and use" : "Download and use"} ({formatBytes(downloadSize)})
             </button>
           )}
         </>

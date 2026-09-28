@@ -38,6 +38,8 @@ struct SttSettings {
     stt_provider_id: Option<String>,
     stt_model: String,
     stt_language: String,
+    /// Local dictation on the GPU when the GPU build is installed. `None` = on.
+    stt_local_gpu: Option<bool>,
 }
 
 async fn read_stt_settings(state: &AppState) -> SttSettings {
@@ -79,7 +81,8 @@ async fn stt_config(state: &AppState) -> AppResult<(String, Option<String>, Stri
     // Dictation on this computer (0.18): no provider row, a server this app
     // starts on demand. Everything past here treats it as any other provider.
     if provider_id == crate::local_stt::PROVIDER_ID {
-        let url = crate::local_stt::ensure_running(&state.app_data_dir, &settings.stt_model).await?;
+        let gpu = settings.stt_local_gpu.unwrap_or(true);
+        let url = crate::local_stt::ensure_running(&state.app_data_dir, &settings.stt_model, gpu).await?;
         return Ok((url, None, settings.stt_model, lang));
     }
     let provider: Option<(String, Option<String>)> =
@@ -668,8 +671,8 @@ pub async fn cancel_dictation(state: State<'_, AppState>, session_id: String) ->
 
 /// What local dictation has installed and is running (0.18).
 #[tauri::command]
-pub fn local_stt_status(state: State<'_, AppState>) -> crate::local_stt::Status {
-    crate::local_stt::status(&state.app_data_dir)
+pub async fn local_stt_status(state: State<'_, AppState>) -> AppResult<crate::local_stt::Status> {
+    Ok(crate::local_stt::status(&state.app_data_dir).await)
 }
 
 /// Download whisper.cpp's server (once) and `model`, verified, reporting
@@ -679,8 +682,9 @@ pub async fn install_local_stt(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     model: String,
+    gpu: Option<bool>,
 ) -> AppResult<()> {
-    crate::local_stt::install(&app, &state.http, &state.app_data_dir, &model).await
+    crate::local_stt::install(&app, &state.http, &state.app_data_dir, &model, gpu.unwrap_or(false)).await
 }
 
 #[tauri::command]

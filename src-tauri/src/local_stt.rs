@@ -15,6 +15,15 @@
 //! - **Models** come from the whisper.cpp model repository, pinned to a commit
 //!   and verified by hash, so a file that changes upstream is refused rather
 //!   than run.
+//! - **The GPU** (Windows + NVIDIA): whisper.cpp's CUDA 12.4 package, which
+//!   bundles cuBLAS and the CUDA runtime so only a driver is needed. Measured
+//!   on an RTX 4070 Ti SUPER with Large v3 Turbo and an 11 s clip: ~16 s on the
+//!   CPU build, ~0.13 s on this one. It is 675 MB, so it is offered rather
+//!   than forced, and it runs on the CPU (`-ng`, or by itself when CUDA cannot
+//!   start) — one download covers both, and a machine whose driver is too old
+//!   gets the CPU speed rather than an error. The CUDA 11.8 package is smaller
+//!   but does not bundle cuBLAS, so its GPU backend silently fails to load
+//!   without a CUDA toolkit installed; it is deliberately not used.
 //! - **Running** is lazy: the server starts on the first transcription, and
 //!   stops after ten idle minutes and when the app quits, so a model is not
 //!   holding memory for a feature that was used once.
@@ -56,7 +65,7 @@ pub const MODELS: &[Model] = &[
     Model { id: "base", label: "Base (multilingual)", size: 147_951_465, sha256: "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe", multilingual: true, note: "Base, for languages other than English." },
     Model { id: "small.en", label: "Small (English)", size: 487_614_201, sha256: "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d", multilingual: false, note: "Noticeably more accurate; a second or two per sentence on a laptop." },
     Model { id: "small", label: "Small (multilingual)", size: 487_601_967, sha256: "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b", multilingual: true, note: "Small, for languages other than English." },
-    Model { id: "large-v3-turbo-q5_0", label: "Large v3 Turbo (multilingual)", size: 574_041_195, sha256: "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2", multilingual: true, note: "Best accuracy, every language. Wants a fast CPU." },
+    Model { id: "large-v3-turbo-q5_0", label: "Large v3 Turbo (multilingual)", size: 574_041_195, sha256: "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2", multilingual: true, note: "Best accuracy, every language. Instant on a GPU; slow on most CPUs." },
 ];
 
 pub fn model(id: &str) -> Option<&'static Model> {
@@ -85,11 +94,65 @@ fn model_path(data_dir: &Path, id: &str) -> PathBuf {
     root(data_dir).join("models").join(format!("ggml-{id}.bin"))
 }
 
-/// The server to run: the downloaded one, or one already on PATH.
+/// The CUDA build: asset, SHA-256, server path, download size.
+fn cuda_asset() -> Option<(&'static str, &'static str, &'static str, u64)> {
+    cfg!(all(windows, target_arch = "x86_64")).then_some((
+        "whisper-cublas-12.4.0-bin-x64.zip",
+        "443110ddaad70d4290ab2e77179e31cf712035bbc4fad56bb4519a90c917b39c",
+        "Release/whisper-server.exe",
+        670_611_449,
+    ))
+}
+
+fn cuda_server(data_dir: &Path) -> Option<PathBuf> {
+    let (_, _, rel, _) = cuda_asset()?;
+    let p = root(data_dir).join(format!("{WHISPER_RELEASE}-cuda")).join(rel);
+    p.is_file().then_some(p)
+}
+
+fn cpu_server(data_dir: &Path) -> Option<PathBuf> {
+    let (_, _, rel) = engine_asset()?;
+    let p = root(data_dir).join(WHISPER_RELEASE).join(rel);
+    p.is_file().then_some(p)
+}
+
+/// The NVIDIA GPU's name, when there is one. `nvcuda.dll` is what the driver
+/// installs and what the CUDA build needs; `nvidia-smi` comes with it.
+async fn nvidia_gpu() -> Option<String> {
+    static GPU: tokio::sync::OnceCell<Option<String>> = tokio::sync::OnceCell::const_new();
+    GPU.get_or_init(|| async {
+        if !cfg!(windows) {
+            return None;
+        }
+        let sys = PathBuf::from(std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into())).join("System32");
+        if !sys.join("nvcuda.dll").is_file() {
+            return None;
+        }
+        let mut cmd = tokio::process::Command::new(sys.join("nvidia-smi.exe"));
+        cmd.args(["--query-gpu=name", "--format=csv,noheader"]);
+        #[cfg(windows)]
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        let name = cmd
+            .output()
+            .await
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .and_then(|s| s.lines().next().map(|l| l.trim().to_string()))
+            .filter(|s| !s.is_empty());
+        Some(name.unwrap_or_else(|| "NVIDIA GPU".into()))
+    })
+    .await
+    .clone()
+}
+
+/// The server to run: the downloaded CUDA build if there is one (it runs on
+/// the CPU too), then the CPU build, then one already on PATH.
 fn server_path(data_dir: &Path) -> Option<PathBuf> {
-    if let Some((_, _, rel)) = engine_asset() {
-        let p = root(data_dir).join(WHISPER_RELEASE).join(rel);
-        return p.is_file().then_some(p);
+    if let Some(p) = cuda_server(data_dir).or_else(|| cpu_server(data_dir)) {
+        return Some(p);
+    }
+    if engine_asset().is_some() {
+        return None;
     }
     let exe = if cfg!(windows) { "whisper-server.exe" } else { "whisper-server" };
     std::env::var_os("PATH")
@@ -118,13 +181,28 @@ pub struct Status {
     /// The model the server is running right now, if it is.
     running_model: Option<String>,
     installing: bool,
+    /// The NVIDIA GPU found, when the GPU build can be offered for it.
+    gpu: Option<String>,
+    gpu_engine_installed: bool,
+    gpu_engine_size: u64,
+    /// Whether the running server actually got the GPU.
+    running_on_gpu: Option<bool>,
 }
 
-pub fn status(data_dir: &Path) -> Status {
+pub async fn status(data_dir: &Path) -> Status {
     let engine_installed = server_path(data_dir).is_some();
+    let gpu = match cuda_asset() {
+        Some(_) => nvidia_gpu().await,
+        None => None,
+    };
+    let running = SERVER.lock().ok().and_then(|s| s.as_ref().map(|s| (s.model.clone(), s.on_gpu)));
     Status {
         supported: engine_asset().is_some() || engine_installed,
         engine_installed,
+        gpu,
+        gpu_engine_installed: cuda_server(data_dir).is_some(),
+        gpu_engine_size: cuda_asset().map_or(0, |a| a.3),
+        running_on_gpu: running.as_ref().map(|r| r.1),
         models: MODELS
             .iter()
             .map(|m| ModelView {
@@ -136,7 +214,7 @@ pub fn status(data_dir: &Path) -> Status {
                 installed: model_path(data_dir, m.id).is_file(),
             })
             .collect(),
-        running_model: SERVER.lock().ok().and_then(|s| s.as_ref().map(|s| s.model.clone())),
+        running_model: running.map(|r| r.0),
         installing: INSTALLING.load(Ordering::Relaxed),
     }
 }
@@ -159,19 +237,31 @@ struct Progress<'a> {
 
 /// Download (if needed) the engine and `model_id`. Returns once both are on
 /// disk and verified. One install at a time.
-pub async fn install(app: &AppHandle, http: &reqwest::Client, data_dir: &Path, model_id: &str) -> AppResult<()> {
+pub async fn install(app: &AppHandle, http: &reqwest::Client, data_dir: &Path, model_id: &str, gpu: bool) -> AppResult<()> {
     let m = model(model_id).ok_or_else(|| AppError::Invalid(format!("unknown model {model_id}")))?;
     if INSTALLING.swap(true, Ordering::SeqCst) {
         return Err(AppError::Other("a download is already running".into()));
     }
     CANCEL.store(false, Ordering::Relaxed);
-    let result = install_inner(app, http, data_dir, m).await;
+    let result = install_inner(app, http, data_dir, m, gpu).await;
     INSTALLING.store(false, Ordering::SeqCst);
     let _ = app.emit("local-stt-progress", Progress { stage: "done", received: 0, total: 0 });
     result
 }
 
-async fn install_inner(app: &AppHandle, http: &reqwest::Client, data_dir: &Path, m: &Model) -> AppResult<()> {
+async fn install_inner(app: &AppHandle, http: &reqwest::Client, data_dir: &Path, m: &Model, gpu: bool) -> AppResult<()> {
+    if let (true, Some((asset, sha, _, _)), None) = (gpu, cuda_asset(), cuda_server(data_dir)) {
+        let dir = root(data_dir).join(format!("{WHISPER_RELEASE}-cuda"));
+        std::fs::create_dir_all(&dir)?;
+        let archive = dir.join(asset);
+        let url = format!("https://github.com/ggml-org/whisper.cpp/releases/download/{WHISPER_RELEASE}/{asset}");
+        download(app, http, &url, &archive, sha, None, "gpu").await?;
+        extract(&archive, &dir).await?;
+        let _ = std::fs::remove_file(&archive);
+        if cuda_server(data_dir).is_none() {
+            return Err(AppError::Other("the whisper.cpp GPU download did not contain its server".into()));
+        }
+    }
     if server_path(data_dir).is_none() {
         let Some((asset, sha, _)) = engine_asset() else {
             return Err(AppError::Other(
@@ -297,6 +387,10 @@ struct Server {
     child: std::process::Child,
     port: u16,
     model: String,
+    /// Asked to use the GPU. A change restarts the server.
+    gpu: bool,
+    /// Whether it actually got one, from its own startup log.
+    on_gpu: bool,
     last_used: Instant,
 }
 
@@ -311,13 +405,13 @@ static STARTING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 const IDLE: Duration = Duration::from_secs(10 * 60);
 
 /// The base URL of a server running `model_id`, starting one if needed.
-pub async fn ensure_running(data_dir: &Path, model_id: &str) -> AppResult<String> {
+pub async fn ensure_running(data_dir: &Path, model_id: &str, gpu: bool) -> AppResult<String> {
     let _starting = STARTING.lock().await;
     {
         let mut guard = SERVER.lock().map_err(|_| AppError::Other("whisper server state poisoned".into()))?;
         if let Some(s) = guard.as_mut() {
             let alive = matches!(s.child.try_wait(), Ok(None));
-            if alive && s.model == model_id {
+            if alive && s.model == model_id && s.gpu == gpu {
                 s.last_used = Instant::now();
                 return Ok(format!("http://127.0.0.1:{}/v1", s.port));
             }
@@ -348,6 +442,7 @@ pub async fn ensure_running(data_dir: &Path, model_id: &str) -> AppResult<String
         .args(["--inference-path", "/v1/audio/transcriptions"])
         .args(["-l", if m.multilingual { "auto" } else { "en" }])
         .args(["-t", &threads.to_string()])
+        .args(if gpu { &[][..] } else { &["-ng"][..] })
         .stdin(std::process::Stdio::null())
         .stdout(log.try_clone()?)
         .stderr(log);
@@ -388,8 +483,12 @@ pub async fn ensure_running(data_dir: &Path, model_id: &str) -> AppResult<String
         tokio::time::sleep(Duration::from_millis(150)).await;
     }
 
+    let on_gpu = gpu
+        && std::fs::read_to_string(root(data_dir).join("server.log"))
+            .map(|l| l.contains("found GPU device"))
+            .unwrap_or(false);
     if let Ok(mut guard) = SERVER.lock() {
-        *guard = Some(Server { child, port, model: model_id.to_string(), last_used: Instant::now() });
+        *guard = Some(Server { child, port, model: model_id.to_string(), gpu, on_gpu, last_used: Instant::now() });
     }
     tokio::spawn(async {
         loop {
@@ -434,8 +533,12 @@ mod tests {
     #[ignore]
     async fn a_real_server_transcribes_through_the_dictation_path() {
         let dir = PathBuf::from(std::env::var("MULTIZONE_WHISPER_TEST_DIR").expect("set MULTIZONE_WHISPER_TEST_DIR"));
-        let url = ensure_running(&dir, "tiny.en").await.unwrap();
-        let again = ensure_running(&dir, "tiny.en").await.unwrap();
+        let gpu = std::env::var("MULTIZONE_WHISPER_TEST_GPU").is_ok();
+        if gpu {
+            assert!(nvidia_gpu().await.is_some(), "an NVIDIA GPU is detected");
+        }
+        let url = ensure_running(&dir, "tiny.en", gpu).await.unwrap();
+        let again = ensure_running(&dir, "tiny.en", gpu).await.unwrap();
         assert_eq!(url, again, "a running server is reused");
         let wav = std::fs::read(dir.join("jfk.wav")).unwrap();
         let out = crate::stt_api::transcribe_via_provider(
@@ -443,7 +546,9 @@ mod tests {
         )
         .await
         .unwrap();
+        let on_gpu = SERVER.lock().unwrap().as_ref().map(|s| s.on_gpu);
         shutdown();
+        assert_eq!(on_gpu, Some(gpu), "the server reports where it is running");
         assert!(out.text.to_lowercase().contains("ask not what your country"), "{}", out.text);
         assert!(!out.text.contains('\n'), "segments are joined into one line: {:?}", out.text);
     }

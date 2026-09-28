@@ -97,7 +97,7 @@ const SERIES_MARKER = [
 ] as const;
 type MarkerShape = (typeof SERIES_MARKER)[number];
 
-function seriesColor(theme: ChartTheme, index: number, override?: string): string {
+export function seriesColor(theme: ChartTheme, index: number, override?: string): string {
   if (override) return override;
   if (index === 0) return theme.accent;
   return SERIES_HUES[theme.mode][index % SERIES_HUES[theme.mode].length];

@@ -734,7 +734,7 @@ async function renderVisuals(
           }),
         );
       } else if (name === "plot_function") {
-        const plot = toMathPlotData(item.args ?? body);
+        const plot = toMathPlotData(body?.functions ? body : item.args);
         if (!plot) continue;
         const svg = renderPlotSvg(plot);
         if (svg) cache.set(key, svg);

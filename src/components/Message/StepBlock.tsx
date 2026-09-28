@@ -457,7 +457,8 @@ function renderToolOutput(
   if (!parsed || typeof parsed !== "object" || "error" in parsed) return null;
 
   if (name === "plot_function") {
-    const data = toMathPlotData(args ?? parsed);
+    // The result carries the normalised expressions (0.18.1); older calls only echo.
+    const data = toMathPlotData(parsed?.functions ? parsed : args);
     if (!data) return null;
     return (
       <>

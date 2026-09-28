@@ -9,54 +9,48 @@ pub fn definitions(ctx: &ToolContext) -> Vec<Tool> {
             tool_type: "function".into(),
             function: ToolFunction {
                 name: "plot_function".into(),
-                description:
-                    "Render a mathematical function plot inline in the chat. Use this whenever the user asks you to graph, plot, or visualize an equation or function. Always specify explicit x_range and y_range; use sensible defaults like [-10, 10] when the user does not specify a domain."
-                        .into(),
+                description: PLOT_DESCRIPTION.into(),
                 parameters: json!({
                     "type": "object",
                     "properties": {
-                        "title": {
-                            "type": "string",
-                            "description": "Optional plot title"
-                        },
-                        "x_range": {
-                            "type": "array",
-                            "items": { "type": "number" },
-                            "minItems": 2,
-                            "maxItems": 2,
-                            "description": "Visible x-axis domain as [min, max], e.g. [-10, 10]"
-                        },
-                        "y_range": {
-                            "type": "array",
-                            "items": { "type": "number" },
-                            "minItems": 2,
-                            "maxItems": 2,
-                            "description": "Visible y-axis domain as [min, max], e.g. [-5, 5]"
-                        },
+                        "title": { "type": "string" },
                         "functions": {
                             "type": "array",
+                            "minItems": 1,
+                            "description": "One entry per curve",
                             "items": {
                                 "type": "object",
                                 "properties": {
-                                    "fn": {
+                                    "type": {
                                         "type": "string",
-                                        "description": "Function expression in x, e.g. 'x^2', 'sin(x)', '2*x + 3'"
+                                        "enum": ["linear", "parametric", "polar", "implicit"],
+                                        "description": "linear (default): y = fn(x). parametric: x(t), y(t). polar: r(theta). implicit: fn(x, y) = 0"
                                     },
-                                    "color": {
-                                        "type": "string",
-                                        "description": "Optional hex color like '#4f9cf9'"
-                                    }
-                                },
-                                "required": ["fn"]
-                            },
-                            "minItems": 1,
-                            "description": "One entry per function/curve to plot"
+                                    "fn": { "type": "string", "description": "linear: in x, e.g. 'x^2 - 3*x'. implicit: in x and y, e.g. 'x^2 + y^2 - 4'" },
+                                    "x": { "type": "string", "description": "parametric: x in terms of t" },
+                                    "y": { "type": "string", "description": "parametric: y in terms of t" },
+                                    "r": { "type": "string", "description": "polar: r in terms of theta" },
+                                    "range": {
+                                        "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2,
+                                        "description": "parametric/polar: the t or theta interval. Default [0, 2*pi]"
+                                    },
+                                    "label": { "type": "string", "description": "Legend text. Defaults to the expression" }
+                                }
+                            }
+                        },
+                        "x_range": {
+                            "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2,
+                            "description": "Visible x domain [min, max]. Default [-10, 10] for y = f(x); omit to fit other curves"
+                        },
+                        "y_range": {
+                            "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2,
+                            "description": "Visible y domain [min, max]. Omit to fit the curves"
                         },
                         "x_label": { "type": "string" },
                         "y_label": { "type": "string" },
                         "caption": { "type": "string" }
                     },
-                    "required": ["x_range", "y_range", "functions"]
+                    "required": ["functions"]
                 }),
             },
         },
@@ -138,6 +132,14 @@ pub fn definitions(ctx: &ToolContext) -> Vec<Tool> {
     ]
 }
 
+const PLOT_DESCRIPTION: &str = concat!(
+    "Plot mathematical functions inline in the chat: y = f(x), parametric, polar or implicit curves. ",
+    "Use it whenever the user asks to graph, plot or visualise an equation; `render_chart` is for data.\n",
+    "Write expressions in plain math: `x^2`, `2*x + 1`, `sin(x)`, `exp(-x^2)`, `log(x)` (natural), `sqrt`, `abs`, `pi`, `e`. ",
+    "`**`, `Math.sin`, `np.exp`, `ln` and `2x` are accepted and normalised; anything else is refused with the reason. ",
+    "Leave colour to the app. Omit y_range to fit the curves. Say in words what the plot shows as well.",
+);
+
 /// Nothing here varies with the theme, deliberately: the chart's palette is
 /// resolved by the renderer from the colours actually on screen, so the model
 /// is told to leave colour alone rather than being handed a palette to reason
@@ -174,27 +176,245 @@ fn build_draw_diagram_description(ctx: &ToolContext) -> String {
     )
 }
 
+/// Validates, normalises and echoes (0.18.1). The drawing happens in the
+/// frontend, but an expression it cannot parse used to reach it anyway and draw
+/// an error box — while the model, holding a successful tool result, carried on
+/// describing a plot nobody could see. Every expression is checked here, so a
+/// mistake comes back as an error the model can fix, and the frontend is handed
+/// the normalised form.
 pub async fn plot(args: &Value) -> AppResult<String> {
-    if args.get("x_range").is_none()
-        || args.get("y_range").is_none()
-        || args.get("functions").is_none()
-    {
-        return Ok(json!({
-            "error": "plot_function requires x_range, y_range, and functions"
-        })
-        .to_string());
+    match plot_spec(args) {
+        Ok(spec) => Ok(spec.to_string()),
+        Err(e) => Ok(json!({ "error": format!("plot_function: {e}") }).to_string()),
     }
+}
+
+fn plot_spec(args: &Value) -> Result<Value, String> {
+    let fns = args
+        .get("functions")
+        .and_then(|v| v.as_array())
+        .filter(|a| !a.is_empty())
+        .ok_or("`functions` must be a non-empty array")?;
+    let mut out = Vec::new();
+    for (i, f) in fns.iter().enumerate() {
+        // A bare string is a linear function — the shape models reach for first.
+        let f = match f {
+            Value::String(s) => json!({ "fn": s }),
+            other => other.clone(),
+        };
+        let kind = f.get("type").and_then(|v| v.as_str()).unwrap_or("linear");
+        let field = |name: &str| -> Result<String, String> {
+            let raw = f
+                .get(name)
+                .and_then(|v| v.as_str())
+                .ok_or(format!("functions[{i}] ({kind}) needs `{name}`"))?;
+            let vars: &[&str] = match kind {
+                "parametric" => &["t"],
+                "polar" => &["theta"],
+                "implicit" => &["x", "y"],
+                _ => &["x"],
+            };
+            normalize_expr(raw, vars).map_err(|e| format!("functions[{i}] `{raw}`: {e}"))
+        };
+        let mut entry = json!({ "type": kind });
+        match kind {
+            "linear" | "implicit" => entry["fn"] = json!(field("fn")?),
+            "parametric" => {
+                entry["x"] = json!(field("x")?);
+                entry["y"] = json!(field("y")?);
+            }
+            "polar" => entry["r"] = json!(field("r")?),
+            other => return Err(format!("functions[{i}]: unknown type `{other}`")),
+        }
+        for key in ["range", "label", "color"] {
+            if let Some(v) = f.get(key) {
+                entry[key] = v.clone();
+            }
+        }
+        out.push(entry);
+    }
+    let range = |key: &str| -> Result<Option<Value>, String> {
+        match args.get(key) {
+            None | Some(Value::Null) => Ok(None),
+            Some(v) => {
+                let pair = v.as_array().filter(|a| a.len() == 2).and_then(|a| Some((a[0].as_f64()?, a[1].as_f64()?)));
+                match pair {
+                    Some((lo, hi)) if lo < hi => Ok(Some(json!([lo, hi]))),
+                    _ => Err(format!("`{key}` must be [min, max] with min < max")),
+                }
+            }
+        }
+    };
     Ok(json!({
         "rendered": "plot_function",
         "title": args.get("title"),
-        "x_range": args.get("x_range"),
-        "y_range": args.get("y_range"),
+        "x_range": range("x_range")?,
+        "y_range": range("y_range")?,
         "x_label": args.get("x_label"),
         "y_label": args.get("y_label"),
-        "functions": args.get("functions"),
+        "functions": out,
         "caption": args.get("caption"),
-    })
-    .to_string())
+    }))
+}
+
+/// Names function-plot's evaluators understand — `Math` plus a few helpers.
+const PLOT_FUNCS: &[&str] = &[
+    "sin", "cos", "tan", "asin", "acos", "atan", "sinh", "cosh", "tanh", "asinh", "acosh", "atanh",
+    "exp", "log", "log10", "log2", "sqrt", "cbrt", "abs", "sign", "floor", "ceil", "round",
+    "min", "max", "pow", "nthRoot",
+];
+
+/// Rewrite the forms models write into the plotter's grammar, and refuse
+/// anything it would choke on. Tokenises rather than pattern-replaces, so `e`
+/// in `exp` or `1e-3` is never mistaken for Euler's number.
+pub(crate) fn normalize_expr(raw: &str, vars: &[&str]) -> Result<String, String> {
+    let mut src = raw.trim().replace("**", "^").replace('\u{03c0}', "pi").replace('\u{2212}', "-");
+    // `y = x^2`, `f(x) = …`, `r = …`: keep the right-hand side. Implicit
+    // equations keep both sides as `lhs - (rhs)`.
+    if let Some(eq) = src.find('=') {
+        let (lhs, rhs) = (src[..eq].trim().to_string(), src[eq + 1..].trim().to_string());
+        src = if vars.contains(&"y") { format!("({lhs}) - ({rhs})") } else { rhs };
+    }
+    for prefix in ["Math.", "math.", "np.", "numpy."] {
+        src = src.replace(prefix, "");
+    }
+    if src.is_empty() {
+        return Err("empty expression".into());
+    }
+
+    #[derive(PartialEq, Clone, Copy)]
+    enum K { Num, Name, Open, Close, Op, Comma }
+    let chars: Vec<char> = src.chars().collect();
+    let mut out = String::new();
+    let mut prev: Option<K> = None;
+    let mut depth = 0i32;
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c.is_whitespace() {
+            i += 1;
+            continue;
+        }
+        let (kind, text) = if c.is_ascii_digit() || (c == '.' && chars.get(i + 1).is_some_and(|d| d.is_ascii_digit())) {
+            let start = i;
+            while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '.') {
+                i += 1;
+            }
+            // Scientific notation belongs to the number.
+            if i < chars.len() && (chars[i] == 'e' || chars[i] == 'E') {
+                let j = if chars.get(i + 1).is_some_and(|c| *c == '-' || *c == '+') { i + 2 } else { i + 1 };
+                if chars.get(j).is_some_and(|d| d.is_ascii_digit()) {
+                    i = j;
+                    while i < chars.len() && chars[i].is_ascii_digit() {
+                        i += 1;
+                    }
+                }
+            }
+            (K::Num, chars[start..i].iter().collect::<String>())
+        } else if c.is_ascii_alphabetic() || c == '_' {
+            let start = i;
+            while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+                i += 1;
+            }
+            let name: String = chars[start..i].iter().collect();
+            let mapped = match name.as_str() {
+                "pi" | "PI" | "Pi" => "PI".to_string(),
+                "e" | "E" => "E".to_string(),
+                "ln" => "log".to_string(),
+                "arcsin" => "asin".to_string(),
+                "arccos" => "acos".to_string(),
+                "arctan" => "atan".to_string(),
+                "sqr" => "sqrt".to_string(),
+                n if vars.contains(&n) || PLOT_FUNCS.contains(&n) => n.to_string(),
+                n => {
+                    return Err(format!(
+                        "unknown name `{n}` — use {} and functions like sin, exp, log, sqrt, abs",
+                        vars.iter().map(|v| format!("`{v}`")).collect::<Vec<_>>().join(" and ")
+                    ))
+                }
+            };
+            (K::Name, mapped)
+        } else {
+            i += 1;
+            match c {
+                '(' | '[' => { depth += 1; (K::Open, "(".to_string()) }
+                ')' | ']' => {
+                    depth -= 1;
+                    if depth < 0 { return Err("unbalanced parentheses".into()); }
+                    (K::Close, ")".to_string())
+                }
+                '+' | '-' | '*' | '/' | '^' | '%' | '!' => (K::Op, c.to_string()),
+                ',' => (K::Comma, ",".to_string()),
+                other => return Err(format!("unexpected `{other}`")),
+            }
+        };
+        // Implicit multiplication: `2x`, `2(x+1)`, `(x)(x)`, `x sin(x)`. A name
+        // directly before `(` is a call, so that case is left alone.
+        let implicit = match (prev, kind) {
+            (Some(K::Num), K::Name | K::Open) => true,
+            (Some(K::Close), K::Num | K::Name | K::Open) => true,
+            (Some(K::Name), K::Num | K::Name) => true,
+            _ => false,
+        };
+        if implicit {
+            out.push('*');
+        }
+        out.push_str(&text);
+        prev = Some(kind);
+    }
+    if depth != 0 {
+        return Err("unbalanced parentheses".into());
+    }
+    if matches!(prev, Some(K::Op | K::Open | K::Comma)) && !out.ends_with('!') {
+        return Err("expression ends early".into());
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod plot_tests {
+    use super::*;
+
+    #[test]
+    fn model_forms_are_normalised() {
+        let x = &["x"];
+        assert_eq!(normalize_expr("x**2", x).unwrap(), "x^2");
+        assert_eq!(normalize_expr("Math.sin(x) + np.exp(x)", x).unwrap(), "sin(x)+exp(x)");
+        assert_eq!(normalize_expr("2x + 3", x).unwrap(), "2*x+3");
+        assert_eq!(normalize_expr("ln(x)", x).unwrap(), "log(x)");
+        assert_eq!(normalize_expr("e^(-x^2)", x).unwrap(), "E^(-x^2)");
+        assert_eq!(normalize_expr("y = 2*pi*x", x).unwrap(), "2*PI*x");
+        assert_eq!(normalize_expr("1e-3*x", x).unwrap(), "1e-3*x");
+        assert_eq!(normalize_expr("exp(x)", x).unwrap(), "exp(x)");
+        assert_eq!(normalize_expr("(x+1)(x-1)", x).unwrap(), "(x+1)*(x-1)");
+    }
+
+    #[test]
+    fn implicit_equations_keep_both_sides() {
+        assert_eq!(normalize_expr("x^2 + y^2 = 4", &["x", "y"]).unwrap(), "(x^2+y^2)-(4)");
+        assert_eq!(normalize_expr("y = x^2", &["x", "y"]).unwrap(), "(y)-(x^2)");
+    }
+
+    #[test]
+    fn mistakes_are_refused_with_a_reason() {
+        assert!(normalize_expr("sin(z)", &["x"]).unwrap_err().contains("`z`"));
+        assert!(normalize_expr("sin(x", &["x"]).unwrap_err().contains("parentheses"));
+        assert!(normalize_expr("x +", &["x"]).is_err());
+        assert!(normalize_expr("x; alert(1)", &["x"]).is_err());
+    }
+
+    #[test]
+    fn a_spec_without_y_range_is_accepted_and_fitted_later() {
+        let v = plot_spec(&json!({ "functions": ["x**3"] })).unwrap();
+        assert_eq!(v["functions"][0]["fn"], "x^3");
+        assert!(v["x_range"].is_null());
+        assert!(v["y_range"].is_null());
+    }
+
+    #[test]
+    fn a_bad_range_is_named() {
+        assert!(plot_spec(&json!({ "functions": ["x"], "x_range": [5, 1] })).unwrap_err().contains("x_range"));
+    }
 }
 
 /// Like `plot` and `draw`, this validates and echoes: the drawing happens in the

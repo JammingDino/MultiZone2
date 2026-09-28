@@ -219,7 +219,9 @@ fn parse_transcription(body: &str) -> Option<Transcription> {
     }
     if let Ok(parsed) = serde_json::from_str::<TranscriptionResponse>(trimmed) {
         return Some(Transcription {
-            text: parsed.text.trim().to_string(),
+            // whisper.cpp's server joins its segments with "\n " — a line
+            // break mid-sentence in the composer. Nobody else answers that way.
+            text: parsed.text.replace("\n ", " ").trim().to_string(),
             language: parsed.language.filter(|l| !l.is_empty()),
             duration_secs: parsed.duration,
             segments: parsed.segments,

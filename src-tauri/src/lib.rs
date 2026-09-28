@@ -32,6 +32,8 @@ mod knowledge;
 #[cfg(desktop)]
 mod llm;
 #[cfg(desktop)]
+mod local_stt;
+#[cfg(desktop)]
 mod mcp;
 #[cfg(desktop)]
 mod ocr;
@@ -466,6 +468,10 @@ pub fn run() {
             commands::voice::delete_cloned_voice,
             commands::voice::transcribe_audio_file,
             commands::voice::transcribe_audio_upload,
+            commands::voice::local_stt_status,
+            commands::voice::install_local_stt,
+            commands::voice::cancel_local_stt_install,
+            commands::voice::remove_local_stt_model,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -476,6 +482,7 @@ pub fn run() {
             // no window left to stop it from.
             if let tauri::RunEvent::Exit = event {
                 tauri::async_runtime::block_on(tools::terminal::shutdown_all());
+                local_stt::shutdown();
             }
         });
 }

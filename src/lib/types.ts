@@ -159,6 +159,30 @@ export interface ScheduleInput {
   enabled?: boolean;
 }
 
+/** Local dictation (0.18) — see `local_stt.rs`. */
+export interface LocalSttModel {
+  id: string;
+  label: string;
+  sizeBytes: number;
+  multilingual: boolean;
+  note: string;
+  installed: boolean;
+}
+export interface LocalSttStatus {
+  /** A prebuilt engine exists for this platform, or one is on PATH. */
+  supported: boolean;
+  engineInstalled: boolean;
+  models: LocalSttModel[];
+  runningModel: string | null;
+  installing: boolean;
+}
+export interface LocalSttProgress {
+  /** `engine`, `model`, or `done`. */
+  stage: string;
+  received: number;
+  total: number;
+}
+
 /** A note the model marked important in a rolling-context chat (0.18). */
 export interface ContextPin {
   id: string;

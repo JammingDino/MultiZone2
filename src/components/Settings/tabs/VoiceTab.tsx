@@ -7,6 +7,7 @@ import { Toggle, ToggleRow } from "@/components/common/Toggle";
 import type { Provider } from "@/lib/types";
 import { reportError } from "@/lib/reportError";
 import { OptionCards, SettingSelect, SliderRow } from "../controls";
+import { LocalDictation, LOCAL_STT_PROVIDER } from "../LocalDictation";
 
 export function VoiceTab() {
   const appSettings = useApp((s) => s.appSettings);
@@ -17,7 +18,7 @@ export function VoiceTab() {
   const [providerModels, setProviderModels] = useState<string[]>([]);
 
   useEffect(() => {
-    if (!appSettings.sttProviderId) { setProviderModels([]); return; }
+    if (!appSettings.sttProviderId || appSettings.sttProviderId === LOCAL_STT_PROVIDER) { setProviderModels([]); return; }
     let cancelled = false;
     api.fetchModels(appSettings.sttProviderId)
       .then((m) => { if (!cancelled) setProviderModels(m); })
@@ -29,15 +30,31 @@ export function VoiceTab() {
     refreshVoiceInputDevices().catch(reportError("Couldn't list microphones"));
   }, [refreshVoiceInputDevices]);
 
+  const local = appSettings.sttProviderId === LOCAL_STT_PROVIDER;
+
   return (
     <div className="flex flex-col gap-6">
+      {/* The download and the server live on the desktop, so a phone
+          driving it remotely cannot set this up from here. */}
+      {!isRemote() && <LocalDictation />}
+
       <section>
         <h3 className="mb-1 text-sm font-medium">Dictation provider</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
           Any provider with an OpenAI-compatible <span className="font-mono">/audio/transcriptions</span>{" "}
           endpoint — including a local whisper server, which keeps recordings on this machine.
         </p>
-        {providers.length === 0 ? (
+        {local ? (
+          <p className="text-xs text-[var(--color-text-muted)]">
+            Using this computer (see above).{" "}
+            <button
+              onClick={() => setAppSettings({ sttProviderId: null, sttModel: "" })}
+              className="underline hover:text-[var(--color-text)]"
+            >
+              Use a provider instead
+            </button>
+          </p>
+        ) : providers.length === 0 ? (
           <p className="text-xs text-amber-600 dark:text-amber-400">
             No providers configured yet — add one in the Providers tab, then choose it here.
           </p>

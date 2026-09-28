@@ -75,6 +75,13 @@ async fn stt_config(state: &AppState) -> AppResult<(String, Option<String>, Stri
                 .to_string(),
         ));
     }
+    let lang = Some(settings.stt_language.clone()).filter(|l| !l.is_empty());
+    // Dictation on this computer (0.18): no provider row, a server this app
+    // starts on demand. Everything past here treats it as any other provider.
+    if provider_id == crate::local_stt::PROVIDER_ID {
+        let url = crate::local_stt::ensure_running(&state.app_data_dir, &settings.stt_model).await?;
+        return Ok((url, None, settings.stt_model, lang));
+    }
     let provider: Option<(String, Option<String>)> =
         sqlx::query_as("SELECT base_url, api_key FROM providers WHERE id = ?1")
             .bind(&provider_id)
@@ -83,7 +90,6 @@ async fn stt_config(state: &AppState) -> AppResult<(String, Option<String>, Stri
     let (base_url, api_key) = provider.ok_or_else(|| {
         AppError::NotFound(format!("transcription provider not found: {provider_id}"))
     })?;
-    let lang = Some(settings.stt_language).filter(|l| !l.is_empty());
     Ok((base_url, api_key, settings.stt_model, lang))
 }
 
@@ -658,4 +664,31 @@ pub async fn cancel_dictation(state: State<'_, AppState>, session_id: String) ->
         .await
         .map_err(|e| AppError::Other(format!("capture cancel task failed: {e}")))?;
     Ok(())
+}
+
+/// What local dictation has installed and is running (0.18).
+#[tauri::command]
+pub fn local_stt_status(state: State<'_, AppState>) -> crate::local_stt::Status {
+    crate::local_stt::status(&state.app_data_dir)
+}
+
+/// Download whisper.cpp's server (once) and `model`, verified, reporting
+/// progress as `local-stt-progress` events. Returns when both are on disk.
+#[tauri::command]
+pub async fn install_local_stt(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    model: String,
+) -> AppResult<()> {
+    crate::local_stt::install(&app, &state.http, &state.app_data_dir, &model).await
+}
+
+#[tauri::command]
+pub fn cancel_local_stt_install() {
+    crate::local_stt::cancel_install();
+}
+
+#[tauri::command]
+pub fn remove_local_stt_model(state: State<'_, AppState>, model: String) -> AppResult<()> {
+    crate::local_stt::remove_model(&state.app_data_dir, &model)
 }

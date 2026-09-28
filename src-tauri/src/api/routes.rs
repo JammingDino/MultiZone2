@@ -482,6 +482,10 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("voice::create_cloned_voice", GuiOnly("uploads a reference sample chosen in a native file dialog")),
     ("voice::delete_cloned_voice", GuiOnly("removes a voice from a picker in Settings")),
     ("voice::transcribe_audio_file", GuiOnly("transcribes a file chosen in a native file dialog")),
+    ("voice::local_stt_status", GuiOnly("local dictation's setup panel in Settings")),
+    ("voice::install_local_stt", GuiOnly("downloads a speech model onto the machine the window is on")),
+    ("voice::cancel_local_stt_install", GuiOnly("stops a download started from Settings")),
+    ("voice::remove_local_stt_model", GuiOnly("deletes a speech model from the machine the window is on")),
     // Was GUI-only until 0.17.4, on the reasoning that the window already holds
     // the bytes. It still does — but the window can now be a phone, and the
     // phone is precisely the device where dictating is the point. Capture

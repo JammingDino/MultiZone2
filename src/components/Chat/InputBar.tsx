@@ -1,5 +1,5 @@
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
-import { Paperclip, Send, X, Loader2, Square, SlidersHorizontal, Zap, Brain, ScanText, AudioLines, Clock, CornerDownRight, ClipboardList } from "lucide-react";
+import { Paperclip, Send, X, Loader2, Square, SlidersHorizontal, Maximize2, Minimize2, Zap, Brain, ScanText, AudioLines, Clock, CornerDownRight, ClipboardList } from "lucide-react";
 import { Popover } from "@/components/common/Popover";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
@@ -54,6 +54,8 @@ interface InputBarProps {
 
 export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
   const [text, setText] = useState("");
+  // A tall editor for reading a long prompt back before it goes (0.18.1).
+  const [expanded, setExpanded] = useState(false);
   // Escape (or a pick) closes the slash menu without clearing what was typed;
   // it re-arms when the text stops being a slash query.
   // A saved run stages its rendered prompt here (0.15.4). Keyed on the nonce so
@@ -301,6 +303,7 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
       const overrideModel = ovModel.trim() || null;
 
       setText("");
+      setExpanded(false);
       tray.clear();
       setSending(false);
       clearOverride();
@@ -481,11 +484,56 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
             </button>
           </div>
         )}
-        <div className="relative flex items-end gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 focus-within:border-[var(--color-accent)]">
+        {/* Two rows (0.18.1): the prompt the full width of the box, so a long one
+            reads as a page rather than a strip beside four buttons, and the
+            controls in a quiet row underneath it. */}
+        <div className="relative rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] px-2.5 pb-1.5 pt-2 focus-within:border-[var(--color-accent)]">
+          {/* MCP prompts and resources (0.15.3). Opens on a `/` in the first
+              column only — a path mid-sentence is not a command. */}
+          {slash !== null && (
+            <SlashMenu
+              query={slash}
+              onPick={(t) => {
+                setText(t);
+                setSlashDismissed(true);
+                taRef.current?.focus();
+              }}
+              onClose={() => setSlashDismissed(true)}
+            />
+          )}
+          <textarea
+            value={text}
+            onChange={(e) => {
+              setText(e.target.value);
+              // Re-arm as soon as the composer is back to a bare slash, so
+              // dismissing once does not disable the menu for the session.
+              if (slashQuery(e.target.value) === null) setSlashDismissed(false);
+            }}
+            onPaste={onPaste}
+            onKeyDown={(e) => {
+              const trigger = sendKey === "ctrl_enter"
+                ? e.key === "Enter" && (e.ctrlKey || e.metaKey)
+                : e.key === "Enter" && !e.shiftKey;
+              if (trigger) {
+                e.preventDefault();
+                if (isStreaming) onQueue();
+                else onSend();
+              }
+            }}
+            ref={taRef}
+            rows={1}
+            placeholder={
+              disabled ? "Configure a zone for this chat first" : "Send a message…"
+            }
+            className="block w-full resize-none overflow-y-auto bg-transparent px-1 py-1 text-sm leading-relaxed outline-none"
+            style={{ maxHeight: expanded ? "70vh" : "40vh", minHeight: expanded ? "40vh" : 24 }}
+            disabled={disabled}
+          />
+          <div className="mt-1 flex items-center gap-0.5">
           <button
             onClick={() => fileRef.current?.click()}
             className={`rounded p-1.5 ${CHROME_QUIET}`}
-            title="Attach file"
+            title="Attach files"
           >
             <Paperclip size={16} />
           </button>
@@ -499,7 +547,6 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
               e.target.value = "";
             }}
           />
-          <MicButton dictation={dictation} disabled={disabled} />
           {conversationEnabled && ttsConfigured && (
             <button
               onClick={toggleConversation}
@@ -568,46 +615,17 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
                 </div>
             </Popover>
           </div>
-          {/* MCP prompts and resources (0.15.3). Opens on a `/` in the first
-              column only — a path mid-sentence is not a command. */}
-          {slash !== null && (
-            <SlashMenu
-              query={slash}
-              onPick={(t) => {
-                setText(t);
-                setSlashDismissed(true);
-                taRef.current?.focus();
-              }}
-              onClose={() => setSlashDismissed(true)}
-            />
-          )}
-          <textarea
-            value={text}
-            onChange={(e) => {
-              setText(e.target.value);
-              // Re-arm as soon as the composer is back to a bare slash, so
-              // dismissing once does not disable the menu for the session.
-              if (slashQuery(e.target.value) === null) setSlashDismissed(false);
-            }}
-            onPaste={onPaste}
-            onKeyDown={(e) => {
-              const trigger = sendKey === "ctrl_enter"
-                ? e.key === "Enter" && (e.ctrlKey || e.metaKey)
-                : e.key === "Enter" && !e.shiftKey;
-              if (trigger) {
-                e.preventDefault();
-                if (isStreaming) onQueue();
-                else onSend();
-              }
-            }}
-            ref={taRef}
-            rows={1}
-            placeholder={
-              disabled ? "Configure a zone for this chat first" : "Send a message…"
-            }
-            className="max-h-40 min-h-[24px] min-w-0 flex-1 resize-none overflow-y-auto bg-transparent px-1 py-1 text-sm outline-none"
-            disabled={disabled}
-          />
+            <div className="flex-1" />
+            {(expanded || text.length > 280 || text.split("\n").length > 5) && (
+              <button
+                onClick={() => { setExpanded((v) => !v); taRef.current?.focus(); }}
+                title={expanded ? "Shrink the prompt box" : "Expand the prompt box to review it"}
+                className={`rounded p-1.5 ${expanded ? CHROME_ACTIVE : CHROME_QUIET}`}
+              >
+                {expanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+              </button>
+            )}
+            <MicButton dictation={dictation} disabled={disabled} />
           {isStreaming ? (
             <>
               <button
@@ -651,6 +669,7 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
               <Send size={16} />
             </button>
           )}
+          </div>
         </div>
       </div>
     </div>

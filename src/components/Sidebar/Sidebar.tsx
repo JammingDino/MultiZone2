@@ -196,10 +196,17 @@ export function Sidebar() {
     </div>
   );
 
+  // Both states render this same <aside>, so React keeps one element and its
+  // width animates each way (0.18.1). Closing used to snap: the rail dropped
+  // the transition class, and a width change without one does not animate.
+  const asideClass = `relative flex h-full flex-shrink-0 flex-col overflow-hidden border-r border-[var(--color-border)] bg-[var(--color-panel)] ${
+    size.dragging ? "" : "transition-[width] duration-200 ease-in-out"
+  }`;
+
   if (!sidebarOpen) {
     return (
-      <aside className="flex h-full w-12 flex-shrink-0 flex-col overflow-hidden border-r border-[var(--color-border)] bg-[var(--color-panel)]">
-        <div className="flex h-12 shrink-0 items-center justify-center border-b border-[var(--color-border)]">
+      <aside className={asideClass} style={{ width: 48 }}>
+        <div className="flex h-12 w-full shrink-0 items-center border-b border-[var(--color-border)] pl-[9px]">
           <button onClick={() => setSidebarOpen(true)} title="Expand sidebar" className={`rounded-md p-1.5 ${CHROME_QUIET}`}>
             <PanelLeftOpen size={16} />
           </button>
@@ -270,12 +277,7 @@ export function Sidebar() {
   );
 
   return (
-    <aside
-      className={`relative flex h-full flex-shrink-0 flex-col overflow-hidden border-r border-[var(--color-border)] bg-[var(--color-panel)] ${
-        size.dragging ? "" : "transition-[width] duration-200 ease-in-out"
-      }`}
-      style={{ width: narrow ? 288 : size.width }}
-    >
+    <aside className={asideClass} style={{ width: narrow ? 288 : size.width }}>
       {!narrow && (
         <ResizeHandle
           side="right"

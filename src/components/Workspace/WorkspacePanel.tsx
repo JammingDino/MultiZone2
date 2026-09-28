@@ -42,15 +42,39 @@ export function WorkspacePanel() {
   // more than the 340px it started at.
   const size = usePanelWidth("ui.workspaceWidth", 360, 260, 720);
 
-  if (!chatId || !open) return null;
+  // Kept mounted through its closing slide, and drawn collapsed for a frame
+  // before opening, so the column animates both ways like the sidebar
+  // (0.18.1). It used to appear and vanish in a single frame.
+  const [mounted, setMounted] = useState(open);
+  const [shown, setShown] = useState(open);
+  useEffect(() => {
+    if (open) {
+      setMounted(true);
+      let inner = 0;
+      const outer = requestAnimationFrame(() => { inner = requestAnimationFrame(() => setShown(true)); });
+      return () => { cancelAnimationFrame(outer); cancelAnimationFrame(inner); };
+    }
+    setShown(false);
+    const t = window.setTimeout(() => setMounted(false), SLIDE_MS);
+    return () => window.clearTimeout(t);
+  }, [open]);
+
+  if (!chatId || !mounted) return null;
 
   const body = <PanelBody chatId={chatId} onClose={() => setOpen(false)} />;
 
   if (narrow) {
     return (
       <>
-        <div className="absolute inset-0 z-30 bg-black/40" onClick={() => setOpen(false)} />
-        <aside className="absolute inset-y-0 right-0 z-40 flex w-[min(92vw,380px)] flex-col border-l border-[var(--color-border)] bg-[var(--color-panel)] shadow-xl">
+        <div
+          className={`absolute inset-0 z-30 bg-black/40 transition-opacity duration-200 ${shown ? "opacity-100" : "opacity-0"}`}
+          onClick={() => setOpen(false)}
+        />
+        <aside
+          className={`absolute inset-y-0 right-0 z-40 flex w-[min(92vw,380px)] flex-col border-l border-[var(--color-border)] bg-[var(--color-panel)] shadow-xl transition-transform duration-200 ease-in-out ${
+            shown ? "translate-x-0" : "translate-x-full"
+          }`}
+        >
           {body}
         </aside>
       </>
@@ -58,8 +82,10 @@ export function WorkspacePanel() {
   }
   return (
     <aside
-      className="relative flex shrink-0 flex-col border-l border-[var(--color-border)] bg-[var(--color-panel)]"
-      style={{ width: size.width }}
+      className={`relative flex shrink-0 flex-col overflow-hidden bg-[var(--color-panel)] ${
+        shown ? "border-l border-[var(--color-border)]" : ""
+      } ${size.dragging ? "" : "transition-[width] duration-200 ease-in-out"}`}
+      style={{ width: shown ? size.width : 0 }}
     >
       <ResizeHandle
         side="left"
@@ -69,10 +95,16 @@ export function WorkspacePanel() {
         onReset={size.reset}
         label="Resize workspace panel"
       />
-      {body}
+      {/* Full width throughout, pinned to the right edge: the column slides
+          in and out rather than its contents re-wrapping at every frame. */}
+      <div className="flex min-h-0 flex-1 flex-col self-end" style={{ width: size.width }}>
+        {body}
+      </div>
     </aside>
   );
 }
+
+const SLIDE_MS = 200;
 
 const TABS: { id: WorkspaceSection; label: string; title: string; icon: ReactNode }[] = [
   { id: "chat", label: "Chat", title: "This chat: project, tags, perspectives", icon: <MessageSquare size={13} /> },

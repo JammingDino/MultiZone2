@@ -1,10 +1,9 @@
 import { useMemo, useRef, useState } from "react";
 import type { Chat, ChatTagLink } from "@/lib/types";
-import { MessageSquare, Pencil, Trash2, Sparkles, Loader2, FolderInput, FolderMinus, GitBranch, ChevronRight, ChevronDown, ShieldAlert, History, FileText, FileType } from "lucide-react";
+import { Pencil, Trash2, Sparkles, Loader2, FolderInput, FolderMinus, ChevronRight, ShieldAlert, History, FileText, FileType } from "lucide-react";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { useShallow } from "zustand/react/shallow";
-import { getZoneIcon } from "@/lib/zoneIcons";
 import { usePersistentSet } from "@/lib/uiState";
 import { Popover, pointRect } from "@/components/common/Popover";
 import { useChatExport } from "@/lib/useChatExport";
@@ -16,6 +15,25 @@ interface Props {
   onSelect: (id: string) => void;
   /** Which project this list lives inside (null = ungrouped section). */
   projectId: string | null;
+  /** Show this many top-level chats, then a "Show N more" row. */
+  limit?: number;
+}
+
+/**
+ * The sidebar's one row shape (0.18.1): projects, chats, branches and the
+ * "show more" line are all this height and size, so the list reads as one
+ * list rather than a stack of differently-sized ones.
+ */
+export const SIDEBAR_ROW = "group flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left text-sm transition-colors";
+
+/** The sidebar's one disclosure glyph: points right when closed, down when open. */
+export function Disclosure({ open }: { open: boolean }) {
+  return (
+    <ChevronRight
+      size={13}
+      className={`shrink-0 transition-transform duration-150 ${open ? "rotate-90" : ""}`}
+    />
+  );
 }
 
 interface MenuState {
@@ -24,8 +42,9 @@ interface MenuState {
   y: number;
 }
 
-export function ChatList({ chats, activeId, onSelect, projectId }: Props) {
+export function ChatList({ chats, activeId, onSelect, projectId, limit }: Props) {
   const [menu, setMenu] = useState<MenuState | null>(null);
+  const [showAll, setShowAll] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const { projects, refreshChats, setChatTitle, regenerateTitle, setChatProject } = useApp(
@@ -135,109 +154,107 @@ export function ChatList({ chats, activeId, onSelect, projectId }: Props) {
     const isRegenerating = regenerating.has(chat.id);
     const awaitingApproval = (pendingApprovalByChat[chat.id]?.length ?? 0) > 0;
     const kids = childrenByParent[chat.id] ?? [];
-    const hasKids = kids.length > 0;
     const branchesOpen = !collapsedBranches.has(chat.id);
-    // A nested child is a subchat when a zone owns it, otherwise a branch.
+    // A nested child is a subchat when a zone owns it, otherwise a branch. No
+    // icon for either (0.18.1): the split bar on its left says it hangs off the
+    // chat above, in the driving zone's colour for a sub-agent.
     const subchatZone = chat.initiatedByZoneId
       ? zones.find((z) => z.id === chat.initiatedByZoneId)
       : null;
-    const isSubchat = !!chat.initiatedByZoneId;
-    const isBranch = depth > 0 && !isSubchat;
-    const SubchatIcon = getZoneIcon(subchatZone?.icon);
+    const tagLinks = tagsByChatId[chat.id] ?? [];
+    const row = (
+      <div
+        onClick={() => onSelect(chat.id)}
+        onContextMenu={(e) => openMenu(e, chat.id)}
+        title={chat.initiatedByZoneId ? `Sub-agent${subchatZone ? ` · ${subchatZone.name}` : ""}` : undefined}
+        className={`${SIDEBAR_ROW} ${
+          active
+            ? "bg-[color-mix(in_srgb,var(--color-accent)_14%,transparent)] text-[var(--color-text)]"
+            : "text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
+        }`}
+      >
+        {editing ? (
+          <input
+            autoFocus
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onBlur={() => commitRename(chat)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commitRename(chat);
+              if (e.key === "Escape") { e.stopPropagation(); setEditingId(null); }
+            }}
+            onClick={(e) => e.stopPropagation()}
+            className="min-w-0 flex-1 rounded bg-[var(--color-bg)] px-1 text-sm"
+          />
+        ) : (
+          <span className="min-w-0 flex-1 truncate" title={chat.title}>
+            {chat.title}
+          </span>
+        )}
+        {isRegenerating && <Loader2 size={12} className="shrink-0 animate-spin text-[var(--color-accent)]" />}
+        {/* Tags as dots, inline, so every row is the same height. */}
+        {!editing && tagLinks.length > 0 && (
+          <span className="flex shrink-0 gap-0.5" title={tagLinks.map((t) => t.name).join(", ")}>
+            {tagLinks.slice(0, 3).map((t) => (
+              <span key={t.tagId} className="h-1.5 w-1.5 rounded-full" style={{ background: t.color ?? "var(--color-text-muted)" }} />
+            ))}
+          </span>
+        )}
+        {/* A tool call waiting on the user in a chat that isn't open. Mostly
+            background sub-agents: without a marker here the request is
+            invisible until it times out and auto-denies. */}
+        {awaitingApproval && (
+          <span title="Waiting for your approval" className="shrink-0">
+            <ShieldAlert size={13} className="animate-pulse text-amber-500" />
+          </span>
+        )}
+        {kids.length > 0 && (
+          <button
+            onClick={(e) => { e.stopPropagation(); toggleBranches(chat.id); }}
+            title={branchesOpen ? "Hide branches and sub-agents" : "Show branches and sub-agents"}
+            className="flex shrink-0 items-center gap-0.5 rounded px-0.5 text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+          >
+            {kids.length}
+            <Disclosure open={branchesOpen} />
+          </button>
+        )}
+      </div>
+    );
     return (
       <div key={chat.id}>
-        <div
-          onClick={() => onSelect(chat.id)}
-          onContextMenu={(e) => openMenu(e, chat.id)}
+        {depth > 0 ? (
+          <div
+            className="border-l-2 pl-1"
+            style={{ borderColor: subchatZone?.accentColor ?? "var(--color-border-strong)" }}
+          >
+            {row}
+          </div>
+        ) : (
+          row
+        )}
+        {kids.length > 0 && branchesOpen && (
           // Indent is capped (#12): a deep sub-agent tree otherwise walked the
           // title off the right-hand edge one level at a time.
-          style={{ marginLeft: Math.min(depth, 5) * 12 }}
-          className={`group mx-1 my-0.5 cursor-pointer rounded px-2 py-1.5 text-sm transition-colors ${
-            active
-              ? "bg-[color-mix(in_srgb,var(--color-accent)_14%,transparent)] font-medium text-[var(--color-text)] shadow-[inset_2px_0_0_var(--color-accent)]"
-              : "text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            {hasKids ? (
-              <button
-                onClick={(e) => { e.stopPropagation(); toggleBranches(chat.id); }}
-                title={branchesOpen ? "Collapse branches" : "Expand branches"}
-                className="flex-shrink-0 rounded text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-              >
-                {branchesOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-              </button>
-            ) : null}
-            {isRegenerating ? (
-              <Loader2 size={14} className="flex-shrink-0 animate-spin text-[var(--color-accent)]" />
-            ) : isSubchat ? (
-              <span
-                title={subchatZone ? `Subchat driven by ${subchatZone.name}` : "Subchat"}
-                className="flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded"
-                style={{ background: subchatZone?.accentColor ?? "var(--color-panel)" }}
-              >
-                <SubchatIcon size={11} color={subchatZone?.accentColor ? "white" : "var(--color-text-muted)"} />
-              </span>
-            ) : isBranch ? (
-              <GitBranch size={13} className="flex-shrink-0 text-[var(--color-text-muted)]" />
-            ) : (
-              <MessageSquare size={14} className="flex-shrink-0" />
-            )}
-            {editing ? (
-              <input
-                autoFocus
-                value={editValue}
-                onChange={(e) => setEditValue(e.target.value)}
-                onBlur={() => commitRename(chat)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") commitRename(chat);
-                  if (e.key === "Escape") { e.stopPropagation(); setEditingId(null); }
-                }}
-                onClick={(e) => e.stopPropagation()}
-                className="flex-1 rounded bg-[var(--color-bg)] px-1 text-sm"
-              />
-            ) : (
-              <span className="min-w-0 flex-1 truncate" title={chat.title}>
-                {chat.title}
-                {isRegenerating && (
-                  <span className="ml-2 text-xs text-[var(--color-text-muted)]">renaming…</span>
-                )}
-              </span>
-            )}
-            {/* A tool call waiting on the user in a chat that isn't open. Mostly
-                background sub-agents: without a marker here the request is
-                invisible until it times out and auto-denies. */}
-            {awaitingApproval && (
-              <span title="Waiting for your approval" className="flex-shrink-0">
-                <ShieldAlert size={13} className="animate-pulse text-amber-500" />
-              </span>
-            )}
-          </div>
-          {/* Tags as dots, not chips: the names are on hover and in the tag
-              filter, and a sidebar row is not the place to read them. */}
-          {!editing && (tagsByChatId[chat.id]?.length ?? 0) > 0 && (
-            <div
-              className="mt-0.5 flex gap-1 pl-6"
-              title={tagsByChatId[chat.id].map((t) => t.name).join(", ")}
-            >
-              {tagsByChatId[chat.id].map((t) => (
-                <span
-                  key={t.tagId}
-                  className="h-1.5 w-1.5 rounded-full"
-                  style={{ background: t.color ?? "var(--color-text-muted)" }}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-        {hasKids && branchesOpen && kids.map((k) => renderChat(k, depth + 1))}
+          <div className={depth < 4 ? "ml-3" : ""}>{kids.map((k) => renderChat(k, depth + 1))}</div>
+        )}
       </div>
     );
   };
 
+  const shown = limit && !showAll && roots.length > limit + 1 ? roots.slice(0, limit) : roots;
+  const hidden = roots.length - shown.length;
+
   return (
-    <div className="px-1">
-      {roots.map((chat) => renderChat(chat, 0))}
+    <div className="flex flex-col gap-px">
+      {shown.map((chat) => renderChat(chat, 0))}
+      {(hidden > 0 || (showAll && limit && roots.length > limit + 1)) && (
+        <button
+          onClick={() => setShowAll((v) => !v)}
+          className={`${SIDEBAR_ROW} text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]`}
+        >
+          {hidden > 0 ? `Show ${hidden} more` : "Show less"}
+        </button>
+      )}
 
       {menu && (
         <ContextMenu

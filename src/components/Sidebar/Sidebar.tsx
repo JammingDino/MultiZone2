@@ -1,16 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
-import { Plus, Settings, Layers, ChevronRight, ChevronDown, FolderPlus, ChevronLeft, Pencil, Trash2, Tag as TagIcon, X, Sparkles } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Plus, Settings, Layers, Pencil, Trash2, Tag as TagIcon, Check, Search, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { Popover, pointRect } from "@/components/common/Popover";
 import { useApp } from "@/store/app";
 import { useShallow } from "zustand/react/shallow";
 import * as api from "@/lib/tauri";
-import { ChatList } from "./ChatList";
+import { ChatList, Disclosure, SIDEBAR_ROW } from "./ChatList";
 import { ChatSearch } from "./ChatSearch";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import { usePersistentSet } from "@/lib/uiState";
 import { resolveBaseModel } from "@/lib/baseZone";
 import type { Project } from "@/lib/types";
-import { CHROME_QUIET } from "@/lib/chrome";
+import { CHROME_ACTIVE, CHROME_OUTLINED, CHROME_QUIET } from "@/lib/chrome";
 import { ResizeHandle, usePanelWidth } from "@/components/common/ResizeHandle";
 import { useIsNarrow } from "@/lib/useIsNarrow";
 
@@ -63,6 +63,9 @@ export function Sidebar() {
     })),
   );
   const triggerNewChat = useApp((s) => s.triggerNewChat);
+  const focusChatSearch = useApp((s) => s.focusChatSearch);
+  const tagBtnRef = useRef<HTMLButtonElement>(null);
+  const [tagMenuOpen, setTagMenuOpen] = useState(false);
   // Tool calls and the context panel name MCP servers, so the list is needed
   // from the start rather than only once Settings → MCP has been opened.
   const refreshMcpServers = useApp((s) => s.refreshMcpServers);
@@ -183,52 +186,88 @@ export function Sidebar() {
   const narrow = useIsNarrow();
   const size = usePanelWidth("ui.sidebarWidth", 288, 200, 560);
 
+  // One footer for both states, so the collapsed rail and the open sidebar put
+  // Zones and Settings in exactly the same place (0.18.1): collapsing hides
+  // the labels and moves nothing.
+  const footer = (
+    <div className="mt-auto flex shrink-0 flex-col gap-0.5 border-t border-[var(--color-border)] p-2">
+      <RailButton icon={<Layers size={16} />} label="Zones" open={sidebarOpen} onClick={() => openZoneLibrary()} />
+      <RailButton icon={<Settings size={16} />} label="Settings" open={sidebarOpen} onClick={openSettings} />
+    </div>
+  );
+
   if (!sidebarOpen) {
     return (
-      <aside className="flex h-full w-12 flex-shrink-0 flex-col overflow-hidden border-r border-[var(--color-border)] bg-[var(--color-panel)] transition-[width] duration-200 ease-in-out">
-        {/* Expand button */}
-        <div className="flex h-12 items-center justify-center border-b border-[var(--color-border)]">
-          <button
-            onClick={() => setSidebarOpen(true)}
-            title="Expand sidebar"
-            className={`rounded p-1.5 ${CHROME_QUIET}`}
-          >
-            <ChevronRight size={16} className="text-[var(--color-accent)]" />
+      <aside className="flex h-full w-12 flex-shrink-0 flex-col overflow-hidden border-r border-[var(--color-border)] bg-[var(--color-panel)]">
+        <div className="flex h-12 shrink-0 items-center justify-center border-b border-[var(--color-border)]">
+          <button onClick={() => setSidebarOpen(true)} title="Expand sidebar" className={`rounded-md p-1.5 ${CHROME_QUIET}`}>
+            <PanelLeftOpen size={16} />
           </button>
         </div>
-
-        {/* New chat icon */}
-        <div className="flex flex-col items-center gap-1 p-1 pt-2">
-          <button
-            onClick={() => onNewChat()}
+        <div className="flex flex-col gap-2 p-2">
+          <RailButton
+            icon={<Plus size={16} />}
+            label={canNewChat ? "New chat" : "Set a default model or create a zone first"}
+            open={false}
             disabled={!canNewChat}
-            title={!canNewChat ? "Set a default model or create a zone first" : "New chat"}
-            className={`flex items-center justify-center rounded p-2 ${CHROME_QUIET} disabled:cursor-not-allowed disabled:opacity-50`}
-          >
-            <Plus size={16} />
-          </button>
+            onClick={() => onNewChat()}
+          />
+          <RailButton icon={<Search size={16} />} label="Search messages" open={false} onClick={focusChatSearch} />
         </div>
-
-        {/* Footer icons */}
-        <div className="mt-auto border-t border-[var(--color-border)] p-1 flex flex-col items-center gap-1">
-          <button
-            onClick={() => openZoneLibrary()}
-            title="Configure Zones"
-            className={`rounded p-2 ${CHROME_QUIET}`}
-          >
-            <Layers size={16} />
-          </button>
-          <button
-            onClick={openSettings}
-            title="Settings"
-            className={`rounded p-2 ${CHROME_QUIET}`}
-          >
-            <Settings size={16} />
-          </button>
-        </div>
+        {footer}
       </aside>
     );
   }
+
+  // Every tag in one list, from a button beside the search box. The strip it
+  // replaces scrolled sideways under a hidden scrollbar, so past the fourth tag
+  // the rest were effectively unreachable.
+  const tagButton = tags.length > 0 && (
+    <>
+      <button
+        ref={tagBtnRef}
+        onClick={() => setTagMenuOpen((v) => !v)}
+        title={filtering ? `Filtering by ${tagFilter.size} tag${tagFilter.size === 1 ? "" : "s"}` : "Filter by tag"}
+        className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded-md ${
+          filtering || tagMenuOpen ? CHROME_ACTIVE : CHROME_OUTLINED
+        }`}
+      >
+        <TagIcon size={14} />
+        {filtering && (
+          <span className="absolute -right-1 -top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-[var(--color-accent)] px-0.5 text-[9px] text-white">
+            {tagFilter.size}
+          </span>
+        )}
+      </button>
+      <Popover
+        open={tagMenuOpen}
+        onClose={() => setTagMenuOpen(false)}
+        anchorRef={tagBtnRef}
+        zIndex={40}
+        className="max-h-80 w-56 overflow-y-auto rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg"
+      >
+        <div className="flex items-center justify-between px-3 pb-1 pt-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+          Filter by tag
+          {filtering && (
+            <button onClick={() => setTagFilter(new Set())} className="normal-case tracking-normal hover:text-[var(--color-text)]">
+              Clear
+            </button>
+          )}
+        </div>
+        {tags.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => toggleTagFilter(t.id)}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)]"
+          >
+            <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: t.color ?? "var(--color-text-muted)" }} />
+            <span className="min-w-0 flex-1 truncate">{t.name}</span>
+            {tagFilter.has(t.id) && <Check size={13} className="shrink-0 text-[var(--color-accent)]" />}
+          </button>
+        ))}
+      </Popover>
+    </>
+  );
 
   return (
     <aside
@@ -247,105 +286,43 @@ export function Sidebar() {
           label="Resize sidebar"
         />
       )}
-      {/* Header */}
-      <div className="flex h-12 items-center justify-between border-b border-[var(--color-border)] px-3">
-        <div className="flex items-center gap-2 font-semibold">
-          <Layers size={18} className="text-[var(--color-accent)]" />
+      <div className="flex h-12 shrink-0 items-center justify-between border-b border-[var(--color-border)] pl-4 pr-2">
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          <Layers size={16} className="text-[var(--color-accent)]" />
           MultiZone
         </div>
-        <div className="flex items-center gap-0.5">
-          <button
-            onClick={() => openZoneLibrary()}
-            className={`rounded p-1.5 ${CHROME_QUIET}`}
-            title="Zones"
-          >
-            <Layers size={16} />
-          </button>
-          <button
-            onClick={openSettings}
-            className={`rounded p-1.5 ${CHROME_QUIET}`}
-            title="Settings"
-          >
-            <Settings size={16} />
-          </button>
-          <button
-            onClick={() => setSidebarOpen(false)}
-            className={`rounded p-1.5 ${CHROME_QUIET}`}
-            title="Collapse sidebar"
-          >
-            <ChevronLeft size={16} />
-          </button>
-        </div>
+        <button onClick={() => setSidebarOpen(false)} className={`rounded-md p-1.5 ${CHROME_QUIET}`} title="Collapse sidebar">
+          <PanelLeftClose size={16} />
+        </button>
       </div>
 
-      {/* New chat + New project */}
-      <div className="m-2 flex gap-2">
+      {/* New chat and Search: the same height, the same outline, one above the
+          other — the rail's two buttons in the same order. */}
+      <div className="shrink-0 p-2 pb-2">
         <button
           onClick={() => onNewChat()}
           disabled={!canNewChat}
-          className="flex flex-1 items-center justify-center gap-2 rounded-md border border-[var(--color-border)] bg-[var(--color-panel-hover)] py-2 text-sm transition hover:border-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex h-8 w-full items-center gap-2 rounded-md border border-[var(--color-border)] px-2.5 text-sm text-[var(--color-text)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
           title={!canNewChat ? "Set a default model or create a zone first" : "New chat"}
         >
-          <Plus size={14} />
+          <Plus size={15} />
           New chat
-        </button>
-        <button
-          onClick={() => openProjectsPanel("__new__")}
-          className="flex items-center justify-center gap-1.5 rounded-md border border-[var(--color-border)] px-2.5 text-sm text-[var(--color-text-muted)] transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
-          title="New project"
-        >
-          <FolderPlus size={16} />
         </button>
       </div>
 
-      <ChatSearch onActiveChange={setSearching} />
-
-      {/* Tag filter bar */}
-      {!searching && tags.length > 0 && (
-        <div className="mx-2 mb-1 flex items-center gap-1">
-          <TagIcon size={11} className="mr-0.5 shrink-0 text-[var(--color-text-muted)]" />
-          {/* One scrolling strip so a long tag list never grows the sidebar header. */}
-          <div className="hide-scrollbar flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
-            {tags.map((t) => {
-              const active = tagFilter.has(t.id);
-              return (
-                <button
-                  key={t.id}
-                  onClick={() => toggleTagFilter(t.id)}
-                  className={`flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] transition ${
-                    active ? "text-white" : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-                  }`}
-                  style={
-                    active
-                      ? { background: t.color ?? "var(--color-accent)", borderColor: "transparent" }
-                      : { borderColor: t.color ?? "var(--color-border)" }
-                  }
-                  title={active ? `Filtering by “${t.name}”` : `Filter by “${t.name}”`}
-                >
-                  <span
-                    className="h-1.5 w-1.5 rounded-full"
-                    style={{ background: active ? "white" : t.color ?? "var(--color-text-muted)" }}
-                  />
-                  {t.name}
-                </button>
-              );
-            })}
-          </div>
-          {filtering && (
-            <button
-              onClick={() => setTagFilter(new Set())}
-              className="flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-              title="Clear tag filter"
-            >
-              <X size={10} /> clear
-            </button>
-          )}
-        </div>
-      )}
+      <ChatSearch onActiveChange={setSearching} trailing={tagButton || undefined} />
 
       {/* Chat list with project folders. Hidden outright while a search is
           running — the results took its place rather than filtering it. */}
-      <div className={`flex-1 overflow-y-auto ${searching ? "hidden" : ""}`}>
+      <div className={`flex-1 overflow-y-auto px-2 pb-2 ${searching ? "hidden" : ""}`}>
+        <SectionLabel
+          label="Projects"
+          action={
+            <button onClick={() => openProjectsPanel("__new__")} title="New project" className={`rounded p-0.5 ${CHROME_QUIET}`}>
+              <Plus size={13} />
+            </button>
+          }
+        />
         {projects.map((project) => {
           const projectChats = chats.filter((c) => c.projectId === project.id && matchesTagFilter(c.id));
           // While a tag filter is active, hide projects with no matching chats.
@@ -365,13 +342,17 @@ export function Sidebar() {
                 color={color}
                 ProjectIcon={ProjectIcon}
               />
-              {isOpen && (
-                <div className="pl-3">
+              {/* A project shows its five latest chats; the rest are a click
+                  away, so a busy project no longer pushes every other one off
+                  the screen. */}
+              {isOpen && projectChats.length > 0 && (
+                <div className="pl-6">
                   <ChatList
                     chats={projectChats}
                     activeId={activeChatId}
                     onSelect={(id) => setActiveChat(id)}
                     projectId={project.id}
+                    limit={filtering ? undefined : 5}
                   />
                 </div>
               )}
@@ -381,11 +362,7 @@ export function Sidebar() {
 
         {ungroupedChats.length > 0 && (
           <>
-            {projects.length > 0 && (
-              <div className="mx-2 mb-0.5 mt-2 px-2 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
-                Ungrouped
-              </div>
-            )}
+            {projects.length > 0 && <SectionLabel label="Chats" />}
             <ChatList
               chats={ungroupedChats}
               activeId={activeChatId}
@@ -407,6 +384,8 @@ export function Sidebar() {
           </div>
         )}
       </div>
+
+      {footer}
 
       {/* Project right-click menu */}
       {projectMenu && (
@@ -479,41 +458,70 @@ function ProjectFolderHeader({
   color: string;
   ProjectIcon: React.ComponentType<{ size?: number; color?: string }>;
 }) {
+  // The same row as a chat (0.18.1) — height, size, trailing chevron — with
+  // the project's swatch where a chat has nothing. `min-w-0` on the name so a
+  // long one truncates instead of pushing the controls off the edge (#12).
   return (
-    <div className="group mx-1 flex items-center gap-1 rounded px-1 py-1" onContextMenu={onContextMenu}>
+    <div
+      role="button"
+      onClick={onToggle}
+      onContextMenu={onContextMenu}
+      className={`${SIDEBAR_ROW} font-medium text-[var(--color-text)] hover:bg-[var(--color-panel-hover)]`}
+    >
+      <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded" style={{ background: color }}>
+        <ProjectIcon size={10} color="white" />
+      </span>
+      <span className="min-w-0 flex-1 truncate" title={project.name}>
+        {project.name}
+      </span>
+      {chatCount > 0 && (
+        <span className="shrink-0 text-[11px] font-normal text-[var(--color-text-muted)] group-hover:hidden">{chatCount}</span>
+      )}
       <button
-        onClick={onToggle}
-        onContextMenu={onContextMenu}
-        // `min-w-0` so the truncating name below actually truncates (#12): a
-        // flex item's automatic minimum is its content, so without this the
-        // button grew to fit a long project name and pushed the row — count,
-        // new-chat button and all — out past the sidebar's edge.
-        className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-1 py-0.5 text-xs font-medium text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
-      >
-        {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        <span
-          className="flex h-4 w-4 shrink-0 items-center justify-center rounded"
-          style={{ background: color }}
-        >
-          <ProjectIcon size={10} color="white" />
-        </span>
-        <span className="min-w-0 flex-1 truncate text-left" title={project.name}>
-          {project.name}
-        </span>
-        {chatCount > 0 && (
-          <span className="shrink-0 text-[10px] text-[var(--color-text-muted)]">
-            {chatCount}
-          </span>
-        )}
-      </button>
-      <button
-        onClick={onNewChat}
+        onClick={(e) => { e.stopPropagation(); onNewChat(); }}
         title="New chat in this project"
-        className={`shrink-0 rounded p-0.5 ${CHROME_QUIET}`}
+        className={`hidden shrink-0 rounded p-0.5 group-hover:block ${CHROME_QUIET}`}
       >
         <Plus size={13} />
       </button>
+      <span className="text-[var(--color-text-muted)]">
+        <Disclosure open={isOpen} />
+      </span>
     </div>
+  );
+}
+
+/** A quiet heading over a part of the list, with an optional action on the right. */
+function SectionLabel({ label, action }: { label: string; action?: React.ReactNode }) {
+  return (
+    <div className="flex h-7 items-center justify-between px-2 pt-1 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
+      {label}
+      {action}
+    </div>
+  );
+}
+
+/**
+ * A rail or footer control. Open, it is an icon and a label; collapsed, the
+ * same icon in the same place, with the label as its tooltip.
+ */
+function RailButton({
+  icon, label, open, onClick, disabled,
+}: {
+  icon: React.ReactNode; label: string; open: boolean; onClick: () => void; disabled?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={label}
+      className={`flex h-8 shrink-0 items-center gap-2 rounded-md text-sm disabled:cursor-not-allowed disabled:opacity-50 ${CHROME_QUIET} ${
+        open ? "w-full px-2" : "w-8 justify-center"
+      }`}
+    >
+      {icon}
+      {open && label}
+    </button>
   );
 }
 

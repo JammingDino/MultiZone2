@@ -49,7 +49,14 @@ export function splitSnippet(snippet: string): { text: string; hit: boolean }[] 
   return out.filter((r) => r.text.length > 0);
 }
 
-export function ChatSearch({ onActiveChange }: { onActiveChange: (active: boolean) => void }) {
+export function ChatSearch({
+  onActiveChange,
+  trailing,
+}: {
+  onActiveChange: (active: boolean) => void;
+  /** Sits to the right of the box, at its height — the tag filter. */
+  trailing?: React.ReactNode;
+}) {
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [busy, setBusy] = useState(false);
@@ -113,7 +120,8 @@ export function ChatSearch({ onActiveChange }: { onActiveChange: (active: boolea
     // When results are showing this becomes the sidebar's scrolling region, so
     // a hundred hits scroll inside the panel rather than growing it.
     <div className={`mx-2 mb-1 flex min-h-0 flex-col ${active ? "flex-1" : ""}`}>
-      <div className="relative shrink-0">
+      <div className="flex shrink-0 gap-2">
+      <div className="relative min-w-0 flex-1">
         <Search
           size={13}
           className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
@@ -130,7 +138,7 @@ export function ChatSearch({ onActiveChange }: { onActiveChange: (active: boolea
           }}
           placeholder="Search messages"
           aria-label="Search messages across all chats"
-          className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-panel-hover)] py-1.5 pl-7 pr-7 text-sm outline-none transition placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)]"
+          className="h-8 w-full rounded-md border border-[var(--color-border)] bg-transparent pl-8 pr-7 text-sm outline-none transition placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)]"
         />
         {busy ? (
           <Loader2
@@ -150,6 +158,8 @@ export function ChatSearch({ onActiveChange }: { onActiveChange: (active: boolea
             <X size={12} />
           </button>
         ) : null}
+      </div>
+      {trailing}
       </div>
 
       {active && !busy && hits.length === 0 && (

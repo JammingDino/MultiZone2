@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { Bot, ShieldCheck, Server, Smartphone, Palette, MessageSquare, Database, Globe, Brain, Sparkles, Plug, Library, Layers, Mic, Volume2, CalendarClock } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
@@ -18,7 +17,7 @@ import { SchedulesTab } from "./tabs/SchedulesTab";
 import { SkillsTab } from "./tabs/SkillsTab";
 import { SpeechTab } from "./tabs/SpeechTab";
 import { VoiceTab } from "./tabs/VoiceTab";
-import { ZonesTab } from "./tabs/ZonesTab";
+import { ZoneLibrary } from "@/components/Zones/ZoneLibrary";
 
 type Tab = "providers" | "zones" | "appearance" | "chat" | "agents" | "approvals" | "schedules" | "voice" | "speech" | "skills" | "mcp" | "knowledge" | "memory" | "remote" | "api" | "data";
 
@@ -61,11 +60,47 @@ function UnsavableWarning() {
 
 export function SettingsModal() {
   const closeSettings = useApp((s) => s.closeSettings);
-  // Something outside Settings can say which tab to land on — the zone
-  // library's back button does, so returning lands on Zones rather than
-  // dumping the user back at Providers with no sense of where they were.
-  const initialTab = useApp((s) => s.settingsInitialTab);
-  const [tab, setTab] = useState<Tab>(isTab(initialTab) ? initialTab : "providers");
+  // In the store, so "edit this zone" from anywhere can land on Zones.
+  const stored = useApp((s) => s.settingsTab);
+  const tab: Tab = isTab(stored) ? stored : "providers";
+  const setTab = useApp((s) => s.setSettingsTab);
+  const zonesNonce = useApp((s) => s.zoneLibraryNonce);
+
+  // The one rail, with the Zones page's own items nested under "Zones" while
+  // it is open (0.18.1). Configure Zones used to be a second panel with a
+  // second rail, and moving between the two changed the whole left side.
+  const rail = (zoneItems?: React.ReactNode) => (
+    <NavRail>
+      <NavGroup label="Models" />
+      <NavItem active={tab === "providers"} icon={<Server size={14} />} label="Providers" onClick={() => setTab("providers")} />
+      <NavItem active={tab === "zones"} icon={<Layers size={14} />} label="Zones" onClick={() => setTab("zones")} />
+      {zoneItems}
+
+      <NavGroup label="Interface" />
+      <NavItem active={tab === "appearance"} icon={<Palette size={14} />} label="Appearance" onClick={() => setTab("appearance")} />
+      <NavItem active={tab === "chat"} icon={<MessageSquare size={14} />} label="Chat" onClick={() => setTab("chat")} />
+      <NavItem active={tab === "voice"} icon={<Mic size={14} />} label="Dictation" onClick={() => setTab("voice")} />
+      <NavItem active={tab === "speech"} icon={<Volume2 size={14} />} label="Speech" onClick={() => setTab("speech")} />
+
+      <NavGroup label="Agents" />
+      <NavItem active={tab === "agents"} icon={<Bot size={14} />} label="Runs" onClick={() => setTab("agents")} />
+      <NavItem active={tab === "approvals"} icon={<ShieldCheck size={14} />} label="Approvals" onClick={() => setTab("approvals")} />
+      <NavItem active={tab === "schedules"} icon={<CalendarClock size={14} />} label="Schedules" onClick={() => setTab("schedules")} />
+
+      <NavGroup label="Tools & context" />
+      <NavItem active={tab === "skills"} icon={<Sparkles size={14} />} label="Skills" onClick={() => setTab("skills")} />
+      <NavItem active={tab === "knowledge"} icon={<Library size={14} />} label="Knowledge" onClick={() => setTab("knowledge")} />
+      <NavItem active={tab === "memory"} icon={<Brain size={14} />} label="Memory" onClick={() => setTab("memory")} />
+      <NavItem active={tab === "mcp"} icon={<Plug size={14} />} label="MCP" onClick={() => setTab("mcp")} />
+
+      <NavGroup label="System" />
+      {/* Its own tab above API (0.17.3): someone connecting a phone is not
+          thinking about REST, even though the two share a socket. */}
+      <NavItem active={tab === "remote"} icon={<Smartphone size={14} />} label="Phone & remote" onClick={() => setTab("remote")} />
+      <NavItem active={tab === "api"} icon={<Globe size={14} />} label="API" onClick={() => setTab("api")} />
+      <NavItem active={tab === "data"} icon={<Database size={14} />} label="Data" onClick={() => setTab("data")} />
+    </NavRail>
+  );
 
   return (
     <Modal onClose={closeSettings} header={<ModalTitle>Settings</ModalTitle>}>
@@ -77,45 +112,22 @@ export function SettingsModal() {
             has to stay reachable from every panel, and a strip keeps it visible
             without a second navigation concept to learn. */}
         <div className="flex flex-1 overflow-hidden narrow:flex-col">
-          <NavRail>
-            <NavGroup label="Models" />
-            <NavItem active={tab === "providers"} icon={<Server size={14} />} label="Providers" onClick={() => setTab("providers")} />
-            <NavItem active={tab === "zones"} icon={<Layers size={14} />} label="Zones" onClick={() => setTab("zones")} />
-
-            <NavGroup label="Interface" />
-            <NavItem active={tab === "appearance"} icon={<Palette size={14} />} label="Appearance" onClick={() => setTab("appearance")} />
-            <NavItem active={tab === "chat"} icon={<MessageSquare size={14} />} label="Chat" onClick={() => setTab("chat")} />
-            <NavItem active={tab === "voice"} icon={<Mic size={14} />} label="Dictation" onClick={() => setTab("voice")} />
-            <NavItem active={tab === "speech"} icon={<Volume2 size={14} />} label="Speech" onClick={() => setTab("speech")} />
-
-            <NavGroup label="Agents" />
-            <NavItem active={tab === "agents"} icon={<Bot size={14} />} label="Runs" onClick={() => setTab("agents")} />
-            <NavItem active={tab === "approvals"} icon={<ShieldCheck size={14} />} label="Approvals" onClick={() => setTab("approvals")} />
-            <NavItem active={tab === "schedules"} icon={<CalendarClock size={14} />} label="Schedules" onClick={() => setTab("schedules")} />
-
-            <NavGroup label="Tools & context" />
-            <NavItem active={tab === "skills"} icon={<Sparkles size={14} />} label="Skills" onClick={() => setTab("skills")} />
-            <NavItem active={tab === "knowledge"} icon={<Library size={14} />} label="Knowledge" onClick={() => setTab("knowledge")} />
-            <NavItem active={tab === "memory"} icon={<Brain size={14} />} label="Memory" onClick={() => setTab("memory")} />
-            <NavItem active={tab === "mcp"} icon={<Plug size={14} />} label="MCP" onClick={() => setTab("mcp")} />
-
-            <NavGroup label="System" />
-            {/* Above API, and its own tab (0.17.3). It was a section inside the
-                API panel, which is where it was *built* rather than where
-                anybody would look for it: someone connecting a phone is not
-                thinking about REST, and the two have different audiences even
-                though they share a socket. */}
-            <NavItem active={tab === "remote"} icon={<Smartphone size={14} />} label="Phone & remote" onClick={() => setTab("remote")} />
-            <NavItem active={tab === "api"} icon={<Globe size={14} />} label="API" onClick={() => setTab("api")} />
-            <NavItem active={tab === "data"} icon={<Database size={14} />} label="Data" onClick={() => setTab("data")} />
-          </NavRail>
+          {tab === "zones" ? (
+            // The Zones page draws the rail itself, so its list can sit under
+            // "Zones" in it; keyed so each "open zones" request starts fresh.
+            <ErrorBoundary label="Zones settings" resetKey={zonesNonce}>
+              <ZoneLibrary key={zonesNonce} rail={rail} />
+            </ErrorBoundary>
+          ) : (
+          <>
+          {rail()}
           <div className="flex flex-1 overflow-y-auto p-5">
             {/* Per tab, and remounted when the tab changes: one screen that
-                throws is one screen, not the window. */}
+                throws is one screen, not the window. The bottom padding keeps
+                the last section off the panel's edge. */}
             <ErrorBoundary label={`${TAB_LABELS[tab]} settings`} resetKey={tab}>
-              <div className="min-w-0 flex-1">
+              <div className="min-w-0 flex-1 pb-10">
                 {tab === "providers" && <ProvidersTab />}
-                {tab === "zones" && <ZonesTab />}
                 {tab === "appearance" && <AppearanceTab />}
                 {tab === "chat" && <ChatTab />}
                 {tab === "agents" && <AgentsTab />}
@@ -133,6 +145,8 @@ export function SettingsModal() {
               </div>
             </ErrorBoundary>
           </div>
+          </>
+          )}
         </div>
     </Modal>
   );

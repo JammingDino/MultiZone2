@@ -41,7 +41,7 @@ export function useGlobalShortcuts() {
           s.toggleSidebar();
           break;
         case "openZoneLibrary":
-          s.zoneLibraryOpen ? s.closeZoneLibrary() : s.openZoneLibrary();
+          s.settingsOpen && s.settingsTab === "zones" ? s.closeSettings() : s.openZoneLibrary();
           break;
         case "openProjects":
           s.projectsPanelOpen ? s.closeProjectsPanel() : s.openProjectsPanel();

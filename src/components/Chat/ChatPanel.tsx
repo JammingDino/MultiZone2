@@ -21,7 +21,6 @@ import {
 } from "@/components/Message/visuals/IntentVisual";
 import { HomeScreen } from "./HomeScreen";
 import { SettingsModal } from "@/components/Settings/SettingsModal";
-import { ZoneLibrary } from "@/components/Zones/ZoneLibrary";
 import { ProjectsPanel } from "@/components/Projects/ProjectsPanel";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import { AskUserCard } from "@/components/Message/StepBlock";
@@ -131,7 +130,6 @@ export function ChatPanel() {
     chats,
     zones,
     settingsOpen,
-    zoneLibraryOpen,
     projectsPanelOpen,
     applyStreamEvent,
     setChatTitle,
@@ -147,7 +145,6 @@ export function ChatPanel() {
       chats: s.chats,
       zones: s.zones,
       settingsOpen: s.settingsOpen,
-      zoneLibraryOpen: s.zoneLibraryOpen,
       projectsPanelOpen: s.projectsPanelOpen,
       applyStreamEvent: s.applyStreamEvent,
       setChatTitle: s.setChatTitle,
@@ -609,7 +606,6 @@ export function ChatPanel() {
         <ReplayView chatId={replayChatId} onClose={closeReplay} />
       )}
       {settingsOpen && <SettingsModal />}
-      {zoneLibraryOpen && <ZoneLibrary />}
       {projectsPanelOpen && <ProjectsPanel />}
     </main>
   );

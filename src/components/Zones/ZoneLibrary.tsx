@@ -13,10 +13,8 @@ import { resolveBaseModel, resolveBaseProvider } from "@/lib/baseZone";
 import { installEntry, installTeam, saveZoneToLibrary, importEntryFromJson } from "@/lib/zoneLibrary";
 import { ZoneForm } from "./ZoneForm";
 import { InstalledZones, useZoneActions } from "./InstalledZones";
-import { Modal, ModalTitle } from "@/components/common/Modal";
-import { BackToSettings } from "@/components/common/BackToSettings";
 import { CHROME_QUIET, PRIMARY_ACTION } from "@/lib/chrome";
-import { NavGroup, NavItem, NavRail } from "@/components/common/NavRail";
+import { NavItem } from "@/components/common/NavRail";
 
 type View = "library" | "detail" | "editor";
 
@@ -58,11 +56,8 @@ function driftsFromLibrary(entry: LibraryEntry, zone: Zone): boolean {
  * — with per-entry detail. Installing creates a live zone; configuring opens
  * the zone editor.
  */
-export function ZoneLibrary() {
-  const closeZoneLibrary = useApp((s) => s.closeZoneLibrary);
-  // Set when Settings → Zones opened this panel, so it can offer the way back.
-  const returnTo = useApp((s) => s.zoneLibraryReturnTo);
-  const returnFromZoneLibrary = useApp((s) => s.returnFromZoneLibrary);
+export function ZoneLibrary({ rail }: { rail: (items: React.ReactNode) => React.ReactNode }) {
+  const closeSettings = useApp((s) => s.closeSettings);
   const zones = useApp((s) => s.zones);
   const providers = useApp((s) => s.providers);
   const baseZoneId = useApp((s) => s.appSettings.baseZoneId);
@@ -173,7 +168,7 @@ export function ZoneLibrary() {
     setView("library");
   }
 
-  const leavePanel = returnTo ? returnFromZoneLibrary : closeZoneLibrary;
+  const leavePanel = closeSettings;
 
   /** Finished with the editor: leave the panel, or fall back into the library. */
   async function afterEditor() {
@@ -367,39 +362,33 @@ export function ZoneLibrary() {
   }
 
   return (
-    <Modal
-      onClose={leavePanel}
-      className="overflow-hidden"
-      header={
-        <>
-          {returnTo === "settings" && <BackToSettings onClick={returnFromZoneLibrary} />}
-          <ModalTitle>Configure Zones</ModalTitle>
-        </>
-      }
-    >
-        <div className="flex min-h-0 flex-1">
-          {/* The Settings rail, not a look of its own (0.18.1). */}
-          <NavRail>
-            <NavItem
-              active={view === "library" || view === "detail"}
-              icon={<Sparkles size={14} />}
-              label="Library"
-              onClick={showLibrary}
-            />
-            <NavItem
-              active={view === "editor" && !editorZoneId}
-              icon={<Plus size={14} />}
-              label="New zone"
-              onClick={() => openEditor(null)}
-            />
-            <NavGroup label={`Installed · ${zones.length}`} />
-            <InstalledZones
-              compact
-              actions={zoneActions}
-              activeZoneId={view === "editor" ? editorZoneId : null}
-              onOpen={openEditor}
-            />
-          </NavRail>
+    <>
+        <div className="relative flex min-h-0 flex-1 narrow:flex-col">
+          {/* The Settings rail itself (0.18.1), with this page's items nested
+              one indent under "Zones": the library, a new zone, and every
+              installed zone. */}
+          {rail(
+            <div className="ml-3 flex flex-col gap-0.5 border-l border-[var(--color-border)] pl-1.5 narrow:ml-0 narrow:flex-row narrow:border-l-0 narrow:pl-0">
+              <NavItem
+                active={view === "library" || view === "detail"}
+                icon={<Sparkles size={14} />}
+                label="Library"
+                onClick={showLibrary}
+              />
+              <NavItem
+                active={view === "editor" && !editorZoneId}
+                icon={<Plus size={14} />}
+                label="New zone"
+                onClick={() => openEditor(null)}
+              />
+              <InstalledZones
+                compact
+                actions={zoneActions}
+                activeZoneId={view === "editor" ? editorZoneId : null}
+                onOpen={openEditor}
+              />
+            </div>,
+          )}
 
           {/* RIGHT PANE */}
           <div className="relative flex min-w-0 flex-1 flex-col">
@@ -490,7 +479,7 @@ export function ZoneLibrary() {
         )}
 
         {zoneActions.menuElement}
-    </Modal>
+    </>
   );
 }
 
@@ -540,7 +529,7 @@ function LibraryView(props: {
   return (
     <>
       {/* header */}
-      <div className="relative z-10 flex flex-shrink-0 items-center justify-between gap-4 border-b border-[var(--color-border)] px-5 py-3">
+      <div className="relative z-10 flex flex-shrink-0 items-center justify-between gap-4 px-5 pb-1 pt-4">
         <h3 className="text-sm font-medium">Library</h3>
         <div className="relative flex flex-shrink-0 items-center gap-2">
           {/* Save a zone */}
@@ -625,7 +614,7 @@ function LibraryView(props: {
       </div>
 
       {/* scroll content */}
-      <div onDragOver={p.onDragOver} onDragLeave={p.onDragLeave} onDrop={p.onDrop} className="relative flex-1 overflow-y-auto px-6 py-5">
+      <div onDragOver={p.onDragOver} onDragLeave={p.onDragLeave} onDrop={p.onDrop} className="relative flex-1 overflow-y-auto px-5 pb-10 pt-3">
         {p.teams.length > 0 && (
           <>
             <SectionLabel>Teams</SectionLabel>

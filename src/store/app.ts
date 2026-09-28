@@ -511,17 +511,8 @@ interface AppStore {
   // ui
   settingsOpen: boolean;
   zonesPanelOpen: boolean;
-  zoneLibraryOpen: boolean;
   /**
-   * Where "Configure Zones" was opened from, so it can offer a way back.
-   * `"settings"` when it was reached through Settings → Zones — the library
-   * then shows a back button that reopens Settings instead of dropping the user
-   * on the chat. Null when it was opened from the sidebar, which has nothing to
-   * go back to.
-   */
-  zoneLibraryReturnTo: "settings" | null;
-  /**
-   * Ask Configure Zones to open straight into the editor rather than onto the
+   * Ask the Zones page to open straight into the editor rather than onto the
    * library grid: `zoneId` is the zone to edit, or null to start a new one.
    *
    * There is no separate zone-editor modal any more (0.12.4). Editing a zone
@@ -532,12 +523,13 @@ interface AppStore {
    */
   zoneLibraryInitialEdit: { zoneId: string | null } | null;
   /**
-   * The Settings tab to land on the next time Settings opens (the id of a tab
-   * in SettingsModal), or null for its own default. Set when something outside
-   * Settings sends the user there — the zone library's back button, so it
-   * returns to the Zones entry it was launched from rather than to Providers.
+   * The Settings page on screen (a tab id in SettingsModal). Zones is one of
+   * them (0.18.1): Configure Zones was a second panel with a second rail, and
+   * moving between the two changed the whole left side of the window.
    */
-  settingsInitialTab: string | null;
+  settingsTab: string;
+  /** Bumped by every request to open the Zones page, so it mounts fresh. */
+  zoneLibraryNonce: number;
   /**
    * The chat whose session replay is on screen, or null.
    *
@@ -637,14 +629,13 @@ interface AppStore {
   /** Show the session replay for `chatId`. */
   openReplay: (chatId: string) => void;
   closeReplay: () => void;
-  /** Open Configure Zones on the editor for `id` (null = a new zone). */
-  openZoneEditor: (id: string | null, returnTo?: "settings") => void;
+  /** Open Settings → Zones on the editor for `id` (null = a new zone). */
+  openZoneEditor: (id: string | null) => void;
   openZonesPanel: () => void;
   closeZonesPanel: () => void;
-  openZoneLibrary: (returnTo?: "settings") => void;
-  closeZoneLibrary: () => void;
-  /** Leave the zone library and reopen whatever opened it (Settings). */
-  returnFromZoneLibrary: () => void;
+  /** Open Settings on the Zones page. */
+  openZoneLibrary: () => void;
+  setSettingsTab: (tab: string) => void;
   setDefaultZone: (id: string | null) => Promise<void>;
   loadDefaultZone: () => Promise<void>;
   openShortcutsHelp: () => void;
@@ -1161,10 +1152,9 @@ export const useApp = create<AppStore>((set, get) => ({
 
   settingsOpen: false,
   zonesPanelOpen: false,
-  zoneLibraryOpen: false,
-  zoneLibraryReturnTo: null,
   zoneLibraryInitialEdit: null,
-  settingsInitialTab: null,
+  settingsTab: "providers",
+  zoneLibraryNonce: 0,
   replayChatId: null,
   defaultZoneId: null,
   shortcutsHelpOpen: false,
@@ -2231,40 +2221,25 @@ export const useApp = create<AppStore>((set, get) => ({
   closeSettings: () => set({ settingsOpen: false }),
   openReplay: (chatId) => set({ replayChatId: chatId }),
   closeReplay: () => set({ replayChatId: null }),
-  // Editing a zone is the library panel opened on its editor, not a panel of
-  // its own — see `zoneLibraryInitialEdit` for why there is only one now.
-  openZoneEditor: (id, returnTo) =>
-    set({
-      zoneLibraryOpen: true,
-      zoneLibraryReturnTo: returnTo ?? null,
+  // Editing a zone is Settings → Zones opened on its editor (0.18.1): one
+  // panel and one rail, from wherever the request comes.
+  openZoneEditor: (id) =>
+    set((st) => ({
+      settingsOpen: true,
+      settingsTab: "zones",
       zoneLibraryInitialEdit: { zoneId: id },
-      settingsOpen: returnTo === "settings" ? false : get().settingsOpen,
-    }),
+      zoneLibraryNonce: st.zoneLibraryNonce + 1,
+    })),
   openZonesPanel: () => set({ zonesPanelOpen: true }),
   closeZonesPanel: () => set({ zonesPanelOpen: false }),
-  // Opening the library from Settings closes Settings rather than stacking a
-  // second modal over it: two overlays deep, Escape becomes ambiguous and the
-  // backdrop click closes the wrong one. The breadcrumb is kept in
-  // `zoneLibraryReturnTo` instead, and the library's back button walks it.
-  openZoneLibrary: (returnTo) =>
-    set({
-      zoneLibraryOpen: true,
-      zoneLibraryReturnTo: returnTo ?? null,
+  openZoneLibrary: () =>
+    set((st) => ({
+      settingsOpen: true,
+      settingsTab: "zones",
       zoneLibraryInitialEdit: null,
-      settingsOpen: returnTo === "settings" ? false : get().settingsOpen,
-    }),
-  closeZoneLibrary: () =>
-    set({ zoneLibraryOpen: false, zoneLibraryReturnTo: null, zoneLibraryInitialEdit: null }),
-  returnFromZoneLibrary: () => {
-    const back = get().zoneLibraryReturnTo;
-    set({
-      zoneLibraryOpen: false,
-      zoneLibraryReturnTo: null,
-      zoneLibraryInitialEdit: null,
-      settingsOpen: back === "settings",
-      settingsInitialTab: back === "settings" ? "zones" : get().settingsInitialTab,
-    });
-  },
+      zoneLibraryNonce: st.zoneLibraryNonce + 1,
+    })),
+  setSettingsTab: (tab) => set({ settingsTab: tab, zoneLibraryInitialEdit: null }),
   openShortcutsHelp: () => set({ shortcutsHelpOpen: true }),
   closeShortcutsHelp: () => set({ shortcutsHelpOpen: false }),
   setSidebarOpen: (open) => {

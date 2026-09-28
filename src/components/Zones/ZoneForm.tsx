@@ -416,12 +416,16 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
   const thinkingOverrides = useApp((s) => s.appSettings.thinkingOverrides);
   const setAppSettings = useApp((s) => s.setAppSettings);
   const thinkingOverride = thinkingOverrides[model.trim()] ?? "";
+  const [showThinkingParam, setShowThinkingParam] = useState(false);
   function setThinkingOverride(next: string) {
     const m = model.trim();
     if (!m) return;
     const map = { ...thinkingOverrides };
     if (next) map[m] = next as ThinkingControl;
-    else delete map[m];
+    else {
+      delete map[m];
+      setShowThinkingParam(false);
+    }
     void setAppSettings({ thinkingOverrides: map });
   }
   useEffect(() => {
@@ -832,7 +836,10 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
             </div>
             {/* The backup for a gateway neither the name nor the catalogue
                 gets right (0.18.1): say which parameter it reads. Stored per
-                model, like image input, so every zone on it agrees. */}
+                model, like image input, so every zone on it agrees. Hidden
+                while automatic — a guess that works needs no thought — and
+                one click away from the note when it does not. */}
+            {(thinkingOverride || showThinkingParam) && (
             <select
               value={thinkingOverride}
               onChange={(e) => setThinkingOverride(e.target.value)}
@@ -850,9 +857,22 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
               <option value="always">Always reasons — send nothing</option>
               <option value="none">No reasoning mode</option>
             </select>
+            )}
             {thinkingProfile && (
               <div className="mt-1 text-[10px] leading-snug text-[var(--color-text-muted)]">
                 <span className="font-medium">{thinkingProfile.family}:</span> {thinkingProfile.note}
+                {!thinkingOverride && !showThinkingParam && model.trim() && (
+                  <>
+                    {" "}
+                    <button
+                      type="button"
+                      onClick={() => setShowThinkingParam(true)}
+                      className="text-[var(--color-accent)] hover:underline"
+                    >
+                      Change
+                    </button>
+                  </>
+                )}
               </div>
             )}
           </div>

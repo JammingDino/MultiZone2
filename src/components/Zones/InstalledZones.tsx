@@ -7,6 +7,7 @@ import type { Zone } from "@/lib/types";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import { exportZoneJson, zoneTeamName } from "@/lib/zoneLibrary";
 import { reportError } from "@/lib/reportError";
+import { NavGroup, navItemClass } from "@/components/common/NavRail";
 
 /**
  * The list of installed zones, shared by every place that shows one — the
@@ -147,12 +148,15 @@ export function InstalledZones({
   activeZoneId = null,
   onOpen,
   emptyText = "No zones installed yet.",
+  compact = false,
 }: {
   actions: ZoneActions;
   /** Highlighted row — the zone currently open in an editor, if any. */
   activeZoneId?: string | null;
   onOpen: (zoneId: string) => void;
   emptyText?: string;
+  /** Rail rows: a small swatch and the name, the height of a Settings tab. */
+  compact?: boolean;
 }) {
   const zones = useApp((s) => s.zones);
   const baseZoneId = useApp((s) => s.appSettings.baseZoneId);
@@ -169,11 +173,14 @@ export function InstalledZones({
         <div key={group.team ?? "__loose__"}>
           {/* Only worth a heading when there is something to tell apart: a
               install with no teams is just a list. */}
-          {groups.length > 1 && (
-            <div className="px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-              {group.team ?? "Other zones"}
-            </div>
-          )}
+          {groups.length > 1 &&
+            (compact ? (
+              <NavGroup label={group.team ?? "Other zones"} />
+            ) : (
+              <div className="px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+                {group.team ?? "Other zones"}
+              </div>
+            ))}
           {group.zones.map((z) => {
             const Icon = getZoneIcon(z.icon);
             const accent = z.accentColor ?? "var(--color-accent)";
@@ -203,6 +210,26 @@ export function InstalledZones({
                     className="min-w-0 flex-1 rounded border border-[var(--color-accent)] bg-[var(--color-bg)] px-1.5 py-0.5 text-[13px] outline-none"
                   />
                 </div>
+              );
+            }
+            if (compact) {
+              return (
+                <button
+                  key={z.id}
+                  onClick={() => onOpen(z.id)}
+                  onContextMenu={(e) => actions.openMenu(z, e)}
+                  title={`${z.name} · ${z.model}${z.id === baseZoneId ? " · base zone" : ""}`}
+                  className={navItemClass(activeZoneId === z.id)}
+                >
+                  <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded" style={{ background: accent }}>
+                    <Icon size={10} color="white" />
+                  </span>
+                  <span className="min-w-0 flex-1 truncate">{z.name}</span>
+                  {z.isLeader && <Crown size={11} className="shrink-0 text-amber-500" aria-label="Response Leader" />}
+                  {z.id === defaultZoneId && (
+                    <Star size={11} className="shrink-0 fill-current text-[var(--color-accent)]" aria-label="Default zone for new chats" />
+                  )}
+                </button>
               );
             }
             return (

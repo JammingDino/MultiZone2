@@ -4,6 +4,7 @@ import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { Modal, ModalTitle } from "@/components/common/Modal";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
+import { NavGroup, NavItem, NavRail } from "@/components/common/NavRail";
 import { ApiTab } from "./tabs/ApiTab";
 import { AppearanceTab } from "./tabs/AppearanceTab";
 import { ChatTab } from "./tabs/ChatTab";
@@ -76,23 +77,23 @@ export function SettingsModal() {
             has to stay reachable from every panel, and a strip keeps it visible
             without a second navigation concept to learn. */}
         <div className="flex flex-1 overflow-hidden narrow:flex-col">
-          <nav className="flex w-44 flex-col gap-0.5 overflow-y-auto border-r border-[var(--color-border)] p-2 text-sm narrow:w-full narrow:flex-none narrow:flex-row narrow:overflow-x-auto narrow:overflow-y-hidden narrow:border-r-0 narrow:border-b">
+          <NavRail>
             <NavGroup label="Models" />
-            <TabButton active={tab === "providers"} icon={<Server size={14} />} label="Providers" onClick={() => setTab("providers")} />
-            <TabButton active={tab === "zones"} icon={<Layers size={14} />} label="Zones" onClick={() => setTab("zones")} />
+            <NavItem active={tab === "providers"} icon={<Server size={14} />} label="Providers" onClick={() => setTab("providers")} />
+            <NavItem active={tab === "zones"} icon={<Layers size={14} />} label="Zones" onClick={() => setTab("zones")} />
 
             <NavGroup label="Interface" />
-            <TabButton active={tab === "appearance"} icon={<Palette size={14} />} label="Appearance" onClick={() => setTab("appearance")} />
-            <TabButton active={tab === "chat"} icon={<MessageSquare size={14} />} label="Chat" onClick={() => setTab("chat")} />
-            <TabButton active={tab === "schedules"} icon={<CalendarClock size={14} />} label="Schedules" onClick={() => setTab("schedules")} />
-            <TabButton active={tab === "voice"} icon={<Mic size={14} />} label="Dictation" onClick={() => setTab("voice")} />
-            <TabButton active={tab === "speech"} icon={<Volume2 size={14} />} label="Speech" onClick={() => setTab("speech")} />
+            <NavItem active={tab === "appearance"} icon={<Palette size={14} />} label="Appearance" onClick={() => setTab("appearance")} />
+            <NavItem active={tab === "chat"} icon={<MessageSquare size={14} />} label="Chat" onClick={() => setTab("chat")} />
+            <NavItem active={tab === "schedules"} icon={<CalendarClock size={14} />} label="Schedules" onClick={() => setTab("schedules")} />
+            <NavItem active={tab === "voice"} icon={<Mic size={14} />} label="Dictation" onClick={() => setTab("voice")} />
+            <NavItem active={tab === "speech"} icon={<Volume2 size={14} />} label="Speech" onClick={() => setTab("speech")} />
 
             <NavGroup label="Tools & context" />
-            <TabButton active={tab === "skills"} icon={<Sparkles size={14} />} label="Skills" onClick={() => setTab("skills")} />
-            <TabButton active={tab === "knowledge"} icon={<Library size={14} />} label="Knowledge" onClick={() => setTab("knowledge")} />
-            <TabButton active={tab === "memory"} icon={<Brain size={14} />} label="Memory" onClick={() => setTab("memory")} />
-            <TabButton active={tab === "mcp"} icon={<Plug size={14} />} label="MCP" onClick={() => setTab("mcp")} />
+            <NavItem active={tab === "skills"} icon={<Sparkles size={14} />} label="Skills" onClick={() => setTab("skills")} />
+            <NavItem active={tab === "knowledge"} icon={<Library size={14} />} label="Knowledge" onClick={() => setTab("knowledge")} />
+            <NavItem active={tab === "memory"} icon={<Brain size={14} />} label="Memory" onClick={() => setTab("memory")} />
+            <NavItem active={tab === "mcp"} icon={<Plug size={14} />} label="MCP" onClick={() => setTab("mcp")} />
 
             <NavGroup label="System" />
             {/* Above API, and its own tab (0.17.3). It was a section inside the
@@ -100,11 +101,11 @@ export function SettingsModal() {
                 anybody would look for it: someone connecting a phone is not
                 thinking about REST, and the two have different audiences even
                 though they share a socket. */}
-            <TabButton active={tab === "remote"} icon={<Smartphone size={14} />} label="Phone & remote" onClick={() => setTab("remote")} />
-            <TabButton active={tab === "api"} icon={<Globe size={14} />} label="API" onClick={() => setTab("api")} />
-            <TabButton active={tab === "data"} icon={<Database size={14} />} label="Data" onClick={() => setTab("data")} />
-          </nav>
-          <div className="flex flex-1 overflow-y-auto p-4">
+            <NavItem active={tab === "remote"} icon={<Smartphone size={14} />} label="Phone & remote" onClick={() => setTab("remote")} />
+            <NavItem active={tab === "api"} icon={<Globe size={14} />} label="API" onClick={() => setTab("api")} />
+            <NavItem active={tab === "data"} icon={<Database size={14} />} label="Data" onClick={() => setTab("data")} />
+          </NavRail>
+          <div className="flex flex-1 overflow-y-auto p-5">
             {/* Per tab, and remounted when the tab changes: one screen that
                 throws is one screen, not the window. */}
             <ErrorBoundary label={`${TAB_LABELS[tab]} settings`} resetKey={tab}>
@@ -128,30 +129,6 @@ export function SettingsModal() {
           </div>
         </div>
     </Modal>
-  );
-}
-
-/** A heading in the tab rail. Hidden when the rail becomes a horizontal strip:
- *  a group label in a scrolling row of tabs reads as another tab. */
-function NavGroup({ label }: { label: string }) {
-  return (
-    <div className="mt-3 px-2 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)] first:mt-0 narrow:hidden">
-      {label}
-    </div>
-  );
-}
-
-function TabButton({ active, icon, label, onClick }: { active: boolean; icon: React.ReactNode; label: string; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`flex items-center gap-2 rounded px-2 py-1.5 text-left narrow:shrink-0 narrow:whitespace-nowrap narrow:px-3 narrow:py-2 ${
-        active ? "bg-[var(--color-panel-hover)] text-[var(--color-text)]" : "text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
-      }`}
-    >
-      {icon}
-      {label}
-    </button>
   );
 }
 

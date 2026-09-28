@@ -16,6 +16,7 @@ import { InstalledZones, useZoneActions } from "./InstalledZones";
 import { Modal, ModalTitle } from "@/components/common/Modal";
 import { BackToSettings } from "@/components/common/BackToSettings";
 import { CHROME_QUIET, PRIMARY_ACTION } from "@/lib/chrome";
+import { NavGroup, NavItem, NavRail } from "@/components/common/NavRail";
 
 type View = "library" | "detail" | "editor";
 
@@ -377,40 +378,28 @@ export function ZoneLibrary() {
       }
     >
         <div className="flex min-h-0 flex-1">
-          {/* LEFT RAIL */}
-          <div className="flex w-56 flex-shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-bg)]/40">
-            <div className="flex flex-col gap-2 p-3">
-              <button
-                onClick={() => openEditor(null)}
-                className={`flex h-9 items-center justify-center gap-1.5 rounded-lg border border-dashed text-sm font-medium text-[var(--color-accent)] transition hover:border-[var(--color-accent)] hover:bg-[var(--color-panel-hover)] ${
-                  view === "editor" && !editorZoneId ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]" : "border-[var(--color-border)]"
-                }`}
-              >
-                <Plus size={15} /> New Zone
-              </button>
-              <button
-                onClick={showLibrary}
-                className={`flex h-9 items-center justify-center gap-2 rounded-lg border text-sm font-semibold transition ${
-                  view === "library" || view === "detail"
-                    ? "border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]"
-                    : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-accent)]"
-                }`}
-              >
-                <Sparkles size={15} /> Browse Library
-              </button>
-            </div>
-
-            <div className="px-3.5 pb-1 pt-1 text-[10.5px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-              Installed · {zones.length}
-            </div>
-            <div className="flex-1 overflow-y-auto px-2 pb-3">
-              <InstalledZones
-                actions={zoneActions}
-                activeZoneId={view === "editor" ? editorZoneId : null}
-                onOpen={openEditor}
-              />
-            </div>
-          </div>
+          {/* The Settings rail, not a look of its own (0.18.1). */}
+          <NavRail>
+            <NavItem
+              active={view === "library" || view === "detail"}
+              icon={<Sparkles size={14} />}
+              label="Library"
+              onClick={showLibrary}
+            />
+            <NavItem
+              active={view === "editor" && !editorZoneId}
+              icon={<Plus size={14} />}
+              label="New zone"
+              onClick={() => openEditor(null)}
+            />
+            <NavGroup label={`Installed · ${zones.length}`} />
+            <InstalledZones
+              compact
+              actions={zoneActions}
+              activeZoneId={view === "editor" ? editorZoneId : null}
+              onOpen={openEditor}
+            />
+          </NavRail>
 
           {/* RIGHT PANE */}
           <div className="relative flex min-w-0 flex-1 flex-col">
@@ -551,14 +540,8 @@ function LibraryView(props: {
   return (
     <>
       {/* header */}
-      <div className="relative z-10 flex flex-shrink-0 items-start justify-between gap-4 border-b border-[var(--color-border)] px-6 py-4">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <Sparkles size={17} className="text-[var(--color-accent)]" />
-            <span className="text-[16px] font-bold tracking-tight">Zone Library</span>
-          </div>
-          <div className="mt-0.5 text-[12.5px] text-[var(--color-text-muted)]">Install a curated assistant, or import your own.</div>
-        </div>
+      <div className="relative z-10 flex flex-shrink-0 items-center justify-between gap-4 border-b border-[var(--color-border)] px-5 py-3">
+        <h3 className="text-sm font-medium">Library</h3>
         <div className="relative flex flex-shrink-0 items-center gap-2">
           {/* Save a zone */}
           <div className="relative">
@@ -666,7 +649,7 @@ function LibraryView(props: {
         <SectionLabel>Curated</SectionLabel>
         {p.pageAvailable.length === 0 ? (
           <div className="rounded-lg border border-dashed border-[var(--color-border)] bg-[var(--color-bg)]/40 px-4 py-4 text-[12.5px] text-[var(--color-text-muted)]">
-            All curated zones are installed — they're in “Saved by you” below.
+            All curated zones are installed.
           </div>
         ) : (
           <div className="grid grid-cols-3 gap-3.5">
@@ -680,7 +663,7 @@ function LibraryView(props: {
         <div className="mt-6"><SectionLabel>Saved by you</SectionLabel></div>
         {p.yours.length === 0 ? (
           <div className="rounded-lg border border-dashed border-[var(--color-border)] bg-[var(--color-bg)]/40 px-4 py-4 text-[12.5px] text-[var(--color-text-muted)]">
-            Nothing here yet — install a curated zone, snapshot one with “Save a zone…”, or import a <span className="font-mono text-[11px]">.json</span>. Right-click a zone for edit / rename / export / delete.
+            Nothing saved yet.
           </div>
         ) : (
           <div className="grid grid-cols-3 gap-3.5">
@@ -921,7 +904,7 @@ function EditorView({
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex flex-shrink-0 items-center justify-between border-b border-[var(--color-border)] px-6 py-3">
         <button onClick={onBack} className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[12.5px] font-semibold text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]">
-          <ChevronLeft size={15} /> Zone Library
+          <ChevronLeft size={15} /> Library
         </button>
         <div className="flex items-center gap-2.5">
           <span className="text-[13px] font-semibold">{zone ? "Edit zone" : "New zone"}</span>
@@ -970,7 +953,7 @@ function DetailView({
     <>
       <div className="flex flex-shrink-0 items-center justify-between border-b border-[var(--color-border)] px-6 py-3">
         <button onClick={onBack} className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[12.5px] font-semibold text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]">
-          <ChevronLeft size={15} /> Zone Library
+          <ChevronLeft size={15} /> Library
         </button>
         <div className="flex items-center gap-2">
           {!entry.curated && (

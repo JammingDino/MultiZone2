@@ -2117,7 +2117,7 @@ async fn run_participant_turn(
         // business (0.17.9): `reasoning_effort` for OpenAI-style reasoning
         // models and hosted gateways, a chat-template toggle for local Qwen and
         // DeepSeek servers, nothing at all for Gemma (inline tags) or gpt-4o
-        // (no reasoning to switch on). See `llm::thinking::profile`.
+        // (no reasoning to switch on). See `llm::thinking::profile_with`.
         let thinking = crate::llm::thinking::controls_with(
             &zone.model,
             &provider.base_url,

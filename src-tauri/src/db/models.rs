@@ -33,7 +33,7 @@ pub struct Zone {
     pub thinking_enabled: bool,
     /// How hard to think when thinking is on: `low`, `medium` or `high`.
     /// What that becomes on the wire depends on the model (0.17.9) — see
-    /// `llm::thinking::controls`.
+    /// `llm::thinking::controls_with`.
     pub thinking_effort: String,
     /// If false, inline thinking blocks (`<think>…</think>` and variants) in
     /// assistant content are stripped before this message is fed back to the

@@ -146,12 +146,8 @@ pub fn is_local_server(base_url: &str) -> bool {
         || host.starts_with("host.docker.internal")
 }
 
-/// Work out the family and its knob from a model name and where it is served.
-pub fn profile(model: &str, base_url: &str) -> Profile {
-    profile_with(model, base_url, Hint::default())
-}
-
-/// [`profile`], corrected by what the user chose and what the catalogue says.
+/// Work out the family and its knob from a model name and where it is served,
+/// corrected by what the user chose and what the catalogue says.
 pub fn profile_with(model: &str, base_url: &str, hint: Hint) -> Profile {
     let mut p = guess(model, base_url);
     if let Some(control) = hint.control {
@@ -269,17 +265,19 @@ fn guess(model: &str, base_url: &str) -> Profile {
     }
 }
 
-/// Turn a zone's switch and level into request fields for this model.
-///
-/// `effort` is the zone's level (`low`/`medium`/`high`); a level the model does
-/// not offer is snapped to the nearest one it does.
+/// [`controls_with`] with no hint: the tests' shorthand.
+#[cfg(test)]
 pub fn controls(model: &str, base_url: &str, enabled: bool, effort: &str) -> Controls {
     controls_with(model, base_url, enabled, effort, Hint::default())
 }
 
-/// [`controls`] with the user's choice and the catalogue taken into account.
-/// Only a hosted guess carries an [`Ask`]: a shape the user picked is theirs,
-/// and a local server ignores what it does not read rather than refusing it.
+/// Turn a zone's switch and level into request fields for this model, with
+/// the user's choice and the catalogue taken into account.
+///
+/// `effort` is the zone's level (`low`/`medium`/`high`); a level the model does
+/// not offer is snapped to the nearest one it does. Only a hosted guess
+/// carries an [`Ask`]: a shape the user picked is theirs, and a local server
+/// ignores what it does not read rather than refusing it.
 pub fn controls_with(model: &str, base_url: &str, enabled: bool, effort: &str, hint: Hint) -> Controls {
     let prof = profile_with(model, base_url, hint);
     let level = snap_level(&effort.trim().to_lowercase(), &prof.levels);

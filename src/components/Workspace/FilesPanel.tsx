@@ -19,6 +19,7 @@ import { useApp } from "@/store/app";
 import { formatBytes } from "@/lib/format";
 import type { DirEntry } from "@/lib/types";
 import { ErrorNote } from "@/components/common/ErrorNote";
+import { isShowing } from "@/lib/tabLayout";
 
 /**
  * The chat's working directory as a tree (0.17.9, reworked 0.18).
@@ -148,7 +149,7 @@ function Guides({ depth }: { depth: number }) {
 
 function Row({ entry, depth }: { entry: DirEntry; depth: number }) {
   const [open, setOpen] = useState(false);
-  const selected = useApp((s) => s.activeFileByChat[s.activeChatId ?? ""] === entry.path);
+  const selected = useApp((s) => isShowing(s.tabLayoutByChat[s.activeChatId ?? ""], entry.path));
   const openFile = useApp((s) => s.openWorkspaceFile);
   const indent = { paddingLeft: `${depth * 14 + 6}px` };
   const hidden = entry.name.startsWith(".");

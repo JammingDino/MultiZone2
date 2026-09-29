@@ -191,7 +191,7 @@ export function FileViewer({ path }: { path: string }) {
         <Action title="Show in the file manager" onClick={() => api.revealPath(path).catch(console.warn)}>
           <FolderOpen size={12} />
         </Action>
-        <Action title="Close" onClick={close}>
+        <Action title="Close" onClick={() => close(path)}>
           <X size={12} />
         </Action>
       </div>

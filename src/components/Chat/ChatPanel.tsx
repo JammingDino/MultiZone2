@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Upload, ShieldAlert, Eye, MessageSquare, X } from "lucide-react";
+import { Upload, ShieldAlert, Eye } from "lucide-react";
 import { useApp } from "@/store/app";
 import { useShallow } from "zustand/react/shallow";
 import * as api from "@/lib/tauri";
 import { MessageThread } from "./MessageThread";
 import { FileViewer } from "@/components/Workspace/FileViewer";
-import { iconFor } from "@/components/Workspace/FilesPanel";
+import { TabTiles } from "./TabTiles";
+import { CHAT_TAB } from "@/lib/tabLayout";
 import { InputBar, type InputBarHandle } from "./InputBar";
 import { ZonePicker } from "./ZonePicker";
 import { WorkspaceToggle } from "@/components/Workspace/WorkspaceToggle";
@@ -28,98 +29,6 @@ import { ReplayView } from "@/components/Chat/ReplayView";
 import { resolveBaseModel } from "@/lib/baseZone";
 import { PRIMARY_ACTION } from "@/lib/chrome";
 import type { FileDiff, StreamEnvelope } from "@/lib/types";
-
-/**
- * The main column's tabs: the transcript, then one per open file (0.18).
- *
- * A file used to open in the workspace panel, in a box above the tree, both of
- * them sharing 360px — so an image was a postage stamp and an HTML report was
- * a letterbox. Here a file gets the column the transcript gets. The strip
- * hides itself when nothing is open, so a chat that never opens a file looks
- * exactly as it did.
- */
-function DocumentTabs({ chatId }: { chatId: string }) {
-  const open = useApp((s) => s.openFilesByChat[chatId]);
-  const active = useApp((s) => s.activeFileByChat[chatId] ?? null);
-  const openFile = useApp((s) => s.openWorkspaceFile);
-  const closeFile = useApp((s) => s.closeWorkspaceFile);
-  const showChat = useApp((s) => s.showChatTab);
-  if (!open || open.length === 0) return null;
-
-  return (
-    // Scrolls sideways rather than squeezing: on a narrow window four open
-    // files must not shrink the chat tab to an ellipsis.
-    <div className="hide-scrollbar flex shrink-0 items-stretch overflow-x-auto border-b border-[var(--color-border)] bg-[var(--color-panel)]">
-      <Tab active={active === null} onClick={showChat} icon={<MessageSquare size={12} />} label="Chat" />
-      {open.map((path) => {
-        const name = path.slice(Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1);
-        const { Icon, color } = iconFor(name);
-        return (
-          <Tab
-            key={path}
-            active={active === path}
-            onClick={() => openFile(path)}
-            onClose={() => closeFile(path)}
-            title={path}
-            icon={<Icon size={12} style={{ color }} />}
-            label={name}
-          />
-        );
-      })}
-    </div>
-  );
-}
-
-function Tab({
-  active,
-  onClick,
-  onClose,
-  icon,
-  label,
-  title,
-}: {
-  active: boolean;
-  onClick: () => void;
-  onClose?: () => void;
-  icon: React.ReactNode;
-  label: string;
-  title?: string;
-}) {
-  return (
-    <div
-      // Middle-click anywhere on the tab closes it, as it does everywhere else
-      // that has tabs — including on the close button, so the aim does not
-      // have to be good. `onMouseDown` only to stop Windows dropping into
-      // autoscroll; the close is on `onAuxClick`, which is the event a
-      // non-primary button actually completes on. The chat tab has no
-      // `onClose`, so there it does nothing.
-      onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }}
-      onAuxClick={(e) => { if (e.button === 1) onClose?.(); }}
-      className={`flex h-9 shrink-0 items-center gap-1.5 border-b-2 border-r border-r-[var(--color-border)] pl-2.5 text-xs ${
-        onClose ? "pr-1" : "pr-2.5"
-      } ${
-        active
-          ? "border-b-[var(--color-accent)] bg-[var(--color-bg)] text-[var(--color-text)]"
-          : "border-b-transparent text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)]"
-      }`}
-    >
-      <button onClick={onClick} title={title ?? label} className="flex min-w-0 items-center gap-1.5">
-        <span className="flex shrink-0">{icon}</span>
-        <span className="max-w-[10rem] truncate">{label}</span>
-      </button>
-      {onClose && (
-        <button
-          onClick={onClose}
-          title="Close this tab"
-          aria-label={`Close ${label}`}
-          className="shrink-0 rounded p-0.5 text-[var(--color-text-muted)] hover:bg-[var(--color-border)] hover:text-[var(--color-text)]"
-        >
-          <X size={11} />
-        </button>
-      )}
-    </div>
-  );
-}
 
 /** How long stream events are collected before being applied as one batch. */
 const STREAM_DRAIN_MS = 16;
@@ -164,8 +73,6 @@ export function ChatPanel() {
   const routingByChat = useApp((s) => s.routingByChat);
   const stageImport = useApp((s) => s.stageImport);
   const pendingApprovals = activeChatId ? (pendingApprovalByChat[activeChatId] ?? []) : [];
-  // The file tab this chat is showing, if any; null is the transcript (0.18).
-  const activeFile = useApp((s) => (activeChatId ? s.activeFileByChat[activeChatId] ?? null : null));
 
   const activeChat = chats.find((c) => c.id === activeChatId) ?? null;
   const activeZone = activeChat ? zones.find((z) => z.id === activeChat.zoneId) : null;
@@ -240,10 +147,10 @@ export function ChatPanel() {
   // transcript runs to the window's edge and shows either side of the box,
   // instead of stopping at a line above it. The thread is padded by the
   // composer's measured height so its last message can still scroll clear.
-  // Anything else in that slot — an approval, a question, an open file, a
-  // banner — keeps the old stacked layout, where nothing sits on top of it.
+  // Anything else in that slot — an approval, a question, a banner — keeps
+  // the old stacked layout, where nothing sits on top of it.
   const floatComposer =
-    !activeFile && elsewhereApprovals.length === 0 && pendingApprovals.length === 0 && !pendingAskUser;
+    elsewhereApprovals.length === 0 && pendingApprovals.length === 0 && !pendingAskUser;
   const [composerEl, setComposerEl] = useState<HTMLDivElement | null>(null);
   const [composerHeight, setComposerHeight] = useState(0);
   useEffect(() => {
@@ -512,104 +419,113 @@ export function ChatPanel() {
             <WorkspaceToggle />
           </header>
 
-          {/* Keyed by chat id so switching chats remounts the thread instead of
-              reusing the previous chat's component instances. Turns and text
-              blocks inside are keyed by index (a turn has no stable id until it
-              persists), so without this a reused instance could carry the old
-              chat's view state — collapsed rails, edit drafts, scroll position,
-              and (before the `useThrottledStreaming` fix) the old answer text. */}
-          <DocumentTabs chatId={activeChat.id} />
-          {activeFile ? (
-            <FileViewer key={activeFile} path={activeFile} />
-          ) : (
-            <MessageThread key={activeChat.id} chatId={activeChat.id} bottomInset={composerHeight} />
-          )}
-          {elsewhereApprovals.length > 0 && (
-            <div className="border-t border-amber-500/40 bg-amber-500/10 px-4 py-2">
-              <div className="mx-auto flex max-w-3xl flex-col gap-1.5">
-                {elsewhereApprovals.map((e) => (
-                  <div key={e.chatId} className="flex items-center gap-2 text-xs">
-                    <ShieldAlert size={14} className="shrink-0 text-amber-500" />
-                    <span className="text-[var(--color-text)]">
-                      {e.count === 1
-                        ? "A sub-agent is waiting for approval in"
-                        : `${e.count} approvals are waiting in`}{" "}
-                      <span className="font-medium">{e.title}</span>
-                    </span>
-                    <button
-                      onClick={() => void setActiveChat(e.chatId)}
-                      className="ml-auto shrink-0 rounded border border-amber-500/50 px-2 py-0.5 font-medium text-amber-600 transition-colors hover:bg-amber-500/20 dark:text-amber-400"
+          {/* The transcript is one tab among the chat's open files, and any of
+              them can sit side by side (0.18.3). The composer, approvals and
+              questions belong to the transcript's tab, wherever it is. */}
+          <TabTiles
+            chatId={activeChat.id}
+            renderTab={(tab) =>
+              tab === CHAT_TAB ? (
+                <>
+                  {/* Keyed by chat id so switching chats remounts the thread instead of
+                      reusing the previous chat's component instances. Turns and text
+                      blocks inside are keyed by index (a turn has no stable id until it
+                      persists), so without this a reused instance could carry the old
+                      chat's view state — collapsed rails, edit drafts, scroll position,
+                      and (before the `useThrottledStreaming` fix) the old answer text. */}
+                  <MessageThread key={activeChat.id} chatId={activeChat.id} bottomInset={composerHeight} />
+                  {elsewhereApprovals.length > 0 && (
+                    <div className="border-t border-amber-500/40 bg-amber-500/10 px-4 py-2">
+                      <div className="mx-auto flex max-w-3xl flex-col gap-1.5">
+                        {elsewhereApprovals.map((e) => (
+                          <div key={e.chatId} className="flex items-center gap-2 text-xs">
+                            <ShieldAlert size={14} className="shrink-0 text-amber-500" />
+                            <span className="text-[var(--color-text)]">
+                              {e.count === 1
+                                ? "A sub-agent is waiting for approval in"
+                                : `${e.count} approvals are waiting in`}{" "}
+                              <span className="font-medium">{e.title}</span>
+                            </span>
+                            <button
+                              onClick={() => void setActiveChat(e.chatId)}
+                              className="ml-auto shrink-0 rounded border border-amber-500/50 px-2 py-0.5 font-medium text-amber-600 transition-colors hover:bg-amber-500/20 dark:text-amber-400"
+                            >
+                              Review
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {/* The plan, task list, terminals and review queue that used to
+                      stack here live in the workspace panel on the right (0.17.9);
+                      only what blocks the turn — approvals, ask_user — stays with
+                      the composer. */}
+                  {pendingApprovals.length > 0 ? (
+                    <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3">
+                      <div className="mx-auto flex max-w-3xl flex-col gap-2">
+                        {subchatNotice}
+                        {pendingApprovals.map((pa) => (
+                          <ToolApprovalBanner
+                            key={pa.zoneId ?? "__primary__"}
+                            toolName={pa.name}
+                            toolArguments={pa.arguments}
+                            diff={pa.diff}
+                            zoneName={
+                              pa.zoneId
+                                ? zones.find((z) => z.id === pa.zoneId)?.name ?? "Perspective"
+                                : null
+                            }
+                            onApprove={(hunks) => respondApproval(activeChatId!, pa.zoneId, true, hunks)}
+                            onDeny={() => respondApproval(activeChatId!, pa.zoneId, false)}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ) : pendingAskUser ? (
+                    <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3">
+                      <div className="mx-auto max-w-3xl">
+                        {subchatNotice}
+                        <AskUserCard
+                          chatId={pendingAskUser.chatId}
+                          questions={
+                            pendingAskUser.parsed.mode === "multi" &&
+                            Array.isArray(pendingAskUser.parsed.questions)
+                              ? pendingAskUser.parsed.questions
+                              : [
+                                  {
+                                    question: pendingAskUser.parsed.question ?? "",
+                                    options: Array.isArray(pendingAskUser.parsed.options)
+                                      ? pendingAskUser.parsed.options
+                                      : [],
+                                    allow_free_text: pendingAskUser.parsed.allow_free_text !== false,
+                                  },
+                                ]
+                          }
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    // The composer arrives a beat after the thread it belongs to, so the
+                    // eye finishes on the thing the user is about to type into.
+                    <div
+                      ref={setComposerEl}
+                      className={`mz-view-in mz-delay-60 ${floatComposer ? "absolute inset-x-0 bottom-0 z-10" : "shrink-0"}`}
                     >
-                      Review
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          {/* The plan, task list, terminals and review queue that used to
-              stack here live in the workspace panel on the right (0.17.9);
-              only what blocks the turn — approvals, ask_user — stays with
-              the composer. */}
-          {pendingApprovals.length > 0 ? (
-            <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3">
-              <div className="mx-auto flex max-w-3xl flex-col gap-2">
-                {subchatNotice}
-                {pendingApprovals.map((pa) => (
-                  <ToolApprovalBanner
-                    key={pa.zoneId ?? "__primary__"}
-                    toolName={pa.name}
-                    toolArguments={pa.arguments}
-                    diff={pa.diff}
-                    zoneName={
-                      pa.zoneId
-                        ? zones.find((z) => z.id === pa.zoneId)?.name ?? "Perspective"
-                        : null
-                    }
-                    onApprove={(hunks) => respondApproval(activeChatId!, pa.zoneId, true, hunks)}
-                    onDeny={() => respondApproval(activeChatId!, pa.zoneId, false)}
-                  />
-                ))}
-              </div>
-            </div>
-          ) : pendingAskUser ? (
-            <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3">
-              <div className="mx-auto max-w-3xl">
-                {subchatNotice}
-                <AskUserCard
-                  chatId={pendingAskUser.chatId}
-                  questions={
-                    pendingAskUser.parsed.mode === "multi" &&
-                    Array.isArray(pendingAskUser.parsed.questions)
-                      ? pendingAskUser.parsed.questions
-                      : [
-                          {
-                            question: pendingAskUser.parsed.question ?? "",
-                            options: Array.isArray(pendingAskUser.parsed.options)
-                              ? pendingAskUser.parsed.options
-                              : [],
-                            allow_free_text: pendingAskUser.parsed.allow_free_text !== false,
-                          },
-                        ]
-                  }
-                />
-              </div>
-            </div>
-          ) : (
-            // The composer arrives a beat after the thread it belongs to, so the
-            // eye finishes on the thing the user is about to type into.
-            <div
-              ref={setComposerEl}
-              className={`mz-view-in mz-delay-60 ${floatComposer ? "absolute inset-x-0 bottom-0 z-10" : "shrink-0"}`}
-            >
-              <InputBar
-                chatId={activeChat.id}
-                disabled={inputDisabled}
-                ref={inputRef}
-                notice={subchatNotice}
-              />
-            </div>
-          )}
+                      <InputBar
+                        chatId={activeChat.id}
+                        disabled={inputDisabled}
+                        ref={inputRef}
+                        notice={subchatNotice}
+                      />
+                    </div>
+                  )}
+                </>
+              ) : (
+                <FileViewer key={tab} path={tab} />
+              )
+            }
+          />
         </div>
       ) : (
         <div className="mz-view-in flex min-h-0 flex-1 flex-col">

@@ -3,6 +3,7 @@ import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { CHROME_OUTLINED, PRIMARY_ACTION } from "@/lib/chrome";
 import { iconFor } from "@/components/Workspace/FilesPanel";
+import { isShowing } from "@/lib/tabLayout";
 import { reportError } from "@/lib/reportError";
 
 /** Shape of the `present_file` tool result the backend renders. */
@@ -25,7 +26,7 @@ export interface SavedOutput {
  */
 export function SavedFileChip({ output }: { output: SavedOutput }) {
   const openInPanel = useApp((s) => s.openWorkspaceFile);
-  const showing = useApp((s) => s.activeFileByChat[s.activeChatId ?? ""] === output.path);
+  const showing = useApp((s) => isShowing(s.tabLayoutByChat[s.activeChatId ?? ""], output.path));
   const name = output.filename || output.path;
   const { Icon, color } = iconFor(name);
   return (

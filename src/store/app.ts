@@ -11,6 +11,7 @@ import { shade } from "@/lib/color";
 import { normalizeApprovals } from "@/lib/approvals";
 import type { PendingAttachment } from "@/lib/attachFiles";
 import { errorText } from "@/lib/errors";
+import { closeTab, groups, initialLayout, openTab, type TabLayout } from "@/lib/tabLayout";
 
 /**
  * Chats whose opening turn has already kicked off an auto-title, so the check
@@ -649,28 +650,24 @@ interface AppStore {
   workspaceFocus: WorkspaceSection | null;
   focusWorkspace: (section: WorkspaceSection | null) => void;
   /**
-   * Files open as document tabs in the main column, per chat (0.18).
+   * The main column's tiles, per chat (0.18.3): the transcript and open files
+   * as tabs in groups that split rows and columns — see lib/tabLayout.ts.
    *
-   * The viewer used to live inside the Files section of the workspace panel,
-   * stacked above the tree — which meant a file and the tree fought over one
-   * 360px column, and the tree lost, dropping to about eight rows. A file is
-   * now a tab beside Chat, at the main column's width, and the panel is a
-   * navigator only. Per chat because the tree is: a chat's working directory
-   * is its own, and another chat's open files name paths that are not in it.
+   * Per chat because the tree is: a chat's working directory is its own, and
+   * another chat's open files name paths that are not in it. A chat with no
+   * entry is the transcript alone.
    */
-  openFilesByChat: Record<string, string[]>;
-  /** Which tab each chat is showing: a path, or null for the transcript. */
-  activeFileByChat: Record<string, string | null>;
+  tabLayoutByChat: Record<string, TabLayout>;
   /**
-   * Open a file as a document tab. `background` leaves you where you are —
-   * the middle-click habit: queue up three files from the tree without the
-   * view jumping away each time.
+   * Open a file as a tab in the focused group. `background` leaves you where
+   * you are — the middle-click habit: queue up three files from the tree
+   * without the view jumping away each time.
    */
   openWorkspaceFile: (path: string, background?: boolean) => void;
-  /** Close one tab, or the active one. */
+  /** Close one tab, or the focused group's active one. */
   closeWorkspaceFile: (path?: string) => void;
-  /** Back to the transcript without closing anything. */
-  showChatTab: () => void;
+  /** Apply a change to a chat's tiles. */
+  updateTabLayout: (chatId: string, fn: (l: TabLayout) => TabLayout) => void;
   /** Signal the active composer to take keyboard focus. */
   focusComposer: () => void;
   /**
@@ -1161,8 +1158,7 @@ export const useApp = create<AppStore>((set, get) => ({
   sidebarOpen: readSidebarOpen(),
   workspaceOpen: readWorkspaceOpen(),
   workspaceFocus: null,
-  openFilesByChat: {},
-  activeFileByChat: {},
+  tabLayoutByChat: {},
   focusComposerNonce: 0,
   projectsPanelOpen: false,
   projectsPanelInitId: null,
@@ -2260,41 +2256,21 @@ export const useApp = create<AppStore>((set, get) => ({
   },
   openWorkspaceFile: (path, background = false) => {
     const chatId = get().activeChatId;
-    if (!chatId) return;
-    const open = get().openFilesByChat[chatId] ?? [];
-    set({
-      openFilesByChat: {
-        ...get().openFilesByChat,
-        [chatId]: open.includes(path) ? open : [...open, path],
-      },
-      // A background open of a file that is already the active tab must not
-      // knock you off it, so this only ever leaves the active tab alone.
-      ...(background ? {} : { activeFileByChat: { ...get().activeFileByChat, [chatId]: path } }),
-    });
+    if (chatId) get().updateTabLayout(chatId, (l) => openTab(l, path, background));
   },
   closeWorkspaceFile: (path) => {
     const chatId = get().activeChatId;
     if (!chatId) return;
-    const open = get().openFilesByChat[chatId] ?? [];
-    const active = get().activeFileByChat[chatId] ?? null;
-    const target = path ?? active;
-    if (!target) return;
-    const i = open.indexOf(target);
-    const rest = open.filter((p) => p !== target);
-    set({
-      openFilesByChat: { ...get().openFilesByChat, [chatId]: rest },
-      activeFileByChat: {
-        ...get().activeFileByChat,
-        // Closing the tab you are on lands on its neighbour, not back at the
-        // transcript: closing three files in a row should not bounce you away
-        // and back each time. Closing a background tab leaves you where you are.
-        [chatId]: active === target ? rest[i] ?? rest[i - 1] ?? null : active,
-      },
+    get().updateTabLayout(chatId, (l) => {
+      const target = path ?? groups(l.root).find((g) => g.id === l.focused)?.active;
+      return target ? closeTab(l, target) : l;
     });
   },
-  showChatTab: () => {
-    const chatId = get().activeChatId;
-    if (chatId) set({ activeFileByChat: { ...get().activeFileByChat, [chatId]: null } });
+  updateTabLayout: (chatId, fn) => {
+    const cur = get().tabLayoutByChat[chatId] ?? initialLayout();
+    const next = fn(cur);
+    // A click that changes nothing (focusing the focused pane) writes nothing.
+    if (next !== cur) set({ tabLayoutByChat: { ...get().tabLayoutByChat, [chatId]: next } });
   },
   toggleSidebar: () => {
     const next = !get().sidebarOpen;

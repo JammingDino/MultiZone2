@@ -47,10 +47,19 @@ function TextBlockView({
   citations?: Citation[];
 }) {
   const visible = useThrottledStreaming(text, streaming);
+  // Still arriving: streaming, or paced text catching up after it ended.
+  const live = streaming || visible !== text;
+  const animation = useApp((s) => s.appSettings.streamAnimation ?? "none");
+  const ms = useApp((s) => s.appSettings.streamAnimationMs ?? 250);
+  const unit = useApp((s) => s.appSettings.streamUnit ?? "char");
   return (
     <div>
-      <StreamingMarkdown source={visible} citations={citations} />
-      {streaming && <span className="animate-pulse">▌</span>}
+      <StreamingMarkdown
+        source={visible}
+        citations={citations}
+        reveal={live && animation !== "none" && ms > 0 ? { unit, animation, ms } : undefined}
+      />
+      {live && <span className="animate-pulse">▌</span>}
     </div>
   );
 }

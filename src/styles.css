@@ -611,6 +611,33 @@ input[type="color"]:hover { border-color: var(--color-accent); }
   stroke-width: 2px;
 }
 
+/* ===== Streamed text reveal (0.18.3) =====
+ * Each newly shown character (or word) of a streaming answer is a `.mz-tok`
+ * span whose animation plays once, when it mounts — see lib/streamReveal.ts.
+ * Only the group still arriving has the spans; a finished answer is plain.
+ */
+[data-reveal] .mz-tok {
+  animation-duration: var(--mz-tok-ms, 250ms);
+  animation-timing-function: ease-out;
+  animation-fill-mode: both;
+}
+[data-reveal="fade"] .mz-tok { animation-name: mz-tok-fade; }
+/* `top` rather than a transform: it moves an inline span without making it a
+   box, so lines still wrap mid-paragraph exactly as plain text does. */
+[data-reveal="rise"] .mz-tok { position: relative; animation-name: mz-tok-rise; }
+[data-reveal="blur"] .mz-tok { animation-name: mz-tok-blur; }
+/* Scaling needs a box. Words become inline-blocks — they still wrap at the
+   spaces between them — so a character can grow inside its word. */
+[data-reveal="grow"] .mz-w { display: inline-block; }
+[data-reveal="grow"] .mz-tok { display: inline-block; transform-origin: 50% 85%; animation-name: mz-tok-grow; }
+@keyframes mz-tok-fade { from { opacity: 0; } }
+@keyframes mz-tok-rise { from { opacity: 0; top: 0.4em; } to { top: 0; } }
+@keyframes mz-tok-blur { from { opacity: 0; filter: blur(5px); } }
+@keyframes mz-tok-grow { from { opacity: 0; transform: scale(0.3); } }
+@media (prefers-reduced-motion: reduce) {
+  [data-reveal] .mz-tok { animation: none; }
+}
+
 /* ===== Glass / transparency (optional) =====
  *
  * Off unless the user turns it on in Settings → Appearance. Two things happen:

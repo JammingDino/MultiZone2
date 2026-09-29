@@ -1012,6 +1012,18 @@ export interface AppSettings {
   /** Flash the taskbar entry too (0.18.3); the quiet half of a notice. */
   notifyFlashTaskbar: boolean;
   /**
+   * How streamed text arrives (0.18.3) — see lib/streamReveal.ts. Smoothing
+   * trails the model by about this many ms to even out bursty tokens; 0 shows
+   * text the moment it lands.
+   */
+  streamSmoothingMs: number;
+  /** Reveal by character, by whole word, or by word only when text comes fast. */
+  streamUnit: "char" | "word" | "adaptive";
+  /** How each newly shown piece appears. */
+  streamAnimation: "none" | "fade" | "rise" | "blur" | "grow";
+  /** How long that takes, ms. */
+  streamAnimationMs: number;
+  /**
    * The window's close button hides it to the tray instead of quitting
    * (0.18), so running agents and scheduled runs carry on. Read by the
    * backend, which handles the close request.
@@ -1394,6 +1406,10 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   notifyWhenFinished: true,
   notifyPreview: true,
   notifyFlashTaskbar: true,
+  streamSmoothingMs: 250,
+  streamUnit: "adaptive",
+  streamAnimation: "fade",
+  streamAnimationMs: 250,
   closeToTray: true,
   maxToolSteps: 30,
   maxSessionTokens: 0,

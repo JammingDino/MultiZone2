@@ -6,7 +6,10 @@ import { MAX_CUSTOM_CSS, THEME_COLOR_KEYS } from "@/store/app";
 import { HexColorField } from "@/components/common/ColorPicker";
 import { ToggleRow } from "@/components/common/Toggle";
 import { formatCount } from "@/lib/format";
-import { OptionCards, SliderRow } from "../controls";
+import { OptionCards, SettingSelect, SliderRow } from "../controls";
+import { StreamingMarkdown } from "@/components/Renderers/StreamingMarkdown";
+import { useThrottledStreaming } from "@/lib/useThrottledStreaming";
+import type { AppSettings } from "@/lib/types";
 
 const ACCENT_PRESETS = ["#4f9cf9", "#22c55e", "#a855f7", "#f97316", "#ec4899", "#facc15"];
 
@@ -264,6 +267,8 @@ export function AppearanceTab() {
           </div>
         </div>
       </section>
+
+      <StreamingSection />
 
       <section>
         <h3 className="mb-2 text-sm font-medium">Visual effects</h3>
@@ -566,3 +571,116 @@ function CustomCssSection() {
 }
 
 // ─── Chat ─────────────────────────────────────────────────────────────────────
+
+// ─── Streaming text (0.18.3) ──────────────────────────────────────────────────
+
+const SAMPLE =
+  "Models rarely write at an even pace. Tokens arrive in bursts — a whole clause at once, then a pause " +
+  "while the next one is decided. **Smoothing** spreads those bursts out, and the animation decides how " +
+  "each new piece lands. Adjust the settings and replay to see the difference.";
+
+/** How streamed answers arrive: pacing, unit, and the animation each piece gets. */
+function StreamingSection() {
+  const settings = useApp((s) => s.appSettings);
+  const set = useApp((s) => s.setAppSettings);
+  const animation = settings.streamAnimation ?? "fade";
+  const smoothing = settings.streamSmoothingMs ?? 0;
+  const ms = settings.streamAnimationMs ?? 250;
+
+  return (
+    <section>
+      <h3 className="mb-1 text-sm font-medium">Streaming text</h3>
+      <p className="mb-3 text-xs text-[var(--color-text-muted)]">How an answer appears as the model writes it.</p>
+      <div className="grid grid-cols-2 narrow:grid-cols-1 gap-4">
+        <label className="block">
+          <div className="mb-1 text-xs text-[var(--color-text-muted)]">Animation</div>
+          <SettingSelect
+            value={animation}
+            onChange={(v) => set({ streamAnimation: v as AppSettings["streamAnimation"] })}
+          >
+            <option value="none">None</option>
+            <option value="fade">Fade in</option>
+            <option value="rise">Rise</option>
+            <option value="blur">Blur in</option>
+            <option value="grow">Grow</option>
+          </SettingSelect>
+        </label>
+        <label className="block">
+          <div className="mb-1 text-xs text-[var(--color-text-muted)]">Reveal by</div>
+          <SettingSelect
+            value={settings.streamUnit ?? "adaptive"}
+            onChange={(v) => set({ streamUnit: v as AppSettings["streamUnit"] })}
+          >
+            <option value="char">Character</option>
+            <option value="word">Whole word</option>
+            <option value="adaptive">Adaptive — words when it is fast</option>
+          </SettingSelect>
+        </label>
+        <SliderRow
+          label="Smoothing"
+          value={smoothing}
+          min={0} max={1000} step={50}
+          display={smoothing === 0 ? "Off" : `${smoothing} ms`}
+          onChange={(v) => set({ streamSmoothingMs: v })}
+        />
+        <SliderRow
+          label="Animation length"
+          value={ms}
+          min={50} max={1000} step={25}
+          display={animation === "none" ? "—" : `${ms} ms`}
+          onChange={(v) => set({ streamAnimationMs: v })}
+        />
+      </div>
+      <StreamPreview />
+    </section>
+  );
+}
+
+/**
+ * The settings above, applied to a sample streamed the way a model streams:
+ * uneven bursts with pauses between them.
+ */
+function StreamPreview() {
+  const [text, setText] = useState("");
+  const [streaming, setStreaming] = useState(false);
+  const [run, setRun] = useState(0);
+
+  useEffect(() => {
+    let i = 0;
+    let t: number;
+    setText("");
+    setStreaming(true);
+    const next = () => {
+      // Bursts of 1–24 characters, 20–220 ms apart: the jitter smoothing is for.
+      i = Math.min(SAMPLE.length, i + 1 + Math.floor(Math.random() * 24));
+      setText(SAMPLE.slice(0, i));
+      if (i < SAMPLE.length) t = window.setTimeout(next, 20 + Math.random() * 200);
+      else setStreaming(false);
+    };
+    t = window.setTimeout(next, 300);
+    return () => window.clearTimeout(t);
+  }, [run]);
+
+  const visible = useThrottledStreaming(text, streaming);
+  const live = streaming || visible !== text;
+  const settings = useApp((s) => s.appSettings);
+  const animation = settings.streamAnimation ?? "none";
+  const ms = settings.streamAnimationMs ?? 250;
+
+  return (
+    <div className="mt-3">
+      <div className="min-h-[5.5rem] rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2">
+        <StreamingMarkdown
+          source={visible}
+          reveal={live && animation !== "none" ? { unit: settings.streamUnit ?? "char", animation, ms } : undefined}
+        />
+      </div>
+      <button
+        onClick={() => setRun((n) => n + 1)}
+        className="mt-1.5 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+      >
+        Replay
+      </button>
+    </div>
+  );
+}

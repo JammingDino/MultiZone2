@@ -1,33 +1,52 @@
-import { useEffect, useRef, useState } from "react";
-import { subscribeStreamTick } from "./streamTick";
+import { useEffect, useReducer, useRef } from "react";
+import { setStreamTickBase, subscribeStreamTick } from "./streamTick";
+import { step } from "./streamReveal";
+import { useApp } from "@/store/app";
 
 /**
- * Throttles a streaming text source so the view reading it repaints on the
- * app-wide stream tick rather than on every token. The tick is shared (see
- * streamTick.ts) so several zones answering at once repaint together in one
- * render pass instead of each on its own timer, and the latest value is
- * flushed immediately the moment `streaming` flips to false.
+ * The part of a streaming text to show now. Repaints on the app-wide stream
+ * tick rather than on every token — the tick is shared (see streamTick.ts) so
+ * several zones answering at once repaint together in one render pass.
  *
- * The throttled `visible` state is only ever consulted *while streaming*. When
- * idle we return `source` directly rather than a state copy of it, because a
- * copy can go stale: consuming components are reused across chat switches
- * (turns and text blocks are keyed by index), and an effect keyed on
- * `[streaming]` never re-runs when both the old and new chat are idle. That
- * left `visible` holding the previous chat's answer — the "chat history
- * mix-ups" bug, where the prompt updated (user messages are keyed by id) but
- * the answer under it did not.
+ * With smoothing on (0.18.3) it also paces the text: characters are revealed
+ * at a rate that follows the backlog (`step` in streamReveal.ts), so bursts
+ * and pauses in the model's output become an even flow, and the reveal keeps
+ * going after the stream ends until it has caught up.
+ *
+ * When there is nothing left to reveal it returns `source` itself rather than
+ * a copy. A copy can go stale: consuming components are reused across chat
+ * switches (turns and text blocks are keyed by index), which once left the
+ * previous chat's answer under the new chat's prompt. For the same reason a
+ * `source` that does not continue what is on screen starts fully shown.
  */
 export function useThrottledStreaming(source: string, streaming: boolean): string {
-  const [visible, setVisible] = useState(source);
-  const latestRef = useRef(source);
-  latestRef.current = source;
+  const smoothMs = useApp((s) => s.appSettings.streamSmoothingMs ?? 0);
+  const unit = useApp((s) => s.appSettings.streamUnit ?? "char");
+  const [, repaint] = useReducer((n: number) => n + 1, 0);
+  const r = useRef({ pos: source.length, shown: source, at: 0 });
+  const latest = useRef(source);
+  latest.current = source;
+  if (!source.startsWith(r.current.shown)) r.current = { pos: source.length, shown: source, at: 0 };
+
+  const live = streaming || r.current.shown.length < source.length;
 
   useEffect(() => {
-    if (!streaming) return;
-    setVisible(latestRef.current);
-    return subscribeStreamTick(() => setVisible(latestRef.current));
-  }, [streaming]);
+    if (!live) return;
+    setStreamTickBase(smoothMs > 0 ? 33 : 60);
+    r.current.at = performance.now();
+    return subscribeStreamTick(() => {
+      const s = r.current;
+      const src = latest.current;
+      const now = performance.now();
+      const { pos, end } = step(src, s.pos, s.shown.length, now - s.at, smoothMs, unit);
+      s.at = now;
+      s.pos = pos;
+      if (end !== s.shown.length || !src.startsWith(s.shown)) {
+        s.shown = src.slice(0, end);
+        repaint();
+      }
+    });
+  }, [live, smoothMs, unit]);
 
-  // Idle: `source` is authoritative and always current.
-  return streaming ? visible : source;
+  return live ? r.current.shown : source;
 }

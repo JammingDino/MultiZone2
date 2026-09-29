@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
+import { rehypeReveal, type RevealUnit } from "@/lib/streamReveal";
 import type { Components } from "react-markdown";
 import { CodeBlock } from "./CodeBlock";
 import { MarkdownTable } from "./DataTable";
@@ -83,6 +84,9 @@ const MD_COMPONENTS_PLAIN_TABLES: Components = {
 const REMARK_PLUGINS = [remarkGfm, remarkMath];
 const REHYPE_PLUGINS = [rehypeKatex];
 
+/** A streaming group's reveal animation — see lib/streamReveal.ts. */
+export type Reveal = { unit: RevealUnit; animation: string; ms: number };
+
 export function Markdown({
   source,
   citations,
@@ -90,6 +94,7 @@ export function Markdown({
   className = "",
   fontSize,
   plainTables = false,
+  reveal,
 }: {
   source: string;
   citations?: Citation[];
@@ -105,6 +110,8 @@ export function Markdown({
   /** Render tables as plain tables — see `MD_COMPONENTS_PLAIN_TABLES`. Set for
    *  the same markdown that sets `fontSize`: chrome, not conversation. */
   plainTables?: boolean;
+  /** Animate text as it appears: set only while this group is still streaming. */
+  reveal?: Reveal;
 }) {
   // Append the citation plugin only when there are citations to map, so ordinary
   // messages keep the stable module-level plugin array (no needless re-parse).
@@ -114,6 +121,13 @@ export function Markdown({
         ? [...REMARK_PLUGINS, citationPlugin(citations)]
         : REMARK_PLUGINS,
     [citations],
+  );
+
+  // The reveal spans only while streaming; a finished answer is plain text.
+  const unit = reveal?.unit;
+  const rehypePlugins = useMemo(
+    () => (unit ? [...REHYPE_PLUGINS, [rehypeReveal, { unit }] as const] : REHYPE_PLUGINS),
+    [unit],
   );
 
   // Normalize \[…\] / \(…\) and inline $$…$$ into the delimiter forms remark-math
@@ -135,12 +149,16 @@ export function Markdown({
   return (
     <div
       className={`${part ? "markdown markdown-part" : "markdown"}${className ? ` ${className}` : ""}`}
-      style={{ fontSize: fontSize ?? "var(--font-size-message, 14px)" }}
+      style={{
+        fontSize: fontSize ?? "var(--font-size-message, 14px)",
+        ...(reveal ? { ["--mz-tok-ms" as string]: `${reveal.ms}ms` } : {}),
+      }}
+      data-reveal={reveal?.animation}
       onClick={onClick}
     >
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
-        rehypePlugins={REHYPE_PLUGINS}
+        rehypePlugins={rehypePlugins as never}
         components={plainTables ? MD_COMPONENTS_PLAIN_TABLES : MD_COMPONENTS}
       >
         {normalized}

@@ -11,7 +11,7 @@
  */
 
 /** Repaint interval with a single stream running. */
-const BASE_MS = 60;
+let BASE_MS = 60;
 /** Added per additional concurrent stream. */
 const PER_STREAM_MS = 40;
 /** Coarsest we will ever get, however many zones are answering. */
@@ -40,6 +40,17 @@ function reschedule() {
     // Copied because a subscriber may unsubscribe from inside its own tick.
     for (const fn of [...subscribers]) fn();
   }, wanted);
+}
+
+/**
+ * Set the single-stream interval. Paced text (streamReveal) wants ~30fps to
+ * read as a flow rather than steps; unpaced text gains nothing from it.
+ */
+export function setStreamTickBase(ms: number) {
+  if (ms === BASE_MS) return;
+  BASE_MS = ms;
+  currentMs = -1; // force the running timer onto the new interval
+  reschedule();
 }
 
 /** Subscribe to the shared repaint tick. Returns the unsubscribe function. */

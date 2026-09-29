@@ -37,6 +37,10 @@ import { isShowing } from "@/lib/tabLayout";
 export function FilesPanel({ chatId }: { chatId: string }) {
   const [root, setRoot] = useState<string | null | undefined>(undefined);
   const [refreshKey, setRefreshKey] = useState(0);
+  // The directory follows the chat's project, so moving the chat to another
+  // project re-resolves it, as does changing the default directory.
+  const projectId = useApp((s) => s.chats.find((c) => c.id === chatId)?.projectId ?? null);
+  const defaultDir = useApp((s) => s.appSettings.defaultDirectory);
 
   useEffect(() => {
     let live = true;
@@ -44,7 +48,7 @@ export function FilesPanel({ chatId }: { chatId: string }) {
       .then((d) => { if (live) setRoot(d); })
       .catch(() => { if (live) setRoot(null); });
     return () => { live = false; };
-  }, [chatId]);
+  }, [chatId, projectId, defaultDir]);
 
   if (root === undefined) return null;
 
@@ -65,7 +69,9 @@ export function FilesPanel({ chatId }: { chatId: string }) {
             </IconButton>
           </div>
           <div className="min-h-0 flex-1 overflow-auto overscroll-contain py-1">
-            <Dir key={refreshKey} path={root} depth={0} open />
+            {/* Keyed by chat and root too: a `Dir` reads its folder once, so without
+                a remount switching chats kept showing the last chat's tree. */}
+            <Dir key={`${chatId}:${root}:${refreshKey}`} path={root} depth={0} open />
           </div>
         </>
       ) : (

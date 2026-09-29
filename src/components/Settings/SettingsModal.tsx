@@ -131,9 +131,7 @@ export function SettingsModal() {
                 throws is one screen, not the window. The bottom padding keeps
                 the last section off the panel's edge. */}
             <ErrorBoundary label={`${TAB_LABELS[tab]} settings`} resetKey={tab}>
-              {/* Capped so a wide window does not stretch a label and its
-                  switch a monitor apart. */}
-              <div className="min-w-0 max-w-2xl flex-1 pb-10">
+              <div className="min-w-0 flex-1 pb-10">
                 {tab === "providers" && <ProvidersTab />}
                 {tab === "appearance" && <AppearanceTab />}
                 {tab === "chat" && <ChatTab />}

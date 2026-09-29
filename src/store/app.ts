@@ -846,8 +846,6 @@ export interface ThemePrefs {
    * flock or a contour stack reads as a palette rather than one flat tone.
    */
   effectHue?: number;
-  bloomEnabled: boolean;
-  bloomIntensity: number;
   shadowsEnabled: boolean;
   /**
    * Glass / transparency (0.9.15). Off by default — a translucent UI is a taste,
@@ -908,8 +906,6 @@ const DEFAULT_THEME: ThemePrefs = {
   effectOpacity: 0.5,
   effectColor: "accent",
   effectHue: 20,
-  bloomEnabled: false,
-  bloomIntensity: 0.5,
   shadowsEnabled: true,
   glassEnabled: false,
   glassStyle: "frosted",
@@ -1060,9 +1056,7 @@ function applyThemeToDom(theme: ThemePrefs) {
     "--color-accent-hover",
     shade(theme.accent, theme.mode === "light" ? -0.14 : 0.14),
   );
-  html.classList.toggle("bloom", !!theme.bloomEnabled);
   html.classList.toggle("shadows", !!theme.shadowsEnabled);
-  html.style.setProperty("--bloom-intensity", String(theme.bloomIntensity ?? 0.5));
 
   // Glass: one class for "on", one for which style, and a strength variable the
   // stylesheet derives blur and opacity from.

@@ -128,10 +128,6 @@ fn fields() -> Vec<Field> {
             doc: "Degrees of hue spread around the effect colour; 0 paints everything one flat tone." },
         Field { name: "shadowsEnabled", kind: Bool, default: json!(true),
             doc: "Depth shadows on panels and cards." },
-        Field { name: "bloomEnabled", kind: Bool, default: json!(false),
-            doc: "Glow on interactive elements and accent colours." },
-        Field { name: "bloomIntensity", kind: Number { min: 0.1, max: 1.0 }, default: json!(0.5),
-            doc: "How far the bloom carries." },
         Field { name: "glassEnabled", kind: Bool, default: json!(false),
             doc: "Panels, menus and dialogs let the background through. Worth little with backgroundEffect \"none\" — there is nothing behind them to see." },
         Field { name: "glassStyle", kind: Enum(GLASS_STYLES), default: json!("frosted"),
@@ -320,7 +316,7 @@ mod tests {
             vec![
                 "mode", "accent", "colorsDark", "colorsLight", "backgroundEffect", "effectColor",
                 "effectSpeed", "effectDensity", "effectOpacity", "effectHue", "shadowsEnabled",
-                "bloomEnabled", "bloomIntensity", "glassEnabled", "glassStyle", "glassStrength",
+                "glassEnabled", "glassStyle", "glassStrength",
                 "customCssEnabled", "customCss",
             ],
         );

@@ -236,7 +236,7 @@ pub const ROUTES: &[RouteDef] = &[
     r("GET", "/api/events", "SSE: every app event a window would receive — the turn, the sidebar, settings, devices"),
 
     r("GET", "/api/theme", "The appearance settings in force, with every field's type, range, default and meaning — and the CSS variables custom CSS should target"),
-    r("PATCH", "/api/theme", "Change appearance: mode, accent, the palette colours (background · panels · hover · borders · text · muted text), background effect, glass, bloom, and custom CSS. Validated, and says what is wrong with a patch it rejects"),
+    r("PATCH", "/api/theme", "Change appearance: mode, accent, the palette colours (background · panels · hover · borders · text · muted text), background effect, glass, and custom CSS. Validated, and says what is wrong with a patch it rejects"),
     r("POST", "/api/mirror", "Re-write every chat to the markdown mirror folder"),
     r("POST", "/api/mirror/import", "Import a markdown chat file as a new chat"),
 ];

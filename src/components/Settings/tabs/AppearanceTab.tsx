@@ -275,23 +275,6 @@ export function AppearanceTab() {
             onChange={(v) => setTheme({ shadowsEnabled: v })}
           />
           <ToggleRow
-            label="Bloom / glow"
-            description="Adds glow to interactive elements and accent colors"
-            checked={!!theme.bloomEnabled}
-            onChange={(v) => setTheme({ bloomEnabled: v })}
-          />
-          {theme.bloomEnabled && (
-            <div className="ml-3 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
-              <SliderRow
-                label="Glow intensity"
-                value={theme.bloomIntensity ?? 0.5}
-                min={0.1} max={1} step={0.05}
-                display={`${Math.round((theme.bloomIntensity ?? 0.5) * 100)}%`}
-                onChange={(v) => setTheme({ bloomIntensity: v })}
-              />
-            </div>
-          )}
-          <ToggleRow
             label="Glass / transparency"
             description="Panels, menus and dialogs let the background show through"
             checked={!!theme.glassEnabled}

@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import type { Chat, ChatTagLink } from "@/lib/types";
-import { Pencil, Trash2, Sparkles, Loader2, FolderInput, FolderMinus, ChevronRight, ShieldAlert, History, FileText, FileType } from "lucide-react";
+import { Pencil, Trash2, Sparkles, Loader2, FolderInput, FolderMinus, ChevronRight, ShieldAlert, History, FileText, FileType, Columns2, SquarePlus } from "lucide-react";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { useShallow } from "zustand/react/shallow";
@@ -65,6 +65,7 @@ export function ChatList({ chats, activeId, onSelect, projectId, limit }: Props)
   const collapsedBranches = usePersistentSet("collapsedBranches");
   const moveRef = useRef<HTMLDivElement>(null);
   const openReplay = useApp((s) => s.openReplay);
+  const setActiveChat = useApp((s) => s.setActiveChat);
   // Bound to whichever chat the menu is open on; an empty id is harmless
   // because nothing runs until an entry is clicked.
   const { exportAs } = useChatExport(menu?.chatId ?? "");
@@ -164,7 +165,11 @@ export function ChatList({ chats, activeId, onSelect, projectId, limit }: Props)
     const tagLinks = tagsByChatId[chat.id] ?? [];
     const row = (
       <div
-        onClick={() => onSelect(chat.id)}
+        // Ctrl/⌘-click or middle-click opens the chat in a new tab, beside
+        // what is open, the way a link does in a browser (0.18.3).
+        onClick={(e) => (e.ctrlKey || e.metaKey ? void setActiveChat(chat.id, "tab") : onSelect(chat.id))}
+        onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }}
+        onAuxClick={(e) => { if (e.button === 1) void setActiveChat(chat.id, "tab"); }}
         onContextMenu={(e) => openMenu(e, chat.id)}
         title={chat.initiatedByZoneId ? `Sub-agent${subchatZone ? ` · ${subchatZone.name}` : ""}` : undefined}
         className={`${SIDEBAR_ROW} ${
@@ -262,6 +267,16 @@ export function ChatList({ chats, activeId, onSelect, projectId, limit }: Props)
           y={menu.y}
           onClose={() => setMenu(null)}
           items={[
+            {
+              label: "Open in new tab",
+              icon: <SquarePlus size={14} />,
+              onClick: () => { const id = menu.chatId; setMenu(null); void setActiveChat(id, "tab"); },
+            },
+            {
+              label: "Open to the side",
+              icon: <Columns2 size={14} />,
+              onClick: () => { const id = menu.chatId; setMenu(null); void setActiveChat(id, "right"); },
+            },
             {
               label: "Rename",
               icon: <Pencil size={14} />,

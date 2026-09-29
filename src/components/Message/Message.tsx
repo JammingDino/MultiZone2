@@ -30,6 +30,7 @@ import { attachmentToParts, type PendingAttachment } from "@/lib/attachFiles";
 import { EditComposer } from "@/components/Chat/EditComposer";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
+import { usePaneChatId } from "@/lib/paneChat";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 import { ChevronDown, ChevronRight } from "lucide-react";
@@ -523,7 +524,7 @@ function BotTurnViewImpl({ turn, isLatest = false }: { turn: BotTurn; isLatest?:
   const isStreaming = Boolean(turn.streaming);
   const hasAnything = turn.blocks.length > 0 || isStreaming;
 
-  const chatId = useApp((s) => s.activeChatId) ?? "";
+  const chatId = usePaneChatId() ?? "";
   // While streaming, no assistant message is saved yet so `turn.zoneId` is null.
   // Resolve the answering zone early — from the live routing result, else the
   // chat's bound zone — so the avatar/accent show the zone's colours from the

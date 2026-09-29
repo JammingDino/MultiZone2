@@ -6,7 +6,8 @@ import * as api from "@/lib/tauri";
 import { MessageThread } from "./MessageThread";
 import { FileViewer } from "@/components/Workspace/FileViewer";
 import { TabTiles } from "./TabTiles";
-import { CHAT_TAB } from "@/lib/tabLayout";
+import { chatOf, chatTab, isFileTab, isShowing } from "@/lib/tabLayout";
+import { PaneChat } from "@/lib/paneChat";
 import { InputBar, type InputBarHandle } from "./InputBar";
 import { ZonePicker } from "./ZonePicker";
 import { WorkspaceToggle } from "@/components/Workspace/WorkspaceToggle";
@@ -35,9 +36,6 @@ const STREAM_DRAIN_MS = 16;
 
 export function ChatPanel() {
   const {
-    activeChatId,
-    chats,
-    zones,
     settingsOpen,
     projectsPanelOpen,
     applyStreamEvent,
@@ -46,13 +44,8 @@ export function ChatPanel() {
     loadMessages,
     refreshTags,
     loadChatTags,
-    loadChatZones,
-    respondApproval,
   } = useApp(
     useShallow((s) => ({
-      activeChatId: s.activeChatId,
-      chats: s.chats,
-      zones: s.zones,
       settingsOpen: s.settingsOpen,
       projectsPanelOpen: s.projectsPanelOpen,
       applyStreamEvent: s.applyStreamEvent,
@@ -61,214 +54,12 @@ export function ChatPanel() {
       loadMessages: s.loadMessages,
       refreshTags: s.refreshTags,
       loadChatTags: s.loadChatTags,
-      loadChatZones: s.loadChatZones,
-      respondApproval: s.respondApproval,
     })),
   );
-  const providers = useApp((s) => s.providers);
-  const baseZoneId = useApp((s) => s.appSettings.baseZoneId);
-
-  const pendingApprovalByChat = useApp((s) => s.pendingApprovalByChat);
-  const setActiveChat = useApp((s) => s.setActiveChat);
-  const routingByChat = useApp((s) => s.routingByChat);
-  const stageImport = useApp((s) => s.stageImport);
-  const pendingApprovals = activeChatId ? (pendingApprovalByChat[activeChatId] ?? []) : [];
-
-  const activeChat = chats.find((c) => c.id === activeChatId) ?? null;
-  const activeZone = activeChat ? zones.find((z) => z.id === activeChat.zoneId) : null;
-
-  // A subchat is a conversation another zone started. It used to be read-only
-  // on the theory that it belongs to its owner, but that made the sub-agent's
-  // work a dead end: the interesting finding is often *in* the subchat, and the
-  // only way to follow it up was to go back to the leader and ask it to relay.
-  // It is an ordinary chat bound to the answering zone, so it now takes messages
-  // like any other — the banner names who else is driving it.
-  const isSubchat = !!activeChat?.initiatedByZoneId;
-  const subchatZone =
-    isSubchat && activeChat
-      ? zones.find((z) => z.id === activeChat.initiatedByZoneId) ?? null
-      : null;
-
-  // Approvals waiting in a chat the user is *not* looking at — almost always a
-  // background sub-agent (0.9.10 let a leader fan out to a whole panel at once).
-  // The store already holds them: the stream listener routes every event by its
-  // own chat id, so a subchat's approval lands correctly whether or not it is on
-  // screen. Nothing surfaced it, though, so the request sat until the ~5-minute
-  // approval timeout auto-denied it and the sub-agent stalled with no visible
-  // cause. Surfacing it here — in the leader's chat, where the user is actually
-  // sitting while the panel works — is what closes that loop.
-  const elsewhereApprovals = useMemo(() => {
-    const out: { chatId: string; title: string; count: number }[] = [];
-    for (const [cid, list] of Object.entries(pendingApprovalByChat)) {
-      if (!list?.length || cid === activeChatId) continue;
-      const chat = chats.find((c) => c.id === cid);
-      if (!chat) continue;
-      out.push({ chatId: cid, title: chat.title || "Untitled chat", count: list.length });
-    }
-    return out;
-  }, [pendingApprovalByChat, activeChatId, chats]);
-
-  // A chat with no zone (Quick) or smart routing enabled runs the base zone, or
-  // the first provider's default model. Zone chats need their zone configured.
-  const quickAvailable = !!resolveBaseModel(providers, zones, baseZoneId);
-  const isSmartChat = !!activeChat?.smartRouting;
-  const isSimpleChat = !!activeChat && activeChat.zoneId == null && !isSmartChat;
-  const inputDisabled = isSmartChat || isSimpleChat ? !quickAvailable : !activeZone;
-  const messagesByChat = useApp((s) => s.messagesByChat);
-
-  // Detect a pending ask_user that hasn't been answered yet.
-  // Walk the tail of the message list: if the most recent non-user messages
-  // include a tool result with rendered === "ask_user" before hitting a user
-  // message, the question is still waiting.
-  const pendingAskUser = useMemo(() => {
-    if (!activeChatId) return null;
-    // Only the primary conversation surfaces an ask_user widget; perspective
-    // tool messages (zone_id set) are ignored so they don't trip the scan.
-    const msgs = (messagesByChat[activeChatId] ?? []).filter((m) => !m.zoneId);
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      const m = msgs[i];
-      if (m.role === "user") return null;
-      if (m.role === "tool") {
-        try {
-          const parts = JSON.parse(m.content) as Array<{ type: string; text?: string }>;
-          const textPart = parts.find((p) => p.type === "text");
-          if (!textPart?.text) continue;
-          const parsed = JSON.parse(textPart.text);
-          if (parsed?.rendered === "ask_user" && parsed?.status === "waiting_for_user") {
-            return { chatId: activeChatId, parsed };
-          }
-        } catch {}
-      }
-    }
-    return null;
-  }, [activeChatId, messagesByChat]);
-
-  // The plain composer floats over the bottom of the thread (0.18.1): the
-  // transcript runs to the window's edge and shows either side of the box,
-  // instead of stopping at a line above it. The thread is padded by the
-  // composer's measured height so its last message can still scroll clear.
-  // Anything else in that slot — an approval, a question, a banner — keeps
-  // the old stacked layout, where nothing sits on top of it.
-  const floatComposer =
-    elsewhereApprovals.length === 0 && pendingApprovals.length === 0 && !pendingAskUser;
-  const [composerEl, setComposerEl] = useState<HTMLDivElement | null>(null);
-  const [composerHeight, setComposerHeight] = useState(0);
-  useEffect(() => {
-    if (!composerEl || !floatComposer) {
-      setComposerHeight(0);
-      return;
-    }
-    const apply = () => setComposerHeight(composerEl.offsetHeight);
-    apply();
-    const obs = new ResizeObserver(apply);
-    obs.observe(composerEl);
-    return () => obs.disconnect();
-  }, [composerEl, floatComposer]);
-
-  // The plan waiting on the user in this chat (0.12.0). Read from the store
-  // rather than scanned out of the transcript like `ask_user` above: a plan
-  // outlives the turn that filed it — close the chat, come back tomorrow, it is
-  // still the thing standing between you and the work happening.
-  const pendingPlan = useApp((s) => (activeChatId ? s.pendingPlanByChat[activeChatId] : null));
-  const loadPendingPlan = useApp((s) => s.loadPendingPlan);
   // Replay lives in the store because the sidebar's right-click menu can open
   // it for a chat that isn't the one on screen (#13).
   const replayChatId = useApp((s) => s.replayChatId);
   const closeReplay = useApp((s) => s.closeReplay);
-
-  useEffect(() => {
-    if (activeChatId) void loadPendingPlan(activeChatId);
-  }, [activeChatId, loadPendingPlan]);
-
-  // A turn that files a plan ends on that tool result, so the arrival of one in
-  // the transcript is the signal to go and fetch the row it wrote.
-  const planFiledMarker = useMemo(() => {
-    if (!activeChatId) return null;
-    const msgs = (messagesByChat[activeChatId] ?? []).filter((m) => !m.zoneId);
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      const m = msgs[i];
-      if (m.role === "user") return null;
-      if (m.role !== "tool") continue;
-      try {
-        const parts = JSON.parse(m.content) as Array<{ type: string; text?: string }>;
-        const text = parts.find((p) => p.type === "text")?.text;
-        if (!text) continue;
-        const parsed = JSON.parse(text);
-        if (parsed?.rendered === "plan_proposal" && parsed?.planId) return String(parsed.planId);
-      } catch {}
-    }
-    return null;
-  }, [activeChatId, messagesByChat]);
-
-  useEffect(() => {
-    if (activeChatId && planFiledMarker && pendingPlan?.id !== planFiledMarker) {
-      void loadPendingPlan(activeChatId);
-    }
-  }, [activeChatId, planFiledMarker, pendingPlan?.id, loadPendingPlan]);
-
-  // Live task state (0.12.1). The plan tree is reloaded when the transcript
-  // grows a tool result, which is exactly when a step can have changed status —
-  // cheaper and more truthful than polling, since `update_plan` writing the row
-  // is the only thing that moves it.
-  const loadPlanTree = useApp((s) => s.loadPlanTree);
-  const isStreaming = useApp(
-    (s) =>
-      !!activeChatId &&
-      (Boolean(s.streamingByChat[activeChatId]) ||
-        Object.keys(s.perspectiveStreamsByChat[activeChatId] ?? {}).length > 0),
-  );
-  const toolResultCount = useMemo(() => {
-    if (!activeChatId) return 0;
-    return (messagesByChat[activeChatId] ?? []).filter((m) => m.role === "tool").length;
-  }, [activeChatId, messagesByChat]);
-
-  useEffect(() => {
-    if (activeChatId) void loadPlanTree(activeChatId);
-  }, [activeChatId, toolResultCount, loadPlanTree]);
-
-  const inputRef = useRef<InputBarHandle>(null);
-  const dragDepth = useRef(0);
-  const [isDragOver, setIsDragOver] = useState(false);
-
-  // Rendered inside whichever composer-row is showing (input, approval, or
-  // ask-user) rather than as a strip of its own above them — see SubchatBanner.
-  const subchatNotice = isSubchat ? <SubchatBanner zone={subchatZone} /> : null;
-
-  function hasFiles(e: React.DragEvent) {
-    return Array.from(e.dataTransfer?.types ?? []).includes("Files");
-  }
-
-  function onDragEnter(e: React.DragEvent) {
-    if (!activeChat || !hasFiles(e)) return;
-    e.preventDefault();
-    dragDepth.current += 1;
-    setIsDragOver(true);
-  }
-  function onDragOver(e: React.DragEvent) {
-    if (!activeChat || !hasFiles(e)) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "copy";
-  }
-  function onDragLeave(e: React.DragEvent) {
-    if (!activeChat || !hasFiles(e)) return;
-    e.preventDefault();
-    dragDepth.current = Math.max(0, dragDepth.current - 1);
-    if (dragDepth.current === 0) setIsDragOver(false);
-  }
-  function onDrop(e: React.DragEvent) {
-    if (!activeChat || !hasFiles(e)) return;
-    e.preventDefault();
-    dragDepth.current = 0;
-    setIsDragOver(false);
-    // Copy out of the event before awaiting — `dataTransfer` is cleared once
-    // the handler returns.
-    const files = Array.from(e.dataTransfer.files);
-    if (files.length === 0) return;
-    // A dropped settings export is an import, not an attachment.
-    void claimSettingsDrop(files, stageImport).then((claimed) => {
-      if (!claimed) inputRef.current?.addFiles(files);
-    });
-  }
 
   // Mirror the latest store actions in refs so the listener-setup effect below
   // can run exactly once (empty deps) without ever tearing down and
@@ -373,163 +164,403 @@ export function ChatPanel() {
   }, []);
 
   return (
-    <main
-      /* `min-w-0` is what keeps a narrow window usable (0.17.9). A flex item
+    <main className="relative flex h-full min-w-0 flex-1 flex-col">
+      {/* Chats, files and the new-chat screen, as tabs that tile the column
+          (0.18.3) — as many as you like, side by side or stacked. */}
+      <TabTiles
+        renderTab={(tab) => {
+          const id = chatOf(tab);
+          if (id) return <ChatPane chatId={id} />;
+          if (isFileTab(tab) && tab) return <FileViewer key={tab} path={tab} />;
+          return (
+            <div className="mz-view-in flex min-h-0 flex-1 flex-col">
+              <HomeScreen />
+            </div>
+          );
+        }}
+      />
+      {replayChatId && (
+        <ReplayView chatId={replayChatId} onClose={closeReplay} />
+      )}
+      {settingsOpen && <SettingsModal />}
+      {projectsPanelOpen && <ProjectsPanel />}
+    </main>
+  );
+}
+
+/**
+ * One chat, as a tab in the main column's tiles (0.18.3): its header, its
+ * transcript, and whatever is waiting on the user — approvals, a question, the
+ * composer. Everything here is about `chatId`, not "the active chat", so two
+ * of these side by side each run their own conversation.
+ */
+function ChatPane({ chatId }: { chatId: string }) {
+  const { chats, zones, loadMessages, loadChatTags, loadChatZones, respondApproval } = useApp(
+    useShallow((s) => ({
+      chats: s.chats,
+      zones: s.zones,
+      loadMessages: s.loadMessages,
+      loadChatTags: s.loadChatTags,
+      loadChatZones: s.loadChatZones,
+      respondApproval: s.respondApproval,
+    })),
+  );
+  // The focused pane's chat is the active one — the one shortcuts, the
+  // workspace panel and approvals from elsewhere are about.
+  const isActive = useApp((s) => s.activeChatId === chatId);
+  const tabLayout = useApp((s) => s.tabLayout);
+  const providers = useApp((s) => s.providers);
+  const baseZoneId = useApp((s) => s.appSettings.baseZoneId);
+
+  const pendingApprovalByChat = useApp((s) => s.pendingApprovalByChat);
+  const setActiveChat = useApp((s) => s.setActiveChat);
+  const routingByChat = useApp((s) => s.routingByChat);
+  const stageImport = useApp((s) => s.stageImport);
+  const pendingApprovals = chatId ? (pendingApprovalByChat[chatId] ?? []) : [];
+
+  const activeChat = chats.find((c) => c.id === chatId) ?? null;
+
+  // A pane restored from last session, or opened beside another, may show a
+  // chat nothing has loaded yet — `setActiveChat` only loads the one it opens.
+  const loaded = useApp((s) => !!s.messagesByChat[chatId]);
+  const tagsLoaded = useApp((s) => !!s.tagsByChat[chatId]);
+  useEffect(() => {
+    if (!loaded) void loadMessages(chatId);
+    if (!tagsLoaded) void loadChatTags(chatId);
+    void loadChatZones(chatId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatId]);
+  const activeZone = activeChat ? zones.find((z) => z.id === activeChat.zoneId) : null;
+
+  // A subchat is a conversation another zone started. It used to be read-only
+  // on the theory that it belongs to its owner, but that made the sub-agent's
+  // work a dead end: the interesting finding is often *in* the subchat, and the
+  // only way to follow it up was to go back to the leader and ask it to relay.
+  // It is an ordinary chat bound to the answering zone, so it now takes messages
+  // like any other — the banner names who else is driving it.
+  const isSubchat = !!activeChat?.initiatedByZoneId;
+  const subchatZone =
+    isSubchat && activeChat
+      ? zones.find((z) => z.id === activeChat.initiatedByZoneId) ?? null
+      : null;
+
+  // Approvals waiting in a chat the user is *not* looking at — almost always a
+  // background sub-agent (0.9.10 let a leader fan out to a whole panel at once).
+  // The store already holds them: the stream listener routes every event by its
+  // own chat id, so a subchat's approval lands correctly whether or not it is on
+  // screen. Nothing surfaced it, though, so the request sat until the ~5-minute
+  // approval timeout auto-denied it and the sub-agent stalled with no visible
+  // cause. Surfacing it here — in the leader's chat, where the user is actually
+  // sitting while the panel works — is what closes that loop.
+  const elsewhereApprovals = useMemo(() => {
+    const out: { chatId: string; title: string; count: number }[] = [];
+    for (const [cid, list] of Object.entries(pendingApprovalByChat)) {
+      // Not one that is on screen already, in this pane or another.
+      if (!list?.length || isShowing(tabLayout, chatTab(cid))) continue;
+      const chat = chats.find((c) => c.id === cid);
+      if (!chat) continue;
+      out.push({ chatId: cid, title: chat.title || "Untitled chat", count: list.length });
+    }
+    return out;
+  }, [pendingApprovalByChat, tabLayout, chats]);
+
+  // A chat with no zone (Quick) or smart routing enabled runs the base zone, or
+  // the first provider's default model. Zone chats need their zone configured.
+  const quickAvailable = !!resolveBaseModel(providers, zones, baseZoneId);
+  const isSmartChat = !!activeChat?.smartRouting;
+  const isSimpleChat = !!activeChat && activeChat.zoneId == null && !isSmartChat;
+  const inputDisabled = isSmartChat || isSimpleChat ? !quickAvailable : !activeZone;
+  const messagesByChat = useApp((s) => s.messagesByChat);
+
+  // Detect a pending ask_user that hasn't been answered yet.
+  // Walk the tail of the message list: if the most recent non-user messages
+  // include a tool result with rendered === "ask_user" before hitting a user
+  // message, the question is still waiting.
+  const pendingAskUser = useMemo(() => {
+    if (!chatId) return null;
+    // Only the primary conversation surfaces an ask_user widget; perspective
+    // tool messages (zone_id set) are ignored so they don't trip the scan.
+    const msgs = (messagesByChat[chatId] ?? []).filter((m) => !m.zoneId);
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i];
+      if (m.role === "user") return null;
+      if (m.role === "tool") {
+        try {
+          const parts = JSON.parse(m.content) as Array<{ type: string; text?: string }>;
+          const textPart = parts.find((p) => p.type === "text");
+          if (!textPart?.text) continue;
+          const parsed = JSON.parse(textPart.text);
+          if (parsed?.rendered === "ask_user" && parsed?.status === "waiting_for_user") {
+            return { chatId: chatId, parsed };
+          }
+        } catch {}
+      }
+    }
+    return null;
+  }, [chatId, messagesByChat]);
+
+  // The plain composer floats over the bottom of the thread (0.18.1): the
+  // transcript runs to the window's edge and shows either side of the box,
+  // instead of stopping at a line above it. The thread is padded by the
+  // composer's measured height so its last message can still scroll clear.
+  // Anything else in that slot — an approval, a question, a banner — keeps
+  // the old stacked layout, where nothing sits on top of it.
+  const showElsewhere = isActive && elsewhereApprovals.length > 0;
+  const floatComposer =
+    !showElsewhere && pendingApprovals.length === 0 && !pendingAskUser;
+  const [composerEl, setComposerEl] = useState<HTMLDivElement | null>(null);
+  const [composerHeight, setComposerHeight] = useState(0);
+  useEffect(() => {
+    if (!composerEl || !floatComposer) {
+      setComposerHeight(0);
+      return;
+    }
+    const apply = () => setComposerHeight(composerEl.offsetHeight);
+    apply();
+    const obs = new ResizeObserver(apply);
+    obs.observe(composerEl);
+    return () => obs.disconnect();
+  }, [composerEl, floatComposer]);
+
+  // The plan waiting on the user in this chat (0.12.0). Read from the store
+  // rather than scanned out of the transcript like `ask_user` above: a plan
+  // outlives the turn that filed it — close the chat, come back tomorrow, it is
+  // still the thing standing between you and the work happening.
+  const pendingPlan = useApp((s) => (chatId ? s.pendingPlanByChat[chatId] : null));
+  const loadPendingPlan = useApp((s) => s.loadPendingPlan);
+
+  useEffect(() => {
+    if (chatId) void loadPendingPlan(chatId);
+  }, [chatId, loadPendingPlan]);
+
+  // A turn that files a plan ends on that tool result, so the arrival of one in
+  // the transcript is the signal to go and fetch the row it wrote.
+  const planFiledMarker = useMemo(() => {
+    if (!chatId) return null;
+    const msgs = (messagesByChat[chatId] ?? []).filter((m) => !m.zoneId);
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i];
+      if (m.role === "user") return null;
+      if (m.role !== "tool") continue;
+      try {
+        const parts = JSON.parse(m.content) as Array<{ type: string; text?: string }>;
+        const text = parts.find((p) => p.type === "text")?.text;
+        if (!text) continue;
+        const parsed = JSON.parse(text);
+        if (parsed?.rendered === "plan_proposal" && parsed?.planId) return String(parsed.planId);
+      } catch {}
+    }
+    return null;
+  }, [chatId, messagesByChat]);
+
+  useEffect(() => {
+    if (chatId && planFiledMarker && pendingPlan?.id !== planFiledMarker) {
+      void loadPendingPlan(chatId);
+    }
+  }, [chatId, planFiledMarker, pendingPlan?.id, loadPendingPlan]);
+
+  // Live task state (0.12.1). The plan tree is reloaded when the transcript
+  // grows a tool result, which is exactly when a step can have changed status —
+  // cheaper and more truthful than polling, since `update_plan` writing the row
+  // is the only thing that moves it.
+  const loadPlanTree = useApp((s) => s.loadPlanTree);
+  const isStreaming = useApp(
+    (s) =>
+      !!chatId &&
+      (Boolean(s.streamingByChat[chatId]) ||
+        Object.keys(s.perspectiveStreamsByChat[chatId] ?? {}).length > 0),
+  );
+  const toolResultCount = useMemo(() => {
+    if (!chatId) return 0;
+    return (messagesByChat[chatId] ?? []).filter((m) => m.role === "tool").length;
+  }, [chatId, messagesByChat]);
+
+  useEffect(() => {
+    if (chatId) void loadPlanTree(chatId);
+  }, [chatId, toolResultCount, loadPlanTree]);
+
+  const inputRef = useRef<InputBarHandle>(null);
+  const dragDepth = useRef(0);
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  // Rendered inside whichever composer-row is showing (input, approval, or
+  // ask-user) rather than as a strip of its own above them — see SubchatBanner.
+  const subchatNotice = isSubchat ? <SubchatBanner zone={subchatZone} /> : null;
+
+  function hasFiles(e: React.DragEvent) {
+    return Array.from(e.dataTransfer?.types ?? []).includes("Files");
+  }
+
+  function onDragEnter(e: React.DragEvent) {
+    if (!activeChat || !hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth.current += 1;
+    setIsDragOver(true);
+  }
+  function onDragOver(e: React.DragEvent) {
+    if (!activeChat || !hasFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  }
+  function onDragLeave(e: React.DragEvent) {
+    if (!activeChat || !hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setIsDragOver(false);
+  }
+  function onDrop(e: React.DragEvent) {
+    if (!activeChat || !hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth.current = 0;
+    setIsDragOver(false);
+    // Copy out of the event before awaiting — `dataTransfer` is cleared once
+    // the handler returns.
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length === 0) return;
+    // A dropped settings export is an import, not an attachment.
+    void claimSettingsDrop(files, stageImport).then((claimed) => {
+      if (!claimed) inputRef.current?.addFiles(files);
+    });
+  }
+
+
+  if (!activeChat) return null;
+
+  return (
+    <PaneChat.Provider value={chatId}>
+    <div
+      /* `min-w-0` is what keeps a narrow pane usable (0.17.9). A flex item
          defaults to min-width:auto — its content's width — so the header's
          run of controls, which cannot shrink, used to make the whole panel
-         wider than the window. Nothing overflowed visibly; the panel simply
-         extended off the right edge, taking the composer's send button and
-         every header control with it. Zero lets the panel be the window's
-         width and the header sort out its own overflow below. */
-      className="relative flex h-full min-w-0 flex-1 flex-col"
+         wider than the window. Zero lets the pane be its tile's width and
+         the header sort out its own overflow below. */
+      className="mz-view-in relative flex min-h-0 min-w-0 flex-1 flex-col"
       onDragEnter={onDragEnter}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
-      {activeChat ? (
-        <div key={activeChat.id} className="mz-view-in relative flex min-h-0 flex-1 flex-col">
-          <header className="mz-drop-in flex min-h-12 flex-wrap items-center gap-2 border-b border-[var(--color-border)] px-3 py-1.5 sm:flex-nowrap sm:gap-3 sm:px-4">
-            {/* A floor on the title so the controls cannot squeeze it to
-                nothing, and no ceiling: it takes whatever they leave. */}
-            <div className="min-w-[5rem] flex-1 truncate text-sm font-medium" title={activeChat.title}>{activeChat.title}</div>
-            <ConversationIndicator chatId={activeChat.id} />
-            {/* The controls scroll sideways when there is not room for them
-                all, rather than pushing the panel past the window. Each stays
-                its natural size (`shrink-0` on the children) so nothing
-                collapses into an unreadable sliver. Project, tags,
-                perspectives and export live in the workspace panel now
-                (0.17.9); what is left is what gets read every message. */}
-            <div className="hide-scrollbar flex min-w-0 shrink items-center gap-2 overflow-x-auto [&>*]:shrink-0">
-            <ContextMeter chatId={activeChat.id} />
-            <ZonePicker
-              chatId={activeChat.id}
-              currentZoneId={activeChat.zoneId}
-              smartRouting={activeChat.smartRouting ?? false}
-              routingState={routingByChat[activeChat.id] ?? null}
-            />
-            {isSmartChat && zones.length === 0 && (
-              <span className="text-xs text-[var(--color-text-muted)]">
-                No zones — add one to enable routing
-              </span>
-            )}
-            </div>
-            {/* Always the rightmost thing in the row: it opens the panel on
-                the right, and a control for the edge belongs at the edge. */}
-            <WorkspaceToggle />
-          </header>
+      <header className="mz-drop-in flex min-h-12 flex-wrap items-center gap-2 border-b border-[var(--color-border)] px-3 py-1.5 sm:flex-nowrap sm:gap-3 sm:px-4">
+        {/* A floor on the title so the controls cannot squeeze it to
+            nothing, and no ceiling: it takes whatever they leave. */}
+        <div className="min-w-[5rem] flex-1 truncate text-sm font-medium" title={activeChat.title}>{activeChat.title}</div>
+        <ConversationIndicator chatId={activeChat.id} />
+        {/* The controls scroll sideways when there is not room for them
+            all, rather than pushing the panel past the window. Each stays
+            its natural size (`shrink-0` on the children) so nothing
+            collapses into an unreadable sliver. Project, tags,
+            perspectives and export live in the workspace panel now
+            (0.17.9); what is left is what gets read every message. */}
+        <div className="hide-scrollbar flex min-w-0 shrink items-center gap-2 overflow-x-auto [&>*]:shrink-0">
+        <ContextMeter chatId={activeChat.id} />
+        <ZonePicker
+          chatId={activeChat.id}
+          currentZoneId={activeChat.zoneId}
+          smartRouting={activeChat.smartRouting ?? false}
+          routingState={routingByChat[activeChat.id] ?? null}
+        />
+        {isSmartChat && zones.length === 0 && (
+          <span className="text-xs text-[var(--color-text-muted)]">
+            No zones — add one to enable routing
+          </span>
+        )}
+        </div>
+        {/* Always the rightmost thing in the row: it opens the panel on
+            the right, and a control for the edge belongs at the edge. */}
+        <WorkspaceToggle />
+      </header>
 
-          {/* The transcript is one tab among the chat's open files, and any of
-              them can sit side by side (0.18.3). The composer, approvals and
-              questions belong to the transcript's tab, wherever it is. */}
-          <TabTiles
-            chatId={activeChat.id}
-            renderTab={(tab) =>
-              tab === CHAT_TAB ? (
-                <>
-                  {/* Keyed by chat id so switching chats remounts the thread instead of
-                      reusing the previous chat's component instances. Turns and text
-                      blocks inside are keyed by index (a turn has no stable id until it
-                      persists), so without this a reused instance could carry the old
-                      chat's view state — collapsed rails, edit drafts, scroll position,
-                      and (before the `useThrottledStreaming` fix) the old answer text. */}
-                  <MessageThread key={activeChat.id} chatId={activeChat.id} bottomInset={composerHeight} />
-                  {elsewhereApprovals.length > 0 && (
-                    <div className="border-t border-amber-500/40 bg-amber-500/10 px-4 py-2">
-                      <div className="mx-auto flex max-w-3xl flex-col gap-1.5">
-                        {elsewhereApprovals.map((e) => (
-                          <div key={e.chatId} className="flex items-center gap-2 text-xs">
-                            <ShieldAlert size={14} className="shrink-0 text-amber-500" />
-                            <span className="text-[var(--color-text)]">
-                              {e.count === 1
-                                ? "A sub-agent is waiting for approval in"
-                                : `${e.count} approvals are waiting in`}{" "}
-                              <span className="font-medium">{e.title}</span>
-                            </span>
-                            <button
-                              onClick={() => void setActiveChat(e.chatId)}
-                              className="ml-auto shrink-0 rounded border border-amber-500/50 px-2 py-0.5 font-medium text-amber-600 transition-colors hover:bg-amber-500/20 dark:text-amber-400"
-                            >
-                              Review
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {/* The plan, task list, terminals and review queue that used to
-                      stack here live in the workspace panel on the right (0.17.9);
-                      only what blocks the turn — approvals, ask_user — stays with
-                      the composer. */}
-                  {pendingApprovals.length > 0 ? (
-                    <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3">
-                      <div className="mx-auto flex max-w-3xl flex-col gap-2">
-                        {subchatNotice}
-                        {pendingApprovals.map((pa) => (
-                          <ToolApprovalBanner
-                            key={pa.zoneId ?? "__primary__"}
-                            toolName={pa.name}
-                            toolArguments={pa.arguments}
-                            diff={pa.diff}
-                            zoneName={
-                              pa.zoneId
-                                ? zones.find((z) => z.id === pa.zoneId)?.name ?? "Perspective"
-                                : null
-                            }
-                            onApprove={(hunks) => respondApproval(activeChatId!, pa.zoneId, true, hunks)}
-                            onDeny={() => respondApproval(activeChatId!, pa.zoneId, false)}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  ) : pendingAskUser ? (
-                    <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3">
-                      <div className="mx-auto max-w-3xl">
-                        {subchatNotice}
-                        <AskUserCard
-                          chatId={pendingAskUser.chatId}
-                          questions={
-                            pendingAskUser.parsed.mode === "multi" &&
-                            Array.isArray(pendingAskUser.parsed.questions)
-                              ? pendingAskUser.parsed.questions
-                              : [
-                                  {
-                                    question: pendingAskUser.parsed.question ?? "",
-                                    options: Array.isArray(pendingAskUser.parsed.options)
-                                      ? pendingAskUser.parsed.options
-                                      : [],
-                                    allow_free_text: pendingAskUser.parsed.allow_free_text !== false,
-                                  },
-                                ]
-                          }
-                        />
-                      </div>
-                    </div>
-                  ) : (
-                    // The composer arrives a beat after the thread it belongs to, so the
-                    // eye finishes on the thing the user is about to type into.
-                    <div
-                      ref={setComposerEl}
-                      className={`mz-view-in mz-delay-60 ${floatComposer ? "absolute inset-x-0 bottom-0 z-10" : "shrink-0"}`}
-                    >
-                      <InputBar
-                        chatId={activeChat.id}
-                        disabled={inputDisabled}
-                        ref={inputRef}
-                        notice={subchatNotice}
-                      />
-                    </div>
-                  )}
-                </>
-              ) : (
-                <FileViewer key={tab} path={tab} />
-              )
-            }
-          />
+      {/* Keyed by chat id so switching chats remounts the thread instead of
+          reusing the previous chat's component instances. Turns and text
+          blocks inside are keyed by index (a turn has no stable id until it
+          persists), so without this a reused instance could carry the old
+          chat's view state — collapsed rails, edit drafts, scroll position,
+          and (before the `useThrottledStreaming` fix) the old answer text. */}
+      <MessageThread key={activeChat.id} chatId={activeChat.id} bottomInset={composerHeight} />
+      {showElsewhere && (
+        <div className="border-t border-amber-500/40 bg-amber-500/10 px-4 py-2">
+          <div className="mx-auto flex max-w-3xl flex-col gap-1.5">
+            {elsewhereApprovals.map((e) => (
+              <div key={e.chatId} className="flex items-center gap-2 text-xs">
+                <ShieldAlert size={14} className="shrink-0 text-amber-500" />
+                <span className="text-[var(--color-text)]">
+                  {e.count === 1
+                    ? "A sub-agent is waiting for approval in"
+                    : `${e.count} approvals are waiting in`}{" "}
+                  <span className="font-medium">{e.title}</span>
+                </span>
+                <button
+                  onClick={() => void setActiveChat(e.chatId)}
+                  className="ml-auto shrink-0 rounded border border-amber-500/50 px-2 py-0.5 font-medium text-amber-600 transition-colors hover:bg-amber-500/20 dark:text-amber-400"
+                >
+                  Review
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {/* The plan, task list, terminals and review queue that used to
+          stack here live in the workspace panel on the right (0.17.9);
+          only what blocks the turn — approvals, ask_user — stays with
+          the composer. */}
+      {pendingApprovals.length > 0 ? (
+        <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3">
+          <div className="mx-auto flex max-w-3xl flex-col gap-2">
+            {subchatNotice}
+            {pendingApprovals.map((pa) => (
+              <ToolApprovalBanner
+                key={pa.zoneId ?? "__primary__"}
+                toolName={pa.name}
+                toolArguments={pa.arguments}
+                diff={pa.diff}
+                zoneName={
+                  pa.zoneId
+                    ? zones.find((z) => z.id === pa.zoneId)?.name ?? "Perspective"
+                    : null
+                }
+                onApprove={(hunks) => respondApproval(chatId!, pa.zoneId, true, hunks)}
+                onDeny={() => respondApproval(chatId!, pa.zoneId, false)}
+              />
+            ))}
+          </div>
+        </div>
+      ) : pendingAskUser ? (
+        <div className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-3">
+          <div className="mx-auto max-w-3xl">
+            {subchatNotice}
+            <AskUserCard
+              chatId={pendingAskUser.chatId}
+              questions={
+                pendingAskUser.parsed.mode === "multi" &&
+                Array.isArray(pendingAskUser.parsed.questions)
+                  ? pendingAskUser.parsed.questions
+                  : [
+                      {
+                        question: pendingAskUser.parsed.question ?? "",
+                        options: Array.isArray(pendingAskUser.parsed.options)
+                          ? pendingAskUser.parsed.options
+                          : [],
+                        allow_free_text: pendingAskUser.parsed.allow_free_text !== false,
+                      },
+                    ]
+              }
+            />
+          </div>
         </div>
       ) : (
-        <div className="mz-view-in flex min-h-0 flex-1 flex-col">
-          <HomeScreen />
+        // The composer arrives a beat after the thread it belongs to, so the
+        // eye finishes on the thing the user is about to type into.
+        <div
+          ref={setComposerEl}
+          className={`mz-view-in mz-delay-60 ${floatComposer ? "absolute inset-x-0 bottom-0 z-10" : "shrink-0"}`}
+        >
+          <InputBar
+            chatId={activeChat.id}
+            disabled={inputDisabled}
+            ref={inputRef}
+            notice={subchatNotice}
+          />
         </div>
       )}
       {isDragOver && activeChat && (
@@ -543,14 +574,11 @@ export function ChatPanel() {
           </div>
         </div>
       )}
-      {replayChatId && (
-        <ReplayView chatId={replayChatId} onClose={closeReplay} />
-      )}
-      {settingsOpen && <SettingsModal />}
-      {projectsPanelOpen && <ProjectsPanel />}
-    </main>
+    </div>
+    </PaneChat.Provider>
   );
 }
+
 
 import type { Zone } from "@/lib/types";
 import { claimSettingsDrop } from "@/lib/importSettings";

@@ -170,12 +170,8 @@ export function Sidebar() {
     setDeleteConfirm(null);
     await api.deleteProject(project.id, deleteChats);
     await refreshProjects();
+    // Closes the tabs of any chats that went with it (see `refreshChats`).
     await refreshChats();
-    // If the active chat lived in a deleted-with-chats project, it's gone now.
-    if (deleteChats && activeChatId) {
-      const stillExists = (await api.listChats()).some((c) => c.id === activeChatId);
-      if (!stillExists) await setActiveChat(null);
-    }
   }
 
   const ungroupedChats = chats.filter((c) => !c.projectId && matchesTagFilter(c.id));

@@ -26,7 +26,7 @@ export interface SavedOutput {
  */
 export function SavedFileChip({ output }: { output: SavedOutput }) {
   const openInPanel = useApp((s) => s.openWorkspaceFile);
-  const showing = useApp((s) => isShowing(s.tabLayoutByChat[s.activeChatId ?? ""], output.path));
+  const showing = useApp((s) => isShowing(s.tabLayout, output.path));
   const name = output.filename || output.path;
   const { Icon, color } = iconFor(name);
   return (

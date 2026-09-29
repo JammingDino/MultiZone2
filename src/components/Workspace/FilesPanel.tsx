@@ -155,7 +155,7 @@ function Guides({ depth }: { depth: number }) {
 
 function Row({ entry, depth }: { entry: DirEntry; depth: number }) {
   const [open, setOpen] = useState(false);
-  const selected = useApp((s) => isShowing(s.tabLayoutByChat[s.activeChatId ?? ""], entry.path));
+  const selected = useApp((s) => isShowing(s.tabLayout, entry.path));
   const openFile = useApp((s) => s.openWorkspaceFile);
   const indent = { paddingLeft: `${depth * 14 + 6}px` };
   const hidden = entry.name.startsWith(".");

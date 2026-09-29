@@ -1,20 +1,24 @@
 /**
  * The main column as tiles of tab groups (0.18.3).
  *
- * A chat's column was one strip of tabs — the transcript, then its open files —
- * and one of them on screen at a time. Reading a report while asking about it
- * meant flipping back and forth. Now the column is a tree: leaves are groups
- * (a tab strip and the active tab's body), inner nodes split their space in a
- * row or a column. Any tab can be dragged onto another group's edge to split
- * it, or into its strip to join it. The transcript is a tab like the rest,
- * except that it cannot be closed — it is where the composer lives.
+ * The column showed one chat, with its open files as a strip of tabs and one
+ * of them on screen at a time. Reading a report while asking about it meant
+ * flipping back and forth, and two chats side by side was not possible at
+ * all. Now the column is a tree: leaves are groups (a tab strip and the active
+ * tab's body), inner nodes split their space in a row or a column. Any tab —
+ * a chat, a file, the new-chat screen — can be dragged onto another group's
+ * edge to split it, or into its strip to join it.
  *
- * Pure functions over plain objects, so the store holds a layout per chat and
- * every change is a new value.
+ * Pure functions over plain objects: the store holds one layout and every
+ * change is a new value.
  */
 
-/** The transcript's tab id. File tabs are absolute paths, which never start with `@`. */
-export const CHAT_TAB = "@chat";
+/** A chat's tab id is `chat:<id>`; the new-chat screen is `@home`; anything else is a file's absolute path. */
+export const HOME_TAB = "@home";
+export const chatTab = (id: string) => `chat:${id}`;
+export const chatOf = (tab: string | undefined): string | null =>
+  tab?.startsWith("chat:") ? tab.slice(5) : null;
+export const isFileTab = (tab: string) => tab !== HOME_TAB && !tab.startsWith("chat:");
 
 export type TabGroup = { kind: "group"; id: string; tabs: string[]; active: string };
 export type TabSplit = { kind: "split"; id: string; dir: "row" | "col"; children: TabNode[]; sizes: number[] };
@@ -27,8 +31,9 @@ let seq = 0;
 const uid = () => `t${++seq}${Math.random().toString(36).slice(2, 7)}`;
 const group = (tabs: string[], active = tabs[0]): TabGroup => ({ kind: "group", id: uid(), tabs, active });
 
+/** Nothing open: one empty group, which shows the new-chat screen. */
 export function initialLayout(): TabLayout {
-  const g = group([CHAT_TAB]);
+  const g: TabGroup = { kind: "group", id: uid(), tabs: [], active: "" };
   return { root: g, focused: g.id };
 }
 
@@ -45,9 +50,14 @@ export function isShowing(layout: TabLayout | undefined, tab: string): boolean {
   return !!layout && groups(layout.root).some((g) => g.active === tab);
 }
 
-/** Just the transcript, alone: the column looks as it did before any tabs. */
+/** One tab, or none: no strip, and the column looks as it did before tabs. */
 export function isBare(layout: TabLayout): boolean {
-  return layout.root.kind === "group" && layout.root.tabs.length === 1;
+  return layout.root.kind === "group" && layout.root.tabs.length <= 1;
+}
+
+export function focusedGroup(layout: TabLayout): TabGroup {
+  const all = groups(layout.root);
+  return all.find((g) => g.id === layout.focused) ?? all[0];
 }
 
 /**
@@ -77,8 +87,8 @@ function rewrite(node: TabNode, fn: (g: TabGroup) => TabNode | null): TabNode | 
 }
 
 function withGroups(layout: TabLayout, fn: (g: TabGroup) => TabNode | null, focused = layout.focused): TabLayout {
-  // The transcript's group always survives, so the root never empties.
-  const root = rewrite(layout.root, fn) ?? layout.root;
+  const root = rewrite(layout.root, fn);
+  if (!root) return initialLayout();
   const all = groups(root);
   return { root, focused: all.some((g) => g.id === focused) ? focused : all[0].id };
 }
@@ -98,9 +108,9 @@ export function focusGroup(layout: TabLayout, groupId: string): TabLayout {
 export function openTab(layout: TabLayout, tab: string, background = false): TabLayout {
   const home = groupOf(layout, tab);
   if (home) return background ? layout : activate(layout, home.id, tab);
-  const target = groups(layout.root).find((g) => g.id === layout.focused) ?? groups(layout.root)[0];
+  const target = focusedGroup(layout);
   return withGroups(layout, (g) =>
-    g.id === target.id ? { ...g, tabs: [...g.tabs, tab], active: background ? g.active : tab } : g,
+    g.id === target.id ? { ...g, tabs: [...g.tabs, tab], active: background && g.active ? g.active : tab } : g,
   );
 }
 
@@ -118,7 +128,59 @@ function without(layout: TabLayout, tab: string): TabLayout {
 }
 
 export function closeTab(layout: TabLayout, tab: string): TabLayout {
-  return tab === CHAT_TAB ? layout : without(layout, tab);
+  return groupOf(layout, tab) ? without(layout, tab) : layout;
+}
+
+/** Close every tab `drop` picks — the chats that were deleted. */
+export function closeWhere(layout: TabLayout, drop: (tab: string) => boolean): TabLayout {
+  return groups(layout.root).some((g) => g.tabs.some(drop))
+    ? groups(layout.root).flatMap((g) => g.tabs).filter(drop).reduce(without, layout)
+    : layout;
+}
+
+/**
+ * Go to a chat (or the new-chat screen) from outside the tiles — the sidebar,
+ * search, a shortcut. Already open: brought forward where it is. `here`
+ * takes the focused group's place when that group is showing a chat, so
+ * clicking down the chat list moves one view along rather than piling up a
+ * tab per click, as the single view always did; a file on screen is kept and
+ * the chat opens beside it as a tab. `tab` always adds one; `right` opens it
+ * in a new group to the right.
+ */
+export function navigate(layout: TabLayout, tab: string, where: "here" | "tab" | "right" = "here"): TabLayout {
+  const home = groupOf(layout, tab);
+  if (home) return activate(layout, home.id, tab);
+  const g = focusedGroup(layout);
+  if (where === "right") {
+    if (g.tabs.length === 0) return openTab(layout, tab);
+    const fresh = group([tab]);
+    return withGroups(
+      layout,
+      (x) => (x.id === g.id ? { kind: "split", id: uid(), dir: "row", children: [x, fresh], sizes: [0.5, 0.5] } : x),
+      fresh.id,
+    );
+  }
+  if (where === "here" && g.active && !isFileTab(g.active)) {
+    return withGroups(layout, (x) =>
+      x.id === g.id ? { ...x, tabs: x.tabs.map((t) => (t === x.active ? tab : t)), active: tab } : x,
+    );
+  }
+  return openTab(layout, tab);
+}
+
+/**
+ * A layout read back from storage, or null if it is not one. localStorage is
+ * user-writable and outlives versions, so nothing is trusted by shape alone.
+ */
+export function parseLayout(raw: unknown): TabLayout | null {
+  const node = (n: any): boolean =>
+    n?.kind === "group"
+      ? typeof n.id === "string" && Array.isArray(n.tabs) && n.tabs.every((t: unknown) => typeof t === "string") && typeof n.active === "string"
+      : n?.kind === "split" && (n.dir === "row" || n.dir === "col") && Array.isArray(n.children) && n.children.length > 1 &&
+        Array.isArray(n.sizes) && n.sizes.length === n.children.length && n.sizes.every((x: unknown) => typeof x === "number" && x > 0) &&
+        n.children.every(node);
+  const l = raw as TabLayout;
+  return l && typeof l.focused === "string" && node(l.root) ? l : null;
 }
 
 /**

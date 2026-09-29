@@ -6,6 +6,7 @@ import {
   ChevronsUpDown, ChevronsDownUp, Maximize2, Minimize2,
 } from "lucide-react";
 import { useApp } from "@/store/app";
+import { usePaneChatId } from "@/lib/paneChat";
 import { useSettledValue } from "@/lib/useSettledValue";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 import * as api from "@/lib/tauri";
@@ -186,7 +187,7 @@ export function MermaidBlock({
 
   // The chat whose model does the repairing. The block's own tool call names it
   // when there is one; a fenced diagram belongs to whatever chat is on screen.
-  const activeChatId = useApp((s) => s.activeChatId);
+  const activeChatId = usePaneChatId();
   const repairChatId = autoFix?.chatId ?? activeChatId;
 
   /**

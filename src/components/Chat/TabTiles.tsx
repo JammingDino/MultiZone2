@@ -1,15 +1,16 @@
 import { useRef, useState, type ReactNode } from "react";
-import { Columns2, MessageSquare, X } from "lucide-react";
+import { Columns2, MessageSquare, Plus, X } from "lucide-react";
 import { useApp } from "@/store/app";
 import { iconFor } from "@/components/Workspace/FilesPanel";
 import {
-  CHAT_TAB,
+  HOME_TAB,
   activate,
+  chatOf,
   closeTab,
   focusGroup,
   groups,
-  initialLayout,
   isBare,
+  isFileTab,
   measure,
   moveTab,
   resizeSplit,
@@ -28,23 +29,33 @@ type Target = { groupId: string; zone: DropZone; index?: number; barX?: number }
 type Drag = { tab: string; x: number; y: number; target: Target | null };
 
 const pct = (n: number) => `${n * 100}%`;
-const nameOf = (tab: string) => (tab === CHAT_TAB ? "Chat" : tab.slice(Math.max(tab.lastIndexOf("/"), tab.lastIndexOf("\\")) + 1));
+function nameOf(tab: string): string {
+  const id = chatOf(tab);
+  if (id) return useApp.getState().chats.find((c) => c.id === id)?.title || "Untitled chat";
+  if (tab === HOME_TAB) return "New chat";
+  return tab.slice(Math.max(tab.lastIndexOf("/"), tab.lastIndexOf("\\")) + 1);
+}
 
 /**
  * The main column as tiles (0.18.3): every group's strip and active tab, each
  * positioned by `measure` as a percentage of the column. Drawn flat and keyed
  * by tab, so dragging a tab to split a group moves boxes around without
- * remounting the transcript — its scroll, its draft and a file's running page
- * all survive a rearrangement. The strip hides while the transcript is alone,
- * so a chat that never opens a file looks exactly as it did.
+ * remounting a chat — its scroll, its draft and a file's running page all
+ * survive a rearrangement. The strip hides while one tab is alone, so a
+ * window with one chat in it looks exactly as it did.
  */
-export function TabTiles({ chatId, renderTab }: { chatId: string; renderTab: (tab: string) => ReactNode }) {
-  const layout = useApp((s) => s.tabLayoutByChat[chatId]) ?? FALLBACK;
-  const update = useApp((s) => s.updateTabLayout);
+export function TabTiles({ renderTab }: { renderTab: (tab: string) => ReactNode }) {
+  const layout = useApp((s) => s.tabLayout);
+  const change = useApp((s) => s.updateTabLayout);
+  // Titles are read when drawn; subscribing keeps the strip current as they change.
+  useApp((s) => s.chats);
   const box = useRef<HTMLDivElement>(null);
-  const [drag, setDrag] = useState<Drag | null>(null);
+  const [drag, setDragState] = useState<Drag | null>(null);
+  // The drop reads this, not `drag`: the pointer listeners outlive the render
+  // they were attached in.
+  const dragRef = useRef<Drag | null>(null);
+  const setDrag = (d: Drag | null) => { dragRef.current = d; setDragState(d); };
 
-  const change = (fn: (l: TabLayout) => TabLayout) => update(chatId, fn);
   const { rects, dividers } = measure(layout.root);
   const all = groups(layout.root);
   const strip = isBare(layout) ? 0 : STRIP;
@@ -53,7 +64,8 @@ export function TabTiles({ chatId, renderTab }: { chatId: string; renderTab: (ta
   });
   // Visible tabs in a fixed order, so React never reorders their DOM — moving
   // an iframe's node reloads the page inside it.
-  const shown = all.map((g) => ({ tab: g.active, gid: g.id })).sort((a, b) => (a.tab < b.tab ? -1 : 1));
+  // An empty group (nothing open at all) shows the new-chat screen.
+  const shown = all.map((g) => ({ tab: g.active || HOME_TAB, gid: g.id })).sort((a, b) => (a.tab < b.tab ? -1 : 1));
 
   /** Which group, and which part of it, is under the pointer. */
   function hit(x: number, y: number): Target | null {
@@ -80,9 +92,10 @@ export function TabTiles({ chatId, renderTab }: { chatId: string; renderTab: (ta
   }
 
   function drop() {
-    if (drag?.target) {
-      const t = drag.target;
-      change((l) => moveTab(l, drag.tab, t.groupId, t.zone, t.index));
+    const d = dragRef.current;
+    if (d?.target) {
+      const t = d.target;
+      change((l) => moveTab(l, d.tab, t.groupId, t.zone, t.index));
     }
     setDrag(null);
   }
@@ -99,25 +112,31 @@ export function TabTiles({ chatId, renderTab }: { chatId: string; renderTab: (ta
             key={g.id}
             data-group={g.id}
             onPointerDownCapture={() => change((l) => focusGroup(l, g.id))}
-            className="hide-scrollbar absolute flex items-stretch overflow-x-auto border-b border-[var(--color-border)] bg-[var(--color-panel)]"
+            className="absolute flex border-b border-[var(--color-border)] bg-[var(--color-panel)]"
             style={{ left: pct(r.x), top: pct(r.y), width: pct(r.w), height: STRIP }}
           >
-            {g.tabs.map((tab) => (
-              <Tab
-                key={tab}
-                tab={tab}
-                active={g.active === tab}
-                focused={layout.focused === g.id || all.length === 1}
-                onActivate={() => change((l) => activate(l, g.id, tab))}
-                onClose={tab === CHAT_TAB ? undefined : () => change((l) => closeTab(l, tab))}
-                onDrag={(x, y, done) => (done ? drop() : setDrag({ tab, x, y, target: hit(x, y) }))}
-              />
-            ))}
+            {/* Scrolls sideways rather than squeezing, so a narrow pane with
+                many tabs never shrinks them to an ellipsis. */}
+            <div className="hide-scrollbar flex min-w-0 flex-1 items-stretch overflow-x-auto">
+              {g.tabs.map((tab) => (
+                <Tab
+                  key={tab}
+                  tab={tab}
+                  active={g.active === tab}
+                  focused={layout.focused === g.id || all.length === 1}
+                  onActivate={() => change((l) => activate(l, g.id, tab))}
+                  onClose={() => change((l) => closeTab(l, tab))}
+                  onDrag={(x, y, phase) =>
+                    phase === "drop" ? drop() : setDrag(phase === "cancel" ? null : { tab, x, y, target: hit(x, y) })
+                  }
+                />
+              ))}
+            </div>
             {g.tabs.length > 1 && (
               <button
                 onClick={() => change((l) => moveTab(l, g.active, g.id, "right"))}
                 title="Split: move this tab to a new pane on the right. Or drag any tab onto a pane's edge."
-                className="sticky right-0 ml-auto flex shrink-0 items-center bg-[var(--color-panel)] px-2 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                className="flex shrink-0 items-center px-2 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
               >
                 <Columns2 size={13} />
               </button>
@@ -163,8 +182,6 @@ export function TabTiles({ chatId, renderTab }: { chatId: string; renderTab: (ta
   );
 }
 
-const FALLBACK = initialLayout();
-
 /** The half (or whole) of a group's body a drop would fill. */
 function dropStyle(r: Rect, zone: DropZone, strip: number) {
   const x = pct(r.x), y = `calc(${pct(r.y)} + ${strip}px)`;
@@ -191,44 +208,50 @@ function Tab({
   focused: boolean;
   onActivate: () => void;
   onClose?: () => void;
-  onDrag: (x: number, y: number, done: boolean) => void;
+  onDrag: (x: number, y: number, phase: "move" | "drop" | "cancel") => void;
 }) {
-  const start = useRef<{ x: number; y: number; moved: boolean } | null>(null);
   const dragged = useRef(false);
   const label = nameOf(tab);
-  const { Icon, color } = tab === CHAT_TAB ? { Icon: MessageSquare, color: undefined } : iconFor(label);
+  const { Icon, color } = chatOf(tab)
+    ? { Icon: MessageSquare, color: undefined }
+    : tab === HOME_TAB
+      ? { Icon: Plus, color: undefined }
+      : iconFor(label);
 
   return (
     <div
       data-tab
-      // Pointer capture rather than HTML drag-and-drop (which this window has
-      // off, for file drops): it works under touch, and a file's iframe cannot
-      // swallow the moves as the pointer crosses it.
+      // Pointer events rather than HTML drag-and-drop (which this window has
+      // off, for file drops), so it works under touch too.
+      // Window listeners from the press, so a quick flick that leaves the tab
+      // before it counts as a drag is still followed; the pointer is captured
+      // once it does count, so a file's iframe cannot swallow the moves.
       onPointerDown={(e) => {
         if (e.button !== 0 || (e.target as HTMLElement).closest("[data-close]")) return;
-        start.current = { x: e.clientX, y: e.clientY, moved: false };
+        const el = e.currentTarget;
+        const id = e.pointerId;
+        const x0 = e.clientX, y0 = e.clientY;
+        let moved = false;
         dragged.current = false;
-      }}
-      onPointerMove={(e) => {
-        const s = start.current;
-        if (!s) return;
-        if (!s.moved) {
-          if (Math.hypot(e.clientX - s.x, e.clientY - s.y) < 5) return;
-          // Captured only once it is a drag, so a plain click still lands on
-          // the button inside.
-          e.currentTarget.setPointerCapture(e.pointerId);
-        }
-        s.moved = dragged.current = true;
-        onDrag(e.clientX, e.clientY, false);
-      }}
-      onPointerUp={(e) => {
-        const s = start.current;
-        start.current = null;
-        if (s?.moved) onDrag(e.clientX, e.clientY, true);
-      }}
-      onPointerCancel={() => {
-        if (start.current?.moved) onDrag(0, 0, true);
-        start.current = null;
+        const move = (ev: PointerEvent) => {
+          if (ev.pointerId !== id) return;
+          if (!moved) {
+            if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 5) return;
+            moved = dragged.current = true;
+            try { el.setPointerCapture(id); } catch { /* released already */ }
+          }
+          onDrag(ev.clientX, ev.clientY, "move");
+        };
+        const end = (ev: PointerEvent) => {
+          if (ev.pointerId !== id) return;
+          window.removeEventListener("pointermove", move);
+          window.removeEventListener("pointerup", end);
+          window.removeEventListener("pointercancel", end);
+          if (moved) onDrag(ev.clientX, ev.clientY, ev.type === "pointerup" ? "drop" : "cancel");
+        };
+        window.addEventListener("pointermove", move);
+        window.addEventListener("pointerup", end);
+        window.addEventListener("pointercancel", end);
       }}
       // Middle-click anywhere on the tab closes it, as it does everywhere else
       // that has tabs. `onMouseDown` only to stop Windows dropping into
@@ -246,7 +269,7 @@ function Tab({
     >
       <button
         onClick={() => { if (!dragged.current) onActivate(); }}
-        title={tab === CHAT_TAB ? "The conversation · drag to move" : `${tab} · drag to move or split`}
+        title={`${isFileTab(tab) ? tab : label} · drag to move or split`}
         className="flex min-w-0 items-center gap-1.5"
       >
         <span className="flex shrink-0"><Icon size={12} style={color ? { color } : undefined} /></span>

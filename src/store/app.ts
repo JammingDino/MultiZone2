@@ -11,7 +11,22 @@ import { shade } from "@/lib/color";
 import { normalizeApprovals } from "@/lib/approvals";
 import type { PendingAttachment } from "@/lib/attachFiles";
 import { errorText } from "@/lib/errors";
-import { closeTab, groups, initialLayout, openTab, type TabLayout } from "@/lib/tabLayout";
+import {
+  HOME_TAB, chatOf, chatTab, closeTab, closeWhere, focusedGroup, initialLayout, isFileTab, navigate, openTab, parseLayout,
+  type TabLayout,
+} from "@/lib/tabLayout";
+
+const TAB_LAYOUT_KEY = "ui.tabLayout";
+function readTabLayout(): TabLayout {
+  try {
+    return parseLayout(JSON.parse(localStorage.getItem(TAB_LAYOUT_KEY) ?? "null")) ?? initialLayout();
+  } catch {
+    return initialLayout();
+  }
+}
+function writeTabLayout(l: TabLayout) {
+  try { localStorage.setItem(TAB_LAYOUT_KEY, JSON.stringify(l)); } catch { /* storage off: in memory only */ }
+}
 
 /**
  * Chats whose opening turn has already kicked off an auto-title, so the check
@@ -551,7 +566,11 @@ interface AppStore {
   refreshProviders: () => Promise<void>;
   refreshZones: () => Promise<void>;
   refreshChats: () => Promise<void>;
-  setActiveChat: (id: string | null) => Promise<void>;
+  /**
+   * Show a chat (or, with null, the new-chat screen) in the main column's
+   * tiles — see `navigate` in lib/tabLayout.ts for what `where` does.
+   */
+  setActiveChat: (id: string | null, where?: "here" | "tab" | "right") => Promise<void>;
   /**
    * A message the thread should scroll to and flash once it is rendered
    * (0.15.0). Set by cross-chat search; cleared by `MessageThread` as soon as
@@ -650,14 +669,12 @@ interface AppStore {
   workspaceFocus: WorkspaceSection | null;
   focusWorkspace: (section: WorkspaceSection | null) => void;
   /**
-   * The main column's tiles, per chat (0.18.3): the transcript and open files
-   * as tabs in groups that split rows and columns — see lib/tabLayout.ts.
-   *
-   * Per chat because the tree is: a chat's working directory is its own, and
-   * another chat's open files name paths that are not in it. A chat with no
-   * entry is the transcript alone.
+   * The main column's tiles (0.18.3): chats, open files and the new-chat
+   * screen as tabs in groups that split rows and columns — see
+   * lib/tabLayout.ts. One layout for the window, persisted under
+   * `ui.tabLayout`, so the chats left open are open again next launch.
    */
-  tabLayoutByChat: Record<string, TabLayout>;
+  tabLayout: TabLayout;
   /**
    * Open a file as a tab in the focused group. `background` leaves you where
    * you are — the middle-click habit: queue up three files from the tree
@@ -666,8 +683,11 @@ interface AppStore {
   openWorkspaceFile: (path: string, background?: boolean) => void;
   /** Close one tab, or the focused group's active one. */
   closeWorkspaceFile: (path?: string) => void;
-  /** Apply a change to a chat's tiles. */
-  updateTabLayout: (chatId: string, fn: (l: TabLayout) => TabLayout) => void;
+  /**
+   * Apply a change to the tiles. The chat in the focused group becomes the
+   * active chat — the one the workspace panel and shortcuts act on.
+   */
+  updateTabLayout: (fn: (l: TabLayout) => TabLayout) => void;
   /** Signal the active composer to take keyboard focus. */
   focusComposer: () => void;
   /**
@@ -1118,7 +1138,7 @@ export const useApp = create<AppStore>((set, get) => ({
   chatTagLinks: [],
   chatZonesByChat: {},
 
-  activeChatId: null,
+  activeChatId: chatOf(focusedGroup(readTabLayout()).active),
   messagesByChat: {},
   streamingByChat: {},
   perspectiveStreamsByChat: {},
@@ -1158,7 +1178,7 @@ export const useApp = create<AppStore>((set, get) => ({
   sidebarOpen: readSidebarOpen(),
   workspaceOpen: readWorkspaceOpen(),
   workspaceFocus: null,
-  tabLayoutByChat: {},
+  tabLayout: readTabLayout(),
   focusComposerNonce: 0,
   projectsPanelOpen: false,
   projectsPanelInitId: null,
@@ -1214,6 +1234,9 @@ export const useApp = create<AppStore>((set, get) => ({
   async refreshChats() {
     const chats = await api.listChats();
     set({ chats });
+    // A deleted chat's tab goes with it, wherever it was.
+    const ids = new Set(chats.map((c) => c.id));
+    get().updateTabLayout((l) => closeWhere(l, (t) => { const c = chatOf(t); return c !== null && !ids.has(c); }));
   },
   pendingJumpMessageId: null,
   async jumpToMessage(chatId, messageId) {
@@ -1226,7 +1249,8 @@ export const useApp = create<AppStore>((set, get) => ({
   clearPendingJump() {
     set({ pendingJumpMessageId: null });
   },
-  async setActiveChat(id) {
+  async setActiveChat(id, where = "here") {
+    get().updateTabLayout((l) => navigate(l, id ? chatTab(id) : HOME_TAB, where));
     set({ activeChatId: id });
     if (id) {
       // Always refresh from the DB on entry so the view reflects persisted
@@ -2255,22 +2279,24 @@ export const useApp = create<AppStore>((set, get) => ({
     }
   },
   openWorkspaceFile: (path, background = false) => {
-    const chatId = get().activeChatId;
-    if (chatId) get().updateTabLayout(chatId, (l) => openTab(l, path, background));
+    get().updateTabLayout((l) => openTab(l, path, background));
   },
   closeWorkspaceFile: (path) => {
-    const chatId = get().activeChatId;
-    if (!chatId) return;
-    get().updateTabLayout(chatId, (l) => {
-      const target = path ?? groups(l.root).find((g) => g.id === l.focused)?.active;
+    get().updateTabLayout((l) => {
+      const target = path ?? focusedGroup(l).active;
       return target ? closeTab(l, target) : l;
     });
   },
-  updateTabLayout: (chatId, fn) => {
-    const cur = get().tabLayoutByChat[chatId] ?? initialLayout();
+  updateTabLayout: (fn) => {
+    const cur = get().tabLayout;
     const next = fn(cur);
     // A click that changes nothing (focusing the focused pane) writes nothing.
-    if (next !== cur) set({ tabLayoutByChat: { ...get().tabLayoutByChat, [chatId]: next } });
+    if (next === cur) return;
+    writeTabLayout(next);
+    // A file in front keeps the chat it was opened from as the active one.
+    const front = focusedGroup(next).active;
+    const chatId = isFileTab(front) && front ? get().activeChatId : chatOf(front);
+    set({ tabLayout: next, ...(chatId !== get().activeChatId ? { activeChatId: chatId } : {}) });
   },
   toggleSidebar: () => {
     const next = !get().sidebarOpen;

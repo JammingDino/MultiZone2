@@ -67,6 +67,8 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
   useEffect(() => {
     if (composerDraft.nonce === seenDraftNonce.current) return;
     seenDraftNonce.current = composerDraft.nonce;
+    // With chats side by side, only the focused one's composer takes it.
+    if (useApp.getState().activeChatId !== chatId) return;
     setText((cur) =>
       composerDraft.mode === "append" && cur.trim() !== ""
         ? `${cur.replace(/\s+$/, "")}\n\n${composerDraft.text}`
@@ -94,7 +96,7 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
   // mounted composer takes focus.
   const focusComposerNonce = useApp((s) => s.focusComposerNonce);
   useEffect(() => {
-    if (focusComposerNonce > 0) taRef.current?.focus();
+    if (focusComposerNonce > 0 && useApp.getState().activeChatId === chatId) taRef.current?.focus();
   }, [focusComposerNonce]);
   // Dictation (0.8.0): mic capture + transcribe-on-stop, shared with the
   // new-chat composer. Cancels a running recording when the chat switches.

@@ -88,3 +88,15 @@ test("a stored layout is only trusted when it has the right shape", () => {
   assert.equal(parseLayout({ root: { kind: "split", dir: "row", children: [], sizes: [] }, focused: "x" }), null);
   assert.equal(parseLayout("nope"), null);
 });
+
+test("a chat that is not open yet can be dropped into a strip or onto an edge", () => {
+  let l = navigate(initialLayout(), A);
+  l = moveTab(l, B, l.root.id, "right");
+  assert.deepEqual(shape(l.root), { row: [[A], [B]] });
+  assert.equal(l.focused, groupOf(l, B).id);
+  l = moveTab(l, C, groupOf(l, A).id, "center", 0);
+  assert.deepEqual(shape(l.root), { row: [[C, A], [B]] });
+  // Onto the empty home screen: there is no edge to split, so it just opens.
+  const home = initialLayout();
+  assert.deepEqual(shape(moveTab(home, A, home.root.id, "left").root), [A]);
+});

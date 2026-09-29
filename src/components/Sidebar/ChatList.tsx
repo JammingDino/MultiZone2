@@ -8,6 +8,8 @@ import { usePersistentSet } from "@/lib/uiState";
 import { Popover, pointRect } from "@/components/common/Popover";
 import { useChatExport } from "@/lib/useChatExport";
 import { reportError } from "@/lib/reportError";
+import { dragIntoTiles } from "@/components/Chat/TabTiles";
+import { chatTab } from "@/lib/tabLayout";
 
 interface Props {
   chats: Chat[];
@@ -66,6 +68,9 @@ export function ChatList({ chats, activeId, onSelect, projectId, limit }: Props)
   const moveRef = useRef<HTMLDivElement>(null);
   const openReplay = useApp((s) => s.openReplay);
   const setActiveChat = useApp((s) => s.setActiveChat);
+  // Set when a press became a drag into the tiles, so the click it ends in
+  // does not also open the chat where it was.
+  const dragged = useRef(false);
   // Bound to whichever chat the menu is open on; an empty id is harmless
   // because nothing runs until an entry is clicked.
   const { exportAs } = useChatExport(menu?.chatId ?? "");
@@ -167,12 +172,19 @@ export function ChatList({ chats, activeId, onSelect, projectId, limit }: Props)
       <div
         // Ctrl/⌘-click or middle-click opens the chat in a new tab, beside
         // what is open, the way a link does in a browser (0.18.3).
-        onClick={(e) => (e.ctrlKey || e.metaKey ? void setActiveChat(chat.id, "tab") : onSelect(chat.id))}
+        // Or drag it onto the tiles: into a tab strip, or onto a pane's edge
+        // to open it beside what is there (0.18.3).
+        onPointerDown={(e) => { if (e.button === 0 && !editing) dragIntoTiles(e, chatTab(chat.id), dragged); }}
+        onClick={(e) => {
+          if (dragged.current) { dragged.current = false; return; }
+          if (e.ctrlKey || e.metaKey) void setActiveChat(chat.id, "tab");
+          else onSelect(chat.id);
+        }}
         onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }}
         onAuxClick={(e) => { if (e.button === 1) void setActiveChat(chat.id, "tab"); }}
         onContextMenu={(e) => openMenu(e, chat.id)}
         title={chat.initiatedByZoneId ? `Sub-agent${subchatZone ? ` · ${subchatZone.name}` : ""}` : undefined}
-        className={`${SIDEBAR_ROW} ${
+        className={`${SIDEBAR_ROW} select-none ${
           active
             ? "bg-[color-mix(in_srgb,var(--color-accent)_14%,transparent)] text-[var(--color-text)]"
             : "text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"

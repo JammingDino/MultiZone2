@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Columns2, MessageSquare, Plus, X } from "lucide-react";
 import { useApp } from "@/store/app";
 import { iconFor } from "@/components/Workspace/FilesPanel";
@@ -27,6 +27,57 @@ const MIN_PANE = 120;
 
 type Target = { groupId: string; zone: DropZone; index?: number; barX?: number };
 type Drag = { tab: string; x: number; y: number; target: Target | null };
+type Phase = "move" | "drop" | "cancel";
+
+/**
+ * Follow a press that may turn into a drag. Window listeners from the press,
+ * so a quick flick that leaves the element before it counts as a drag is still
+ * followed; the pointer is captured once it does count, so a file's iframe
+ * cannot swallow the moves. Pointer events rather than HTML drag-and-drop
+ * (which this window has off, for file drops), so it works under touch too.
+ * `dragged` is set once it became a drag, for the click that follows to skip.
+ */
+export function followDrag(
+  e: React.PointerEvent<HTMLElement>,
+  onDrag: (x: number, y: number, phase: Phase) => void,
+  dragged: { current: boolean },
+) {
+  const el = e.currentTarget;
+  const id = e.pointerId;
+  const x0 = e.clientX, y0 = e.clientY;
+  let moved = false;
+  dragged.current = false;
+  const move = (ev: PointerEvent) => {
+    if (ev.pointerId !== id) return;
+    if (!moved) {
+      if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 5) return;
+      moved = dragged.current = true;
+      try { el.setPointerCapture(id); } catch { /* released already */ }
+    }
+    onDrag(ev.clientX, ev.clientY, "move");
+  };
+  const end = (ev: PointerEvent) => {
+    if (ev.pointerId !== id) return;
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", end);
+    window.removeEventListener("pointercancel", end);
+    if (moved) onDrag(ev.clientX, ev.clientY, ev.type === "pointerup" ? "drop" : "cancel");
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", end);
+  window.addEventListener("pointercancel", end);
+}
+
+/** The tiles on screen, for drags that start outside them. */
+let tilesDrag: ((tab: string, x: number, y: number, phase: Phase) => void) | null = null;
+
+/**
+ * Drag a tab in from outside the tiles — a chat from the sidebar — with the
+ * same drop targets and preview as a tab dragged between strips.
+ */
+export function dragIntoTiles(e: React.PointerEvent<HTMLElement>, tab: string, dragged: { current: boolean }) {
+  followDrag(e, (x, y, phase) => tilesDrag?.(tab, x, y, phase), dragged);
+}
 
 const pct = (n: number) => `${n * 100}%`;
 function nameOf(tab: string): string {
@@ -100,6 +151,15 @@ export function TabTiles({ renderTab }: { renderTab: (tab: string) => ReactNode 
     setDrag(null);
   }
 
+  const onDrag = (tab: string, x: number, y: number, phase: Phase) =>
+    phase === "drop" ? drop() : setDrag(phase === "cancel" ? null : { tab, x, y, target: hit(x, y) });
+  // Re-registered every render, so an outside drag always hit-tests against
+  // the layout on screen now.
+  useEffect(() => {
+    tilesDrag = onDrag;
+    return () => { if (tilesDrag === onDrag) tilesDrag = null; };
+  });
+
   const target = drag?.target;
   const tr = target && rects[target.groupId];
 
@@ -126,9 +186,7 @@ export function TabTiles({ renderTab }: { renderTab: (tab: string) => ReactNode 
                   focused={layout.focused === g.id || all.length === 1}
                   onActivate={() => change((l) => activate(l, g.id, tab))}
                   onClose={() => change((l) => closeTab(l, tab))}
-                  onDrag={(x, y, phase) =>
-                    phase === "drop" ? drop() : setDrag(phase === "cancel" ? null : { tab, x, y, target: hit(x, y) })
-                  }
+                  onDrag={(x, y, phase) => onDrag(tab, x, y, phase)}
                 />
               ))}
             </div>
@@ -208,7 +266,7 @@ function Tab({
   focused: boolean;
   onActivate: () => void;
   onClose?: () => void;
-  onDrag: (x: number, y: number, phase: "move" | "drop" | "cancel") => void;
+  onDrag: (x: number, y: number, phase: Phase) => void;
 }) {
   const dragged = useRef(false);
   const label = nameOf(tab);
@@ -221,37 +279,8 @@ function Tab({
   return (
     <div
       data-tab
-      // Pointer events rather than HTML drag-and-drop (which this window has
-      // off, for file drops), so it works under touch too.
-      // Window listeners from the press, so a quick flick that leaves the tab
-      // before it counts as a drag is still followed; the pointer is captured
-      // once it does count, so a file's iframe cannot swallow the moves.
       onPointerDown={(e) => {
-        if (e.button !== 0 || (e.target as HTMLElement).closest("[data-close]")) return;
-        const el = e.currentTarget;
-        const id = e.pointerId;
-        const x0 = e.clientX, y0 = e.clientY;
-        let moved = false;
-        dragged.current = false;
-        const move = (ev: PointerEvent) => {
-          if (ev.pointerId !== id) return;
-          if (!moved) {
-            if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 5) return;
-            moved = dragged.current = true;
-            try { el.setPointerCapture(id); } catch { /* released already */ }
-          }
-          onDrag(ev.clientX, ev.clientY, "move");
-        };
-        const end = (ev: PointerEvent) => {
-          if (ev.pointerId !== id) return;
-          window.removeEventListener("pointermove", move);
-          window.removeEventListener("pointerup", end);
-          window.removeEventListener("pointercancel", end);
-          if (moved) onDrag(ev.clientX, ev.clientY, ev.type === "pointerup" ? "drop" : "cancel");
-        };
-        window.addEventListener("pointermove", move);
-        window.addEventListener("pointerup", end);
-        window.addEventListener("pointercancel", end);
+        if (e.button === 0 && !(e.target as HTMLElement).closest("[data-close]")) followDrag(e, onDrag, dragged);
       }}
       // Middle-click anywhere on the tab closes it, as it does everywhere else
       // that has tabs. `onMouseDown` only to stop Windows dropping into

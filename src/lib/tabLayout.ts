@@ -186,17 +186,21 @@ export function parseLayout(raw: unknown): TabLayout | null {
 /**
  * Drop a tab on a group: into its strip (`center`, before `index`), or on one
  * of its edges, which splits the group and gives the tab a new one on that side.
+ * The tab need not be open yet — a chat dragged in from the sidebar lands the
+ * same way one dragged between strips does.
  */
 export function moveTab(layout: TabLayout, tab: string, targetId: string, zone: DropZone, index?: number): TabLayout {
   const src = groupOf(layout, tab);
   const target = groups(layout.root).find((g) => g.id === targetId);
-  if (!src || !target) return layout;
+  if (!target) return layout;
+  // An empty group (the new-chat screen, nothing open) has no edge to split.
+  if (target.tabs.length === 0) zone = "center";
 
   if (zone === "center") {
     const from = target.tabs.indexOf(tab);
     let at = index ?? target.tabs.length;
     if (from >= 0 && from < at) at -= 1;
-    const moved = src.id === target.id ? layout : without(layout, tab);
+    const moved = !src || src.id === target.id ? layout : without(layout, tab);
     return withGroups(
       moved,
       (g) => {
@@ -210,12 +214,12 @@ export function moveTab(layout: TabLayout, tab: string, targetId: string, zone: 
   }
 
   // Splitting a group off its own only tab would leave it where it started.
-  if (src.id === target.id && src.tabs.length === 1) return layout;
+  if (src?.id === target.id && src.tabs.length === 1) return layout;
   const fresh = group([tab]);
   const dir = zone === "left" || zone === "right" ? "row" : "col";
   const before = zone === "left" || zone === "top";
   return withGroups(
-    without(layout, tab),
+    src ? without(layout, tab) : layout,
     (g) =>
       g.id === targetId
         ? { kind: "split", id: uid(), dir, children: before ? [fresh, g] : [g, fresh], sizes: [0.5, 0.5] }

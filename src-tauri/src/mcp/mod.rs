@@ -655,8 +655,10 @@ impl Manager {
     }
 
     /// Call a tool by its qualified name (`mcp__<shortId>__<tool>`), connecting
-    /// lazily if no live connection exists. Returns the textual tool output.
-    pub async fn call(&self, qualified: &str, arguments: Value) -> AppResult<String> {
+    /// lazily if no live connection exists. Returns the tool output: text, or a
+    /// JSON parts array when it carries images and `can_see` says the model
+    /// can take them (see `render_tool_result`).
+    pub async fn call(&self, qualified: &str, arguments: Value, can_see: bool) -> AppResult<String> {
         let (short, tool) = parse_qualified(qualified)
             .ok_or_else(|| AppError::Invalid(format!("not an MCP tool: {qualified}")))?;
         let server = self.server_by_short_id(&short).await?;
@@ -665,7 +667,7 @@ impl Manager {
         let result = conn
             .request("tools/call", json!({ "name": tool, "arguments": arguments }))
             .await?;
-        Ok(render_tool_result(&result))
+        Ok(render_tool_result(&result, can_see))
     }
 
     /// Every resource a server currently offers (0.15.3).
@@ -893,42 +895,79 @@ fn render_prompt_messages(result: &Value) -> String {
     out
 }
 
-/// Flatten an MCP `tools/call` result into a plain string for the model. MCP
-/// returns `{ content: [{type:"text", text}, ...], isError? }`; we join text
-/// parts and prefix errors so the model can react.
-fn render_tool_result(result: &Value) -> String {
+/// Render an MCP `tools/call` result for the model. MCP returns
+/// `{ content: [{type:"text", text} | {type:"image", data, mimeType} | ...], isError? }`.
+///
+/// Text parts are joined and errors prefixed so the model can react. An image
+/// becomes a real `image_url` part — the same parts-array shape `read` returns
+/// with `as_image` — so the model sees it at vision-token cost. Its base64 must
+/// never reach the prompt as text: a 1.7 MB PNG is ~2.3M characters, and that is
+/// hundreds of thousands of tokens re-sent on every step of the turn. A model
+/// that can't see gets a line naming the image instead, as does any other
+/// binary part (audio, blob resources).
+fn render_tool_result(result: &Value, can_see: bool) -> String {
     let is_error = result.get("isError").and_then(Value::as_bool).unwrap_or(false);
-    let mut out = String::new();
+    let mut text = String::new();
+    let mut images: Vec<String> = Vec::new();
+    let push = |text: &mut String, s: &str| {
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        text.push_str(s);
+    };
     if let Some(parts) = result.get("content").and_then(Value::as_array) {
         for part in parts {
+            let mime = part.get("mimeType").and_then(Value::as_str);
             match part.get("type").and_then(Value::as_str) {
                 Some("text") => {
                     if let Some(t) = part.get("text").and_then(Value::as_str) {
-                        if !out.is_empty() {
-                            out.push('\n');
-                        }
-                        out.push_str(t);
+                        push(&mut text, t);
                     }
                 }
-                _ => {
-                    // Non-text content (images/resources) — pass through as JSON
-                    // so nothing is silently dropped.
-                    if !out.is_empty() {
-                        out.push('\n');
+                Some("image") => {
+                    let mime = mime.unwrap_or("image/png");
+                    match part.get("data").and_then(Value::as_str) {
+                        Some(data) if can_see => images.push(format!("data:{mime};base64,{data}")),
+                        _ => push(
+                            &mut text,
+                            &format!("[image ({mime}) — the active model can't view images, so it was not inlined]"),
+                        ),
                     }
-                    out.push_str(&part.to_string());
                 }
+                Some("audio") => push(
+                    &mut text,
+                    &format!("[audio ({}) — not inlined]", mime.unwrap_or("audio")),
+                ),
+                Some("resource") => {
+                    let res = part.get("resource").cloned().unwrap_or(Value::Null);
+                    let rendered = render_resource_contents(&json!({ "contents": [res] }));
+                    push(&mut text, &rendered);
+                }
+                Some("resource_link") => {
+                    let uri = part.get("uri").and_then(Value::as_str).unwrap_or("resource");
+                    push(&mut text, &format!("[resource {uri}]"));
+                }
+                _ => push(&mut text, &part.to_string()),
             }
         }
     }
-    if out.is_empty() {
-        out = result.to_string();
+    if text.is_empty() && images.is_empty() {
+        text = result.to_string();
     }
     if is_error {
-        format!("Tool reported an error: {out}")
-    } else {
-        out
+        text = format!("Tool reported an error: {text}");
     }
+    if images.is_empty() {
+        return text;
+    }
+    let mut parts = Vec::with_capacity(images.len() + 1);
+    if !text.is_empty() {
+        parts.push(json!({ "type": "text", "text": text }));
+    }
+    for url in images {
+        parts.push(json!({ "type": "image_url", "image_url": { "url": url } }));
+    }
+    Value::Array(parts).to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -1134,6 +1173,28 @@ second");
         assert!(out.contains("file:///logo.png"), "{out}");
         assert!(out.contains("image/png"), "{out}");
         assert!(!out.contains("iVBORw0KGgo"), "the bytes must not be inlined: {out}");
+    }
+
+    /// An MCP image used to reach the model as its JSON — base64 as text, which
+    /// for one ComfyUI output was ~590k tokens. It must arrive as an image part,
+    /// and a model that can't see must get a line instead of the bytes.
+    #[test]
+    fn a_tool_result_image_is_an_image_part_never_text() {
+        use crate::llm::types::ContentPart;
+        let v = json!({ "content": [
+            { "type": "text", "text": "saved" },
+            { "type": "image", "data": "iVBORw0KGgo=", "mimeType": "image/png" }
+        ]});
+
+        let parts: Vec<ContentPart> =
+            serde_json::from_str(&render_tool_result(&v, true)).expect("a parts array");
+        assert!(matches!(&parts[0], ContentPart::Text { text } if text == "saved"));
+        assert!(matches!(&parts[1], ContentPart::ImageUrl { image_url }
+            if image_url.url == "data:image/png;base64,iVBORw0KGgo="));
+
+        let blind = render_tool_result(&v, false);
+        assert!(blind.starts_with("saved\n[image (image/png)"), "{blind}");
+        assert!(!blind.contains("iVBORw0KGgo"), "the bytes must not be inlined: {blind}");
     }
 
     /// A server that answers with a shape we did not expect gets an empty

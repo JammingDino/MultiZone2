@@ -562,7 +562,12 @@ async fn dispatch_inner(
         } else {
             args.clone()
         };
-        return crate::mcp::manager().call(name, call_args).await;
+        // Same flag the `read` tool honours: images only go to a model that sees.
+        let can_see = zone_config
+            .get("vision_capable")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        return crate::mcp::manager().call(name, call_args, can_see).await;
     }
 
     // Multi-agent write coordination (0.9.10). In a session that has sub-agents,

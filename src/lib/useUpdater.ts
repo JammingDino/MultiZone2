@@ -78,7 +78,7 @@ export function useUpdater() {
    * gets a 404 — so the honest thing is to say so and list them rather than
    * imply the server returned something malformed.
    */
-  const explain = (raw: string): string => {
+  const explain = (raw: string, downloading = false): string => {
     // The repository is private, so every request carries the token compiled in
     // at build time. A 401/403 therefore means that token is expired, revoked,
     // or was never baked in — not something the user did, and not something
@@ -87,6 +87,16 @@ export function useUpdater() {
       return (
         "MultiZone isn't authorised to fetch updates. Its access token has most " +
         "likely expired or been revoked — a new build with a fresh token is needed."
+      );
+    }
+    // During the download the manifest was already read, so a 404 is the
+    // installer it named — gone because the release was rebuilt after the
+    // manifest was written (0.18.1). Saying "no manifest" there sent the
+    // search the wrong way.
+    if (downloading && /404|not found/i.test(raw)) {
+      return (
+        "The update's installer couldn't be downloaded — the release changed " +
+        "after its update manifest was published. Try again later."
       );
     }
     if (/valid release JSON|404|not found/i.test(raw)) {
@@ -165,7 +175,7 @@ export function useUpdater() {
       });
       set({ stage: "ready" });
     } catch (e) {
-      set({ stage: "error", error: explain(e instanceof Error ? e.message : String(e)) });
+      set({ stage: "error", error: explain(e instanceof Error ? e.message : String(e), true) });
     }
   }, [set]);
 

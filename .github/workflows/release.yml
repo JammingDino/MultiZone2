@@ -9,6 +9,15 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# One release run at a time, queued rather than cancelled. Two pushes close
+# together (0.18.1) both read `releaseBuild: true` from their own commits;
+# the second rebuilt v0.18.1 over the first, replacing the installer the
+# committed manifest pointed at, and every install got a 404 on download.
+# Serialised, the second run's check sees the tag the first one made.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   # ── Check whether a release build was requested ───────────────────────────
   check:
@@ -27,6 +36,7 @@ jobs:
         id: flag
         shell: bash
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Whether an APK is coming is decided once, here, so the release notes
           # and the build job cannot disagree about it. A `secrets` context is
           # not available in a job-level `if:` or in a `releaseBody`, but it is
@@ -36,6 +46,12 @@ jobs:
           SHOULD_BUILD=$(node -p "require('./package.json').releaseBuild")
           VERSION=$(node -p "require('./package.json').version")
           if [ -n "$KEYSTORE" ]; then ANDROID=true; else ANDROID=false; fi
+          # A published version is never rebuilt: its assets are what the
+          # committed manifest names, and replacing them breaks every update.
+          if [ "$SHOULD_BUILD" = "true" ] && gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::notice::v$VERSION is already released — not rebuilding it. Bump the version to release again."
+            SHOULD_BUILD=false
+          fi
           echo "should_build=$SHOULD_BUILD" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "android=$ANDROID" >> "$GITHUB_OUTPUT"
@@ -278,7 +294,7 @@ jobs:
     # with the only way back a hand-edited version bump. A skipped Android job
     # (no keystore) still counts as success, which is what makes the secrets
     # optional rather than load-bearing.
-    needs: [build, android]
+    needs: [check, build, android]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -318,7 +334,9 @@ jobs:
       - name: Rewrite updater manifest for private access
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: v${{ steps.bump.outputs.old }}
+          # The version this run built, not whatever main says now: main can
+          # have moved on under a queued run.
+          RELEASE_TAG: v${{ needs.check.outputs.version }}
         run: node scripts/rewrite-updater-manifest.mjs
 
       - name: Commit and push

@@ -155,14 +155,14 @@ export function AppearanceTab() {
         {/* Two columns rather than three: each cell now carries an editable hex
             alongside its swatch, and a colour you can read is worth more than a
             grid one row shorter. */}
-        <div className="grid grid-cols-2 narrow:grid-cols-1 gap-2">
+        <div className="grid grid-cols-2 narrow:grid-cols-1 gap-x-8">
           {(Object.keys(THEME_COLOR_KEYS) as ThemeColorKey[]).map((key) => {
             const value = overrides[key] ?? base[key];
             const custom = !!overrides[key];
             return (
               <div
                 key={key}
-                className="flex items-center gap-2 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5"
+                className="flex items-center gap-2 py-1"
               >
                 <span className="min-w-0 flex-1 truncate text-xs">{COLOR_LABELS[key]}</span>
                 <HexColorField

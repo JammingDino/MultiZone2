@@ -1004,6 +1004,14 @@ export interface AppSettings {
    */
   notifyWhenFinished: boolean;
   /**
+   * Put the chat's name and the answer's first line in the notification
+   * (0.18.3). Off keeps them to "Finished" or "Waiting for your approval" —
+   * a notification is on a lock screen, or a shared screen, as often as not.
+   */
+  notifyPreview: boolean;
+  /** Flash the taskbar entry too (0.18.3); the quiet half of a notice. */
+  notifyFlashTaskbar: boolean;
+  /**
    * The window's close button hides it to the tray instead of quitting
    * (0.18), so running agents and scheduled runs carry on. Read by the
    * backend, which handles the close request.
@@ -1384,6 +1392,8 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   approvals: { categories: {}, shellAllow: [], shellDeny: [], editAllow: [], editDeny: [] },
   notifyWhenWaiting: true,
   notifyWhenFinished: true,
+  notifyPreview: true,
+  notifyFlashTaskbar: true,
   closeToTray: true,
   maxToolSteps: 30,
   maxSessionTokens: 0,

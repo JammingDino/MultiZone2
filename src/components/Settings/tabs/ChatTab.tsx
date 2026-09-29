@@ -77,24 +77,6 @@ export function ChatTab() {
         </div>
       </section>
       <section>
-        <h3 className="mb-1 text-sm font-medium">Notifications</h3>
-        <p className="mb-3 text-xs text-[var(--color-text-muted)]">Only while the window is in the background.</p>
-        <div className="flex flex-col gap-2">
-          <ToggleRow
-            label="Needs my input"
-            description="Approvals, questions and plans."
-            checked={appSettings.notifyWhenWaiting}
-            onChange={(v) => setAppSettings({ notifyWhenWaiting: v })}
-          />
-          <ToggleRow
-            label="Run finished"
-            description="A final answer, an error, or a run stopped by a limit."
-            checked={appSettings.notifyWhenFinished}
-            onChange={(v) => setAppSettings({ notifyWhenFinished: v })}
-          />
-        </div>
-      </section>
-      <section>
         <h3 className="mb-1 text-sm font-medium">Closing the window</h3>
 
         <ToggleRow

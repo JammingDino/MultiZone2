@@ -51,17 +51,35 @@ async function ensurePermission(): Promise<boolean> {
  * notification is the louder half and is reserved for a window that is not
  * being looked at.
  */
-export async function notifyWaiting(title: string, body: string): Promise<void> {
+export async function notifyWaiting(title: string, body: string, flash = true): Promise<void> {
   if (await windowIsFocused()) return;
 
-  try {
-    await getCurrentWindow().requestUserAttention(UserAttentionType.Informational);
-  } catch { /* not in a Tauri window */ }
+  if (flash) {
+    try {
+      await getCurrentWindow().requestUserAttention(UserAttentionType.Informational);
+    } catch { /* not in a Tauri window */ }
+  }
 
   if (!(await ensurePermission())) return;
   try {
-    sendNotification({ title, body });
+    sendNotification(body ? { title, body } : { title });
   } catch { /* a failed notification must never break the turn */ }
+}
+
+/**
+ * Post one now, focused or not — the Settings button that answers "will I
+ * actually see these?". False when the system has notifications blocked.
+ * Permission is asked afresh: it may have been allowed since it was cached.
+ */
+export async function sendTestNotification(): Promise<boolean> {
+  granted = null;
+  if (!(await ensurePermission())) return false;
+  try {
+    sendNotification({ title: "MultiZone", body: "Notifications are on." });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

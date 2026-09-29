@@ -1358,13 +1358,17 @@ export const useApp = create<AppStore>((set, get) => ({
       const s = get();
       const chat = s.chats.find((c) => c.id === chatId);
       const where = chat?.title || "a chat";
+      // Without previews a notice says what happened, not where or what the
+      // answer was (0.18.3).
+      const { notifyPreview: preview, notifyFlashTaskbar: flash } = s.appSettings;
+      const say = (title: string, body: string) => void notifyWaiting(title, preview ? body : "", flash);
       if (s.appSettings.notifyWhenWaiting) {
         if (event.type === "tool_approval_required") {
-          void notifyWaiting("Waiting for your approval", `${toolLabel(event.name)} in ${where}`);
+          say("Waiting for your approval", `${toolLabel(event.name)} in ${where}`);
         } else if (event.type === "tool_call_result" && event.name === "ask_user") {
-          void notifyWaiting("A question for you", where);
+          say("A question for you", where);
         } else if (event.type === "tool_call_result" && event.name === "exit_plan_mode") {
-          void notifyWaiting("A plan to review", where);
+          say("A plan to review", where);
         }
       }
       // Only the run the user started: a sub-agent finishing is a step of
@@ -1372,7 +1376,7 @@ export const useApp = create<AppStore>((set, get) => ({
       // A Stop never gets here as `done` — `stopChat` settles it as `cancelled`.
       if (s.appSettings.notifyWhenFinished && !perspectiveZoneId && !chat?.initiatedByZoneId) {
         const ended = finishedNotice(chatId, event, s.messagesByChat[chatId] ?? []);
-        if (ended) void notifyWaiting(`${ended.title} · ${where}`, ended.body);
+        if (ended) say(preview ? `${ended.title} · ${where}` : ended.title, ended.body);
       }
     }
     // A file the model presents opens in the workspace panel's viewer (0.17.9)

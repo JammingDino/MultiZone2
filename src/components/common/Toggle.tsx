@@ -44,9 +44,12 @@ export function ToggleRow({
   onChange: (v: boolean) => void;
 }) {
   return (
+    // A row, not a card (0.18.3): a page of settings was a stack of bordered
+    // boxes. The hover wash reaches past the text so the row still reads as
+    // one target, while the label stays aligned with the headings above it.
     <div
       onClick={() => onChange(!checked)}
-      className="flex cursor-pointer items-center justify-between gap-3 rounded border border-[var(--color-border)] px-3 py-2.5 hover:border-[var(--color-accent)]"
+      className="-mx-2 flex cursor-pointer items-center justify-between gap-3 rounded px-2 py-1.5 hover:bg-[var(--color-panel-hover)]"
     >
       <div className="min-w-0">
         <div className="text-sm">{label}</div>

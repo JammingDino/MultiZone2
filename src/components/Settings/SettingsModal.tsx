@@ -1,4 +1,4 @@
-import { Bot, ShieldCheck, Server, Smartphone, Palette, MessageSquare, Database, Globe, Brain, Sparkles, Plug, Library, Layers, Mic, Volume2, CalendarClock } from "lucide-react";
+import { Bell, Bot, ShieldCheck, Server, Smartphone, Palette, MessageSquare, Database, Globe, Brain, Sparkles, Plug, Library, Layers, Mic, Volume2, CalendarClock } from "lucide-react";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { Modal, ModalTitle } from "@/components/common/Modal";
@@ -11,6 +11,7 @@ import { DataTab } from "./tabs/DataTab";
 import { KnowledgeTab } from "./tabs/KnowledgeTab";
 import { McpTab } from "./tabs/McpTab";
 import { MemoryTab } from "./tabs/MemoryTab";
+import { NotificationsTab } from "./tabs/NotificationsTab";
 import { ProvidersTab } from "./tabs/ProvidersTab";
 import { RemoteTab } from "./tabs/RemoteTab";
 import { SchedulesTab } from "./tabs/SchedulesTab";
@@ -19,14 +20,14 @@ import { SpeechTab } from "./tabs/SpeechTab";
 import { VoiceTab } from "./tabs/VoiceTab";
 import { ZoneLibrary } from "@/components/Zones/ZoneLibrary";
 
-type Tab = "providers" | "zones" | "appearance" | "chat" | "agents" | "approvals" | "schedules" | "voice" | "speech" | "skills" | "mcp" | "knowledge" | "memory" | "remote" | "api" | "data";
+type Tab = "providers" | "zones" | "appearance" | "chat" | "notifications" | "agents" | "approvals" | "schedules" | "voice" | "speech" | "skills" | "mcp" | "knowledge" | "memory" | "remote" | "api" | "data";
 
-const TAB_IDS: Tab[] = ["providers", "zones", "appearance", "chat", "agents", "approvals", "schedules", "voice", "speech", "skills", "mcp", "knowledge", "memory", "remote", "api", "data"];
+const TAB_IDS: Tab[] = ["providers", "zones", "appearance", "chat", "notifications", "agents", "approvals", "schedules", "voice", "speech", "skills", "mcp", "knowledge", "memory", "remote", "api", "data"];
 
 /** The nav label for each tab, reused when a tab fails to render so the message
  * names the screen the user actually clicked. */
 const TAB_LABELS: Record<Tab, string> = {
-  providers: "Providers", zones: "Zones", appearance: "Appearance", chat: "Chat", agents: "Runs", approvals: "Approvals", schedules: "Schedules",
+  providers: "Providers", zones: "Zones", appearance: "Appearance", chat: "Chat", notifications: "Notifications", agents: "Runs", approvals: "Approvals", schedules: "Schedules",
   voice: "Dictation", speech: "Speech", skills: "Skills", mcp: "MCP",
   knowledge: "Knowledge", memory: "Memory", remote: "Phone & remote", api: "API", data: "Data",
 };
@@ -79,6 +80,7 @@ export function SettingsModal() {
       <NavGroup label="Interface" />
       <NavItem active={tab === "appearance"} icon={<Palette size={14} />} label="Appearance" onClick={() => setTab("appearance")} />
       <NavItem active={tab === "chat"} icon={<MessageSquare size={14} />} label="Chat" onClick={() => setTab("chat")} />
+      <NavItem active={tab === "notifications"} icon={<Bell size={14} />} label="Notifications" onClick={() => setTab("notifications")} />
       <NavItem active={tab === "voice"} icon={<Mic size={14} />} label="Dictation" onClick={() => setTab("voice")} />
       <NavItem active={tab === "speech"} icon={<Volume2 size={14} />} label="Speech" onClick={() => setTab("speech")} />
 
@@ -129,10 +131,13 @@ export function SettingsModal() {
                 throws is one screen, not the window. The bottom padding keeps
                 the last section off the panel's edge. */}
             <ErrorBoundary label={`${TAB_LABELS[tab]} settings`} resetKey={tab}>
-              <div className="min-w-0 flex-1 pb-10">
+              {/* Capped so a wide window does not stretch a label and its
+                  switch a monitor apart. */}
+              <div className="min-w-0 max-w-2xl flex-1 pb-10">
                 {tab === "providers" && <ProvidersTab />}
                 {tab === "appearance" && <AppearanceTab />}
                 {tab === "chat" && <ChatTab />}
+                {tab === "notifications" && <NotificationsTab />}
                 {tab === "agents" && <AgentsTab />}
                 {tab === "approvals" && <ApprovalsTab />}
                 {tab === "schedules" && <SchedulesTab />}

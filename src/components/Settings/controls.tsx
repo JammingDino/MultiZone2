@@ -92,9 +92,8 @@ export function SettingSelect({
   );
 }
 
-/** Labeled toggle row — the shared pattern for an on/off setting with a description. */
 /**
- * A group of mutually-exclusive option cards — the settings counterpart to
+ * A group of mutually-exclusive options — the settings counterpart to
  * [`ToggleRow`], for a choice with more than two states or one that needs a line
  * of explanation per option.
  *
@@ -106,38 +105,68 @@ export function SettingSelect({
  * side, `column` when the descriptions need the width. `align` centres a row of
  * bare values (a numeric choice) where a label with prose reads better left.
  */
+/**
+ * A segmented control's two states. The selected one is a quiet fill rather
+ * than the accent (0.18.3): a page of seven "Inherit"s in solid accent was the
+ * loudest thing in Settings, and accent is what a switch that is on looks like.
+ */
+const SEG_ON = "bg-[var(--color-panel-hover)] font-medium text-[var(--color-text)]";
+const SEG_OFF = "text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]";
+
 export function OptionCards<T extends string | number>({
   value,
   onChange,
   options,
-  layout = "row",
-  align = "left",
 }: {
   value: T;
   onChange: (value: T) => void;
   /** `[value, label]` or `[value, label, description]`. */
   options: readonly (readonly [T, string] | readonly [T, string, string])[];
+  /** Kept for callers; the shape now follows whether options are described. */
   layout?: "row" | "column";
   align?: "left" | "center";
 }) {
+  // Bare values are a segmented control: one line, the choice readable at a
+  // glance (0.18.3). They were a row of full-width cards, which made "Enter or
+  // Ctrl+Enter" the heaviest thing on its page.
+  if (options.every((o) => o.length === 2)) {
+    return (
+      <div role="radiogroup" className="inline-flex flex-wrap overflow-hidden rounded border border-[var(--color-border)] text-sm">
+        {options.map(([val, label]) => (
+          <button
+            key={val}
+            role="radio"
+            aria-checked={value === val}
+            onClick={() => onChange(val)}
+            className={`px-3 py-1.5 ${value === val ? SEG_ON : SEG_OFF}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    );
+  }
+  // Described options are a radio list: a dot, the label, the line of
+  // explanation beside it — no box around each.
   return (
-    <div className={layout === "row" ? "flex flex-wrap gap-2" : "flex flex-col gap-2"}>
+    <div role="radiogroup" className="flex flex-col">
       {options.map(([val, label, description]) => (
         <button
           key={val}
+          role="radio"
+          aria-checked={value === val}
           onClick={() => onChange(val)}
-          className={`rounded border px-3 py-2.5 text-sm ${
-            align === "center" ? "text-center" : "text-left"
-          } ${layout === "row" ? "flex-1" : ""} ${
-            value === val
-              ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]"
-              : "border-[var(--color-border)] hover:border-[var(--color-accent)]"
-          }`}
+          className="-mx-2 flex items-baseline gap-2.5 rounded px-2 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)]"
         >
-          <div className="font-medium">{label}</div>
-          {description && (
-            <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">{description}</div>
-          )}
+          <span
+            className={`relative top-0.5 h-3.5 w-3.5 shrink-0 self-start rounded-full border ${
+              value === val ? "border-[4px] border-[var(--color-accent)]" : "border-[var(--color-border)]"
+            }`}
+          />
+          <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+            <span className={value === val ? "text-[var(--color-text)]" : ""}>{label}</span>
+            {description && <span className="text-xs text-[var(--color-text-muted)]">{description}</span>}
+          </span>
         </button>
       ))}
     </div>
@@ -180,11 +209,11 @@ export function ApprovalCategoryGrid({
   }
 
   return (
-    <div className="divide-y divide-[var(--color-border)] rounded border border-[var(--color-border)]">
+    <div className="divide-y divide-[var(--color-border)]">
       {APPROVAL_CATEGORIES.map(([cat, label, description]) => {
         const current = value.categories[cat];
         return (
-          <div key={cat} className="flex items-center gap-3 px-3 py-2">
+          <div key={cat} className="flex items-center gap-3 py-2">
             <div className="min-w-0 flex-1">
               <div className="text-xs font-medium">{label}</div>
               {!compact && (
@@ -200,11 +229,7 @@ export function ApprovalCategoryGrid({
                 <button
                   key={text}
                   onClick={() => set(cat, state)}
-                  className={`px-2 py-1 ${
-                    current === state
-                      ? "bg-[var(--color-accent)] text-white"
-                      : "bg-[var(--color-panel)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-                  }`}
+                  className={`px-2 py-1 ${current === state ? SEG_ON : SEG_OFF}`}
                 >
                   {text}
                 </button>

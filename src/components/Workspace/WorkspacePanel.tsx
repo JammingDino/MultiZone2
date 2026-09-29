@@ -40,7 +40,7 @@ export function WorkspacePanel() {
   useBackDismiss(narrow && open, () => setOpen(false));
   // The column's width is the user's (0.17.10); a file open in the viewer wants
   // more than the 340px it started at.
-  const size = usePanelWidth("ui.workspaceWidth", 360, 260, 720);
+  const size = usePanelWidth("ui.workspaceWidth", 360, 260);
 
   // Kept mounted through its closing slide, and drawn collapsed for a frame
   // before opening, so the column animates both ways like the sidebar

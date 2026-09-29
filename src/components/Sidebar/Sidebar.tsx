@@ -184,7 +184,7 @@ export function Sidebar() {
   // The expanded width is the user's (0.17.10). On a phone the sidebar is a
   // drawer capped by the viewport, so the handle is left out there.
   const narrow = useIsNarrow();
-  const size = usePanelWidth("ui.sidebarWidth", 288, 200, 560);
+  const size = usePanelWidth("ui.sidebarWidth", 288, 200);
 
   // One footer for both states, so the collapsed rail and the open sidebar put
   // Zones and Settings in exactly the same place (0.18.1): collapsing hides

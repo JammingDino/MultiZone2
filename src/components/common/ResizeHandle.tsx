@@ -15,12 +15,21 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * handle, which a fast drag always does.
  */
 
-export function usePanelWidth(key: string, fallback: number, min: number, max: number) {
+/**
+ * No fixed ceiling (0.18.3): on a wide monitor a panel can take as much of the
+ * window as its owner wants. The one limit is the window itself, less enough
+ * for the chat column to stay usable — a width saved on a 4K screen must not
+ * swallow the chat on a laptop.
+ */
+const CHAT_FLOOR = 240;
+const maxWidth = () => Math.max(window.innerWidth - CHAT_FLOOR, 0);
+
+export function usePanelWidth(key: string, fallback: number, min: number) {
   const [width, setWidth] = useState<number>(() => {
     try {
       const raw = localStorage.getItem(key);
       const n = raw === null ? NaN : Number(raw);
-      return Number.isFinite(n) ? clamp(n, min, max) : fallback;
+      return Number.isFinite(n) ? clamp(n, min, maxWidth()) : fallback;
     } catch {
       return fallback;
     }
@@ -32,7 +41,7 @@ export function usePanelWidth(key: string, fallback: number, min: number, max: n
     try { localStorage.setItem(key, String(Math.round(width))); } catch { /* ignore */ }
   }, [key, width, dragging]);
 
-  const set = useCallback((w: number) => setWidth(clamp(w, min, max)), [min, max]);
+  const set = useCallback((w: number) => setWidth(clamp(w, min, maxWidth())), [min]);
   const reset = useCallback(() => setWidth(fallback), [fallback]);
 
   return { width, set, reset, dragging, setDragging };

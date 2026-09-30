@@ -913,10 +913,14 @@ pub(super) async fn build_identity_preamble(
             .unwrap_or_default();
     ids.extend(persp);
 
-    let zone_names: Vec<(String, String)> =
-        sqlx::query_as("SELECT id, name FROM zones").fetch_all(db).await?;
+    // "Name (model)": who each participant is, and what it runs on.
+    let zone_names: Vec<(String, String, String)> =
+        sqlx::query_as("SELECT id, name, model FROM zones").fetch_all(db).await?;
     let name_of = |zid: &str| -> Option<String> {
-        zone_names.iter().find(|(id, _)| id == zid).map(|(_, n)| n.clone())
+        zone_names
+            .iter()
+            .find(|(id, _, _)| id == zid)
+            .map(|(_, n, m)| format!("{n} ({m})"))
     };
 
     // Distinct "other participant" names (everyone except this zone).
@@ -933,10 +937,10 @@ pub(super) async fn build_identity_preamble(
     }
 
     let mut text = format!(
-        "You are taking part in a multi-zone conversation. You are \"{}\". \
-         You answer this turn independently — you cannot see what the other zones \
-         say this turn, only what everyone said in previous turns.",
-        self_zone.name
+        "You are taking part in a multi-zone conversation. You are \"{}\", running on \
+         the model {}. You answer this turn independently — you cannot see what the \
+         other zones say this turn, only what everyone said in previous turns.",
+        self_zone.name, self_zone.model
     );
     if !others.is_empty() {
         text.push_str(&format!(

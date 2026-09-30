@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Send, ChevronDown, Zap, Check, Layers, Settings as SettingsIcon, Loader2, Brain, Paperclip, Tag, X, SplitSquareHorizontal, Crown, Users, Upload, ScanText, Folder } from "lucide-react";
 import { useApp } from "@/store/app";
 import { reportError } from "@/lib/reportError";
@@ -214,6 +214,13 @@ export function HomeScreen() {
   useEffect(() => {
     if (focusComposerNonce > 0) taRef.current?.focus();
   }, [focusComposerNonce]);
+  // Grow with the prompt up to the CSS max-height, then scroll — as InputBar does.
+  useLayoutEffect(() => {
+    const el = taRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [text]);
   const isFirstNewChatTick = useRef(true);
   const visionOverrides = useApp((s) => s.appSettings.visionOverrides);
   const audioOverrides = useApp((s) => s.appSettings.audioOverrides);
@@ -486,9 +493,11 @@ export function HomeScreen() {
        like a small thing adrift in a large window.
 
        `overflow-y-auto` with real padding is what keeps that honest on a short
-       window: centring plus a nudge has to degrade to scrolling, not clipping. */
+       window: centring plus a nudge has to degrade to scrolling, not clipping.
+       Centred with `my-auto` on the column rather than `justify-center`, which
+       pushes the top out of reach once a long prompt outgrows the window. */
     <div
-      className="relative flex flex-1 flex-col items-center justify-center overflow-y-auto px-4 pb-[9vh] pt-8"
+      className="relative flex flex-1 flex-col items-center overflow-y-auto px-4 pb-[9vh] pt-8"
       onDragEnter={onDragEnter}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
@@ -505,7 +514,7 @@ export function HomeScreen() {
           </div>
         </div>
       )}
-      <div className="w-full max-w-3xl">
+      <div className="my-auto w-full max-w-3xl">
         {/* The greeting fades and the composer rises under it, so arriving here —
             on launch, or on coming back from a conversation — is a movement rather
             than a cut. Both are pure decoration and both are dropped under
@@ -550,7 +559,7 @@ export function HomeScreen() {
             rows={2}
             autoFocus
             placeholder="Send a message…"
-            className="max-h-[40vh] min-h-[52px] w-full resize-none bg-transparent px-2 py-1.5 text-sm leading-relaxed outline-none"
+            className="max-h-[40vh] min-h-[52px] w-full resize-none overflow-y-auto bg-transparent px-2 py-1.5 text-sm leading-relaxed outline-none"
           />
           <div className="flex items-center gap-2 px-1 pt-1">
             {/* Attach */}

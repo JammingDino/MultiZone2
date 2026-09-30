@@ -194,7 +194,7 @@ use crate::db::models::ZONE_COLS;
 // then failed to decode a Chat row and the send silently did nothing.
 use crate::commands::chats::CHAT_COLS;
 const MSG_COLS: &str =
-    "id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at";
+    "id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at, consult_id";
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -1600,6 +1600,9 @@ struct TurnParticipant {
     /// turn rather than a person. Decides whether `ask_user` survives in a
     /// subchat — see the strip site below.
     agent_driven: bool,
+    /// Another zone's `ask_zone` question, when this participant is answering
+    /// one in its own lane. Appended to the request, never stored.
+    consult_note: Option<String>,
 }
 
 /// Primary-zone wrapper: resolves the turn's mode (override → chat state →
@@ -1642,6 +1645,7 @@ async fn run_agentic_loop(
         persp_zone_id: None,
         allow_zone_switch: !ov.is_active() && is_zone_mode,
         agent_driven: ov.agent_driven,
+        consult_note: None,
     };
     run_participant_turn(ctx, sink, chat_id, participant, cancel).await
 }
@@ -1793,8 +1797,16 @@ async fn run_participant_turn(
         persp_zone_id,
         allow_zone_switch,
         agent_driven,
+        consult_note,
     } = participant;
     let persp = persp_zone_id.as_deref();
+    // A lane is a zone id, or `<zone id>~<consult id>` for a zone answering
+    // another's `ask_zone` beside its own reply. Rows store the two apart.
+    let (store_zone, consult_id) = match persp.map(|l| l.split_once('~')) {
+        Some(Some((z, c))) => (Some(z), Some(c)),
+        Some(None) => (persp, None),
+        None => (None, None),
+    };
     // Rebuilt on a zone switch below: the new zone's model may not see images,
     // and the tools it is offered have to match the model that will answer.
     let mut tool_ctx = load_tool_context(&ctx.db, Some(chat_id), Some(&zone.model)).await;
@@ -1856,10 +1868,18 @@ async fn run_participant_turn(
     } else {
         0
     };
+    // Writing its own reply: what `ask_zone`'s wait mode waits on. A zone that
+    // is answering a question is neither marked nor offered the tool.
+    let _busy = consult_id.is_none().then(|| crate::tools::ask_zone::busy(chat_id, &zone.id));
+    let ask_zone_tool = match consult_id {
+        None => crate::tools::ask_zone::offer(&ctx.db, chat_id, &zone.id).await,
+        Some(_) => None,
+    };
     let mut tools = build_tools_for_zone(&ctx.db, &zone, &tool_ctx).await;
     if knowledge_available {
         tools.push(crate::tools::knowledge::definition());
     }
+    tools.extend(ask_zone_tool.clone());
     if rolling_limit > 0 {
         tools.extend(crate::tools::rolling::definitions());
     }
@@ -1887,6 +1907,9 @@ async fn run_participant_turn(
 
     // Build initial messages array (full history)
     let mut api_messages = build_message_history(&ctx.db, chat_id, &zone, persp).await?;
+    if let Some(note) = consult_note {
+        push_system_note(&mut api_messages, note);
+    }
 
     // "Plan this out first" should reach the tool without the user having to
     // name it (0.14.6). The standing snippet says planning exists; this says the
@@ -2318,6 +2341,7 @@ async fn run_participant_turn(
                 if knowledge_available {
                     tools.push(crate::tools::knowledge::definition());
                 }
+                tools.extend(ask_zone_tool.clone());
                 if rolling_limit > 0 {
                     tools.extend(crate::tools::rolling::definitions());
                 }
@@ -2463,17 +2487,18 @@ async fn run_participant_turn(
             let active_zone_col: Option<&str> =
                 if persp.is_some() { None } else { Some(zone.id.as_str()) };
             sqlx::query(
-                "INSERT INTO messages (id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, created_at)
-                 VALUES (?1, ?2, 'assistant', ?3, ?4, NULL, ?5, ?6, ?7, ?8)",
+                "INSERT INTO messages (id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, created_at, consult_id)
+                 VALUES (?1, ?2, 'assistant', ?3, ?4, NULL, ?5, ?6, ?7, ?8, ?9)",
             )
             .bind(&assistant_msg_id)
             .bind(chat_id)
             .bind(&assistant_content_json)
             .bind(&tool_calls_json)
             .bind(&reasoning_save)
-            .bind(persp)
+            .bind(store_zone)
             .bind(active_zone_col)
             .bind(now)
+            .bind(consult_id)
             .execute(&ctx.db)
             .await?;
             sqlx::query("UPDATE chats SET updated_at = ?1 WHERE id = ?2")
@@ -2711,15 +2736,16 @@ async fn run_participant_turn(
                 let (parts, api_content) = parse_tool_result_content(&refusal);
                 let msg_id = new_id();
                 sqlx::query(
-                    "INSERT INTO messages (id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, created_at)
-                     VALUES (?1, ?2, 'tool', ?3, NULL, ?4, NULL, ?5, ?6)",
+                    "INSERT INTO messages (id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, created_at, consult_id)
+                     VALUES (?1, ?2, 'tool', ?3, NULL, ?4, NULL, ?5, ?6, ?7)",
                 )
                 .bind(&msg_id)
                 .bind(chat_id)
                 .bind(serde_json::to_string(&parts)?)
                 .bind(&tc.id)
-                .bind(persp)
+                .bind(store_zone)
                 .bind(now_ts())
+                .bind(consult_id)
                 .execute(&ctx.db)
                 .await?;
                 let saved = sqlx::query_as::<_, Message>(&format!(
@@ -2789,15 +2815,16 @@ async fn run_participant_turn(
                 let (parts, api_content) = parse_tool_result_content(reason);
                 let msg_id = new_id();
                 sqlx::query(
-                    "INSERT INTO messages (id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, created_at)
-                     VALUES (?1, ?2, 'tool', ?3, NULL, ?4, NULL, ?5, ?6)",
+                    "INSERT INTO messages (id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, created_at, consult_id)
+                     VALUES (?1, ?2, 'tool', ?3, NULL, ?4, NULL, ?5, ?6, ?7)",
                 )
                 .bind(&msg_id)
                 .bind(chat_id)
                 .bind(serde_json::to_string(&parts)?)
                 .bind(&tc.id)
-                .bind(persp)
+                .bind(store_zone)
                 .bind(now_ts())
+                .bind(consult_id)
                 .execute(&ctx.db)
                 .await?;
                 let saved = sqlx::query_as::<_, Message>(&format!(
@@ -3051,15 +3078,16 @@ async fn run_participant_turn(
             // Tag perspective tool messages with their zone so they group under
             // the right participant and stay out of the primary conversation.
             sqlx::query(
-                "INSERT INTO messages (id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, created_at)
-                 VALUES (?1, ?2, 'tool', ?3, NULL, ?4, NULL, ?5, ?6)",
+                "INSERT INTO messages (id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, created_at, consult_id)
+                 VALUES (?1, ?2, 'tool', ?3, NULL, ?4, NULL, ?5, ?6, ?7)",
             )
             .bind(&tool_msg_id)
             .bind(chat_id)
             .bind(&tool_content_json)
             .bind(&tc.id)
-            .bind(persp)
+            .bind(store_zone)
             .bind(tnow)
+            .bind(consult_id)
             .execute(&ctx.db)
             .await?;
 
@@ -3211,6 +3239,7 @@ async fn run_participant_turn(
             if knowledge_available {
                 tools.push(crate::tools::knowledge::definition());
             }
+            tools.extend(ask_zone_tool.clone());
             if rolling_limit > 0 {
                 tools.extend(crate::tools::rolling::definitions());
             }
@@ -3249,6 +3278,7 @@ async fn run_participant_turn(
                         if knowledge_available {
                             tools.push(crate::tools::knowledge::definition());
                         }
+                        tools.extend(ask_zone_tool.clone());
                         if rolling_limit > 0 {
                             tools.extend(crate::tools::rolling::definitions());
                         }
@@ -3428,8 +3458,35 @@ async fn run_perspective(
         allow_zone_switch: false,
         // A perspective zone answers the user's own message, never a leader's.
         agent_driven: false,
+        consult_note: None,
     };
     run_participant_turn(ctx, sink, chat_id, participant, cancel).await
+}
+
+/// A zone answering another zone's `ask_zone`, in the lane `zone~consult` so
+/// it can run beside that zone's own reply. Boxed: this closes the cycle
+/// turn → dispatch → ask_zone → here → turn, which an unboxed future can't.
+pub fn run_consult<'a>(
+    ctx: &'a EngineCtx,
+    sink: &'a StreamSink,
+    chat_id: &'a str,
+    zone_id: &'a str,
+    consult_id: &'a str,
+    note: String,
+    cancel: Arc<AtomicBool>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = AppResult<()>> + Send + 'a>> {
+    Box::pin(async move {
+        let (zone, provider) = load_zone_and_provider(&ctx.db, zone_id).await?;
+        let participant = TurnParticipant {
+            zone,
+            provider,
+            persp_zone_id: Some(format!("{zone_id}~{consult_id}")),
+            allow_zone_switch: false,
+            agent_driven: false,
+            consult_note: Some(note),
+        };
+        run_participant_turn(ctx, sink, chat_id, participant, cancel).await
+    })
 }
 
 // ─── Message history ──────────────────────────────────────────────────────────
@@ -3557,6 +3614,7 @@ mod tests {
             zone_id: None,
             active_zone_id: None,
             edited: false,
+            consult_id: None,
             created_at: 0,
         }
     }
@@ -3875,6 +3933,53 @@ mod tests {
     async fn parallel_zones_answer_blind() {
         let pool = pool_with_two_zones("parallel").await;
         assert!(!last_user_for(&pool, Some("zb")).await.contains("alpha answer"));
+    }
+
+    /// A zone asked a question sees the round so far — even in parallel mode,
+    /// since looking over the asker's work is the point — and its answer reads
+    /// as an answer to whoever asked, apart from its own reply.
+    #[tokio::test]
+    async fn an_asked_zone_sees_the_round_and_its_answer_is_labelled() {
+        let pool = pool_with_two_zones("parallel").await;
+        assert!(last_user_for(&pool, Some("zb~za.x")).await.contains("alpha answer"));
+
+        sqlx::query(
+            "INSERT INTO messages (id, chat_id, role, content, zone_id, consult_id, created_at) VALUES
+             ('b1', 'c1', 'assistant', '[{\"type\":\"text\",\"text\":\"beta checked it\"}]', 'zb', 'za.x', 30)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE chats SET perspective_mode = 'sequential' WHERE id = 'c1'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        // Beta's own reply this round is another lane, so it sees what it told Alpha.
+        let seen = last_user_for(&pool, Some("zb")).await;
+        assert!(seen.contains("**Beta (answering Alpha):**"), "{seen}");
+        assert!(seen.contains("beta checked it"));
+    }
+
+    #[tokio::test]
+    async fn ask_zone_is_offered_only_with_someone_to_ask() {
+        let pool = pool_with_two_zones("parallel").await;
+        let tool = crate::tools::ask_zone::offer(&pool, "c1", "za").await.expect("offered");
+        assert_eq!(tool.function.parameters["properties"]["zone"]["enum"], serde_json::json!(["Beta"]));
+        // The added zone can ask the chat's own zone back.
+        assert!(crate::tools::ask_zone::offer(&pool, "c1", "zb").await.is_some());
+
+        sqlx::query("DELETE FROM chat_zones").execute(&pool).await.unwrap();
+        assert!(crate::tools::ask_zone::offer(&pool, "c1", "za").await.is_none(), "alone in the chat");
+
+        sqlx::query("INSERT INTO chat_zones (chat_id, zone_id) VALUES ('c1', 'zb')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO settings (key, value) VALUES ('app_settings', '{\"zoneAsk\":\"off\"}')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(crate::tools::ask_zone::offer(&pool, "c1", "za").await.is_none(), "switched off");
     }
 
 }

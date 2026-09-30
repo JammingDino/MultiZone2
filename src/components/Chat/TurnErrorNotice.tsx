@@ -3,6 +3,7 @@ import { AlertCircle, AlertTriangle, ChevronDown, ChevronRight, RotateCw, Settin
 import { useApp } from "@/store/app";
 import { CHROME_QUIET } from "@/lib/chrome";
 import { friendlyError } from "@/lib/errors";
+import { laneZone } from "@/lib/grouping";
 
 /** A provider error nothing recognised: say what failed rather than "something". */
 const TURN_FAILED = {
@@ -40,14 +41,14 @@ export function TurnErrorNotice({ chatId }: { chatId: string }) {
           <RunawayCard
             key={i}
             message={e.message}
-            zoneName={e.zoneId ? zones.find((z) => z.id === e.zoneId)?.name ?? "A zone" : null}
+            zoneName={e.zoneId ? zones.find((z) => z.id === laneZone(e.zoneId!))?.name ?? "A zone" : null}
             onDismiss={() => dismiss(chatId)}
           />
         ) : (
           <ErrorCard
             key={i}
             message={e.message}
-            zoneName={e.zoneId ? zones.find((z) => z.id === e.zoneId)?.name ?? "A zone" : null}
+            zoneName={e.zoneId ? zones.find((z) => z.id === laneZone(e.zoneId!))?.name ?? "A zone" : null}
             onDismiss={() => dismiss(chatId)}
             onOpenSettings={openSettings}
           />

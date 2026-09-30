@@ -400,6 +400,18 @@ export function AgentsTab() {
         />
       </section>
       <section>
+        <h3 className="mb-3 text-sm font-medium">Zones asking each other</h3>
+        <OptionCards
+          value={appSettings.zoneAsk}
+          onChange={(zoneAsk) => setAppSettings({ zoneAsk })}
+          options={[
+            ["concurrent", "Answer at once", "The asked zone answers beside its own reply — two runs of it at once."],
+            ["wait", "Finish first", "The asked zone finishes its own reply, then answers."],
+            ["off", "Off", "Zones in a chat can't ask each other."],
+          ]}
+        />
+      </section>
+      <section>
         <h3 className="mb-2 text-sm font-medium">Subagent depth limit</h3>
         <OptionCards
           align="center"

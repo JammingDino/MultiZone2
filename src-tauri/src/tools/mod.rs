@@ -15,6 +15,7 @@ pub mod memory;
 pub mod skills;
 pub mod knowledge;
 pub mod subchat;
+pub mod ask_zone;
 pub mod teamwork;
 pub mod plan;
 pub mod plan_mode;
@@ -405,6 +406,8 @@ pub fn tool_safety_by_name(name: &str) -> u8 {
         // background subagents are all reads of work the user already approved
         // when the spawn went through.
         | "load_skill" | "read_subchat" | "list_subchats" | "collect_subagents"
+        // Asking a zone the user put in this chat; `zoneAsk: off` withholds it.
+        | "ask_zone"
         | "team_status" | "claim_files" | "release_files" | "post_note"
         // Watching a terminal someone already approved starting is a read.
         | "terminal_read" | "terminal_list"
@@ -686,6 +689,7 @@ async fn dispatch_inner(
         "collect_subagents" => subchat::collect(args, db, chat_id).await,
         "list_subchats" => subchat::list(db, chat_id).await,
         "read_subchat" => subchat::read(args, db).await,
+        "ask_zone" => ask_zone::run(args, ctx, sink, chat_id, caller_zone_id).await,
         "terminal_start" => terminal::start(args, db, chat_id, project_dir).await,
         "terminal_write" => terminal::write(args, db, chat_id).await,
         "terminal_read" => terminal::read(args, db, chat_id).await,

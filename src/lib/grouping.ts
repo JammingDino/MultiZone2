@@ -29,7 +29,12 @@ export type TurnBlock =
   | { kind: "step"; step: Step };
 
 export interface PerspectiveTurn {
+  /** Where this reply streams: the zone id, or `zone~consult` for an answer to
+   *  another zone's `ask_zone` (the same zone can be doing both at once). */
+  lane: string;
   zoneId: string;
+  /** For an answer to `ask_zone`: the zone that asked. */
+  askedBy: string | null;
   /** Last assistant message id in the turn (for copy/regenerate targeting). */
   messageId: string;
   /** All assistant message ids in this perspective turn, ordered. */
@@ -85,6 +90,17 @@ function parseToolCalls(json: string | null): ToolCall[] {
     if (Array.isArray(arr)) return arr;
   } catch {}
   return [];
+}
+
+/** The zone behind a stream lane (`zone` or `zone~consult`). */
+export function laneZone(lane: string): string {
+  return lane.split("~")[0];
+}
+
+/** The zone that asked, when a lane is an answer to `ask_zone`. */
+function laneAsker(lane: string): string | null {
+  const consult = lane.split("~")[1];
+  return consult ? consult.split(".")[0] : null;
 }
 
 function lastAt(msgs: Message[]): number {
@@ -273,10 +289,11 @@ export function groupMessages(
       }
     }
     if (turnIdx < 0) continue;
+    const lane = pm.consultId ? `${pm.zoneId}~${pm.consultId}` : pm.zoneId;
     const zmap = byTurn.get(turnIdx) ?? new Map<string, Message[]>();
-    const list = zmap.get(pm.zoneId) ?? [];
+    const list = zmap.get(lane) ?? [];
     list.push(pm);
-    zmap.set(pm.zoneId, list);
+    zmap.set(lane, list);
     byTurn.set(turnIdx, zmap);
   }
 
@@ -287,10 +304,12 @@ export function groupMessages(
     } else if (unit.type === "bot") {
       const zmap = byTurn.get(precedingUserIdx);
       if (!zmap) continue;
-      for (const [zoneId, msgs] of zmap.entries()) {
+      for (const [lane, msgs] of zmap.entries()) {
         const { blocks, messageIds } = buildBlocks(msgs);
         unit.perspectives.push({
-          zoneId,
+          lane,
+          zoneId: laneZone(lane),
+          askedBy: laneAsker(lane),
           messageIds,
           messageId: messageIds[messageIds.length - 1] ?? "",
           blocks,
@@ -310,10 +329,19 @@ export function groupMessages(
       lastBot = { type: "bot", messageIds: [], blocks: [], perspectives: [], zoneId: null, lastAt: 0 };
       units.push(lastBot);
     }
-    for (const [zoneId, st] of Object.entries(perspectiveStreams)) {
-      let pt = lastBot.perspectives.find((p) => p.zoneId === zoneId);
+    for (const [lane, st] of Object.entries(perspectiveStreams)) {
+      let pt = lastBot.perspectives.find((p) => p.lane === lane);
       if (!pt) {
-        pt = { zoneId, messageId: st.messageId, messageIds: [], blocks: [], text: "", lastAt: 0 };
+        pt = {
+          lane,
+          zoneId: laneZone(lane),
+          askedBy: laneAsker(lane),
+          messageId: st.messageId,
+          messageIds: [],
+          blocks: [],
+          text: "",
+          lastAt: 0,
+        };
         lastBot.perspectives.push(pt);
       }
       appendStreamingBlocks(pt.blocks, st);

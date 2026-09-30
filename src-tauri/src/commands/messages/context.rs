@@ -1022,7 +1022,11 @@ pub(super) async fn build_multi_model_history(
     persp: Option<&str>,
     out: &mut Vec<ChatMessage>,
 ) -> AppResult<()> {
-    let sees_round = super::resolve_perspective_mode(db, chat_id).await == "sequential";
+    // A zone answering another's question sees the round so far: looking over
+    // what the asker is doing is usually the point of asking.
+    let is_consult = persp.map_or(false, |l| l.contains('~'));
+    let sees_round =
+        is_consult || super::resolve_perspective_mode(db, chat_id).await == "sequential";
     let rows = sqlx::query_as::<_, Message>(&format!(
         "SELECT {MSG_COLS} FROM messages WHERE chat_id = ?1 ORDER BY created_at ASC"
     ))
@@ -1080,7 +1084,11 @@ pub(super) async fn build_multi_model_history(
                 // Past-round answers always; this round's only from others, and
                 // only when the mode lets this participant see them.
                 let is_past = last_user_ts.map_or(false, |lu| m.created_at < lu);
-                if !is_past && !(sees_round && m.zone_id.as_deref() != persp) {
+                let lane = match (&m.zone_id, &m.consult_id) {
+                    (Some(z), Some(c)) => Some(format!("{z}~{c}")),
+                    (z, _) => z.clone(),
+                };
+                if !is_past && !(sees_round && lane.as_deref() != persp) {
                     continue;
                 }
                 let text = strip_thinking_blocks(&assistant_text(&m.content));
@@ -1088,10 +1096,13 @@ pub(super) async fn build_multi_model_history(
                 if text.is_empty() {
                     continue;
                 }
-                let label = match &m.zone_id {
+                let mut label = match &m.zone_id {
                     None => primary_name.clone(),
                     Some(z) => name_of(z),
                 };
+                if let Some(asker) = m.consult_id.as_deref().and_then(|c| c.split('.').next()) {
+                    label = format!("{label} (answering {})", name_of(asker));
+                }
                 let into = if is_past { &mut pending } else { &mut this_round };
                 // One reply over several tool steps reads as one reply.
                 match into.last_mut() {
@@ -1158,7 +1169,7 @@ pub(super) fn push_merged_round(out: &mut Vec<ChatMessage>, pending: &mut Vec<(S
 }
 
 /// Joins the text parts of a stored assistant message's content JSON.
-pub(super) fn assistant_text(content_json: &str) -> String {
+pub(crate) fn assistant_text(content_json: &str) -> String {
     let parts: Vec<ContentPart> = serde_json::from_str(content_json).unwrap_or_default();
     parts
         .iter()

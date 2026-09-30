@@ -42,7 +42,7 @@ pub mod routes;
 
 use crate::commands::chats::CHAT_COLS;
 const MSG_COLS: &str =
-    "id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at";
+    "id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at, consult_id";
 
 /// Cheap-to-clone state shared by every request handler.
 #[derive(Clone)]

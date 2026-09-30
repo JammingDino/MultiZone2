@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Loader2, Wrench, Cog, Brain } from "lucide-react";
 import { LIVE_RATE_WINDOW_MS, useApp, type StreamingState, type TurnAggregate } from "@/store/app";
 import { formatTokens } from "@/lib/format";
+import { laneZone } from "@/lib/grouping";
 
 /**
  * Live status line for one participant in a turn — the primary or a
@@ -168,8 +169,9 @@ export function PerspectiveStatusLine({
   chatId: string;
   zoneId: string;
 }) {
+  // `zoneId` is the stream lane, which is `zone~consult` for an ask_zone answer.
   const turn = useApp((s) => s.perspectiveTurnByChat[chatId]?.[zoneId]);
-  return <ZoneStatusLine streaming={streaming} turn={turn} zoneId={zoneId} />;
+  return <ZoneStatusLine streaming={streaming} turn={turn} zoneId={laneZone(zoneId)} />;
 }
 
 /**

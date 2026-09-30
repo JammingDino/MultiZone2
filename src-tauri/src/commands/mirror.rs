@@ -29,7 +29,7 @@ use crate::state::AppState;
 
 use crate::commands::chats::CHAT_COLS;
 const MSG_COLS: &str =
-    "id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at";
+    "id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at, consult_id";
 use crate::db::models::ZONE_COLS;
 
 /// Resolved mirror configuration. Present only when the feature is on and an

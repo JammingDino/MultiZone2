@@ -335,6 +335,10 @@ pub struct Message {
     /// True when the user hand-edited this message's content after it was saved.
     pub edited: bool,
     pub created_at: i64,
+    /// Set on a zone's answer to another zone's `ask_zone`: `<asking zone
+    /// id>.<unique>`. Groups that answer's steps apart from the zone's own reply.
+    #[sqlx(default)]
+    pub consult_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]

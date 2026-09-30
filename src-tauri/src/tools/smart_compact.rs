@@ -156,7 +156,7 @@ pub async fn run(args: &Value, db: &SqlitePool, chat_id: &str) -> AppResult<Stri
 pub(crate) async fn primary_rows(db: &SqlitePool, chat_id: &str) -> Vec<Message> {
     let mut rows: Vec<Message> = sqlx::query_as(
         "SELECT id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id,
-                active_zone_id, edited, created_at
+                active_zone_id, edited, created_at, consult_id
            FROM messages WHERE chat_id = ?1 AND zone_id IS NULL ORDER BY created_at ASC",
     )
     .bind(chat_id)
@@ -330,6 +330,7 @@ mod tests {
             zone_id: None,
             active_zone_id: None,
             edited: false,
+            consult_id: None,
             created_at: at,
         }
     }

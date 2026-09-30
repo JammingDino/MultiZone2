@@ -373,6 +373,7 @@ mod tests {
             zone_id: None,
             active_zone_id: None,
             edited: false,
+            consult_id: None,
             created_at: at,
         }
     }

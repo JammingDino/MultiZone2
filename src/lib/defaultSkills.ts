@@ -41,7 +41,7 @@ A **provider** is one endpoint: a base URL, an optional API key, and a default m
 
 A **zone** is the unit of configuration: one provider + model + system prompt + temperature + toolset + thinking setting, saved under a name with an icon and colour. A chat is bound to a zone, and that zone answers.
 
-- **Perspective zones** — add more zones to one chat and every message fans out to all of them. One thread, independent replies, side by side or stacked. Good for comparing models, bad for a long task (each zone pays the full context).
+- **More zones in one chat** ("Add zones") — every message fans out to all of them, and each knows its own name and model and the others'. Replies read in the order they arrive (Settings → Appearance → Zone layout). In parallel mode they answer blind; in sequential mode each sees the replies before it. A zone can ask another directly with **ask_zone** to check its work (Settings → Runs → Zones asking each other). Good for comparing models, bad for a long task (each zone pays the full context).
 - **Smart chat** — a router picks the best zone per turn instead of you choosing.
 - **Quick chat** — a chat with no zone. The app-wide default zone answers (Settings → Chat), or the first provider's default model with no system prompt and only the safe tools.
 - The **Zone Library** ships curated presets. Installing one binds it to the user's own provider and model.

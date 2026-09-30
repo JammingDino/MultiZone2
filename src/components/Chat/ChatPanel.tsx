@@ -516,7 +516,7 @@ function ChatPane({ chatId }: { chatId: string }) {
                 diff={pa.diff}
                 zoneName={
                   pa.zoneId
-                    ? zones.find((z) => z.id === pa.zoneId)?.name ?? "Zone"
+                    ? zones.find((z) => z.id === laneZone(pa.zoneId!))?.name ?? "Zone"
                     : null
                 }
                 onApprove={(hunks) => respondApproval(chatId!, pa.zoneId, true, hunks)}
@@ -582,6 +582,7 @@ function ChatPane({ chatId }: { chatId: string }) {
 
 import type { Zone } from "@/lib/types";
 import { claimSettingsDrop } from "@/lib/importSettings";
+import { laneZone } from "@/lib/grouping";
 
 /**
  * Notice above the composer in a subchat, naming the zone that started it.

@@ -649,7 +649,7 @@ async fn copy_messages_and_attachments(
     // tool_call_id is the model-supplied id (not a row PK) so copying it verbatim
     // keeps tool calls matched within the branch. Map old→new ids for attachments.
     let msgs = sqlx::query_as::<_, Message>(
-        "SELECT id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at
+        "SELECT id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at, consult_id
          FROM messages WHERE chat_id = ?1 AND created_at <= ?2 ORDER BY created_at ASC",
     )
     .bind(src)
@@ -663,8 +663,8 @@ async fn copy_messages_and_attachments(
         id_map.insert(m.id.clone(), nid.clone());
         sqlx::query(
             "INSERT INTO messages
-               (id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+               (id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at, consult_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         )
         .bind(&nid)
         .bind(dst)
@@ -677,6 +677,7 @@ async fn copy_messages_and_attachments(
         .bind(&m.active_zone_id)
         .bind(m.edited)
         .bind(m.created_at)
+        .bind(&m.consult_id)
         .execute(db)
         .await?;
     }
@@ -846,27 +847,22 @@ pub async fn delete_participant_messages(
     .await?;
     let Some(ts) = last_user_ts else { return Ok(()); };
 
-    match zone_id {
-        Some(z) => {
-            sqlx::query(
-                "DELETE FROM messages WHERE chat_id = ?1 AND created_at >= ?2 AND role != 'user' AND zone_id = ?3",
-            )
-            .bind(&chat_id)
-            .bind(ts)
-            .bind(&z)
-            .execute(&state.db)
-            .await?;
-        }
-        None => {
-            sqlx::query(
-                "DELETE FROM messages WHERE chat_id = ?1 AND created_at >= ?2 AND role != 'user' AND zone_id IS NULL",
-            )
-            .bind(&chat_id)
-            .bind(ts)
-            .execute(&state.db)
-            .await?;
-        }
-    }
+    // The participant's own reply, and the answers other zones gave to its
+    // `ask_zone` calls (the questions go with it). Answers it gave to others
+    // stay: they belong to the zone that asked.
+    let (own, asker) = match &zone_id {
+        Some(_) => ("zone_id = ?3 AND consult_id IS NULL", "?3"),
+        None => ("zone_id IS NULL AND ?3 IS NULL", "(SELECT zone_id FROM chats WHERE id = ?1)"),
+    };
+    sqlx::query(&format!(
+        "DELETE FROM messages WHERE chat_id = ?1 AND created_at >= ?2 AND role != 'user'
+           AND ({own} OR consult_id LIKE {asker} || '.%')"
+    ))
+    .bind(&chat_id)
+    .bind(ts)
+    .bind(&zone_id)
+    .execute(&state.db)
+    .await?;
     Ok(())
 }
 
@@ -897,7 +893,7 @@ pub async fn get_messages(
     chat_id: String,
 ) -> AppResult<Vec<Message>> {
     let rows = sqlx::query_as::<_, Message>(
-        "SELECT id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at
+        "SELECT id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at, consult_id
          FROM messages WHERE chat_id = ?1 ORDER BY created_at ASC",
     )
     .bind(&chat_id)
@@ -1189,7 +1185,7 @@ async fn build_title_context(
 ) -> AppResult<Vec<ChatMessage>> {
     let rows = if whole_conversation {
         sqlx::query_as::<_, Message>(
-            "SELECT id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at
+            "SELECT id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at, consult_id
              FROM messages
              WHERE chat_id = ?1 AND zone_id IS NULL AND role IN ('user', 'assistant')
              ORDER BY created_at ASC",
@@ -1199,7 +1195,7 @@ async fn build_title_context(
         .await?
     } else {
         sqlx::query_as::<_, Message>(
-            "SELECT id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at
+            "SELECT id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at, consult_id
              FROM messages WHERE chat_id = ?1 AND role = 'user' ORDER BY created_at ASC LIMIT 1",
         )
         .bind(chat_id)

@@ -22,7 +22,7 @@ use crate::llm::types::{
 use crate::state::AppState;
 
 const MSG_COLS: &str =
-    "id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at";
+    "id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at, consult_id";
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

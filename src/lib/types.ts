@@ -656,6 +656,8 @@ export interface Message {
   /** True when the user hand-edited this message's content after it was saved. */
   edited: boolean;
   createdAt: number;
+  /** Set on a zone's answer to another zone's `ask_zone`: `<asking zone id>.<unique>`. */
+  consultId?: string | null;
 }
 
 export type ContentPart =
@@ -1116,6 +1118,13 @@ export interface AppSettings {
    */
   perspectiveMode: "sequential" | "parallel";
   /**
+   * When one zone asks another with `ask_zone`.
+   * "concurrent" — the asked zone answers at once, beside its own reply (default)
+   * "wait"       — it finishes its own reply first
+   * "off"        — zones are not offered the tool
+   */
+  zoneAsk: "concurrent" | "wait" | "off";
+  /**
    * How the replies of a multi-zone chat are laid out.
    * "chronological" — one column, in the order the replies arrived (default)
    * "stacked"       — one column, the chat's own zone first, then the others
@@ -1423,6 +1432,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   pdfExportSessionLog: false,
   exportSubchats: true,
   perspectiveMode: "parallel",
+  zoneAsk: "concurrent",
   zoneLayout: "chronological",
   baseZoneId: null,
   memoryScopeLimit: 50,

@@ -648,24 +648,25 @@ function BotTurnViewImpl({ turn, isLatest = false }: { turn: BotTurn; isLatest?:
       ),
     };
     const others = turn.perspectives.map((p) => ({
-      key: p.zoneId,
+      key: p.lane,
       lastAt: p.lastAt,
       streaming: p.streaming,
       card: (
         <ParticipantCard
-          key={p.zoneId}
+          key={p.lane}
           zoneId={p.zoneId}
+          askedBy={p.askedBy}
           fallbackName="Zone"
           blocks={p.blocks}
           isStreaming={Boolean(p.streaming)}
           chatId={chatId}
           text={p.text}
           actionMessageId={p.messageId}
-          regenerateZoneId={p.zoneId}
-          canRegenerate={isLatest}
+          regenerateZoneId={p.askedBy ? null : p.zoneId}
+          canRegenerate={isLatest && !p.askedBy}
           layout={cardLayout}
           branchFromMessageId={p.messageId}
-          branchSolo
+          branchSolo={!p.askedBy}
           branchSoloZoneId={p.zoneId}
           fileSources={fileSources}
           carriedCitations={carriedCitations}
@@ -674,7 +675,7 @@ function BotTurnViewImpl({ turn, isLatest = false }: { turn: BotTurn; isLatest?:
               <PerspectiveStatusLine
                 streaming={p.streaming}
                 chatId={chatId}
-                zoneId={p.zoneId}
+                zoneId={p.lane}
               />
             ) : null
           }
@@ -813,7 +814,7 @@ function botTurnPropsEqual(
   for (let i = 0; i < a.perspectives.length; i++) {
     const pa = a.perspectives[i];
     const pb = b.perspectives[i];
-    if (pa.zoneId !== pb.zoneId || pa.messageId !== pb.messageId || pa.streaming !== pb.streaming) {
+    if (pa.lane !== pb.lane || pa.messageId !== pb.messageId || pa.streaming !== pb.streaming) {
       return false;
     }
   }
@@ -831,6 +832,7 @@ export const BotTurnView = memo(BotTurnViewImpl, botTurnPropsEqual);
  */
 function ParticipantCard({
   zoneId,
+  askedBy = null,
   fallbackName,
   blocks,
   isStreaming,
@@ -848,6 +850,8 @@ function ParticipantCard({
   statusLine,
 }: {
   zoneId: string | null;
+  /** Set when this card is an answer to another zone's `ask_zone`. */
+  askedBy?: string | null;
   fallbackName: string;
   blocks: TurnBlock[];
   isStreaming: boolean;
@@ -887,6 +891,7 @@ function ParticipantCard({
       : false,
   );
   const zone = useApp((s) => s.zones.find((z) => z.id === zoneId));
+  const asker = useApp((s) => (askedBy ? s.zones.find((z) => z.id === askedBy) : undefined));
   const ZoneIcon = getZoneIcon(zone?.icon);
   const color = zone?.accentColor ?? null;
   const hasContent = blocks.length > 0;
@@ -936,6 +941,11 @@ function ParticipantCard({
               </span>
               {zone?.model && (
                 <span className="truncate text-[var(--color-text-muted)]">{zone.model}</span>
+              )}
+              {askedBy && (
+                <span className="shrink-0 text-[var(--color-text-muted)]">
+                  · answering {asker?.name ?? "another zone"}
+                </span>
               )}
             </div>
 

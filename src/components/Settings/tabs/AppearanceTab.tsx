@@ -404,12 +404,13 @@ export function AppearanceTab() {
       <CustomCssSection />
 
       <section>
-        <h3 className="mb-3 text-sm font-medium">Perspective layout</h3>
+        <h3 className="mb-3 text-sm font-medium">Zone layout</h3>
         <OptionCards
-          value={appSettings.perspectiveLayout}
-          onChange={(perspectiveLayout) => setAppSettings({ perspectiveLayout })}
+          value={appSettings.zoneLayout}
+          onChange={(zoneLayout) => setAppSettings({ zoneLayout })}
           options={[
-            ["stacked", "Stacked", "Full-width response blocks stacked vertically."],
+            ["chronological", "Chronological", "One column, in the order the replies arrived."],
+            ["stacked", "Stacked", "One column, the chat's own zone first."],
             ["columns", "Columns", "Side-by-side columns for direct comparison."],
           ]}
         />

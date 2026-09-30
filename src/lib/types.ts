@@ -1116,11 +1116,13 @@ export interface AppSettings {
    */
   perspectiveMode: "sequential" | "parallel";
   /**
-   * How multiple model responses are laid out in the chat.
-   * "stacked" — full-width response blocks stacked vertically (default)
-   * "columns" — side-by-side columns for direct comparison
+   * How the replies of a multi-zone chat are laid out.
+   * "chronological" — one column, in the order the replies arrived (default)
+   * "stacked"       — one column, the chat's own zone first, then the others
+   * "columns"       — side-by-side columns for direct comparison
+   * Replaces `perspectiveLayout`, whose "columns" is carried over on load.
    */
-  perspectiveLayout: "stacked" | "columns";
+  zoneLayout: "chronological" | "stacked" | "columns";
   /**
   /**
    * The zone that answers a Quick Chat — the app-wide default assistant, and
@@ -1421,7 +1423,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   pdfExportSessionLog: false,
   exportSubchats: true,
   perspectiveMode: "parallel",
-  perspectiveLayout: "stacked",
+  zoneLayout: "chronological",
   baseZoneId: null,
   memoryScopeLimit: 50,
   seededSkills: false,

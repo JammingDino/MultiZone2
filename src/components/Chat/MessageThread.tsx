@@ -33,7 +33,7 @@ export function MessageThread({ chatId, bottomInset = 0 }: {
   const streaming = useApp((s) => s.streamingByChat[chatId]);
   const perspectiveStreams = useApp((s) => s.perspectiveStreamsByChat[chatId] ?? EMPTY_PERSPECTIVE_STREAMS);
   const loadMessages = useApp((s) => s.loadMessages);
-  const layout = useApp((s) => s.appSettings.perspectiveLayout);
+  const layout = useApp((s) => s.appSettings.zoneLayout);
   const containerRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);

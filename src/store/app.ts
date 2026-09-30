@@ -2093,8 +2093,11 @@ export const useApp = create<AppStore>((set, get) => ({
     try {
       const raw = await api.getSetting("app_settings");
       if (raw) {
-        const parsed = JSON.parse(raw) as Partial<AppSettings> & { fontSize?: any };
+        const parsed = JSON.parse(raw) as Partial<AppSettings> & { fontSize?: any; perspectiveLayout?: string };
         const merged = mergeAppSettings(parsed);
+        // `perspectiveLayout` became `zoneLayout` with chronological as the
+        // default; only an explicit choice of columns is carried over.
+        if (!parsed.zoneLayout && parsed.perspectiveLayout === "columns") merged.zoneLayout = "columns";
         // Migrate legacy string fontSize values
         if (typeof merged.fontSize === "string") {
           merged.fontSize = LEGACY_FONT_SIZE[merged.fontSize as string] ?? 14;

@@ -13,6 +13,7 @@ import { CitationSources } from "./CitationSources";
 import { StackTrace, spawnedSubchatIdsFromBlocks } from "./StackTrace";
 import { TurnChanges } from "./TurnChanges";
 import type { BotTurn, PerspectiveTurn, Step, TurnBlock } from "@/lib/grouping";
+import { chronological } from "@/lib/grouping";
 import {
   citationKey,
   collectCarriedCitations,
@@ -545,7 +546,7 @@ function BotTurnViewImpl({ turn, isLatest = false }: { turn: BotTurn; isLatest?:
     (routing && routing.status === "done" ? routing.zoneId : null) ??
     chatZoneId;
   const zone = useApp((s) => s.zones.find((z) => z.id === resolvedZoneId));
-  const layout = useApp((s) => s.appSettings.perspectiveLayout);
+  const layout = useApp((s) => s.appSettings.zoneLayout);
 
   // Citation sources for the turn (web_search results + the round's file
   // attachments). Shared with every perspective card in this round.
@@ -605,11 +606,82 @@ function BotTurnViewImpl({ turn, isLatest = false }: { turn: BotTurn; isLatest?:
   const ZoneIcon = getZoneIcon(zone?.icon);
   const zoneColor = zone?.accentColor ?? null;
   const hasPerspectives = turn.perspectives.length > 0;
+  const cardLayout = layout === "columns" ? "columns" : "stacked";
 
-  // ── Multi-zone turn: the primary and every perspective are equal cards laid
-  // out together — side-by-side columns or stacked. They share one renderer so
-  // the zone avatar/accent is the only thing that differs between them. ──
+  // ── Multi-zone turn: the primary and every other zone are equal cards laid
+  // out together — in arrival order, stacked, or side-by-side columns. They
+  // share one renderer so the zone avatar/accent is the only thing that
+  // differs between them. ──
   if (hasPerspectives) {
+    const primary = {
+      key: "primary",
+      lastAt: turn.lastAt,
+      streaming: turn.streaming,
+      card: (
+        <ParticipantCard
+          key="primary"
+          zoneId={resolvedZoneId}
+          fallbackName="Primary"
+          blocks={turn.blocks}
+          isStreaming={isStreaming}
+          chatId={chatId}
+          text={allText}
+          actionMessageId={lastMessageId}
+          regenerateZoneId={null}
+          canRegenerate={isLatest}
+          layout={cardLayout}
+          branchFromMessageId={lastMessageId}
+          branchSolo
+          branchSoloZoneId={null}
+          fileSources={fileSources}
+          carriedCitations={carriedCitations}
+          statusLine={
+            turn.streaming ? (
+              <PrimaryStatusLine
+                streaming={turn.streaming}
+                chatId={chatId}
+                zoneId={resolvedZoneId}
+              />
+            ) : null
+          }
+        />
+      ),
+    };
+    const others = turn.perspectives.map((p) => ({
+      key: p.zoneId,
+      lastAt: p.lastAt,
+      streaming: p.streaming,
+      card: (
+        <ParticipantCard
+          key={p.zoneId}
+          zoneId={p.zoneId}
+          fallbackName="Zone"
+          blocks={p.blocks}
+          isStreaming={Boolean(p.streaming)}
+          chatId={chatId}
+          text={p.text}
+          actionMessageId={p.messageId}
+          regenerateZoneId={p.zoneId}
+          canRegenerate={isLatest}
+          layout={cardLayout}
+          branchFromMessageId={p.messageId}
+          branchSolo
+          branchSoloZoneId={p.zoneId}
+          fileSources={fileSources}
+          carriedCitations={carriedCitations}
+          statusLine={
+            p.streaming ? (
+              <PerspectiveStatusLine
+                streaming={p.streaming}
+                chatId={chatId}
+                zoneId={p.zoneId}
+              />
+            ) : null
+          }
+        />
+      ),
+    }));
+    const replies = [primary, ...others];
     // NB: no `msg-row` on this wrapper — each ParticipantCard is its own
     // `.msg-row`, so a wrapping row here would make hovering any one card
     // reveal every card's action bar (the `.msg-row:hover .msg-actions` rule
@@ -617,61 +689,7 @@ function BotTurnViewImpl({ turn, isLatest = false }: { turn: BotTurn; isLatest?:
     return (
       <div>
         <div className={layout === "columns" ? "flex flex-wrap items-start justify-center gap-4" : "flex flex-col gap-5"}>
-          <ParticipantCard
-            zoneId={resolvedZoneId}
-            fallbackName="Primary"
-            blocks={turn.blocks}
-            isStreaming={isStreaming}
-            chatId={chatId}
-            text={allText}
-            actionMessageId={lastMessageId}
-            regenerateZoneId={null}
-            canRegenerate={isLatest}
-            layout={layout}
-            branchFromMessageId={lastMessageId}
-            branchSolo
-            branchSoloZoneId={null}
-            fileSources={fileSources}
-            carriedCitations={carriedCitations}
-            statusLine={
-              turn.streaming ? (
-                <PrimaryStatusLine
-                  streaming={turn.streaming}
-                  chatId={chatId}
-                  zoneId={resolvedZoneId}
-                />
-              ) : null
-            }
-          />
-          {turn.perspectives.map((p) => (
-            <ParticipantCard
-              key={p.zoneId}
-              zoneId={p.zoneId}
-              fallbackName="Perspective"
-              blocks={p.blocks}
-              isStreaming={Boolean(p.streaming)}
-              chatId={chatId}
-              text={p.text}
-              actionMessageId={p.messageId}
-              regenerateZoneId={p.zoneId}
-              canRegenerate={isLatest}
-              layout={layout}
-              branchFromMessageId={p.messageId}
-              branchSolo
-              branchSoloZoneId={p.zoneId}
-              fileSources={fileSources}
-              carriedCitations={carriedCitations}
-              statusLine={
-                p.streaming ? (
-                  <PerspectiveStatusLine
-                    streaming={p.streaming}
-                    chatId={chatId}
-                    zoneId={p.zoneId}
-                  />
-                ) : null
-              }
-            />
-          ))}
+          {(layout === "chronological" ? chronological(replies) : replies).map((r) => r.card)}
         </div>
       </div>
     );

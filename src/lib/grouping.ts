@@ -38,6 +38,8 @@ export interface PerspectiveTurn {
   blocks: TurnBlock[];
   /** Combined plain text of the answer (for the copy action). */
   text: string;
+  /** When this reply last wrote a message — its place in chronological order. */
+  lastAt: number;
   streaming?: StreamingState;
 }
 
@@ -52,6 +54,8 @@ export interface BotTurn {
   perspectives: PerspectiveTurn[];
   /** The zone that answered this turn (from the first assistant message's activeZoneId). */
   zoneId: string | null;
+  /** When the primary reply last wrote a message — see `PerspectiveTurn.lastAt`. */
+  lastAt: number;
 }
 
 export interface UserUnit {
@@ -81,6 +85,26 @@ function parseToolCalls(json: string | null): ToolCall[] {
     if (Array.isArray(arr)) return arr;
   } catch {}
   return [];
+}
+
+function lastAt(msgs: Message[]): number {
+  return msgs.reduce((t, m) => Math.max(t, m.createdAt), 0);
+}
+
+/**
+ * The replies of one round in the order they arrived: finished ones by when
+ * they last wrote, then the ones still streaming, in their original order.
+ * Stable, so equal times keep the chat's own zone first.
+ */
+export function chronological<T extends { lastAt: number; streaming?: unknown }>(replies: T[]): T[] {
+  return replies
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) =>
+      Number(!!a.r.streaming) - Number(!!b.r.streaming) ||
+      (a.r.streaming ? 0 : a.r.lastAt - b.r.lastAt) ||
+      a.i - b.i,
+    )
+    .map(({ r }) => r);
 }
 
 /** Joins the text of a block list (for the copy action). */
@@ -207,6 +231,7 @@ export function groupMessages(
       blocks,
       perspectives: [],
       zoneId: turnZoneId,
+      lastAt: lastAt(turnMsgs),
       streaming: turnStreaming,
     });
     turnMsgs = [];
@@ -270,6 +295,7 @@ export function groupMessages(
           messageId: messageIds[messageIds.length - 1] ?? "",
           blocks,
           text: blocksText(blocks),
+          lastAt: lastAt(msgs),
         });
       }
     }
@@ -281,13 +307,13 @@ export function groupMessages(
     if (!lastBot) {
       // No primary turn yet this round (e.g. primary errored) — create one so
       // the streaming perspectives still have somewhere to render.
-      lastBot = { type: "bot", messageIds: [], blocks: [], perspectives: [], zoneId: null };
+      lastBot = { type: "bot", messageIds: [], blocks: [], perspectives: [], zoneId: null, lastAt: 0 };
       units.push(lastBot);
     }
     for (const [zoneId, st] of Object.entries(perspectiveStreams)) {
       let pt = lastBot.perspectives.find((p) => p.zoneId === zoneId);
       if (!pt) {
-        pt = { zoneId, messageId: st.messageId, messageIds: [], blocks: [], text: "" };
+        pt = { zoneId, messageId: st.messageId, messageIds: [], blocks: [], text: "", lastAt: 0 };
         lastBot.perspectives.push(pt);
       }
       appendStreamingBlocks(pt.blocks, st);

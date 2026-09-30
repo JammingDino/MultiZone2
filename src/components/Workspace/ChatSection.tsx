@@ -301,7 +301,7 @@ export function ChatSection({ chatId }: { chatId: string }) {
             )
           }
         >
-          Perspectives
+          Other zones
         </Label>
         <div className="flex flex-wrap items-center gap-1.5">
           {perspectiveZones.map((pz) => {
@@ -428,7 +428,7 @@ function ZoneChip({ zone, fallback, onOpen, onRemove }: { zone: Zone | undefined
         </span>
         <span className="max-w-[120px] truncate">{zone?.name ?? fallback}</span>
       </button>
-      <button onClick={onRemove} className="rounded-full p-0.5 text-[var(--color-text-muted)] hover:text-[var(--color-danger)]" title="Remove perspective">
+      <button onClick={onRemove} className="rounded-full p-0.5 text-[var(--color-text-muted)] hover:text-[var(--color-danger)]" title="Remove zone">
         <X size={9} />
       </button>
     </div>

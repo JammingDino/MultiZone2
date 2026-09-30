@@ -427,7 +427,7 @@ export function HomeScreen() {
           try {
             await api.addPerspectiveZone(chat.id, zid);
           } catch (e) {
-            reportError("Couldn't add a perspective zone")(e);
+            reportError("Couldn't add a zone")(e);
           }
         }
       }
@@ -959,9 +959,8 @@ export function HomeScreen() {
         )}
         {!leaderSelected && selectedPerspectiveIds.size > 0 && (
           <p className="mt-2 text-center text-xs text-[var(--color-text-muted)]">
-            You'll get {selectedPerspectiveIds.size + 1} answers side by side — the
-            primary plus {selectedPerspectiveIds.size} perspective
-            {selectedPerspectiveIds.size > 1 ? "s" : ""}. Run mode: {globalPerspectiveMode} (change in Settings → Runs).
+            {selectedPerspectiveIds.size + 1} zones will answer in this chat — the
+            primary plus {selectedPerspectiveIds.size} more. Run mode: {globalPerspectiveMode} (change in Settings → Runs).
           </p>
         )}
         {leaderSelected && (
@@ -1009,13 +1008,13 @@ function PerspectivePicker({
       <button
         ref={openBtnRef}
         onClick={() => setOpen((v) => !v)}
-        title="Perspectives — get answers from multiple zones side by side"
+        title="Add zones — more zones answer in the same chat, and can ask each other"
         className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs ${
           count > 0 || open ? CHROME_ACTIVE : CHROME_OUTLINED
         }`}
       >
         <SplitSquareHorizontal size={12} />
-        {count > 0 ? `${count} perspective${count > 1 ? "s" : ""}` : "Perspectives"}
+        {count > 0 ? `+${count} zone${count > 1 ? "s" : ""}` : "Add zones"}
       </button>
       <Popover
         open={open}

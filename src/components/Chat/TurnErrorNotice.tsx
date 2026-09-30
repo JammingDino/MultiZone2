@@ -40,14 +40,14 @@ export function TurnErrorNotice({ chatId }: { chatId: string }) {
           <RunawayCard
             key={i}
             message={e.message}
-            zoneName={e.zoneId ? zones.find((z) => z.id === e.zoneId)?.name ?? "A perspective zone" : null}
+            zoneName={e.zoneId ? zones.find((z) => z.id === e.zoneId)?.name ?? "A zone" : null}
             onDismiss={() => dismiss(chatId)}
           />
         ) : (
           <ErrorCard
             key={i}
             message={e.message}
-            zoneName={e.zoneId ? zones.find((z) => z.id === e.zoneId)?.name ?? "A perspective zone" : null}
+            zoneName={e.zoneId ? zones.find((z) => z.id === e.zoneId)?.name ?? "A zone" : null}
             onDismiss={() => dismiss(chatId)}
             onOpenSettings={openSettings}
           />

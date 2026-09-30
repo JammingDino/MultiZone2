@@ -389,7 +389,7 @@ export function AgentsTab() {
         </label>
       </section>
       <section>
-        <h3 className="mb-3 text-sm font-medium">Perspective run mode</h3>
+        <h3 className="mb-3 text-sm font-medium">Multi-zone run mode</h3>
         <OptionCards
           value={appSettings.perspectiveMode}
           onChange={(perspectiveMode) => setAppSettings({ perspectiveMode })}

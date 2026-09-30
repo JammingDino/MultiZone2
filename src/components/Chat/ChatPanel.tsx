@@ -516,7 +516,7 @@ function ChatPane({ chatId }: { chatId: string }) {
                 diff={pa.diff}
                 zoneName={
                   pa.zoneId
-                    ? zones.find((z) => z.id === pa.zoneId)?.name ?? "Perspective"
+                    ? zones.find((z) => z.id === pa.zoneId)?.name ?? "Zone"
                     : null
                 }
                 onApprove={(hunks) => respondApproval(chatId!, pa.zoneId, true, hunks)}

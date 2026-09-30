@@ -107,7 +107,7 @@ export function WorkspacePanel() {
 const SLIDE_MS = 200;
 
 const TABS: { id: WorkspaceSection; label: string; title: string; icon: ReactNode }[] = [
-  { id: "chat", label: "Chat", title: "This chat: project, tags, perspectives", icon: <MessageSquare size={13} /> },
+  { id: "chat", label: "Chat", title: "This chat: project, tags, zones", icon: <MessageSquare size={13} /> },
   { id: "plan", label: "Plan", title: "Plans and the task list", icon: <ClipboardList size={13} /> },
   { id: "terminals", label: "Term", title: "Terminals", icon: <TerminalSquare size={13} /> },
   { id: "files", label: "Files", title: "The chat's working directory", icon: <FolderTree size={13} /> },

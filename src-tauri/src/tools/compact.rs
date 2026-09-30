@@ -288,7 +288,7 @@ pub async fn auto_compact(
     use crate::llm::types::{ChatMessage, ChatRequest, MessageContent};
 
     let mut messages =
-        crate::commands::messages::build_message_history(db, chat_id, zone, false).await?;
+        crate::commands::messages::build_message_history(db, chat_id, zone, None).await?;
     messages.push(ChatMessage {
         role: "user".into(),
         content: Some(MessageContent::Text(SUMMARY_INSTRUCTION.into())),

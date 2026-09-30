@@ -395,7 +395,7 @@ export function AgentsTab() {
           onChange={(perspectiveMode) => setAppSettings({ perspectiveMode })}
           options={[
             ["parallel",   "Parallel",   "All zones at once — fastest."],
-            ["sequential", "Sequential", "One at a time — easier on local VRAM."],
+            ["sequential", "Sequential", "One at a time — each zone sees the replies before it. Easier on local VRAM."],
           ]}
         />
       </section>

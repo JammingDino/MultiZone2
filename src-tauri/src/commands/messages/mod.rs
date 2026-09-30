@@ -1886,7 +1886,7 @@ async fn run_participant_turn(
     let project_dir: Option<String> = tool_ctx.project_dir.clone();
 
     // Build initial messages array (full history)
-    let mut api_messages = build_message_history(&ctx.db, chat_id, &zone, persp.is_some()).await?;
+    let mut api_messages = build_message_history(&ctx.db, chat_id, &zone, persp).await?;
 
     // "Plan this out first" should reach the tool without the user having to
     // name it (0.14.6). The standing snippet says planning exists; this says the
@@ -2014,7 +2014,7 @@ async fn run_participant_turn(
                     crate::llm::tokens::DEFAULT_CHARS_PER_TOKEN,
                 ) > rolling_limit;
             if epoch != context_epoch || outgrown {
-                api_messages = build_message_history(&ctx.db, chat_id, &zone, false).await?;
+                api_messages = build_message_history(&ctx.db, chat_id, &zone, None).await?;
                 context_epoch = compaction_epoch(&ctx.db, chat_id).await;
             }
         }
@@ -2229,7 +2229,7 @@ async fn run_participant_turn(
                         )
                         .await;
                         sink.notify_chats_changed();
-                        api_messages = build_message_history(&ctx.db, chat_id, &zone, false).await?;
+                        api_messages = build_message_history(&ctx.db, chat_id, &zone, None).await?;
                         context_epoch = compaction_epoch(&ctx.db, chat_id).await;
                         continue;
                     }
@@ -2261,7 +2261,7 @@ async fn run_participant_turn(
                         )
                         .await;
                         sink.notify_chats_changed();
-                        api_messages = build_message_history(&ctx.db, chat_id, &zone, false).await?;
+                        api_messages = build_message_history(&ctx.db, chat_id, &zone, None).await?;
                         context_epoch = compaction_epoch(&ctx.db, chat_id).await;
                         continue;
                     }
@@ -3365,7 +3365,7 @@ async fn run_participant_turn(
 
 /// Resolves the effective perspective execution mode for a chat:
 /// per-chat override → global `perspectiveMode` app setting → `"parallel"`.
-async fn resolve_perspective_mode(db: &SqlitePool, chat_id: &str) -> String {
+pub(super) async fn resolve_perspective_mode(db: &SqlitePool, chat_id: &str) -> String {
     let chat_mode: Option<String> = match sqlx::query_scalar::<_, Option<String>>(
         "SELECT perspective_mode FROM chats WHERE id = ?1",
     )
@@ -3818,6 +3818,63 @@ mod tests {
             "the system prompt changed as the history grew, so every request \
              behind it misses the prefix cache",
         );
+    }
+
+    // ── Zones talking to each other ──────────────────────────────────────────
+
+    /// Chat c1 on zone "za" with "zb" added, one round asked, and za's reply to
+    /// it saved.
+    async fn pool_with_two_zones(mode: &str) -> SqlitePool {
+        let pool = pool_with_long_chat().await;
+        for (id, name) in [("za", "Alpha"), ("zb", "Beta")] {
+            sqlx::query("INSERT INTO zones (id, name, model, created_at, updated_at) VALUES (?1, ?2, 'm-' || ?1, 0, 0)")
+                .bind(id)
+                .bind(name)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        sqlx::query("UPDATE chats SET zone_id = 'za', perspective_mode = ?1 WHERE id = 'c1'")
+            .bind(mode)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO chat_zones (chat_id, zone_id) VALUES ('c1', 'zb')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO messages (id, chat_id, role, content, zone_id, created_at) VALUES
+             ('u1', 'c1', 'user', '[{\"type\":\"text\",\"text\":\"question\"}]', NULL, 10),
+             ('a1', 'c1', 'assistant', '[{\"type\":\"text\",\"text\":\"alpha answer\"}]', NULL, 20)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    async fn last_user_for(pool: &SqlitePool, persp: Option<&str>) -> String {
+        let mut out = Vec::new();
+        context::build_multi_model_history(pool, "c1", None, persp, &mut out).await.unwrap();
+        let last = out.last().unwrap();
+        assert_eq!(last.role, "user", "the request still ends on the user's message");
+        serde_json::to_string(&last.content).unwrap()
+    }
+
+    #[tokio::test]
+    async fn sequential_zones_see_the_replies_given_before_them() {
+        let pool = pool_with_two_zones("sequential").await;
+        let seen = last_user_for(&pool, Some("zb")).await;
+        assert!(seen.contains("alpha answer"), "{seen}");
+        // A zone is never shown its own reply as someone else's.
+        assert!(!last_user_for(&pool, None).await.contains("alpha answer"));
+    }
+
+    #[tokio::test]
+    async fn parallel_zones_answer_blind() {
+        let pool = pool_with_two_zones("parallel").await;
+        assert!(!last_user_for(&pool, Some("zb")).await.contains("alpha answer"));
     }
 
 }

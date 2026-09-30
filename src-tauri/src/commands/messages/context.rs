@@ -541,8 +541,11 @@ pub(crate) async fn build_message_history(
     db: &SqlitePool,
     chat_id: &str,
     zone: &Zone,
-    is_perspective: bool,
+    // The participant being built for: `None` for the primary, else its lane
+    // (a perspective zone's id). Decides whose replies this round are "others".
+    persp: Option<&str>,
 ) -> AppResult<Vec<ChatMessage>> {
+    let is_perspective = persp.is_some();
     let chat = sqlx::query_as::<_, crate::db::models::Chat>(&format!(
         "SELECT {CHAT_COLS} FROM chats WHERE id = ?1"
     ))
@@ -570,7 +573,7 @@ pub(crate) async fn build_message_history(
     }
 
     if multi_model {
-        build_multi_model_history(db, chat_id, chat.as_ref(), &mut out).await?;
+        build_multi_model_history(db, chat_id, chat.as_ref(), persp, &mut out).await?;
         return Ok(out);
     }
 
@@ -936,10 +939,16 @@ pub(super) async fn build_identity_preamble(
         }
     }
 
+    let round = if super::resolve_perspective_mode(db, chat_id).await == "sequential" {
+        "Zones answer one after another: any replies given before yours this round are \
+         shown after the user's message."
+    } else {
+        "You answer this turn independently — you cannot see what the other zones say \
+         this turn, only what everyone said in previous turns."
+    };
     let mut text = format!(
         "You are taking part in a multi-zone conversation. You are \"{}\", running on \
-         the model {}. You answer this turn independently — you cannot see what the \
-         other zones say this turn, only what everyone said in previous turns.",
+         the model {}. {round}",
         self_zone.name, self_zone.model
     );
     if !others.is_empty() {
@@ -1002,12 +1011,18 @@ pub(super) fn drop_orphan_tool_messages(rows: &mut Vec<Message>) {
 ///
 /// Tool-call structure from past rounds is flattened to text here; the active
 /// turn still carries full tool structure via the caller's in-memory appends.
+///
+/// Sequential mode lifts rule 1: zones answer one after another, so the replies
+/// already saved this round by *other* participants are shown to `persp` (the
+/// participant being built for), folded into the user's message.
 pub(super) async fn build_multi_model_history(
     db: &SqlitePool,
     chat_id: &str,
     chat: Option<&Chat>,
+    persp: Option<&str>,
     out: &mut Vec<ChatMessage>,
 ) -> AppResult<()> {
+    let sees_round = super::resolve_perspective_mode(db, chat_id).await == "sequential";
     let rows = sqlx::query_as::<_, Message>(&format!(
         "SELECT {MSG_COLS} FROM messages WHERE chat_id = ?1 ORDER BY created_at ASC"
     ))
@@ -1042,6 +1057,8 @@ pub(super) async fn build_multi_model_history(
     // Accumulates the answers produced since the previous user message, flushed
     // as one merged assistant turn when the next user message (or the end) is hit.
     let mut pending: Vec<(String, String)> = Vec::new();
+    // Other participants' replies this round, when this participant may see them.
+    let mut this_round: Vec<(String, String)> = Vec::new();
 
     for m in &rows {
         match m.role.as_str() {
@@ -1060,9 +1077,10 @@ pub(super) async fn build_multi_model_history(
                 }
             }
             "assistant" => {
-                // Only past-round answers; current-round siblings stay hidden.
+                // Past-round answers always; this round's only from others, and
+                // only when the mode lets this participant see them.
                 let is_past = last_user_ts.map_or(false, |lu| m.created_at < lu);
-                if !is_past {
+                if !is_past && !(sees_round && m.zone_id.as_deref() != persp) {
                     continue;
                 }
                 let text = strip_thinking_blocks(&assistant_text(&m.content));
@@ -1074,15 +1092,43 @@ pub(super) async fn build_multi_model_history(
                     None => primary_name.clone(),
                     Some(z) => name_of(z),
                 };
-                pending.push((label, text.to_string()));
+                let into = if is_past { &mut pending } else { &mut this_round };
+                // One reply over several tool steps reads as one reply.
+                match into.last_mut() {
+                    Some((l, t)) if *l == label => {
+                        t.push_str("\n\n");
+                        t.push_str(text);
+                    }
+                    _ => into.push((label, text.to_string())),
+                }
             }
             // Tool messages aren't replayed in the shared transcript.
             _ => continue,
         }
     }
     push_merged_round(out, &mut pending);
+    fold_into_last_user(out, "Replies other zones have already given to this message:", &this_round);
 
     Ok(())
+}
+
+/// Appends labelled replies to the last message — the user's, this round — as
+/// text. Folded in rather than sent as an assistant turn, because a request
+/// that ends on an assistant message is read as a prefill to continue.
+pub(super) fn fold_into_last_user(out: &mut [ChatMessage], heading: &str, replies: &[(String, String)]) {
+    if replies.is_empty() {
+        return;
+    }
+    let Some(last) = out.last_mut().filter(|m| m.role == "user") else { return };
+    let mut buf = format!("\n\n---\n{heading}");
+    for (label, text) in replies {
+        buf.push_str(&format!("\n\n**{label}:**\n{text}"));
+    }
+    match &mut last.content {
+        Some(MessageContent::Text(t)) => t.push_str(&buf),
+        Some(MessageContent::Parts(parts)) => parts.push(ContentPart::Text { text: buf }),
+        None => last.content = Some(MessageContent::Text(buf)),
+    }
 }
 
 /// Flushes the accumulated per-zone answers for one round into a single labelled

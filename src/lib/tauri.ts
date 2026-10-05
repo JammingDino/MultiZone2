@@ -57,6 +57,11 @@ import type {
   Message,
   PendingMode,
   Project,
+  StudyAnswerResult,
+  StudyCard,
+  StudyGrade,
+  StudyOverview,
+  StudySetDetail,
   Provider,
   SessionUsage,
   Skill,
@@ -221,6 +226,18 @@ export const upsertProject = (project: Partial<Project> & { name: string }) =>
 /** Delete a project. `deleteChats` false (default) moves its chats to Ungrouped; true deletes them too. */
 export const deleteProject = (id: string, deleteChats = false) =>
   invoke<void>("delete_project", { id, deleteChats });
+
+// Study mode — decks, quizzes and their review state, per project.
+export const studyOverview = (projectId: string) =>
+  invoke<StudyOverview>("study_overview", { projectId });
+export const getStudySet = (setId: string) => invoke<StudySetDetail>("get_study_set", { setId });
+export const dueStudyCards = (projectId: string, limit?: number) =>
+  invoke<StudyCard[]>("due_study_cards", { projectId, limit });
+export const reviewStudyCard = (cardId: string, grade: StudyGrade) =>
+  invoke<StudyCard>("review_study_card", { cardId, grade });
+export const answerStudyQuestion = (questionId: string, chosenIndex: number) =>
+  invoke<StudyAnswerResult>("answer_study_question", { questionId, chosenIndex });
+export const deleteStudySet = (setId: string) => invoke<void>("delete_study_set", { setId });
 
 // Knowledge (RAG) — project-scoped, sourced from the project directory.
 export const setProjectKbConfig = (
@@ -821,6 +838,10 @@ export function onChatZoneUpdated(
   return listen<{ chatId: string; zoneId: string }>("chat-zone-updated", (e) =>
     handler(e.payload),
   );
+}
+/** A study deck or quiz was made, reviewed, answered or deleted. */
+export function onStudyChanged(handler: () => void): Promise<UnlistenFn> {
+  return listen("study-changed", () => handler());
 }
 /** A scheduled run was added, changed, or fired (0.18). */
 export function onSchedulesChanged(handler: () => void): Promise<UnlistenFn> {

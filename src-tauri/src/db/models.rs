@@ -158,6 +158,9 @@ pub struct Project {
     /// Per-project override for whether new chats start with knowledge enabled.
     /// None = inherit the global `knowledgeDefaultEnabled` setting.
     pub kb_default_enabled: Option<bool>,
+    /// A project for learning its sources rather than working on them: chats
+    /// answer only from them, and get the study tools (see `study`).
+    pub study_mode: bool,
     pub created_at: i64,
     pub updated_at: i64,
 }

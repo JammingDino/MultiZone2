@@ -1868,6 +1868,7 @@ async fn run_participant_turn(
     }
     // Plan mode (0.12.0). Re-evaluated after every tool batch below, because the
     // model can move the chat in or out of it mid-turn.
+    crate::study::apply(&ctx.db, chat_id, &mut tools).await;
     let mut planning = apply_plan_mode(&ctx.db, chat_id, &mut tools, persp.is_some()).await;
     // Per-zone MCP tool danger levels, refreshed on zone switch, consulted by the
     // approval gate alongside built-in `tool_safety_by_name`.
@@ -2324,6 +2325,7 @@ async fn run_participant_turn(
                 if suppress_ask_user {
                     strip_ask_user(&mut tools);
                 }
+                crate::study::apply(&ctx.db, chat_id, &mut tools).await;
                 planning = apply_plan_mode(&ctx.db, chat_id, &mut tools, persp.is_some()).await;
                 mcp_danger = {
                     let ids: Vec<String> =
@@ -3217,6 +3219,7 @@ async fn run_participant_turn(
             if suppress_ask_user {
                 strip_ask_user(&mut tools);
             }
+            crate::study::apply(&ctx.db, chat_id, &mut tools).await;
             planning = apply_plan_mode(&ctx.db, chat_id, &mut tools, persp.is_some()).await;
         }
 
@@ -3255,6 +3258,7 @@ async fn run_participant_turn(
                         if suppress_ask_user {
                             strip_ask_user(&mut tools);
                         }
+                        crate::study::apply(&ctx.db, chat_id, &mut tools).await;
                         planning = apply_plan_mode(&ctx.db, chat_id, &mut tools, persp.is_some()).await;
                         mcp_danger = {
                             let ids: Vec<String> =

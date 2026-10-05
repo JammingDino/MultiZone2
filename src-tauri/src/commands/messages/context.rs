@@ -30,6 +30,9 @@ pub enum SnippetKind {
     /// The chat forgets its oldest messages past a limit; how to work with
     /// that (0.18).
     RollingContext,
+    /// The project is for studying: answer from its sources or say they do
+    /// not cover it, and the study tools (study mode).
+    Study,
     Skills,
     Knowledge,
     /// The ranked map of what this project defines (0.14.5).
@@ -66,6 +69,7 @@ impl SnippetKind {
             Self::DefaultRules => "Default rules",
             Self::Env => "Environment",
             Self::RollingContext => "Rolling context",
+            Self::Study => "Study mode",
             Self::Leader => "Sub-agent roster",
             Self::Memory => "Memories",
             Self::Identity => "Multi-zone identity",
@@ -273,6 +277,16 @@ pub async fn build_system_snippets(
         snippets.push((SnippetKind::RollingContext, crate::tools::rolling::INSTRUCTIONS.to_string()));
     }
 
+    // Study mode: stable for as long as the project is a study project, and it
+    // changes what every answer is allowed to draw on, so it sits with the
+    // other standing rules rather than with the volatile tail.
+    let study_project = crate::study::study_project_for_chat(db, chat_id).await;
+    if let Some(pid) = &study_project {
+        let indexed = crate::knowledge::has_index(db, pid).await;
+        let has_diagrams = zone_tool_ids.iter().any(|t| t == "render_graph");
+        snippets.push((SnippetKind::Study, crate::study::preamble(indexed, has_diagrams)));
+    }
+
     // Plan mode and its aftermath (0.12.0), directly after the loop preamble
     // because both change what the rest of the turn is *for*. They are mutually
     // exclusive by construction: approving a plan is what clears the mode.
@@ -312,7 +326,9 @@ pub async fn build_system_snippets(
     // non-empty index — so the prompt can never advertise a tool the turn does
     // not actually offer, or stay silent about one it does.
     if let Some(c) = chat {
-        if c.knowledge_enabled {
+        // A study project's sources are offered whether or not the chat
+        // opted in — see `study::apply`, which offers the tool on the same terms.
+        if c.knowledge_enabled || study_project.is_some() {
             let scope = c
                 .project_id
                 .clone()
@@ -469,6 +485,7 @@ pub async fn turn_overhead(db: &SqlitePool, chat_id: &str) -> AppResult<TurnOver
     if rolling_active(db, chat_id).await {
         tools.extend(crate::tools::rolling::definitions());
     }
+    crate::study::apply(db, chat_id, &mut tools).await;
 
     // Function name → the group it belongs to, over the zone's enabled ids.
     // Anything not found there came from elsewhere: `mcp__<server>__<tool>`
@@ -494,6 +511,7 @@ pub async fn turn_overhead(db: &SqlitePool, chat_id: &str) -> AppResult<TurnOver
                     .unwrap_or_else(|| match name.as_str() {
                         "search_local_files" => "knowledge".to_string(),
                         "mark_important" | "forget_important" => "rolling context".to_string(),
+                        "make_flashcards" | "make_quiz" | "study_progress" => "study mode".to_string(),
                         _ => "plan mode".to_string(),
                     })
             });

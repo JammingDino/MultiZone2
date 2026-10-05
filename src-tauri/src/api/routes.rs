@@ -52,7 +52,7 @@ const fn open(method: &'static str, path: &'static str, description: &'static st
 
 /// Bumped whenever a route is added, removed or changes shape, so a caller can
 /// tell "the app is older than my script" from "my script is wrong".
-pub const ROUTE_SET_VERSION: u32 = 11;
+pub const ROUTE_SET_VERSION: u32 = 12;
 
 pub const ROUTES: &[RouteDef] = &[
     // Discovery — deliberately unauthenticated. A caller debugging a broken
@@ -95,6 +95,14 @@ pub const ROUTES: &[RouteDef] = &[
     r("POST", "/api/schedules", "Create or update a scheduled run"),
     r("DELETE", "/api/schedules/:id", "Delete a scheduled run"),
     r("POST", "/api/schedules/:id/run", "Fire a scheduled run now"),
+
+    // Study mode
+    r("GET", "/api/projects/:id/study", "A study project's decks and quizzes, cards due, and whether its sources are indexed"),
+    r("GET", "/api/projects/:id/study/due", "Flashcards due for review now, most overdue first (?limit=)"),
+    r("GET", "/api/study/sets/:id", "One deck or quiz with its cards or questions and their state"),
+    r("DELETE", "/api/study/sets/:id", "Delete a deck or quiz and its history"),
+    r("POST", "/api/study/cards/:id/review", "Grade a flashcard review ({grade: again|hard|good|easy}) and reschedule it"),
+    r("POST", "/api/study/questions/:id/answer", "Answer a quiz question ({chosenIndex}) and record the attempt"),
     r("POST", "/api/runs/:id/render", "Fill a run's template. Body: { \"values\"? }"),
     r("POST", "/api/chats", "Create a chat"),
     r("DELETE", "/api/chats/:id", "Delete a chat"),
@@ -319,6 +327,12 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("schedules::upsert_scheduled_run", Route("POST /api/schedules")),
     ("schedules::delete_scheduled_run", Route("DELETE /api/schedules/:id")),
     ("schedules::run_scheduled_now", Route("POST /api/schedules/:id/run")),
+    ("study::study_overview", Route("GET /api/projects/:id/study")),
+    ("study::due_study_cards", Route("GET /api/projects/:id/study/due")),
+    ("study::get_study_set", Route("GET /api/study/sets/:id")),
+    ("study::delete_study_set", Route("DELETE /api/study/sets/:id")),
+    ("study::review_study_card", Route("POST /api/study/cards/:id/review")),
+    ("study::answer_study_question", Route("POST /api/study/questions/:id/answer")),
     ("chats::create_chat", Route("POST /api/chats")),
     ("chats::delete_chat", Route("DELETE /api/chats/:id")),
     ("chats::get_messages", Route("GET /api/chats/:id/messages")),
@@ -734,6 +748,61 @@ pub async fn run_scheduled_now(
 ) -> ApiResult<StatusCode> {
     commands::schedules::run_scheduled_now(st.app.clone(), app_state(&st), id).await?;
     Ok(NO_CONTENT)
+}
+
+pub async fn study_overview(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+) -> ApiResult<Response> {
+    Ok(Json(commands::study::study_overview(app_state(&st), id).await?).into_response())
+}
+
+pub async fn due_study_cards(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> ApiResult<Response> {
+    let limit = q.get("limit").and_then(|v| v.parse().ok());
+    Ok(Json(commands::study::due_study_cards(app_state(&st), id, limit).await?).into_response())
+}
+
+pub async fn get_study_set(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+) -> ApiResult<Response> {
+    Ok(Json(commands::study::get_study_set(app_state(&st), id).await?).into_response())
+}
+
+pub async fn delete_study_set(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+) -> ApiResult<StatusCode> {
+    commands::study::delete_study_set(st.app.clone(), app_state(&st), id).await?;
+    Ok(NO_CONTENT)
+}
+
+pub async fn review_study_card(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> ApiResult<Response> {
+    let grade = serde_json::from_value(body.get("grade").cloned().unwrap_or(Value::Null)).map_err(|_| {
+        ApiError(crate::error::AppError::Invalid("'grade' must be again, hard, good or easy".into()))
+    })?;
+    let card = commands::study::review_study_card(st.app.clone(), app_state(&st), id, grade).await?;
+    Ok(Json(card).into_response())
+}
+
+pub async fn answer_study_question(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> ApiResult<Response> {
+    let chosen = body.get("chosenIndex").and_then(Value::as_i64).ok_or_else(|| {
+        ApiError(crate::error::AppError::Invalid("'chosenIndex' is required".into()))
+    })?;
+    let out = commands::study::answer_study_question(st.app.clone(), app_state(&st), id, chosen).await?;
+    Ok(Json(out).into_response())
 }
 
 pub async fn set_chat_rolling_context(

@@ -95,12 +95,15 @@ export const FAMILY: Record<string, Family> = {
   read_context: "state",
   get_current_datetime: "state",
   enter_plan_mode: "state",
+  study_progress: "state",
   // 14 · the renderers that already existed
   plot_function: "existing",
   render_chart: "existing",
   draw_diagram: "existing",
   update_plan: "existing",
   exit_plan_mode: "existing",
+  make_flashcards: "existing",
+  make_quiz: "existing",
   ask_user: "existing",
 };
 

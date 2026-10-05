@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { X, Plus, Trash2, Folder, FolderOpen, Database, RefreshCw, FileText, Loader2, AlertTriangle, ChevronLeft } from "lucide-react";
+import { X, Plus, Trash2, Folder, FolderOpen, Database, RefreshCw, FileText, Loader2, AlertTriangle, ChevronLeft, GraduationCap } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useApp } from "@/store/app";
 import { useShallow } from "zustand/react/shallow";
@@ -243,6 +243,7 @@ function ProjectForm({
   const [defaultContextEnabled, setDefaultContextEnabled] = useState(false);
   const [lintCommand, setLintCommand] = useState("");
   const [testCommand, setTestCommand] = useState("");
+  const [studyMode, setStudyMode] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<unknown>(null);
   const refreshProjects = useApp((s) => s.refreshProjects);
@@ -258,10 +259,12 @@ function ProjectForm({
       setDefaultContextEnabled(project.defaultContextEnabled ?? false);
       setLintCommand(project.lintCommand ?? "");
       setTestCommand(project.testCommand ?? "");
+      setStudyMode(project.studyMode ?? false);
     } else {
       setName(""); setIcon(null); setAccentColor(null);
       setDefaultZoneId(null); setContextSnippet(""); setDirectory(null);
       setDefaultContextEnabled(false);
+      setStudyMode(false);
     }
   }, [project?.id]);
 
@@ -298,6 +301,7 @@ function ProjectForm({
       defaultContextEnabled,
       lintCommand: lintCommand.trim() || null,
       testCommand: testCommand.trim() || null,
+      studyMode,
     };
   }
 
@@ -329,7 +333,7 @@ function ProjectForm({
     }, 600);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project?.id, name, icon, accentColor, defaultZoneId, contextSnippet, directory, defaultContextEnabled, lintCommand, testCommand]);
+  }, [project?.id, name, icon, accentColor, defaultZoneId, contextSnippet, directory, defaultContextEnabled, lintCommand, testCommand, studyMode]);
 
   async function onDelete() {
     if (!project) return;
@@ -368,6 +372,33 @@ function ProjectForm({
             {zones.map((z: Zone) => <option key={z.id} value={z.id}>{z.name} · {z.model}</option>)}
           </select>
         </label>
+
+        {/* Study mode — changes what every chat in the project may answer
+            from, so it sits up here with the other things that define the
+            project rather than down among the checks. */}
+        <div
+          onClick={() => setStudyMode((v) => !v)}
+          className="mb-3 flex cursor-pointer items-center justify-between rounded border border-[var(--color-border)] px-3 py-2.5 hover:border-[var(--color-accent)]"
+        >
+          <div className="flex items-start gap-2">
+            <GraduationCap size={15} className="mt-0.5 shrink-0 text-[var(--color-text-muted)]" />
+            <div>
+              <div className="text-sm font-medium">Study project</div>
+              <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">
+                Chats answer only from this project's sources and say when they don't cover
+                something. Adds flashcards with spaced review, quizzes, and a Study tab.
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={(e) => { e.stopPropagation(); setStudyMode((v) => !v); }}
+            aria-pressed={studyMode}
+            aria-label="Study project"
+            className={`relative h-5 w-9 flex-shrink-0 rounded-full transition-colors ${studyMode ? "bg-[var(--color-accent)]" : "bg-[var(--color-border)]"}`}
+          >
+            <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all duration-200 ${studyMode ? "translate-x-4" : ""}`} />
+          </button>
+        </div>
 
         {/* Project directory */}
         <div className="mb-3">

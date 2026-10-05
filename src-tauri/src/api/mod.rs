@@ -258,6 +258,11 @@ fn build_router(state: ApiState) -> Router {
         .route("/api/schedules", get(h::list_scheduled_runs).post(h::upsert_scheduled_run))
         .route("/api/schedules/:id", axum::routing::delete(h::delete_scheduled_run))
         .route("/api/schedules/:id/run", post(h::run_scheduled_now))
+        .route("/api/projects/:id/study", get(h::study_overview))
+        .route("/api/projects/:id/study/due", get(h::due_study_cards))
+        .route("/api/study/sets/:id", get(h::get_study_set).delete(h::delete_study_set))
+        .route("/api/study/cards/:id/review", post(h::review_study_card))
+        .route("/api/study/questions/:id/answer", post(h::answer_study_question))
         .route("/api/chats/:id/rolling-context", post(h::set_chat_rolling_context))
         .route("/api/chats/:id/pins", get(h::list_context_pins))
         .route("/api/chats/:id/pins/:pinId", axum::routing::delete(h::delete_context_pin))
@@ -581,10 +586,14 @@ async fn list_zones(State(st): State<ApiState>) -> ApiResult<Json<Vec<Zone>>> {
 }
 
 async fn list_projects(State(st): State<ApiState>) -> ApiResult<Json<Vec<Project>>> {
-    let rows = sqlx::query_as::<_, Project>(
-        "SELECT id, name, icon, accent_color, default_zone_id, context_snippet, directory, default_context_enabled, kb_provider_id, kb_embedding_model, kb_dimensions, kb_indexed_at, created_at, updated_at
-         FROM projects ORDER BY name",
-    )
+    // The command's own column list, so a column added to `Project` cannot
+    // leave this route failing to decode rows — which it did, from the 0.14.5
+    // check commands until study mode noticed.
+    let rows = sqlx::query_as::<_, Project>(&format!(
+        "SELECT {} FROM projects WHERE id != ?1 ORDER BY name",
+        crate::commands::projects::PROJECT_COLS
+    ))
+    .bind(crate::knowledge::GLOBAL_KB_ID)
     .fetch_all(&st.db)
     .await
     .map_err(AppError::from)?;

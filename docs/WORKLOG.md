@@ -5,6 +5,40 @@ alone. Newest first. Detail belongs in the linked docs; this is the thread.
 
 ---
 
+## 2026-10-06 — Study mode, first slice
+
+The backlog entry in [RELEASE_PLAN.md](RELEASE_PLAN.md#backlog--unscheduled),
+cut to grounding + flashcards + quizzes + spaced repetition. No audio, slides,
+probe/plan/teach loop or shared mode surface yet.
+
+- **Per project.** `projects.study_mode` (migration 049), a toggle in the
+  project editor. A chat in a study project gets a `Study mode` system snippet
+  (answer only from the sources, cite everything, say "the sources don't cover
+  this"), the project's `search_local_files` whether or not the chat opted into
+  knowledge, and loses the web tools — withheld from the request and refused at
+  dispatch, the same two locks plan mode uses.
+- **Tools, injected by the mode** (`study::apply`, beside every
+  `apply_plan_mode`): `make_flashcards`, `make_quiz`, `study_progress`. Not a
+  zone tool group, so the toolset budget test is unchanged.
+- **State.** `study_sets`, `study_cards` (SM-2: four grades, "Again" back in 10
+  minutes, Easy ×1.3), `study_questions`, `study_attempts` (every answer kept).
+- **UI.** Inline deck (flip, grade) and quiz (answer, explanation, source,
+  restored on reload) renderers; a Study tab in the workspace panel, shown only
+  in a study project, with the due count, a keyboard review session, and every
+  deck and quiz. Six routes under `/api/projects/:id/study` and `/api/study/*`,
+  and `study-changed` is forwarded to remotes. Exports draw decks and quizzes.
+
+Also fixed in passing: `GET /api/projects` selected its own column list, which
+had been missing the 0.14.5 check commands, so it could not decode a row; it
+uses `PROJECT_COLS` now.
+
+**Verified how.** `cargo test --lib` (447; new tests for the SM-2 ladder,
+lapses, the ease floor, deck/quiz storage, answer-index refusal and the tool
+withholding), `tsc -b`, `npm test` (96, including the route-map drift check).
+Not yet run in the Tauri shell.
+
+---
+
 ## 2026-09-28 (0.18.1) — Visual coherence
 
 A feature request written from an annotated walk-through of the app, then

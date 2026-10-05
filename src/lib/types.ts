@@ -326,8 +326,83 @@ export interface Project {
   /** Per-project override for the knowledge default in new chats. Null = inherit
    * the global `knowledgeDefaultEnabled` setting. */
   kbDefaultEnabled: boolean | null;
+  /** Study mode: chats answer only from the project's sources, and get the
+   * flashcard and quiz tools. */
+  studyMode: boolean;
   createdAt: number;
   updatedAt: number;
+}
+
+// ─── Study mode ──────────────────────────────────────────────────────────────
+
+/** One generated deck or quiz, with its counts. */
+export interface StudySet {
+  id: string;
+  projectId: string;
+  chatId: string | null;
+  kind: "flashcards" | "quiz";
+  title: string;
+  createdAt: number;
+  /** Cards in a deck, questions in a quiz. */
+  itemCount: number;
+  /** Cards due now (decks). */
+  dueCount: number;
+  /** Questions answered at least once, and right on the latest try (quizzes). */
+  answered: number;
+  correct: number;
+}
+
+export interface StudyCard {
+  id: string;
+  setId: string;
+  ordinal: number;
+  front: string;
+  back: string;
+  source: string | null;
+  ease: number;
+  intervalDays: number;
+  repetitions: number;
+  lapses: number;
+  dueAt: number;
+  lastReviewedAt: number | null;
+}
+
+export interface StudyQuestion {
+  id: string;
+  setId: string;
+  ordinal: number;
+  question: string;
+  options: string[];
+  answerIndex: number;
+  explanation: string | null;
+  source: string | null;
+  lastChoice: number | null;
+  attempts: number;
+  wrong: number;
+}
+
+export interface StudySetDetail {
+  set: StudySet;
+  cards: StudyCard[];
+  questions: StudyQuestion[];
+}
+
+export interface StudyOverview {
+  projectId: string;
+  indexed: boolean;
+  dueCount: number;
+  cardCount: number;
+  nextDueAt: number | null;
+  sets: StudySet[];
+}
+
+export type StudyGrade = "again" | "hard" | "good" | "easy";
+
+export interface StudyAnswerResult {
+  correct: boolean;
+  answerIndex: number;
+  explanation: string | null;
+  source: string | null;
 }
 
 /** A document in a project's knowledge index. */

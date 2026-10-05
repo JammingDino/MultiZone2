@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ClipboardList, FolderTree, Gauge, MessageSquare, PanelRightClose, TerminalSquare } from "lucide-react";
+import { ClipboardList, FolderTree, Gauge, GraduationCap, MessageSquare, PanelRightClose, TerminalSquare } from "lucide-react";
 import { useApp, type WorkspaceSection } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { useIsNarrow } from "@/lib/useIsNarrow";
@@ -14,6 +14,7 @@ import { TerminalPanel } from "@/components/Chat/TerminalPanel";
 import { ContextPanel } from "./ContextPanel";
 import { FilesPanel } from "./FilesPanel";
 import { ChatSection } from "./ChatSection";
+import { StudyPanel, useStudyDue } from "./StudyPanel";
 
 /**
  * The workspace panel (0.17.9): everything that used to pile up between the
@@ -109,6 +110,8 @@ const SLIDE_MS = 200;
 const TABS: { id: WorkspaceSection; label: string; title: string; icon: ReactNode }[] = [
   { id: "chat", label: "Chat", title: "This chat: project, tags, perspectives", icon: <MessageSquare size={13} /> },
   { id: "plan", label: "Plan", title: "Plans and the task list", icon: <ClipboardList size={13} /> },
+  // Only shown in a study project; see `PanelBody`.
+  { id: "study", label: "Study", title: "Flashcards due, decks and quizzes", icon: <GraduationCap size={13} /> },
   { id: "terminals", label: "Term", title: "Terminals", icon: <TerminalSquare size={13} /> },
   { id: "files", label: "Files", title: "The chat's working directory", icon: <FolderTree size={13} /> },
   { id: "context", label: "Ctx", title: "What is in the context window", icon: <Gauge size={13} /> },
@@ -141,7 +144,16 @@ function PanelBody({ chatId, onClose }: { chatId: string; onClose: () => void })
   // past three other headers — and once a file was open the tree had about a
   // quarter of the panel left. They are tabs now: one at a time, at full
   // height. `focusWorkspace(id)` switches tab instead of scrolling.
-  const [tab, setTab] = usePersistentChoice<WorkspaceSection>("workspace.tab", "files", TABS.map((t) => t.id));
+  const [savedTab, setTab] = usePersistentChoice<WorkspaceSection>("workspace.tab", "files", TABS.map((t) => t.id));
+  // The Study tab exists only for a chat in a study project. A remembered
+  // "study" in any other chat falls back to Files rather than a blank panel.
+  const studyProjectId = useApp((s) => {
+    const pid = s.chats.find((c) => c.id === chatId)?.projectId;
+    return pid && s.projects.find((p) => p.id === pid)?.studyMode ? pid : null;
+  });
+  const studyDue = useStudyDue(studyProjectId);
+  const tabs = studyProjectId ? TABS : TABS.filter((t) => t.id !== "study");
+  const tab: WorkspaceSection = savedTab === "study" && !studyProjectId ? "files" : savedTab;
   const focus = useApp((s) => s.workspaceFocus);
   useEffect(() => {
     if (!focus) return;
@@ -163,10 +175,10 @@ function PanelBody({ chatId, onClose }: { chatId: string; onClose: () => void })
         </button>
       </div>
       {/* The tab strip. Short labels because the panel is 360px by default and
-          five tabs have to fit; the icon carries the rest. A dot marks a tab
+          five tabs (six in a study project) have to fit; the icon carries the rest. A dot marks a tab
           with something waiting — a filed plan is the case that matters. */}
       <div className="flex shrink-0 border-b border-[var(--color-border)]">
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
@@ -180,7 +192,7 @@ function PanelBody({ chatId, onClose }: { chatId: string; onClose: () => void })
           >
             {t.icon}
             <span>{t.label}</span>
-            {t.id === "plan" && pendingPlan && (
+            {((t.id === "plan" && pendingPlan) || (t.id === "study" && !!studyDue)) && (
               <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-[var(--color-accent)]" />
             )}
           </button>
@@ -236,6 +248,7 @@ function PanelBody({ chatId, onClose }: { chatId: string; onClose: () => void })
               )}
             </>
           )}
+          {tab === "study" && studyProjectId && <StudyPanel projectId={studyProjectId} />}
           {tab === "terminals" && <TerminalPanel chatId={chatId} embedded />}
           {tab === "context" && <ContextPanel chatId={chatId} />}
         </div>

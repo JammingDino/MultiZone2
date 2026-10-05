@@ -51,6 +51,8 @@ mod schedule;
 #[cfg(desktop)]
 mod search;
 #[cfg(desktop)]
+mod study;
+#[cfg(desktop)]
 mod review;
 #[cfg(desktop)]
 mod pdf_bridge;
@@ -305,6 +307,12 @@ pub fn run() {
             commands::schedules::upsert_scheduled_run,
             commands::schedules::delete_scheduled_run,
             commands::schedules::run_scheduled_now,
+            commands::study::study_overview,
+            commands::study::get_study_set,
+            commands::study::due_study_cards,
+            commands::study::review_study_card,
+            commands::study::answer_study_question,
+            commands::study::delete_study_set,
             commands::mcp::list_mcp_resources,
             commands::mcp::read_mcp_resource,
             commands::mcp::list_mcp_prompts,

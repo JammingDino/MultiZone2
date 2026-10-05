@@ -18,6 +18,8 @@ const VISUAL_TOOLS = new Set([
   "update_plan",
   "present_file",
   "draw_diagram",
+  "make_flashcards",
+  "make_quiz",
 ]);
 
 /**
@@ -27,6 +29,9 @@ const VISUAL_TOOLS = new Set([
  */
 const TOOL_LABELS: Record<string, string> = {
   ask_user: "Asking a question",
+  make_flashcards: "Making flashcards",
+  make_quiz: "Making a quiz",
+  study_progress: "Checking study progress",
   draft_plan_step: "Writing a plan step",
   enter_plan_mode: "Switching to plan mode",
   exit_plan_mode: "Proposing a plan",

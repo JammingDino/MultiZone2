@@ -7,7 +7,7 @@ use tauri::State;
 
 // ─── Projects ────────────────────────────────────────────────────────────────
 
-pub const PROJECT_COLS: &str = "id, name, icon, accent_color, default_zone_id, context_snippet, directory, default_context_enabled, lint_command, test_command, kb_provider_id, kb_embedding_model, kb_dimensions, kb_indexed_at, kb_default_enabled, created_at, updated_at";
+pub const PROJECT_COLS: &str = "id, name, icon, accent_color, default_zone_id, context_snippet, directory, default_context_enabled, lint_command, test_command, kb_provider_id, kb_embedding_model, kb_dimensions, kb_indexed_at, kb_default_enabled, study_mode, created_at, updated_at";
 
 #[tauri::command]
 pub async fn list_projects(state: State<'_, AppState>) -> AppResult<Vec<Project>> {
@@ -37,6 +37,9 @@ pub struct ProjectInput {
     /// landed (0.14.5). Empty clears the stored one.
     pub lint_command: Option<String>,
     pub test_command: Option<String>,
+    /// Study mode. Absent leaves it as it was, so an older client saving a
+    /// project does not switch it off.
+    pub study_mode: Option<bool>,
 }
 
 #[tauri::command]
@@ -73,6 +76,13 @@ pub async fn upsert_project(state: State<'_, AppState>, project: ProjectInput) -
     .bind(now)
     .execute(&state.db)
     .await?;
+    if let Some(on) = project.study_mode {
+        sqlx::query("UPDATE projects SET study_mode = ?1 WHERE id = ?2")
+            .bind(on)
+            .bind(&id)
+            .execute(&state.db)
+            .await?;
+    }
 
     // New projects inherit the global default embedding provider+model so the
     // user doesn't reconfigure it per project (they can still override it).

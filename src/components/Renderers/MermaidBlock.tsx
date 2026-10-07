@@ -30,6 +30,20 @@ const TALL_MAX_SCALE = 2;
 // Cache rendered SVGs by source so remounts (theme changes, rare edge cases)
 // reuse the result immediately without re-invoking the mermaid renderer.
 const svgCache = new Map<string, string>();
+/**
+ * Diagrams kept. A long session drew every diagram it ever showed into this and
+ * held them all; a big one is hundreds of KB of SVG. Past the cap the oldest go,
+ * and a remount of one of those simply renders again.
+ */
+const SVG_CACHE_MAX = 64;
+function cacheSvg(source: string, svg: string) {
+  svgCache.delete(source);
+  svgCache.set(source, svg);
+  if (svgCache.size > SVG_CACHE_MAX) {
+    const oldest = svgCache.keys().next().value;
+    if (oldest !== undefined) svgCache.delete(oldest);
+  }
+}
 
 /**
  * Broken source → the repaired source the model returned for it. Remounts and
@@ -133,7 +147,7 @@ export async function renderMermaidSvg(source: string): Promise<string | null> {
     const cleaned = svg
       .replace(/(<svg[^>]*?)\s+style="[^"]*background[^"]*"/i, "$1")
       .replace(/background-color:\s*[^;"]+;?/gi, "");
-    svgCache.set(clean, cleaned);
+    cacheSvg(clean, cleaned);
     return cleaned;
   } catch {
     return null;
@@ -270,7 +284,7 @@ export function MermaidBlock({
           const cleaned = svg
             .replace(/(<svg[^>]*?)\s+style="[^"]*background[^"]*"/i, "$1")
             .replace(/background-color:\s*[^;"]+;?/gi, "");
-          svgCache.set(cleanSource, cleaned);
+          cacheSvg(cleanSource, cleaned);
           setSvg(cleaned);
           setLoading(false);
         }

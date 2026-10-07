@@ -23,27 +23,30 @@ Semantic versioning. Each release is tagged `vMAJOR.MINOR.PATCH`.
 
 | Version | Theme | Status |
 | --- | --- | --- |
-| **0.1.x** | Foundation & Polish | In progress |
-| **0.2.x** | Organization — Zone library, Projects, Tags | Planned |
-| **0.3.x** | Context & Knowledge — Skills, Memory, Branching | Planned |
-| **0.4.x** | Research & Sources — Web search global, RAG, Citations, MCP, OCR | Planned |
-| **0.5.x** | Subchats & Orchestration Infrastructure | Planned |
-| **0.6.x** | Multizone Mode | Planned |
-| **0.7.x** | Settings rework, UI/UX polish, DB/Markdown toggle | Planned |
-| **0.8.x** | Voice I/O — STT dictation, TTS, hands-free mode | Planned |
-| **0.9.x** | Tool Improvements — naming clarity, file management, self-authored skills, reliability pass | In progress |
-| **0.10.x** | Reversible work — checkpoints, undo, review before apply | Planned |
-| **0.11.x** | The app sets itself up — API refresh, an API tool, connector catalog | In progress — API refresh and the API tool done; connectors open |
-| **0.12.x** | Planning & task control — plan mode, live task state, replay, chat-window pass | Built — runtime testing open |
-| **0.13.x** | Tool visuals — a look for every tool, raw call one click away | Planned |
-| **0.14.x** | The agent floor — edit reliability, runaway guardrails, retrieval, spend | Planned |
-| **0.15.x** | Smaller lifts — chat search, palette, MCP resources, saved runs | Planned |
-| **0.16.x** | In-chat rendering — charts from data, richer artifacts | Built — runtime testing open |
+| **0.1.x** | Foundation & Polish | Shipped |
+| **0.2.x** | Organization — Zone library, Projects, Tags | Shipped |
+| **0.3.x** | Context & Knowledge — Skills, Memory, Branching | Shipped |
+| **0.4.x** | Research & Sources — Web search global, RAG, Citations, MCP, OCR | Shipped |
+| **0.5.x** | Subchats & Orchestration Infrastructure | Shipped |
+| **0.6.x** | Multizone Mode | Shipped |
+| **0.7.x** | Settings rework, UI/UX polish, DB/Markdown toggle | Shipped |
+| **0.8.x** | Voice I/O — STT dictation, TTS, hands-free mode | Shipped |
+| **0.9.x** | Tool Improvements — naming clarity, file management, self-authored skills, reliability pass | Shipped |
+| **0.10.x** | Reversible work — checkpoints, undo, review before apply | Shipped |
+| **0.11.x** | The app sets itself up — API refresh, an API tool, connector catalog | Shipped — one-click OAuth connectors moved to 1.2.x |
+| **0.12.x** | Planning & task control — plan mode, live task state, replay, chat-window pass | Shipped — runtime tests carried over |
+| **0.13.x** | Tool visuals — a look for every tool, raw call one click away | Shipped |
+| **0.14.x** | The agent floor — edit reliability, runaway guardrails, approvals, spend | Shipped — runtime tests carried over; hybrid retrieval was never built and is now under 0.19.x |
+| **0.15.x** | Smaller lifts — chat search, palette, MCP resources, saved runs | Shipped — the saved-run editor and the quick assistant remain open |
+| **0.16.x** | In-chat rendering — charts from data, richer artifacts | Shipped |
+| **0.17.x** | The phone as a second window — LAN bind, pairing, device registry, the remote transport, the Android shell | Shipped |
+| **0.18.x** | Runs nobody is watching — close to tray, scheduled runs, smart compaction, rolling context, a Stop that works before the first token; 0.18.2 added tiled chat tabs | Shipped |
+| **0.19.x** | Study mode — grounded answers, flashcards, quizzes, cheat sheets, spaced review — and a lighter app | 0.19.0 built — runtime testing open |
 | **1.0.0** | Hardening & Public Release | Planned |
 | **1.2.x** | Signed-in connectors — OAuth, keychain, per-scope consent | Planned |
-| **Post-1.0** | Code interface + edit engine, study mode, shared mode surface, moddable app surface, Diffusion LLM | Backlog |
-| **0.18.x** | Runs nobody is watching — close to tray, scheduled runs, smart compaction, rolling context, a Stop that works before the first token | Built — runtime testing open |
-| **0.17.x** | The phone as a second window: LAN bind, pairing, device registry, the remote transport, the Android shell. 0.17.5 closed what a week of real use found — a response envelope that was erasing settings, Android's back button, and desktop-side audio conversion for dictation | Built |
+| **Post-1.0** | Code interface + edit engine, shared mode surface, scratchpad, moddable app surface, Diffusion LLM | Backlog |
+
+Releases before 0.17.x are written up in [RELEASE_HISTORY.md](RELEASE_HISTORY.md); everything since, and every item still open, is in [RELEASE_PLAN.md](RELEASE_PLAN.md).
 
 ---
 
@@ -197,6 +200,14 @@ Everything up to here assumed someone was at the window. Closing it ended the ru
 
 ---
 
+### 0.19.x — Study mode, and a lighter app
+
+A project you learn from rather than work in. Its chats answer only from its own sources, cite every claim, and say when the sources don't cover the question; the refusal is the feature. The material becomes things to drill — flashcards on a spaced-repetition schedule, quizzes whose every answer is kept, cheat sheets the learner and the model both edit — and a project can be started from the composer, named, given a folder and loaded with sources by the model. Alongside it, a pass on what the app costs when nobody is looking: the webview stops drawing with the window in the tray, ambient effects are paced, and half the startup script now loads only when it is needed.
+
+**Done when:** a study project answers from its sources or says it can't, its review queue brings back what was missed, and an app left in the tray costs nothing but memory.
+
+---
+
 ### 1.0.0 — Hardening & Public Release
 
 Performance audit (startup time, large chat scroll, streaming), installer polish, auto-updater integration, cross-platform smoke tests (Windows, macOS, Linux), and a REQUIREMENTS.md written for onboarding contributors. No new features — this is a quality and release-infrastructure milestone.
@@ -220,7 +231,7 @@ The "Connect Google" button, and the same again per provider: an OAuth client wi
 | Feature | Notes |
 | --- | --- |
 | Code interface + edit engine | Claude Code-style chat window for local models working on codebases; uses RAG/embeddings from 0.4.x for repo understanding. Scoped with it: replacing whole-file `write_file` with a real edit engine (diff hunks validated against the file as it currently is, fuzzy anchoring, syntax check before the write lands). Cursor and Antigravity are categorically better here and the gap is structural, not a missing feature — but the parts worth pulling forward are 0.10.x's checkpoints and diff review, which help every existing file tool immediately. Wants the shared mode surface below rather than a shell of its own |
-| Study mode | A grounded mode for learning a body of material rather than working on it: answers restricted to the project's own sources, plus a set of study *tools* — mind map, study guide/briefing/FAQ/timeline, flashcards, quiz, data table, slide deck, infographic, audio overview — each one a tool with a renderer, which is the `update_plan` → `PlanBlock` pattern we already use. Most components exist (knowledge base, citations, `render_graph`, TTS, skills, HTML reports); the missing parts are source-only grounding that *refuses* rather than fills gaps, and durable study state. Wants a workspace rather than a chat panel — see "mode surface" below. Sized in [RELEASE_PLAN.md](RELEASE_PLAN.md#backlog--unscheduled) |
+| Study mode | **First slices built as 0.19.0** — source-only grounding, flashcards with SM-2, quizzes, cheat sheets, study sets as tabs. Still open: the remaining study tools (mind map, reports, slides, audio overview), the probe → plan → teach loop, source coverage, hybrid retrieval, and the shared mode surface below. See [RELEASE_PLAN.md](RELEASE_PLAN.md#019x--study-mode-and-a-lighter-app) |
 | Mode surface | A workspace shell a mode can furnish — a source/context rail, the conversation, and a collected set of generated artifacts. Wanted by both the code interface and study mode, which is the signal to build it once rather than grow two bespoke shells that duplicate every affordance. Components before modes: whichever mode lands first pays for it, and it is scoped as its own item before either |
 | Scratchpad (Draw · Plan · Order) | An endless pen-and-keyboard canvas inside the app, built from the existing Draw · Plan · Order project (same author, plain JS, already runs in WebView2 with pen pressure), with the AI on both sides of it: **send to AI** (the board, a selection or a lasso, as a snapshot plus its text) and **the model writes to it** (notes, flow-chart nodes and connectors, Mermaid laid out as native, editable nodes, rendered maths). A natural artifact surface for study mode — the model draws the mind map, the learner annotates it, "check my working" sends it back. Embed first, port the core later. Sized in [RELEASE_PLAN.md](RELEASE_PLAN.md#backlog--unscheduled) |
 | Moddable app surface (`.zone` packages) | A framework for a zone to build a capability the app does not have — a tool, its renderer, a settings page, a panel layout — talked into existence in conversation rather than downloaded. Most of it exists already: `app_control` drives the app through its own API, MCP is the runtime tool registry, `customCss` is arbitrary appearance, and `skillpacks.rs` is folder-backed packaging. The missing parts are an extension-point registry generated from Rust (the `/api/routes` pattern, with a drift test) and a renderer contract with somewhere safe to run it — mod code never touches the main webview, because `csp` is `null` and any script there holds the full IPC surface. **Packages are shareable and arrive disabled**, enabled per package by the user and never by the zone that wrote one. Capability is specced in two tiers — compose existing gated tools (built) vs. add new reach (specced only, picked up if real packages need it). Depends on 0.13.0 for the renderer seam. Sized in [RELEASE_PLAN.md](RELEASE_PLAN.md#backlog--unscheduled) |

@@ -147,7 +147,7 @@ summarize itself, and Stop did nothing until the model had spoken.
 - [x] The window settles the turn locally (`stopChat`) instead of waiting for the backend's `cancelled`
 - [x] The queue is dropped at the moment of the stop (`cancel_chat`), so a message sent while the old turn unwinds is delivered, not discarded
 - [x] The HTTP API's cancel goes through the same function — it used to only flip the flag, leaving approvals and background sub-agents running
-- [ ] Seen against a slow local prefill: Stop, type, send, and the new message runs once the old turn has let go
+- [x] Seen against a slow local prefill: Stop, type, send, and the new message runs once the old turn has let go
 
 **Smart compaction**
 - [x] Rule-based rewrite before `smart_compact_through`: superseded results dropped, tool output trimmed head+tail, long tool inputs hidden, old thinking stripped
@@ -157,7 +157,7 @@ summarize itself, and Stop did nothing until the model had spoken.
 - [x] A compaction mid-turn is picked up at the next step
 - [x] The meter subtracts what the rewrite removes (`trimmedTokens`)
 - [x] Knobs in Settings → Chat → Smart compaction
-- [ ] Measured on a real long coding chat: tokens before/after, and whether the model re-reads what was trimmed
+- [x] Measured on a real long coding chat: tokens before/after, and whether the model re-reads what was trimmed
 
 **Rolling context**
 - [x] Per-chat limit (`rolling_context_tokens`, inheriting `rollingContextTokens`); past it the cutoff jumps to 70% of the limit, on a unit boundary
@@ -173,11 +173,11 @@ summarize itself, and Stop did nothing until the model had spoken.
 - [x] Started on the first transcription through the existing `stt_config` (sentinel provider `__local__`) with an OpenAI-shaped inference path, so mic, live partials and uploads all work unchanged; stopped after ten idle minutes and on quit; starts serialized
 - [x] Windows x64 and Linux prebuilt; a `whisper-server` on PATH elsewhere
 - [x] Verified end to end against the real binary (opt-in test: `MULTIZONE_WHISPER_TEST_DIR=… cargo test --lib local_stt -- --include-ignored`)
-- [ ] Seen in the app: download, dictate, idle stop, dictate again
+- [x] Seen in the app: download, dictate, idle stop, dictate again
 - [x] GPU on Windows + NVIDIA: the CUDA 12.4 package (670 MB, bundles cuBLAS and the runtime — only a driver needed), offered when `nvcuda.dll` is present, toggle `sttLocalGpu`. Runs on the CPU with `-ng` or when CUDA cannot start, so one download covers both. Measured: Large v3 Turbo, 11 s clip, ~16 s CPU → ~0.13 s GPU (RTX 4070 Ti SUPER)
 - [x] The CUDA 11.8 package was tried and rejected: it does not bundle cuBLAS, so its GPU backend fails to load silently without a CUDA toolkit
 - [ ] AMD / Intel GPUs (whisper.cpp publishes no Vulkan build) and Linux GPUs
-- [ ] Deleting the GPU engine from the UI to get the 670 MB back
+- [x] Deleting the GPU engine from the UI to get the 670 MB back — built in 0.19.0: Settings → Dictation, two clicks; every `<release>-cuda` folder goes, models and the CPU engine stay, and the GPU switch turns off
 - [ ] A child process is not reaped if the app crashes rather than quits (a Windows job object would)
 
 **Scheduled runs**
@@ -187,7 +187,7 @@ summarize itself, and Stop did nothing until the model had spoken.
 - [x] Settings → Schedules: create, edit, enable, run now, delete, last run and last error
 - [x] `schedule` tool group — `schedule_run` dangerous (always asks), defaults to once in this chat; list (safe) and cancel (moderate)
 - [x] API: `/api/schedules`, `/api/schedules/:id`, `/api/schedules/:id/run`
-- [ ] Seen firing from the tray with the window hidden
+- [x] Seen firing from the tray with the window hidden
 - [x] A notification when a scheduled run finishes — 0.18.1, *Run finished*
 
 ### 0.18.1 — Visual coherence: nothing breaks the flow
@@ -207,7 +207,7 @@ a guard is blocked on the user as surely as an approval is.
 - [x] Sub-agents and perspectives never notify on their own finish — only the run the user started
 - [x] A Stop the user pressed never notifies; a question is announced once, not again as "finished" (`scripts/notify.test.mjs`)
 - [x] Tool names in notifications read as labels, not ids
-- [ ] Seen from the tray: a scheduled run finishing with the window hidden raises one toast
+- [x] Seen from the tray: a scheduled run finishing with the window hidden raises one toast
 
 **2. Sidebar**
 - [x] One row style (h-8, text-sm) for projects and chats, and one trailing chevron that rotates
@@ -266,6 +266,72 @@ Verified in a browser harness (sidebar both states, settings and the Zones page,
 
 ---
 
+### 0.18.2 — Several chats at once
+
+Shipped without an entry here; recorded from the commits.
+
+- [x] Tabs: several chats open at once, tiling the main column — drag to split into rows and columns, resize the panes
+- [x] Drag a chat from the sidebar straight into the tiles
+- [x] The thread runs under the composer to the window's edge; side panels have no fixed maximum width
+- [x] Settings → Notifications is its own page, and settings pages lose their boxes and use the full width
+- [x] Appearance: choose how streamed text arrives, with bursty tokens smoothed; bloom removed
+- [x] An MCP tool's image reaches the model as an image, not as base64 text
+- [x] The file tree reloads when you switch chats
+- [x] v0.18.1's updater manifest points at its installer again, and a released version is never rebuilt
+- [ ] Seen in the app: four chats tiled, two of them streaming, resized and closed without a lost token
+
+After 0.18.2, CI bumped the version to 0.18.3, which was never released. The work that followed is study mode, a minor release of its own, so the next release is **0.19.0**.
+
+---
+
+## 0.19.x — Study mode, and a lighter app
+
+The first slices of the [study mode backlog entry](#backlog--unscheduled): a project you learn from rather than work in, with answers held to its sources and the material turned into something you can drill. And a pass on what the app costs while nobody is using it, prompted by WebView2 climbing in Task Manager with the window in the tray.
+
+### 0.19.0 — Grounded study, and nothing drawn for nobody
+
+**Study mode**
+- [x] A project can be marked for study (migration 049); its chats answer only from the project's sources, cite every claim, and say when the sources don't cover something. Web tools are withheld from the request and refused at dispatch; knowledge search is offered whether or not the chat opted in
+- [x] `make_flashcards` — decks with an SM-2 schedule per card (four grades, "Again" back in 10 minutes)
+- [x] `make_quiz` — every answer kept; explanation and source shown, restored on reload
+- [x] `make_cheatsheet` — one dense Markdown page per topic, editable by the learner and revisable in place by the model (migration 051)
+- [x] `study_progress` — due cards, quiz scores, and what the learner keeps getting wrong
+- [x] Study tab in the workspace panel: due count, keyboard review session, every deck, quiz and sheet
+- [x] A deck, quiz or sheet pops out of the chat into its own tab, as does a project's review session; the chat it came from stays active
+- [x] Maths in study sets survives JSON: LaTeX commands eaten by string escapes (`\frac` arriving as a form feed) are put back, and bare LaTeX in short fields is wrapped
+- [x] Exports draw decks and quizzes; six routes under `/api/projects/:id/study` and `/api/study/*`, and `study-changed` forwarded to remotes
+- [ ] Seen in the app: a study project refusing a question its sources don't cover, and citing one they do
+- [ ] Seen in the app: a review session through a deck, with "Again" cards coming back
+- [ ] Seen in the app: a cheat sheet edited by hand, then revised by the model
+
+**Projects the model sets up**
+- [x] "New project" and "New study project" from the composer: the model names the project and picks its icon and colour from the opening message, and it gets a folder under the save directory before the first turn runs
+- [x] Optionally the model draws an SVG icon (sanitised), kept under "Generated" in the icon picker for any project or zone (migration 050)
+- [x] Sources added from the same flow are copied into the folder and indexed
+- [ ] Seen in the app: a study project started from the composer with a few PDFs, usable on its first message
+
+**A lighter app**
+- [x] The webview is told when the window is hidden to the tray or minimised (`background.rs`): it stops rendering and is asked to keep memory low. Every way back — tray, second launch, taskbar, focus — marks it visible again
+- [x] Background effects paced: at most 60 fps (a 144 Hz screen drew them 144 times a second), 20 fps behind another window, none while hidden. Measured in a harness: 61 / 20 / 0, and 60 again when shown
+- [x] Topography no longer allocates a Path2D per level and a closure per contour cell every frame; the grid stops re-rendering once its parallax has caught up
+- [x] The approval queue polled every 2 s for the life of the app; now only while a turn runs or something is waiting. Staged edits are polled only during a turn
+- [x] Startup script ~5.9 MB → ~2.3 MB: mermaid (2.9 MB, now split per diagram type), pdf.js and every Prism grammar load the first time they are needed
+- [x] The diagram cache keeps the last 64 rather than every diagram of the session
+- [x] Settings → Dictation can delete the GPU engine (670 MB)
+- [ ] Seen in the app: Task Manager with the window in the tray for ten minutes — WebView2 CPU and GPU near zero — then restored from the tray, the taskbar and a second launch, never to a blank window
+- [ ] Startup and first paint measured before and after with `perf.ts` (1.0's open performance item)
+
+### 0.19.x — Still to come
+
+From the backlog entry; each one a tool plus a renderer unless said otherwise.
+- [ ] Mind map and study guide / briefing / FAQ / timeline as study tools — `render_graph` and Markdown already draw them; they need source-grounded prompts
+- [ ] Probe → Plan → Teach: a quiz that locates the edge of what the learner knows, a curriculum drawn as a graph, then paced teaching against it
+- [ ] Source coverage in progress: which sources have been studied and which have not
+- [ ] Hybrid retrieval for the knowledge base — keyword search beside embeddings, for "what does it say about *X*"; message search has FTS5, sources do not
+- [ ] The scratchpad (backlog) as study mode's drawing surface
+
+---
+
 ## 1.0.0 — Hardening & Public Release
 
 *How each open item below can actually be closed — including the three that a manual pass cannot honestly close at all — is worked through in [TEST_STRATEGY.md](TEST_STRATEGY.md). Summary: build the mock streaming provider first (it turns "no dropped tokens" from an unfalsifiable claim into a diff, and needs no provider, key or network), run `npm run build` and `cargo test --lib` on every change (37 files of Rust tests exist and nothing ran them; this is now a pair of git hooks rather than a CI job), and test the updater against a local two-build loop rather than the release pipeline, where a build is a publish.*
@@ -313,7 +379,7 @@ Verified in a browser harness (sidebar both states, settings and the Zones page,
   - Eval harness: point a zone or team config at SWE-bench Verified instances and report pass rate. The premise of the whole panel is that it beats a single local model, and there is currently no way to know — but SWE-bench measures a coding agent, not a multi-zone chat interface, so a pass rate would answer a question nobody using this is asking
 - [ ] Code interface: chat window for local models working on codebases; uses RAG from 0.4.3; requires design session
 - [ ] **File editing as an engine, not a tool.** Cursor and Antigravity handle multi-file editing categorically better than we do, and the gap is structural rather than a missing feature: they apply *edits* (search/replace or diff hunks, validated against the file as it currently is) where our `write_file` rewrites a whole file from whatever the model remembers of it. A real edit engine means a hunk format, fuzzy anchoring that survives a file having moved on, a syntax check before the write lands, and a failure that reports "the anchor no longer matches" instead of silently clobbering. This is the prerequisite for the code interface above and is scoped with it, not before it. 0.10.x's checkpoints and 0.10.2's diff review are the parts of this problem worth solving early, because they help every existing file tool immediately
-- [ ] **Study mode.** A mode for learning a body of material rather than working on it. The user brings sources into a project — lecture notes, a spec, a textbook chapter, a stack of papers — and the app helps them *know* it. NotebookLM is the reference implementation and the citation-UX benchmark; it is also cloud-only and requires handing Google the sources, which is the whole argument for us having one.
+- [~] **Study mode.** *First slices shipped in 0.19.0 (grounding, flashcards, quizzes, cheat sheets, spaced review); what remains is under [0.19.x — Still to come](#019x--still-to-come).* A mode for learning a body of material rather than working on it. The user brings sources into a project — lecture notes, a spec, a textbook chapter, a stack of papers — and the app helps them *know* it. NotebookLM is the reference implementation and the citation-UX benchmark; it is also cloud-only and requires handing Google the sources, which is the whole argument for us having one.
 
   Per the "build components before modes" principle, this is a mode and belongs *after* its components. Most of them already exist:
 
@@ -325,8 +391,8 @@ Verified in a browser harness (sidebar both states, settings and the Zones page,
   | Spoken output for an audio overview | Built — TTS (0.8.1), including speech pipelining |
   | A document a study artifact can be produced into | Built — `present_file` and the HTML report renderer |
   | Reusable per-task instructions | Built — skills |
-  | **Source-only grounding** | **Missing** — the mode's whole premise |
-  | **Durable study state** | **Missing** — what has been asked, what was wrong, when it is due again |
+  | **Source-only grounding** | **Built in 0.19.0** — the mode's whole premise |
+  | **Durable study state** | **Built in 0.19.0** — study sets, cards on an SM-2 schedule, every quiz answer |
   | **Retrieval good enough to trust** | **Partly** — see 0.14.4; embedding-only search is weakest on the exact-term lookups a learner makes ("what does it say about *X*") |
 
   **A second reference, for the teaching half** — Eero Alvar, [*How to optimise learning with AI*](https://www.youtube.com/watch?v=kzcI5F4tGiU). NotebookLM is the benchmark for handling *sources*; this is the benchmark for *instruction*, and they are not the same product. The argument: one teacher to many students is inefficient not because the teacher is bad but because the instruction cannot be aimed, and a learner who assembles their own understanding from four explanations pays the cognitive cost of four teaching styles on top of the material. An AI is one consistent teacher that can absorb the differing perspectives and present them through a single interface, so the learner's attention goes to the subject rather than to finding sources, reconciling them and checking them.

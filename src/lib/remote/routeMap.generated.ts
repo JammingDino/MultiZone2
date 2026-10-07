@@ -214,6 +214,7 @@ export const GUI_ONLY: Record<string, string> = {
   local_stt_status: "local dictation's setup panel in Settings",
   open_path: "opens a path in this machine's shell — nothing a remote caller can observe",
   read_output_file: "feeds the in-window report preview; the file tools read files for callers",
+  remove_local_stt_gpu_engine: "deletes the GPU speech engine from the machine the window is on",
   remove_local_stt_model: "deletes a speech model from the machine the window is on",
   reset_database: "deletes everything and exits the process; a two-step confirmation in front of a human is the whole safety mechanism",
   resolve_pdf_read: "answers a request the backend made *of the window*: it hands back page text the webview rasterized, so there is nobody on the other end of it remotely",

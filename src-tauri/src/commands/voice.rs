@@ -698,3 +698,8 @@ pub fn cancel_local_stt_install() {
 pub fn remove_local_stt_model(state: State<'_, AppState>, model: String) -> AppResult<()> {
     crate::local_stt::remove_model(&state.app_data_dir, &model)
 }
+
+#[tauri::command]
+pub fn remove_local_stt_gpu_engine(state: State<'_, AppState>) -> AppResult<()> {
+    crate::local_stt::remove_gpu_engine(&state.app_data_dir)
+}

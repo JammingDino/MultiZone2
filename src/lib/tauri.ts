@@ -964,6 +964,7 @@ export const installLocalStt = (model: string, gpu: boolean) =>
   invoke<void>("install_local_stt", { model, gpu });
 export const cancelLocalSttInstall = () => invoke<void>("cancel_local_stt_install");
 export const removeLocalSttModel = (model: string) => invoke<void>("remove_local_stt_model", { model });
+export const removeLocalSttGpuEngine = () => invoke<void>("remove_local_stt_gpu_engine");
 export function onLocalSttProgress(
   handler: (p: import("./types").LocalSttProgress) => void,
 ): Promise<UnlistenFn> {

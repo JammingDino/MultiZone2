@@ -383,6 +383,38 @@ pub fn remove_model(data_dir: &Path, id: &str) -> AppResult<()> {
     Ok(())
 }
 
+/// Delete the GPU engine to get its ~670 MB back. Models are kept; dictation
+/// falls back to the CPU engine, downloaded again (~9 MB) if the CUDA package
+/// was the only one installed — it covered both.
+///
+/// Any running server stops first, whatever it was asked for: the CUDA build is
+/// preferred even for CPU runs (`server_path`), and Windows will not delete an
+/// executable or DLL a live process has open.
+pub fn remove_gpu_engine(data_dir: &Path) -> AppResult<()> {
+    if INSTALLING.load(Ordering::Relaxed) {
+        return Err(AppError::Invalid("a download is running; cancel it first".into()));
+    }
+    let root = root(data_dir);
+    // Every `<release>-cuda` folder, not only the current release's: a pinned
+    // version bump leaves the old one behind, and that is 670 MB too.
+    let dirs: Vec<PathBuf> = std::fs::read_dir(&root)
+        .map(|rd| {
+            rd.flatten()
+                .map(|e| e.path())
+                .filter(|p| p.is_dir() && p.file_name().is_some_and(|n| n.to_string_lossy().ends_with("-cuda")))
+                .collect()
+        })
+        .unwrap_or_default();
+    if dirs.is_empty() {
+        return Ok(());
+    }
+    shutdown();
+    for d in dirs {
+        std::fs::remove_dir_all(&d)?;
+    }
+    Ok(())
+}
+
 struct Server {
     child: std::process::Child,
     port: u16,
@@ -558,5 +590,27 @@ mod tests {
         for m in MODELS {
             assert_eq!(m.sha256.len(), 64, "{}", m.id);
         }
+    }
+
+    /// Every CUDA build goes, the old release's included; models and the CPU
+    /// engine stay.
+    #[test]
+    fn removing_the_gpu_engine_keeps_models_and_the_cpu_engine() {
+        let dir = tempfile::tempdir().unwrap();
+        let w = root(dir.path());
+        for d in ["v1.9.2-cuda/bin", "v1.8.0-cuda", "v1.9.2", "models"] {
+            std::fs::create_dir_all(w.join(d)).unwrap();
+        }
+        std::fs::write(w.join("v1.9.2-cuda/bin/whisper-server.exe"), b"x").unwrap();
+        std::fs::write(w.join("models/ggml-base.en.bin"), b"x").unwrap();
+
+        remove_gpu_engine(dir.path()).unwrap();
+
+        assert!(!w.join("v1.9.2-cuda").exists());
+        assert!(!w.join("v1.8.0-cuda").exists());
+        assert!(w.join("v1.9.2").is_dir());
+        assert!(w.join("models/ggml-base.en.bin").is_file());
+        // Nothing to delete is not an error.
+        remove_gpu_engine(dir.path()).unwrap();
     }
 }

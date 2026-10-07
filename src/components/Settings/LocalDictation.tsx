@@ -23,6 +23,8 @@ export function LocalDictation() {
   const [progress, setProgress] = useState<LocalSttProgress | null>(null);
   const active = appSettings.sttProviderId === LOCAL_STT_PROVIDER ? appSettings.sttModel : null;
   const [chosen, setPicked] = useState<string | null>(active || null);
+  /** Second click of "Delete the GPU engine" — it is a 670 MB download to get back. */
+  const [confirmGpuDelete, setConfirmGpuDelete] = useState(false);
 
   const refresh = () => api.localSttStatus().then(setStatus).catch(reportError("Couldn't read local dictation"));
 
@@ -71,6 +73,22 @@ export function LocalDictation() {
     refresh();
   }
 
+  async function removeGpuEngine() {
+    if (!confirmGpuDelete) {
+      setConfirmGpuDelete(true);
+      return;
+    }
+    setConfirmGpuDelete(false);
+    try {
+      await api.removeLocalSttGpuEngine();
+      // Without it the GPU switch would only offer the download again.
+      await setAppSettings({ sttLocalGpu: false });
+    } catch (e) {
+      reportError("Couldn't delete the GPU engine")(e);
+    }
+    refresh();
+  }
+
   return (
     <section>
       <h3 className="mb-1 flex items-center gap-1.5 text-sm font-medium">
@@ -87,6 +105,21 @@ export function LocalDictation() {
             checked={gpu}
             onChange={(v) => setAppSettings({ sttLocalGpu: v })}
           />
+          {status.gpuEngineInstalled && !installing && (
+            <div className="mt-1.5 flex items-center gap-2 text-[11px] text-[var(--color-text-muted)]">
+              GPU engine downloaded ({formatBytes(status.gpuEngineSize)}).
+              <button
+                onClick={removeGpuEngine}
+                onBlur={() => setConfirmGpuDelete(false)}
+                className={`flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-[var(--color-panel-hover)] ${
+                  confirmGpuDelete ? "text-red-500" : "hover:text-[var(--color-text)]"
+                }`}
+              >
+                <Trash2 size={11} />
+                {confirmGpuDelete ? "Delete it? Click again" : "Delete it"}
+              </button>
+            </div>
+          )}
         </div>
       )}
       {status.runningModel && (

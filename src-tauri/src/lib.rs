@@ -492,6 +492,7 @@ pub fn run() {
             commands::voice::install_local_stt,
             commands::voice::cancel_local_stt_install,
             commands::voice::remove_local_stt_model,
+            commands::voice::remove_local_stt_gpu_engine,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

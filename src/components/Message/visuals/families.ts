@@ -104,6 +104,7 @@ export const FAMILY: Record<string, Family> = {
   exit_plan_mode: "existing",
   make_flashcards: "existing",
   make_quiz: "existing",
+  make_cheatsheet: "existing",
   ask_user: "existing",
 };
 

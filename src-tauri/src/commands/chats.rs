@@ -1080,6 +1080,16 @@ async fn request_title(
     client: &LlmClient<'_>,
     plain: ChatRequest,
 ) -> AppResult<crate::llm::types::ChatResponse> {
+    request_quietly(client, plain).await
+}
+
+/// A small one-off request with thinking switched off, falling back to plain
+/// if the provider refuses the switches — see `request_title`. Shared with
+/// project setup, which asks for a name and an icon on the same terms.
+pub(crate) async fn request_quietly(
+    client: &LlmClient<'_>,
+    plain: ChatRequest,
+) -> AppResult<crate::llm::types::ChatResponse> {
     let quiet = ChatRequest {
         reasoning_effort: Some("none".to_string()),
         chat_template_kwargs: Some(serde_json::json!({ "enable_thinking": false })),

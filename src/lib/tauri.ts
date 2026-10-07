@@ -57,6 +57,7 @@ import type {
   Message,
   PendingMode,
   Project,
+  GeneratedIcon,
   StudyAnswerResult,
   StudyCard,
   StudyGrade,
@@ -227,6 +228,24 @@ export const upsertProject = (project: Partial<Project> & { name: string }) =>
 export const deleteProject = (id: string, deleteChats = false) =>
   invoke<void>("delete_project", { id, deleteChats });
 
+// Projects set up by the model (name, icon, colour, folder) from a first message.
+export const setupNewProject = (
+  projectId: string,
+  chatId: string,
+  prompt: string,
+  iconIds: string[],
+  colors: string[],
+) => invoke<Project>("setup_new_project", { projectId, chatId, prompt, iconIds, colors });
+/** Ask a model to draw an SVG icon for a project; it lands in the icon picker
+ *  under "Generated" and becomes the project's icon. Resolves when drawn. */
+export const drawProjectIcon = (projectId: string, chatId?: string | null) =>
+  invoke<Project>("draw_project_icon", { projectId, chatId: chatId ?? null });
+export const listGeneratedIcons = () => invoke<GeneratedIcon[]>("list_generated_icons");
+export const deleteGeneratedIcon = (iconId: string) => invoke<void>("delete_generated_icon", { iconId });
+/** Copy files into a project's directory and index them. */
+export const addProjectSources = (projectId: string, paths: string[]) =>
+  invoke<number>("add_project_sources", { projectId, paths });
+
 // Study mode — decks, quizzes and their review state, per project.
 export const studyOverview = (projectId: string) =>
   invoke<StudyOverview>("study_overview", { projectId });
@@ -238,6 +257,8 @@ export const reviewStudyCard = (cardId: string, grade: StudyGrade) =>
 export const answerStudyQuestion = (questionId: string, chosenIndex: number) =>
   invoke<StudyAnswerResult>("answer_study_question", { questionId, chosenIndex });
 export const deleteStudySet = (setId: string) => invoke<void>("delete_study_set", { setId });
+export const updateStudyCheatsheet = (setId: string, body: string, title?: string) =>
+  invoke<StudySetDetail>("update_study_cheatsheet", { setId, body, title });
 
 // Knowledge (RAG) — project-scoped, sourced from the project directory.
 export const setProjectKbConfig = (

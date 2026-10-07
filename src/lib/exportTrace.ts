@@ -267,6 +267,7 @@ const VISUAL_TOOLS = new Set([
   "present_file",
   "make_flashcards",
   "make_quiz",
+  "make_cheatsheet",
 ]);
 
 /**
@@ -411,6 +412,7 @@ const LABELS: Record<string, { label: string; icon: ToolIcon }> = {
   render_chart: { label: "Chart", icon: "chart" },
   make_flashcards: { label: "Flashcards", icon: "checklist" },
   make_quiz: { label: "Quiz", icon: "checklist" },
+  make_cheatsheet: { label: "Cheat sheet", icon: "checklist" },
   study_progress: { label: "Study progress", icon: "checklist" },
   search_local_files: { label: "Knowledge search", icon: "database" },
   save_memory: { label: "Saved memory", icon: "brain" },
@@ -577,6 +579,7 @@ export function describeTool(item: TraceToolItem): ToolDescription {
     }
     case "make_flashcards":
     case "make_quiz":
+    case "make_cheatsheet":
       desc.subject = str(args?.title);
       break;
     case "render_chart": {

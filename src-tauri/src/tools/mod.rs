@@ -429,7 +429,7 @@ pub fn tool_safety_by_name(name: &str) -> u8 {
         | "list_scheduled_runs"
         // The study tools write only to the project's own study state, which
         // the user is shown the moment it exists.
-        | "make_flashcards" | "make_quiz" | "study_progress"
+        | "make_flashcards" | "make_quiz" | "make_cheatsheet" | "study_progress"
         // `search_knowledge` is the pre-0.9.0 name for `search_local_files`;
         // stored tool-call history still carries it.
         | "search_local_files" | "search_knowledge" => 0,
@@ -692,11 +692,11 @@ async fn dispatch_inner(
         "mark_important" => rolling::mark(args, db, chat_id).await,
         "forget_important" => rolling::forget(args, db, chat_id).await,
         "read_context" => context_usage::run(args, db, chat_id, http).await,
-        "make_flashcards" | "make_quiz" => {
-            let out = if name == "make_quiz" {
-                study::make_quiz(args, db, chat_id).await
-            } else {
-                study::make_flashcards(args, db, chat_id).await
+        "make_flashcards" | "make_quiz" | "make_cheatsheet" => {
+            let out = match name {
+                "make_quiz" => study::make_quiz(args, db, chat_id).await,
+                "make_cheatsheet" => study::make_cheatsheet(args, db, chat_id).await,
+                _ => study::make_flashcards(args, db, chat_id).await,
             };
             use tauri::Emitter;
             let _ = sink.app().emit("study-changed", serde_json::json!({ "chatId": chat_id }));

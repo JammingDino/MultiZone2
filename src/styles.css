@@ -580,6 +580,42 @@ input[type="color"]:hover { border-color: var(--color-accent); }
   padding-block: 3px;
 }
 
+/* KaTeX's own error rendering, for the one command it could not parse: muted
+ * and dotted rather than a red alarm over the whole message. The title
+ * attribute still carries KaTeX's message. */
+.markdown .katex-error {
+  color: var(--color-danger) !important;
+  border-bottom: 1px dotted currentColor;
+  cursor: help;
+}
+
+/* ===== Cheat sheets (StudyTab) =====
+ * A sheet flows across columns; a heading stays with what follows it, and
+ * nothing small is split across a column break. Headings are tighter than in a
+ * message, because a cheat sheet is dense on purpose. */
+.mz-sheet h1,
+.mz-sheet h2,
+.mz-sheet h3,
+.mz-sheet h4 {
+  break-after: avoid;
+}
+.mz-sheet .markdown > h2 {
+  margin-top: 1em;
+  padding-bottom: 0.15em;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-accent);
+}
+.mz-sheet .markdown > h2:first-child {
+  margin-top: 0;
+}
+.mz-sheet li,
+.mz-sheet table,
+.mz-sheet pre,
+.mz-sheet blockquote,
+.mz-sheet .katex-display {
+  break-inside: avoid;
+}
+
 /* ===== function-plot (MathPlotBlock) theme awareness ===== */
 .math-plot-wrapper .function-plot {
   background: transparent !important;

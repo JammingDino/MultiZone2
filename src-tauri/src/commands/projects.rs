@@ -135,6 +135,65 @@ pub async fn delete_project(
     Ok(())
 }
 
+// ─── Projects the model sets up (see `project_setup`) ─────────────────────────
+
+/// Name a just-created project, choose its icon and colour from the lists
+/// given, and make its folder under the save directory, from `prompt` — the
+/// message it was started with. The lists come from the frontend, which owns
+/// the icon set, so the two cannot disagree about which ids exist. Drawing an
+/// icon is `draw_project_icon`, called separately because nothing should wait
+/// on it.
+#[tauri::command]
+pub async fn setup_new_project(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    project_id: String,
+    chat_id: String,
+    prompt: String,
+    icon_ids: Vec<String>,
+    colors: Vec<String>,
+) -> AppResult<Project> {
+    crate::project_setup::setup(
+        &state.db, &state.http, &app, &project_id, &chat_id, &prompt, &icon_ids, &colors,
+    )
+    .await
+}
+
+/// Have a model draw an SVG icon for the project and make it the project's
+/// icon. It is kept, and offered in the icon picker under "Generated".
+#[tauri::command]
+pub async fn draw_project_icon(
+    state: State<'_, AppState>,
+    project_id: String,
+    chat_id: Option<String>,
+) -> AppResult<Project> {
+    crate::project_setup::draw_icon(&state.db, &state.http, &project_id, chat_id.as_deref()).await
+}
+
+#[tauri::command]
+pub async fn list_generated_icons(
+    state: State<'_, AppState>,
+) -> AppResult<Vec<crate::project_setup::GeneratedIcon>> {
+    crate::project_setup::list_icons(&state.db).await
+}
+
+#[tauri::command]
+pub async fn delete_generated_icon(state: State<'_, AppState>, icon_id: String) -> AppResult<()> {
+    crate::project_setup::delete_icon(&state.db, &icon_id).await
+}
+
+/// Copy files into the project's folder and index it. GUI-only: the paths are
+/// this machine's, picked in its file dialog.
+#[tauri::command]
+pub async fn add_project_sources(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    project_id: String,
+    paths: Vec<String>,
+) -> AppResult<usize> {
+    crate::project_setup::add_sources(&state.db, &state.http, &app, &project_id, &paths).await
+}
+
 // ─── Tags ─────────────────────────────────────────────────────────────────────
 
 #[tauri::command]

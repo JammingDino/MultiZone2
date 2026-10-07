@@ -1,5 +1,5 @@
-//! `make_flashcards`, `make_quiz`, `study_progress` — the study tools. See
-//! `crate::study` for the mode they belong to.
+//! `make_flashcards`, `make_quiz`, `make_cheatsheet`, `study_progress` — the
+//! study tools. See `crate::study` for the mode they belong to.
 //!
 //! Not a zone tool group: they are offered by the mode, to every chat in a
 //! study project and to no other, the way plan mode's tools are. A deck made
@@ -37,7 +37,7 @@ pub fn definitions() -> Vec<Tool> {
                                 "type": "object",
                                 "properties": {
                                     "front": { "type": "string", "description": "A question or cue with one answer." },
-                                    "back": { "type": "string", "description": "The answer, briefly. Markdown and $math$ are fine." },
+                                    "back": { "type": "string", "description": "The answer, briefly. Markdown and $math$ are fine (backslashes doubled in JSON)." },
                                     "source": { "type": "string", "description": "The source file it came from." }
                                 },
                                 "required": ["front", "back"]
@@ -67,8 +67,8 @@ pub fn definitions() -> Vec<Tool> {
                             "items": {
                                 "type": "object",
                                 "properties": {
-                                    "question": { "type": "string" },
-                                    "options": { "type": "array", "items": { "type": "string" }, "minItems": 2, "maxItems": 6 },
+                                    "question": { "type": "string", "description": "Markdown; math as $…$ with backslashes doubled in JSON." },
+                                    "options": { "type": "array", "items": { "type": "string" }, "minItems": 2, "maxItems": 6, "description": "Math in an option goes in $…$ too — never bare LaTeX." },
                                     "answer_index": { "type": "integer", "description": "0-based index of the correct option." },
                                     "explanation": { "type": "string", "description": "Why it is right, shown after answering." },
                                     "source": { "type": "string", "description": "The source file it came from." }
@@ -78,6 +78,30 @@ pub fn definitions() -> Vec<Tool> {
                         }
                     },
                     "required": ["title", "questions"]
+                }),
+            },
+        },
+        Tool {
+            tool_type: "function".into(),
+            function: ToolFunction {
+                name: "make_cheatsheet".into(),
+                description: "Make a cheat sheet from the project's sources: one dense Markdown \
+                    page the user keeps open beside the chat while they study. Short headed \
+                    sections, tables, bullet lists and key formulas; no padding. It is saved to the \
+                    project and the user can edit it. Pass `set_id` to revise an existing sheet \
+                    in place instead of making another."
+                    .into(),
+                parameters: json!({
+                    "type": "object",
+                    "properties": {
+                        "title": { "type": "string", "description": "Short name, e.g. the topic or chapter." },
+                        "markdown": {
+                            "type": "string",
+                            "description": "The whole sheet. `##` headings per section; math as $…$ and $$…$$ with backslashes doubled in JSON; cite sources as (file name) where it helps."
+                        },
+                        "set_id": { "type": "string", "description": "An existing cheat sheet to replace, from an earlier make_cheatsheet result." }
+                    },
+                    "required": ["title", "markdown"]
                 }),
             },
         },
@@ -158,6 +182,35 @@ pub async fn make_quiz(args: &Value, db: &SqlitePool, chat_id: &str) -> AppResul
             })).collect::<Vec<_>>(),
             "note": "The quiz is shown to the user to answer. Do not reveal or repeat the answers \
                      in your reply; call `study_progress` later to see how they did.",
+        })
+        .to_string()),
+        Err(e) => Ok(invalid(e)),
+    }
+}
+
+pub async fn make_cheatsheet(args: &Value, db: &SqlitePool, chat_id: &str) -> AppResult<String> {
+    let project_id = match project_or_refusal(db, chat_id).await {
+        Ok(p) => p,
+        Err(refusal) => return Ok(refusal),
+    };
+    let title = args.get("title").and_then(Value::as_str).unwrap_or("");
+    let Some(markdown) = args.get("markdown").and_then(Value::as_str) else {
+        return Ok(invalid("markdown is required"));
+    };
+    let set_id = args.get("set_id").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty());
+    let out = match set_id {
+        Some(id) => study::update_cheatsheet(db, id, Some(&project_id), Some(title), markdown).await,
+        None => study::create_cheatsheet(db, &project_id, Some(chat_id), title, markdown).await,
+    };
+    match out {
+        Ok(sheet) => Ok(json!({
+            "set_id": sheet.set.id,
+            "kind": "cheatsheet",
+            "title": sheet.set.title,
+            "markdown": sheet.body,
+            "revised": set_id.is_some(),
+            "note": "The sheet is saved to the project and shown to the user, who can open it in \
+                     its own tab. Do not repeat it in your reply.",
         })
         .to_string()),
         Err(e) => Ok(invalid(e)),

@@ -23,6 +23,8 @@ import {
   User, Users, Crown, Award, Trophy, Bookmark, Flag, Heart,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { createElement, forwardRef } from "react";
+import { useApp } from "@/store/app";
 
 export interface ZoneIconDef {
   id: string;
@@ -180,9 +182,57 @@ const iconMap: Record<string, LucideIcon> = Object.fromEntries(
   ZONE_ICONS.map(({ id, icon }) => [id, icon]),
 );
 
-/** Returns the Lucide component for a stored icon id, or Bot as fallback. */
+/** Stored ids of icons a model drew are `gen:<id>`; see `generated_icons`. */
+export const GENERATED_PREFIX = "gen:";
+
+/**
+ * A drawn icon, as a component shaped like a Lucide one.
+ *
+ * The SVG is a CSS mask, not markup: it is model-written, and an SVG used as
+ * a mask image cannot run anything or reach the page. It also means the icon
+ * takes `color` like every other icon here — the drawing supplies the shape
+ * and the caller the colour — so a generated icon sits white on a project's
+ * accent exactly as a Lucide one does. It reads the drawing from the store,
+ * so it fills in when the icon list arrives rather than staying a fallback.
+ */
+// `globalThis.Map`: this file imports lucide's `Map` icon.
+const generatedComponents = new globalThis.Map<string, LucideIcon>();
+function generatedIcon(id: string): LucideIcon {
+  let comp = generatedComponents.get(id);
+  if (comp) return comp;
+  const Comp = forwardRef<HTMLSpanElement, { size?: number | string; color?: string; className?: string }>(
+    function GeneratedIcon({ size = 24, color, className }, ref) {
+      const svg = useApp((s) => s.generatedIcons.find((g) => g.id === id)?.svg);
+      if (!svg) return createElement(Bot, { size: Number(size), color, className });
+      // Without the namespace a data-URL SVG does not load, and a mask that
+      // does not load paints the whole box.
+      const src = svg.includes("xmlns=") ? svg : svg.replace("<svg", '<svg xmlns="http://www.w3.org/2000/svg"');
+      const url = `url("data:image/svg+xml;utf8,${encodeURIComponent(src)}")`;
+      return createElement("span", {
+        ref,
+        className,
+        "aria-hidden": true,
+        style: {
+          display: "inline-block",
+          flexShrink: 0,
+          width: size,
+          height: size,
+          backgroundColor: color ?? "currentColor",
+          WebkitMask: `${url} center / contain no-repeat`,
+          mask: `${url} center / contain no-repeat`,
+        },
+      });
+    },
+  );
+  comp = Comp as unknown as LucideIcon;
+  generatedComponents.set(id, comp);
+  return comp;
+}
+
+/** Returns the component for a stored icon id, or Bot as fallback. */
 export function getZoneIcon(iconId: string | null | undefined): LucideIcon {
   if (!iconId) return Bot;
+  if (iconId.startsWith(GENERATED_PREFIX)) return generatedIcon(iconId.slice(GENERATED_PREFIX.length));
   return iconMap[iconId] ?? Bot;
 }
 

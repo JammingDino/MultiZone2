@@ -20,6 +20,7 @@ const VISUAL_TOOLS = new Set([
   "draw_diagram",
   "make_flashcards",
   "make_quiz",
+  "make_cheatsheet",
 ]);
 
 /**
@@ -31,6 +32,7 @@ const TOOL_LABELS: Record<string, string> = {
   ask_user: "Asking a question",
   make_flashcards: "Making flashcards",
   make_quiz: "Making a quiz",
+  make_cheatsheet: "Making a cheat sheet",
   study_progress: "Checking study progress",
   draft_plan_step: "Writing a plan step",
   enter_plan_mode: "Switching to plan mode",

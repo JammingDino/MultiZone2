@@ -3,6 +3,9 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
+// Registers `\ce{…}` and `\pu{…}` on the KaTeX instance rehype-katex uses —
+// chemistry is half of what a study project is about for some people.
+import "katex/contrib/mhchem";
 import { rehypeReveal, type RevealUnit } from "@/lib/streamReveal";
 import type { Components } from "react-markdown";
 import { CodeBlock } from "./CodeBlock";
@@ -82,7 +85,63 @@ const MD_COMPONENTS_PLAIN_TABLES: Components = {
 };
 
 const REMARK_PLUGINS = [remarkGfm, remarkMath];
-const REHYPE_PLUGINS = [rehypeKatex];
+
+/**
+ * Shorthands models reach for that KaTeX does not define — the blackboard
+ * sets, physics-style derivatives, siunitx-style units. Without them the whole
+ * equation renders as a red error over one unknown command.
+ */
+const KATEX_MACROS: Record<string, string> = {
+  "\\R": "\\mathbb{R}",
+  "\\N": "\\mathbb{N}",
+  "\\Z": "\\mathbb{Z}",
+  "\\Q": "\\mathbb{Q}",
+  "\\C": "\\mathbb{C}",
+  "\\E": "\\mathbb{E}",
+  "\\abs": "\\left\\lvert #1 \\right\\rvert",
+  "\\norm": "\\left\\lVert #1 \\right\\rVert",
+  "\\set": "\\left\\{ #1 \\right\\}",
+  "\\dd": "\\mathrm{d}",
+  "\\dv": "\\frac{\\mathrm{d} #1}{\\mathrm{d} #2}",
+  "\\pdv": "\\frac{\\partial #1}{\\partial #2}",
+  "\\Var": "\\operatorname{Var}",
+  "\\Cov": "\\operatorname{Cov}",
+  "\\argmax": "\\operatorname*{arg\\,max}",
+  "\\argmin": "\\operatorname*{arg\\,min}",
+  "\\sgn": "\\operatorname{sgn}",
+  "\\tr": "\\operatorname{tr}",
+  "\\rank": "\\operatorname{rank}",
+  "\\degree": "^{\\circ}",
+  "\\celsius": "{}^{\\circ}\\mathrm{C}",
+  "\\ohm": "\\Omega",
+  "\\unit": "\\,\\mathrm{#1}",
+  "\\si": "\\mathrm{#1}",
+  "\\SI": "#1\\,\\mathrm{#2}",
+  "\\num": "#1",
+};
+
+/**
+ * KaTeX settings. Lenient: a model's LaTeX is close to LaTeX, not KaTeX, and
+ * one unsupported command should cost that command, not the equation.
+ * `macros` is a fresh object each time the processor is built — every render
+ * — so a `\newcommand` reaches the rest of its message, and neither leaks into
+ * other messages nor collides with itself when a streaming message re-renders.
+ */
+function rehypeKatexLenient(this: unknown) {
+  return (rehypeKatex as (this: unknown, o: object) => unknown).call(this, {
+    strict: "ignore",
+    throwOnError: false,
+    trust: false,
+    macros: { ...KATEX_MACROS },
+  });
+}
+
+/** `\newcommand{\R}` on a name defined above would be an error; make it a redefinition. */
+const OURS = new RegExp(
+  `\\\\newcommand(\\s*\\{?\\s*\\\\(?:${Object.keys(KATEX_MACROS).map((k) => k.slice(1)).join("|")})(?![a-zA-Z]))`,
+  "g",
+);
+const ownMacros = (src: string) => (src.includes("\\newcommand") ? src.replace(OURS, "\\renewcommand$1") : src);
 
 /** A streaming group's reveal animation — see lib/streamReveal.ts. */
 export type Reveal = { unit: RevealUnit; animation: string; ms: number };
@@ -125,15 +184,14 @@ export function Markdown({
 
   // The reveal spans only while streaming; a finished answer is plain text.
   const unit = reveal?.unit;
-  const rehypePlugins = useMemo(
-    () => (unit ? [...REHYPE_PLUGINS, [rehypeReveal, { unit }] as const] : REHYPE_PLUGINS),
-    [unit],
-  );
+  const rehypePlugins = useMemo(() => {
+    return unit ? [rehypeKatexLenient, [rehypeReveal, { unit }] as const] : [rehypeKatexLenient];
+  }, [unit]);
 
   // Normalize \[…\] / \(…\) and inline $$…$$ into the delimiter forms remark-math
   // renders correctly, so display equations become centered blocks instead of
   // being squeezed inline. Memoized so streaming re-renders don't repeat the work.
-  const normalized = useMemo(() => normalizeMath(source), [source]);
+  const normalized = useMemo(() => normalizeMath(ownMacros(source)), [source]);
 
   // File citation markers carry `data-reveal-path` (see remarkCitations). They
   // are rendered deep inside remark's output, so the click is delegated from

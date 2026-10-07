@@ -12,10 +12,11 @@
 //!   knowledge is worse than none, because the gap is invisible exactly where
 //!   the learner is least able to catch it.
 //!
-//! - **The study state.** Flashcard decks and quizzes the model generates are
-//!   stored per project, not left in the transcript: every card carries an SM-2
-//!   schedule, and every quiz answer is kept. That record is what makes this a
-//!   study tool rather than a chat with a document.
+//! - **The study state.** Flashcard decks, quizzes and cheat sheets the model
+//!   generates are stored per project, not left in the transcript: every card
+//!   carries an SM-2 schedule, every quiz answer is kept, and a cheat sheet is
+//!   a document both the model and the learner can revise. That record is what
+//!   makes this a study tool rather than a chat with a document.
 //!
 //! - **The scheduler.** SM-2, which is old, simple and good enough. Four
 //!   grades rather than six, because nobody can tell a 3 from a 4 at speed.
@@ -31,6 +32,8 @@ use sqlx::SqlitePool;
 pub const MAX_ITEMS: usize = 40;
 /// Per-field ceiling. A card's back is an answer, not an essay.
 const MAX_FIELD_CHARS: usize = 2_000;
+/// A cheat sheet fits on a page or two. Past this it is the notes again.
+pub const MAX_SHEET_CHARS: usize = 30_000;
 const DAY_MS: i64 = 86_400_000;
 /// A card graded "Again" comes back in the same sitting, not tomorrow.
 const RELEARN_MS: i64 = 10 * 60_000;
@@ -122,7 +125,8 @@ pub fn preamble(indexed: bool, has_diagrams: bool) -> String {
         "# Study mode\n\
          This project is for learning a body of material. {sources}\n\n\
          ## Grounding — the rule that matters most\n\
-         - Answer only from the sources. Cite every claim inline with its `[n]` ref.\n\
+         - Answer only from the sources. Cite every claim inline with its `[n]` ref. Files the user \
+         attaches to a message are sources too.\n\
          - When the sources do not cover something, say exactly that: \"The sources don't cover \
          this.\" Do not fill the gap from your own knowledge — a gap the learner cannot see is \
          worse than one they can. If they then ask for general knowledge explicitly, give it, \
@@ -133,12 +137,21 @@ pub fn preamble(indexed: bool, has_diagrams: bool) -> String {
          front a question that has one answer. The cards are kept and scheduled for review.\n\
          - `make_quiz` when they want to test themselves. Multiple choice, one correct option, \
          plausible distractors drawn from the same material, an explanation that cites.\n\
+         - `make_cheatsheet` when they want a cheat sheet, summary sheet or formula sheet: one \
+         dense Markdown page — short headed sections, tables, bullet lists, key formulas — that \
+         they keep open beside the chat. Pass `set_id` to revise one that exists rather than \
+         making a second.\n\
          - `study_progress` to see what has been missed before deciding what to teach or quiz \
          next.{mind_map}\n\
          - A study guide, briefing, FAQ or timeline is a well-structured answer in Markdown, \
          cited like any other.\n\
          Search first, then generate: a card or question you cannot cite does not belong in \
-         the set."
+         the set.\n\n\
+         ## Math in study sets\n\
+         Write math as `$…$` inline and `$$…$$` for display in every field — questions, \
+         options, answers, explanations, sheets. Tool arguments are JSON, so every LaTeX \
+         backslash is doubled: `\"$\\\\frac{{a}}{{b}}$\"`. A single one (`\"$\\frac{{a}}{{b}}$\"`) \
+         arrives as a form feed followed by `rac`."
     )
 }
 
@@ -203,6 +216,9 @@ pub struct StudySetDetail {
     pub set: StudySet,
     pub cards: Vec<StudyCard>,
     pub questions: Vec<StudyQuestion>,
+    /// A cheat sheet's Markdown, and when it last changed (cheat sheets only).
+    pub body: Option<String>,
+    pub updated_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -343,7 +359,12 @@ pub async fn set_detail(db: &SqlitePool, set_id: &str) -> AppResult<StudySetDeta
     .fetch_all(db)
     .await?;
     let questions = questions_of(db, set_id).await?;
-    Ok(StudySetDetail { set, cards, questions })
+    let (body, updated_at): (Option<String>, Option<i64>) =
+        sqlx::query_as("SELECT body, updated_at FROM study_sets WHERE id = ?1")
+            .bind(set_id)
+            .fetch_one(db)
+            .await?;
+    Ok(StudySetDetail { set, cards, questions, body, updated_at })
 }
 
 /// Cards due now across the project, most overdue first.
@@ -369,6 +390,7 @@ async fn insert_set(
     let id = new_id();
     let title = match title.trim() {
         "" if kind == "quiz" => "Quiz".to_string(),
+        "" if kind == "cheatsheet" => "Cheat sheet".to_string(),
         "" => "Flashcards".to_string(),
         t => clip(t),
     };
@@ -479,6 +501,63 @@ pub async fn create_quiz(
     }
     tx.commit().await?;
     set_detail(db, &set_id).await
+}
+
+fn sheet_body(body: &str) -> AppResult<String> {
+    let body = body.trim();
+    if body.is_empty() {
+        return Err(AppError::Invalid("a cheat sheet needs some content".into()));
+    }
+    Ok(if body.chars().count() <= MAX_SHEET_CHARS {
+        body.to_string()
+    } else {
+        body.chars().take(MAX_SHEET_CHARS).collect::<String>() + "\n\n…"
+    })
+}
+
+pub async fn create_cheatsheet(
+    db: &SqlitePool,
+    project_id: &str,
+    chat_id: Option<&str>,
+    title: &str,
+    body: &str,
+) -> AppResult<StudySetDetail> {
+    let body = sheet_body(body)?;
+    let mut tx = db.begin().await?;
+    let set_id = insert_set(&mut *tx, project_id, chat_id, "cheatsheet", title).await?;
+    sqlx::query("UPDATE study_sets SET body = ?1, updated_at = created_at WHERE id = ?2")
+        .bind(&body)
+        .bind(&set_id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    set_detail(db, &set_id).await
+}
+
+/// Replace a cheat sheet's content, and its title when one is given. Refused
+/// for a set that is not a cheat sheet, or — when `project_id` is given, as it
+/// is for the model — one in another project.
+pub async fn update_cheatsheet(
+    db: &SqlitePool,
+    set_id: &str,
+    project_id: Option<&str>,
+    title: Option<&str>,
+    body: &str,
+) -> AppResult<StudySetDetail> {
+    let set = get_set(db, set_id).await?;
+    if set.kind != "cheatsheet" || project_id.is_some_and(|p| p != set.project_id) {
+        return Err(AppError::NotFound(format!("cheat sheet {set_id}")));
+    }
+    let body = sheet_body(body)?;
+    let title = title.map(str::trim).filter(|t| !t.is_empty()).map(clip).unwrap_or(set.title);
+    sqlx::query("UPDATE study_sets SET body = ?1, title = ?2, updated_at = ?3 WHERE id = ?4")
+        .bind(&body)
+        .bind(&title)
+        .bind(now_ts())
+        .bind(set_id)
+        .execute(db)
+        .await?;
+    set_detail(db, set_id).await
 }
 
 pub async fn delete_set(db: &SqlitePool, set_id: &str) -> AppResult<()> {
@@ -796,6 +875,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_cheatsheet_is_kept_and_revised_in_place() {
+        let db = pool().await;
+        let sheet = create_cheatsheet(&db, "p", None, " ", "## Ohm\n$V = IR$").await.unwrap();
+        assert_eq!(sheet.set.title, "Cheat sheet");
+        assert_eq!(sheet.body.as_deref(), Some("## Ohm\n$V = IR$"));
+
+        let revised = update_cheatsheet(&db, &sheet.set.id, Some("p"), Some("Circuits"), "## Ohm\n$I = V/R$")
+            .await
+            .unwrap();
+        assert_eq!(revised.set.title, "Circuits");
+        assert_eq!(revised.body.as_deref(), Some("## Ohm\n$I = V/R$"));
+        assert_eq!(overview(&db, "p").await.unwrap().sets.len(), 1, "revised, not duplicated");
+
+        assert!(update_cheatsheet(&db, &sheet.set.id, Some("other"), None, "x").await.is_err());
+        assert!(update_cheatsheet(&db, &sheet.set.id, None, None, "  ").await.is_err());
+        let quiz = create_quiz(
+            &db,
+            "p",
+            None,
+            "",
+            &[NewQuestion {
+                question: "?".into(),
+                options: vec!["a".into(), "b".into()],
+                answer_index: 0,
+                explanation: None,
+                source: None,
+            }],
+        )
+        .await
+        .unwrap();
+        assert!(update_cheatsheet(&db, &quiz.set.id, None, None, "x").await.is_err(), "a quiz is not a sheet");
+    }
+
+    #[tokio::test]
     async fn study_mode_withholds_the_web_and_adds_the_study_tools() {
         let db = pool().await;
         sqlx::query("INSERT INTO chats (id, title, project_id, created_at, updated_at) VALUES ('c', 't', 'p', 0, 0)")
@@ -808,5 +921,6 @@ mod tests {
         assert!(!names.contains(&"smart_search"));
         assert!(names.contains(&"get_current_datetime"));
         assert!(names.contains(&"make_flashcards") && names.contains(&"make_quiz"));
+        assert!(names.contains(&"make_cheatsheet"));
     }
 }

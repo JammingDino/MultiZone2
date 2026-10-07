@@ -1251,6 +1251,21 @@ pub async fn effective_zone_and_provider(
     }
 }
 
+/// The zone and provider a chat with no zone would use: the base zone if one
+/// is configured, else the default provider's model with no prompt or tools.
+/// For one-off requests that belong to no chat (drawing a project's icon from
+/// its settings).
+pub async fn base_zone_and_provider(db: &SqlitePool) -> AppResult<(Zone, Provider)> {
+    if let Some(zid) = base_zone_id(db).await {
+        if let Ok(zp) = load_zone_and_provider(db, &zid).await {
+            return Ok(zp);
+        }
+    }
+    let provider = default_provider(db).await?;
+    let zone = simple_zone(&provider)?;
+    Ok((zone, provider))
+}
+
 /// How a single turn picks its zone.
 #[derive(Clone)]
 enum TurnMode {

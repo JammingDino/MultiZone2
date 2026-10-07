@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
-import { getZoneIcon, ZONE_ICONS, ZONE_ICON_GROUPS } from "@/lib/zoneIcons";
+import { getZoneIcon, GENERATED_PREFIX, ZONE_ICONS, ZONE_ICON_GROUPS, type ZoneIconDef } from "@/lib/zoneIcons";
+import { useApp } from "@/store/app";
 import { Popover } from "@/components/common/Popover";
 
 /**
@@ -34,12 +35,28 @@ export function IconPicker({
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [search, setSearch] = useState("");
 
+  // Icons a model drew, first: they were made for something in this app.
+  const drawn = useApp((s) => s.generatedIcons);
+  const generated = useMemo<ZoneIconDef[]>(
+    () =>
+      drawn.map((g) => ({
+        id: `${GENERATED_PREFIX}${g.id}`,
+        icon: getZoneIcon(`${GENERATED_PREFIX}${g.id}`),
+        label: g.name,
+      })),
+    [drawn],
+  );
+  const groups = useMemo(
+    () => (generated.length ? [{ label: "Generated", icons: generated }, ...ZONE_ICON_GROUPS] : ZONE_ICON_GROUPS),
+    [generated],
+  );
+
   // null = show the grouped grid; an array = flat search results.
   const filtered = useMemo(() => {
     if (!search.trim()) return null;
     const q = search.toLowerCase();
-    return ZONE_ICONS.filter((i) => i.label.toLowerCase().includes(q));
-  }, [search]);
+    return [...generated, ...ZONE_ICONS].filter((i) => i.label.toLowerCase().includes(q));
+  }, [search, generated]);
 
   const SelectedIcon = getZoneIcon(value);
 
@@ -92,7 +109,11 @@ export function IconPicker({
         >
           <SelectedIcon size={15} color="white" />
         </span>
-        <span className="truncate text-xs">{value ?? "Default"}</span>
+        <span className="truncate text-xs">
+          {value?.startsWith(GENERATED_PREFIX)
+            ? generated.find((g) => g.id === value)?.label ?? "Generated"
+            : value ?? "Default"}
+        </span>
         <span className="ml-auto shrink-0 text-[11px] text-[var(--color-text-muted)]">Change</span>
       </button>
 
@@ -123,7 +144,7 @@ export function IconPicker({
                 )
               ) : (
                 <div className="flex flex-col gap-3">
-                  {ZONE_ICON_GROUPS.map((group) => (
+                  {groups.map((group) => (
                     <div key={group.label}>
                       <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-muted)]">
                         {group.label}

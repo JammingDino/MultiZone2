@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { DEFAULT_APP_SETTINGS, type AppSettings, type Chat, type Checkpoint, type RestoreReport, type RewindReport, type RewindStatus, type ChatTagEntry, type ChatTagLink, type ChatZone, type McpServerView, type Memory, type Message, type PendingMessage, type PendingMode, type Plan, type PlanStep, type Project, type Provider, type Skill, type SkillPack, type Tag, type Zone } from "@/lib/types";
+import { DEFAULT_APP_SETTINGS, type AppSettings, type Chat, type Checkpoint, type RestoreReport, type RewindReport, type RewindStatus, type ChatTagEntry, type ChatTagLink, type ChatZone, type McpServerView, type Memory, type Message, type PendingMessage, type PendingMode, type Plan, type PlanStep, type Project, type GeneratedIcon, type Provider, type Skill, type SkillPack, type Tag, type Zone } from "@/lib/types";
 import * as api from "@/lib/tauri";
 // Dictation goes through its own seam: the microphone is on this device, and
 // on a phone that means the WebView rather than the machine running the app.
@@ -12,8 +12,8 @@ import { normalizeApprovals } from "@/lib/approvals";
 import type { PendingAttachment } from "@/lib/attachFiles";
 import { errorText } from "@/lib/errors";
 import {
-  HOME_TAB, chatOf, chatTab, closeTab, closeWhere, focusedGroup, initialLayout, isFileTab, navigate, openTab, parseLayout,
-  type TabLayout,
+  HOME_TAB, chatOf, chatTab, closeTab, closeWhere, focusedGroup, initialLayout, isAuxTab, navigate, openBeside, openTab,
+  parseLayout, type TabLayout,
 } from "@/lib/tabLayout";
 
 const TAB_LAYOUT_KEY = "ui.tabLayout";
@@ -26,6 +26,19 @@ function readTabLayout(): TabLayout {
 }
 function writeTabLayout(l: TabLayout) {
   try { localStorage.setItem(TAB_LAYOUT_KEY, JSON.stringify(l)); } catch { /* storage off: in memory only */ }
+}
+
+// A study tab's name ("Ch. 3 quiz") lives in the database, and a tab that is
+// not on screen never loads it — so the names are kept beside the layout,
+// for the strip to show after a restart.
+const STUDY_TITLES_KEY = "ui.studyTabTitles";
+function readStudyTitles(): Record<string, string> {
+  try {
+    const v = JSON.parse(localStorage.getItem(STUDY_TITLES_KEY) ?? "{}");
+    return v && typeof v === "object" ? v : {};
+  } catch {
+    return {};
+  }
 }
 
 /**
@@ -390,6 +403,8 @@ interface AppStore {
   zones: Zone[];
   chats: Chat[];
   projects: Project[];
+  /** Icons a model drew (see `GeneratedIcon`), loaded with the projects. */
+  generatedIcons: GeneratedIcon[];
   tags: Tag[];
   /** Global skill catalog — managed in Settings → Skills. */
   skills: Skill[];
@@ -681,6 +696,14 @@ interface AppStore {
    * without the view jumping away each time.
    */
   openWorkspaceFile: (path: string, background?: boolean) => void;
+  /**
+   * Pop a study set (or a review session) out into its own tab beside the
+   * chat — see `openBeside`. `title` names the tab until it has loaded.
+   */
+  openStudyTab: (tab: string, title?: string) => void;
+  /** Tab names for study tabs, by tab id. */
+  studyTabTitles: Record<string, string>;
+  setStudyTabTitle: (tab: string, title: string) => void;
   /** Close one tab, or the focused group's active one. */
   closeWorkspaceFile: (path?: string) => void;
   /**
@@ -1122,6 +1145,7 @@ export const useApp = create<AppStore>((set, get) => ({
   zones: [],
   chats: [],
   projects: [],
+  generatedIcons: [],
   tags: [],
   skills: [],
   savedRuns: [],
@@ -2279,6 +2303,20 @@ export const useApp = create<AppStore>((set, get) => ({
   openWorkspaceFile: (path, background = false) => {
     get().updateTabLayout((l) => openTab(l, path, background));
   },
+  openStudyTab: (tab, title) => {
+    if (title) get().setStudyTabTitle(tab, title);
+    get().updateTabLayout((l) => openBeside(l, tab));
+  },
+  studyTabTitles: readStudyTitles(),
+  setStudyTabTitle: (tab, title) => {
+    if (get().studyTabTitles[tab] === title) return;
+    // Only the tabs still open are worth remembering.
+    const open = new Set(JSON.stringify(get().tabLayout).match(/study:[^"]+/g) ?? []);
+    const next: Record<string, string> = { [tab]: title };
+    for (const [k, v] of Object.entries(get().studyTabTitles)) if (open.has(k) && k !== tab) next[k] = v;
+    try { localStorage.setItem(STUDY_TITLES_KEY, JSON.stringify(next)); } catch { /* in memory only */ }
+    set({ studyTabTitles: next });
+  },
   closeWorkspaceFile: (path) => {
     get().updateTabLayout((l) => {
       const target = path ?? focusedGroup(l).active;
@@ -2291,9 +2329,10 @@ export const useApp = create<AppStore>((set, get) => ({
     // A click that changes nothing (focusing the focused pane) writes nothing.
     if (next === cur) return;
     writeTabLayout(next);
-    // A file in front keeps the chat it was opened from as the active one.
+    // A file or study set in front keeps the chat it was opened from as the
+    // active one.
     const front = focusedGroup(next).active;
-    const chatId = isFileTab(front) && front ? get().activeChatId : chatOf(front);
+    const chatId = isAuxTab(front) ? get().activeChatId : chatOf(front);
     set({ tabLayout: next, ...(chatId !== get().activeChatId ? { activeChatId: chatId } : {}) });
   },
   toggleSidebar: () => {
@@ -2340,8 +2379,13 @@ export const useApp = create<AppStore>((set, get) => ({
   setHomeScreenAttachments: (attachments) => set({ homeScreenAttachments: attachments }),
 
   async refreshProjects() {
-    const projects = await api.listProjects();
-    set({ projects });
+    // The drawn icons ride along: projects are what they are drawn for, and a
+    // project whose icon arrives before its drawing would show the fallback.
+    const [projects, generatedIcons] = await Promise.all([
+      api.listProjects(),
+      api.listGeneratedIcons().catch(() => get().generatedIcons),
+    ]);
+    set({ projects, generatedIcons });
   },
   async refreshTags() {
     const tags = await api.listTags();

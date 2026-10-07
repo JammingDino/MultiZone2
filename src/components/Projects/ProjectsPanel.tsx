@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { X, Plus, Trash2, Folder, FolderOpen, Database, RefreshCw, FileText, Loader2, AlertTriangle, ChevronLeft, GraduationCap } from "lucide-react";
+import { X, Plus, Trash2, Folder, FolderOpen, Database, RefreshCw, FileText, Loader2, AlertTriangle, ChevronLeft, GraduationCap, PenTool } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useApp } from "@/store/app";
 import { useShallow } from "zustand/react/shallow";
@@ -244,6 +244,8 @@ function ProjectForm({
   const [lintCommand, setLintCommand] = useState("");
   const [testCommand, setTestCommand] = useState("");
   const [studyMode, setStudyMode] = useState(false);
+  const [drawing, setDrawing] = useState(false);
+  const [drawError, setDrawError] = useState<unknown>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<unknown>(null);
   const refreshProjects = useApp((s) => s.refreshProjects);
@@ -360,7 +362,36 @@ function ProjectForm({
         {/* Identity: the same side-by-side icon + colour pair the zone editor
             uses, from the same two controls. */}
         <div className="mb-4 grid grid-cols-2 gap-3 narrow:grid-cols-1">
-          <IconPicker value={icon} onChange={setIcon} activeColor={activeColor} />
+          <div>
+            <IconPicker value={icon} onChange={setIcon} activeColor={activeColor} />
+            {project && (
+              <button
+                type="button"
+                disabled={drawing}
+                onClick={async () => {
+                  setDrawing(true);
+                  setDrawError(null);
+                  try {
+                    const drawn = await api.drawProjectIcon(project.id);
+                    // Taken into the form, or the next autosave would put the
+                    // old icon straight back.
+                    setIcon(drawn.icon ?? null);
+                    await refreshProjects();
+                  } catch (e) {
+                    setDrawError(e);
+                  } finally {
+                    setDrawing(false);
+                  }
+                }}
+                title="Have the model draw an SVG icon for this project. It is kept in the icon picker under Generated."
+                className="mt-1 flex items-center gap-1 text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-accent)] disabled:opacity-60"
+              >
+                {drawing ? <Loader2 size={11} className="animate-spin" /> : <PenTool size={11} />}
+                {drawing ? "Drawing…" : "Draw an icon with AI"}
+              </button>
+            )}
+            {drawError ? <ErrorNote error={drawError} context="Couldn't draw an icon" className="mt-1 text-[11px] text-[var(--color-danger)]" /> : null}
+          </div>
           <ColorPicker value={accentColor} onChange={setAccentColor} />
         </div>
 

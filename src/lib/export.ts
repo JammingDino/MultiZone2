@@ -44,7 +44,7 @@ import {
   type TraceUnit,
 } from "@/lib/exportTrace";
 import { toPlanData } from "@/components/Renderers/PlanBlock";
-import { toDeckData, toQuizData } from "@/components/Renderers/StudyBlocks";
+import { toDeckData, toQuizData, toSheetData } from "@/components/Renderers/StudyBlocks";
 import { renderMermaidSvg } from "@/components/Renderers/MermaidBlock";
 import { renderPlotSvg, toMathPlotData } from "@/components/Renderers/MathPlotBlock";
 import { renderChartSvg, toChartData, type ChartTheme } from "@/lib/chart";
@@ -774,6 +774,12 @@ async function renderVisuals(
 function renderStudyVisual(name: string, body: any, accent: string, p: Palette): string {
   const src = (s: string | null) =>
     s ? `<div style="font-size:11px;color:${p.muted}">${escapeHtml(s)}</div>` : "";
+  if (name === "make_cheatsheet") {
+    const sheet = toSheetData(body);
+    if (!sheet) return "";
+    return `<div><div style="font-weight:600;margin-bottom:6px">${escapeHtml(sheet.title)} · cheat sheet</div>
+      <div style="white-space:pre-wrap;padding:8px 10px;border:1px solid ${p.border};border-radius:6px;font-size:12px">${escapeHtml(sheet.markdown)}</div></div>`;
+  }
   if (name === "make_flashcards") {
     const deck = toDeckData(body);
     if (!deck) return "";
@@ -936,6 +942,7 @@ const NO_PREVIEW = new Set([
   "present_file",
   "make_flashcards",
   "make_quiz",
+  "make_cheatsheet",
   ...SEARCH_TOOLS,
 ]);
 
@@ -1024,7 +1031,7 @@ function renderToolCard(
     visual = renderPlanVisual(body, accent, p);
   } else if (name === "present_file") {
     visual = renderFileVisual(body, accent);
-  } else if (name === "make_flashcards" || name === "make_quiz") {
+  } else if (name === "make_flashcards" || name === "make_quiz" || name === "make_cheatsheet") {
     visual = renderStudyVisual(name, body, accent, p);
   } else if (name === "draw_diagram" || name === "plot_function" || name === "render_chart") {
     const svg = visuals.get(key);

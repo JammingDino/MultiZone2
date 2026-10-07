@@ -39,6 +39,8 @@ mod mcp;
 mod ocr;
 #[cfg(desktop)]
 mod plans;
+#[cfg(desktop)]
+mod project_setup;
 mod preview;
 #[cfg(desktop)]
 mod remote;
@@ -307,12 +309,18 @@ pub fn run() {
             commands::schedules::upsert_scheduled_run,
             commands::schedules::delete_scheduled_run,
             commands::schedules::run_scheduled_now,
+            commands::projects::setup_new_project,
+            commands::projects::draw_project_icon,
+            commands::projects::list_generated_icons,
+            commands::projects::delete_generated_icon,
+            commands::projects::add_project_sources,
             commands::study::study_overview,
             commands::study::get_study_set,
             commands::study::due_study_cards,
             commands::study::review_study_card,
             commands::study::answer_study_question,
             commands::study::delete_study_set,
+            commands::study::update_study_cheatsheet,
             commands::mcp::list_mcp_resources,
             commands::mcp::read_mcp_resource,
             commands::mcp::list_mcp_prompts,

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Send, ChevronDown, Zap, Check, Layers, Settings as SettingsIcon, Loader2, Brain, Paperclip, Tag, X, SplitSquareHorizontal, Crown, Users, Upload, ScanText, Folder } from "lucide-react";
+import { Send, ChevronDown, Zap, Check, Layers, Settings as SettingsIcon, Loader2, Brain, Paperclip, Tag, X, SplitSquareHorizontal, Crown, Users, Upload, ScanText, Folder, FolderPlus, GraduationCap, PenTool } from "lucide-react";
 import { useApp } from "@/store/app";
 import { reportError } from "@/lib/reportError";
 import * as api from "@/lib/tauri";
-import { getZoneIcon } from "@/lib/zoneIcons";
+import { getZoneIcon, ZONE_COLOR_PRESETS, ZONE_ICONS } from "@/lib/zoneIcons";
 import { CHROME_ACTIVE, CHROME_OUTLINED, CHROME_QUIET, PRIMARY_ACTION } from "@/lib/chrome";
 import type { InputPart, Zone } from "@/lib/types";
 import { Popover } from "@/components/common/Popover";
@@ -117,6 +117,22 @@ function pickGreeting(now: Date): string {
   return phrases[Math.floor(Math.random() * phrases.length)];
 }
 
+/** The two ways to start in a project that does not exist yet. */
+const NEW_PROJECT_KINDS = [
+  {
+    kind: "general",
+    label: "New project",
+    Icon: FolderPlus,
+    hint: "Named, given an icon and a folder from your message",
+  },
+  {
+    kind: "study",
+    label: "New study project",
+    Icon: GraduationCap,
+    hint: "The same, set up for studying: answers from its sources, flashcards, quizzes",
+  },
+] as const;
+
 type Mode =
   | { type: "quick" }
   | { type: "smart" }
@@ -134,6 +150,7 @@ export function HomeScreen() {
   const providers = useApp((s) => s.providers);
   const projects = useApp((s) => s.projects);
   const tags = useApp((s) => s.tags);
+  const refreshProjects = useApp((s) => s.refreshProjects);
   const baseZoneId = useApp((s) => s.appSettings.baseZoneId);
   const sendKey = useApp((s) => s.appSettings.sendKey);
   const refreshChats = useApp((s) => s.refreshChats);
@@ -192,6 +209,12 @@ export function HomeScreen() {
   const [sending, setSending] = useState(false);
   // Initialize project from any pending new-chat context set by the sidebar.
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(newChatProjectId);
+  // Start in a project that does not exist yet: the model names it, picks its
+  // icon and colour, and gives it a folder under the save directory, from the
+  // message being sent. "study" also makes it a study project. Optionally the
+  // model draws the icon instead of picking one.
+  const [newProjectKind, setNewProjectKind] = useState<null | "general" | "study">(null);
+  const [drawIcon, setDrawIcon] = useState(false);
   const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
   // Extra zones to answer alongside the primary (mode) zone as perspectives.
   const [selectedPerspectiveIds, setSelectedPerspectiveIds] = useState<Set<string>>(new Set());
@@ -231,6 +254,7 @@ export function HomeScreen() {
   useEffect(() => {
     if (isFirstNewChatTick.current) { isFirstNewChatTick.current = false; return; }
     setSelectedProjectId(newChatProjectId);
+    setNewProjectKind(null);
     // A project's own default zone wins over the global Quick Chat default when
     // the new chat was started from that project.
     const proj = newChatProjectId ? projects.find((p) => p.id === newChatProjectId) : null;
@@ -389,7 +413,9 @@ export function HomeScreen() {
       }
     }
 
-    const currentProjectId = selectedProjectId;
+    let currentProjectId = selectedProjectId;
+    const currentNewProject = newProjectKind;
+    const currentDrawIcon = drawIcon;
     const currentTagIds = new Set(selectedTagIds);
     const currentPerspectiveIds = new Set(selectedPerspectiveIds);
     const currentSubagentIds = new Set(selectedSubagentIds);
@@ -406,7 +432,42 @@ export function HomeScreen() {
         ? (effectiveLeaderZone?.id ?? null)
         : null;
     try {
+      // A new project is made first, under a placeholder name, so the chat can
+      // be created inside it; the model names it below, before the first turn
+      // runs, so that turn already works in the project's own folder.
+      if (currentNewProject) {
+        const project = await api.upsertProject({
+          name: currentNewProject === "study" ? "New study project" : "New project",
+          studyMode: currentNewProject === "study",
+        });
+        currentProjectId = project.id;
+      }
       const chat = await api.createChat(zoneId, currentProjectId);
+      if (currentNewProject && currentProjectId) {
+        const projectId = currentProjectId;
+        try {
+          await api.setupNewProject(
+            projectId,
+            chat.id,
+            currentText,
+            ZONE_ICONS.map((i) => i.id),
+            ZONE_COLOR_PRESETS,
+          );
+        } catch (e) {
+          // The project still works under its placeholder name; say so rather
+          // than holding the message hostage to a naming call.
+          reportError("Couldn't name the new project")(e);
+        }
+        await refreshProjects();
+        if (currentDrawIcon) {
+          // Slower than naming, and nothing waits on it: the icon appears in
+          // the sidebar when it is drawn.
+          api
+            .drawProjectIcon(projectId, chat.id)
+            .then(() => refreshProjects())
+            .catch(reportError("Couldn't draw the project icon"));
+        }
+      }
       if (currentMode.type === "smart") {
         await setChatSmart(chat.id, true);
       }
@@ -780,8 +841,10 @@ export function HomeScreen() {
                 tighter gap than the rest of the row, to read as one cluster. */}
             <div className="flex shrink-0 items-center gap-1">
 
-            {/* Project — custom dropdown */}
-            {projects.length > 0 && (
+            {/* Project — custom dropdown. Always shown: "New project" and "New
+                study project" live in it, and they are how a first project
+                gets made without a trip to settings. */}
+            {(
               <div className="shrink-0">
                 {/* Icon only, and the same folder glyph the active chat's header
                     uses for the same thing — this is the one control that named
@@ -793,16 +856,30 @@ export function HomeScreen() {
                   ref={projectMenuBtnRef}
                   onClick={() => setProjectMenuOpen((v) => !v)}
                   title={
-                    selectedProject
+                    newProjectKind
+                      ? `A new ${newProjectKind === "study" ? "study " : ""}project, named from your message — click to change`
+                      : selectedProject
                       ? `Project: ${selectedProject.name} — click to change`
-                      : "No project — click to file this chat under one"
+                      : "No project — click to file this chat under one, or start a new one"
                   }
-                  aria-label={selectedProject ? `Project: ${selectedProject.name}` : "No project"}
-                  className={`flex items-center rounded-full p-1.5 ${
-                    projectMenuOpen ? CHROME_ACTIVE : CHROME_QUIET
+                  aria-label={
+                    newProjectKind
+                      ? newProjectKind === "study" ? "New study project" : "New project"
+                      : selectedProject ? `Project: ${selectedProject.name}` : "No project"
+                  }
+                  className={`flex items-center gap-1 rounded-full ${newProjectKind ? "px-2 py-1" : "p-1.5"} ${
+                    projectMenuOpen || newProjectKind ? CHROME_ACTIVE : CHROME_QUIET
                   }`}
                 >
-                  {selectedProject ? (
+                  {newProjectKind ? (
+                    <>
+                      {newProjectKind === "study" ? <GraduationCap size={14} /> : <FolderPlus size={14} />}
+                      <span className="text-xs">
+                        {newProjectKind === "study" ? "New study project" : "New project"}
+                      </span>
+                      {drawIcon && <PenTool size={11} className="opacity-70" />}
+                    </>
+                  ) : selectedProject ? (
                     <span
                       className="flex h-[15px] w-[15px] items-center justify-center rounded"
                       style={{ background: selectedProject.accentColor ?? "var(--color-accent)" }}
@@ -824,12 +901,40 @@ export function HomeScreen() {
                 >
                   <div>
                       <button
-                        onClick={() => { setSelectedProjectId(null); setProjectMenuOpen(false); }}
+                        onClick={() => { setSelectedProjectId(null); setNewProjectKind(null); setProjectMenuOpen(false); }}
                         className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)]"
                       >
                         <span className="text-[var(--color-text-muted)]">No project</span>
-                        {!selectedProjectId && <Check size={12} className="ml-auto text-[var(--color-accent)]" />}
+                        {!selectedProjectId && !newProjectKind && <Check size={12} className="ml-auto text-[var(--color-accent)]" />}
                       </button>
+                      {NEW_PROJECT_KINDS.map(({ kind, label, Icon, hint }) => (
+                        <button
+                          key={kind}
+                          onClick={() => { setNewProjectKind(kind); setSelectedProjectId(null); setProjectMenuOpen(false); }}
+                          title={hint}
+                          className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)]"
+                        >
+                          <Icon size={13} className="text-[var(--color-text-muted)]" />
+                          {label}
+                          {newProjectKind === kind && <Check size={12} className="ml-auto text-[var(--color-accent)]" />}
+                        </button>
+                      ))}
+                      {newProjectKind && (
+                        <button
+                          onClick={() => setDrawIcon((v) => !v)}
+                          aria-pressed={drawIcon}
+                          title="Have the model draw an SVG icon for the project. It is added to the icon picker under Generated."
+                          className="flex w-full items-center gap-2 px-3 py-1.5 pl-8 text-left text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
+                        >
+                          <PenTool size={12} />
+                          Draw an icon
+                          <span
+                            className={`relative ml-auto h-3.5 w-6 shrink-0 rounded-full transition-colors ${drawIcon ? "bg-[var(--color-accent)]" : "bg-[var(--color-border)]"}`}
+                          >
+                            <span className={`absolute left-0.5 top-0.5 h-2.5 w-2.5 rounded-full bg-white transition-all ${drawIcon ? "translate-x-2.5" : ""}`} />
+                          </span>
+                        </button>
+                      )}
                       {projects.length > 0 && <div className="my-1 border-t border-[var(--color-border)]" />}
                       {projects.map((p) => {
                         // Same swatch the in-chat project picker uses, so a
@@ -838,7 +943,7 @@ export function HomeScreen() {
                         return (
                           <button
                             key={p.id}
-                            onClick={() => { setSelectedProjectId(p.id); setProjectMenuOpen(false); }}
+                            onClick={() => { setSelectedProjectId(p.id); setNewProjectKind(null); setProjectMenuOpen(false); }}
                             className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)]"
                           >
                             <span
@@ -848,7 +953,7 @@ export function HomeScreen() {
                               <Icon size={10} color="white" />
                             </span>
                             {p.name}
-                            {selectedProjectId === p.id && <Check size={12} className="ml-auto text-[var(--color-accent)]" />}
+                            {selectedProjectId === p.id && !newProjectKind && <Check size={12} className="ml-auto text-[var(--color-accent)]" />}
                           </button>
                         );
                       })}

@@ -40,6 +40,7 @@ export const ROUTE_MAP: Record<string, RouteBinding> = {
   delete_chat: { method: "DELETE", path: "/api/chats/:id" },
   delete_connector: { method: "DELETE", path: "/api/connectors/:entryId" },
   delete_context_pin: { method: "DELETE", path: "/api/chats/:id/pins/:pinId" },
+  delete_generated_icon: { method: "DELETE", path: "/api/icons/:id" },
   delete_library_entry: { method: "DELETE", path: "/api/zone-library/:id" },
   delete_mcp_server: { method: "DELETE", path: "/api/mcp/servers/:id" },
   delete_memory: { method: "DELETE", path: "/api/memories/:id" },
@@ -57,6 +58,7 @@ export const ROUTE_MAP: Record<string, RouteBinding> = {
   discard_all_staged_edits: { method: "DELETE", path: "/api/chats/:id/staged-edits" },
   discard_staged_edit: { method: "DELETE", path: "/api/staged-edits/:id" },
   disconnect_mcp_server: { method: "POST", path: "/api/mcp/servers/:id/disconnect" },
+  draw_project_icon: { method: "POST", path: "/api/projects/:id/draw-icon" },
   due_study_cards: { method: "GET", path: "/api/projects/:id/study/due" },
   fetch_models: { method: "GET", path: "/api/providers/:id/models" },
   fix_diagram: { method: "POST", path: "/api/chats/:id/fix-diagram" },
@@ -86,6 +88,7 @@ export const ROUTE_MAP: Record<string, RouteBinding> = {
   list_connectors: { method: "GET", path: "/api/connectors" },
   list_context_pins: { method: "GET", path: "/api/chats/:id/pins" },
   list_dir: { method: "GET", path: "/api/fs/list" },
+  list_generated_icons: { method: "GET", path: "/api/icons" },
   list_global_kb_documents: { method: "GET", path: "/api/knowledge/documents" },
   list_knowledge_documents: { method: "GET", path: "/api/projects/:id/knowledge/documents" },
   list_library_entries: { method: "GET", path: "/api/zone-library" },
@@ -160,6 +163,7 @@ export const ROUTE_MAP: Record<string, RouteBinding> = {
   set_project_kb_default: { method: "POST", path: "/api/projects/:id/knowledge/default" },
   set_setting: { method: "PUT", path: "/api/settings/:key" },
   set_skill_enabled: { method: "POST", path: "/api/skills/:id/enabled" },
+  setup_new_project: { method: "POST", path: "/api/projects/:id/setup" },
   skill_packs_root: { method: "GET", path: "/api/skill-packs/root", unwrap: "root" },
   start_terminal: { method: "POST", path: "/api/chats/:id/terminals" },
   stop_terminal: { method: "DELETE", path: "/api/chats/:id/terminals/:terminalId" },
@@ -168,6 +172,7 @@ export const ROUTE_MAP: Record<string, RouteBinding> = {
   transcribe_audio_upload: { method: "POST", path: "/api/transcribe" },
   update_message: { method: "PATCH", path: "/api/chats/:id/messages/:messageId" },
   update_plan_steps: { method: "POST", path: "/api/plans/:id/steps" },
+  update_study_cheatsheet: { method: "PUT", path: "/api/study/sets/:id/sheet" },
   upsert_library_entry: { method: "POST", path: "/api/zone-library" },
   upsert_mcp_server: { method: "POST", path: "/api/mcp/servers" },
   upsert_memory: { method: "POST", path: "/api/memories" },
@@ -191,6 +196,7 @@ export const ROUTE_MAP: Record<string, RouteBinding> = {
  * request that fails with a 404.
  */
 export const GUI_ONLY: Record<string, string> = {
+  add_project_sources: "Takes paths on the desktop, chosen in its file dialog; a remote has no way to name one",
   api_bind_state: "the Settings panel's read of the same row `/api/health` reports; a caller asks the API itself",
   apply_api_settings: "rebinds the server the request arrived on — a caller could lock itself out of the app with no way back in",
   cancel_dictation: "ends a capture that only the window could have started",

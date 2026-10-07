@@ -52,6 +52,20 @@ pub async fn answer_study_question(
     Ok(out)
 }
 
+/// The learner's own edit to a cheat sheet.
+#[tauri::command]
+pub async fn update_study_cheatsheet(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    set_id: String,
+    title: Option<String>,
+    body: String,
+) -> AppResult<StudySetDetail> {
+    let out = study::update_cheatsheet(&state.db, &set_id, None, title.as_deref(), &body).await?;
+    changed(&app);
+    Ok(out)
+}
+
 #[tauri::command]
 pub async fn delete_study_set(app: AppHandle, state: State<'_, AppState>, set_id: String) -> AppResult<()> {
     study::delete_set(&state.db, &set_id).await?;

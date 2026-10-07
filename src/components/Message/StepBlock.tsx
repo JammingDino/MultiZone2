@@ -21,7 +21,7 @@ import { toChartData } from "@/lib/chart";
 import { MermaidBlock, type MermaidAutoFix } from "@/components/Renderers/MermaidBlock";
 import { SavedFileChip } from "@/components/Renderers/SavedFileChip";
 import { PlanBlock, PlanProposalBlock, toPlanData, toPlanProposal } from "@/components/Renderers/PlanBlock";
-import { FlashcardDeckBlock, QuizBlock, toDeckData, toQuizData } from "@/components/Renderers/StudyBlocks";
+import { CheatsheetBlock, FlashcardDeckBlock, QuizBlock, toDeckData, toQuizData, toSheetData } from "@/components/Renderers/StudyBlocks";
 import { ToolVisual, hasToolVisual } from "./visuals/ToolVisual";
 import { familyIcon } from "./visuals/familyIcon";
 import * as api from "@/lib/tauri";
@@ -489,6 +489,10 @@ function renderToolOutput(
   if (name === "make_quiz") {
     const quiz = toQuizData(parsed);
     return quiz ? <QuizBlock {...quiz} /> : null;
+  }
+  if (name === "make_cheatsheet") {
+    const sheet = toSheetData(parsed);
+    return sheet ? <CheatsheetBlock {...sheet} /> : null;
   }
   if (name === "exit_plan_mode") {
     const proposal = toPlanProposal(parsed);

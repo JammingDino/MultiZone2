@@ -6,7 +6,8 @@ import * as api from "@/lib/tauri";
 import { MessageThread } from "./MessageThread";
 import { FileViewer } from "@/components/Workspace/FileViewer";
 import { TabTiles } from "./TabTiles";
-import { chatOf, chatTab, isFileTab, isShowing } from "@/lib/tabLayout";
+import { chatOf, chatTab, isFileTab, isShowing, isStudyTab } from "@/lib/tabLayout";
+import { StudyTab } from "@/components/Study/StudyTab";
 import { PaneChat } from "@/lib/paneChat";
 import { InputBar, type InputBarHandle } from "./InputBar";
 import { ZonePicker } from "./ZonePicker";
@@ -165,12 +166,13 @@ export function ChatPanel() {
 
   return (
     <main className="relative flex h-full min-w-0 flex-1 flex-col">
-      {/* Chats, files and the new-chat screen, as tabs that tile the column
+      {/* Chats, files, study sets and the new-chat screen, as tabs that tile the column
           (0.18.3) — as many as you like, side by side or stacked. */}
       <TabTiles
         renderTab={(tab) => {
           const id = chatOf(tab);
           if (id) return <ChatPane chatId={id} />;
+          if (isStudyTab(tab)) return <StudyTab tab={tab} />;
           if (isFileTab(tab) && tab) return <FileViewer key={tab} path={tab} />;
           return (
             <div className="mz-view-in flex min-h-0 flex-1 flex-col">

@@ -5,6 +5,34 @@ alone. Newest first. Detail belongs in the linked docs; this is the thread.
 
 ---
 
+## 2026-10-08 — Study mode, second slice: cheat sheets, study tabs, projects the model sets up
+
+- **Cheat sheets.** `make_cheatsheet`: one dense Markdown page per topic, kept
+  as a study set (`kind = 'cheatsheet'`, `body` and `updated_at` — migration
+  051), editable by the learner and revisable in place by the model via
+  `set_id`.
+- **Study sets as tabs.** A deck, quiz or sheet pops out of the chat into its
+  own tab (`study:set:<id>`), and a project's review session is
+  `study:review:<projectId>`; `Study/StudyTab.tsx` hosts both, with grid, list
+  and one-at-a-time layouts and printing. An auxiliary tab keeps the chat it
+  came from active, so the workspace panel stays with that chat.
+- **Maths that survives JSON.** `lib/studyMath.ts` puts back LaTeX commands
+  JSON escapes ate (`rac` → form feed + `rac`) and wraps bare LaTeX in short
+  fields; `scripts/study-math.test.mjs`.
+- **Projects the model sets up** (`project_setup.rs`). "New project" and "New
+  study project" from the composer: the project is made under a placeholder,
+  the model names it and picks an icon and colour from the opening message,
+  and it gets a folder under the save directory before the first turn runs.
+  Optionally the model draws an SVG icon (sanitised, kept in
+  `generated_icons` — migration 050) offered under "Generated" in the icon
+  picker for any project or zone. Sources can be added from the same flow and
+  are indexed.
+
+**Verified how.** `tsc -b`, `npm test` (105), `cargo test --lib` (452). Not
+yet run in the Tauri shell.
+
+---
+
 ## 2026-10-06 — Study mode, first slice
 
 The backlog entry in [RELEASE_PLAN.md](RELEASE_PLAN.md#backlog--unscheduled),

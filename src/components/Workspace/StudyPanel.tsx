@@ -1,9 +1,25 @@
-import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, ChevronDown, ChevronRight, GraduationCap, Layers, Play, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useState, type RefObject } from "react";
+import {
+  AlertTriangle,
+  ChevronDown,
+  ChevronRight,
+  FilePlus,
+  GraduationCap,
+  Layers,
+  Loader2,
+  NotebookText,
+  Play,
+  SquareArrowOutUpRight,
+  Trash2,
+} from "lucide-react";
+import { open } from "@tauri-apps/plugin-dialog";
+import { isRemote } from "@/lib/remote/transport";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import type { StudyCard, StudyGrade, StudyOverview, StudySet, StudySetDetail } from "@/lib/types";
+import { studyReviewTab, studySetTab } from "@/lib/tabLayout";
 import {
+  CheatsheetBlock,
   Flashcard,
   FlashcardDeckBlock,
   QuizBlock,
@@ -38,8 +54,9 @@ export function useStudyDue(projectId: string | null): number | null {
 }
 
 /**
- * The Study tab: what is due, a review session to clear it, and every deck and
- * quiz the project has — wherever in the project's chats it was made.
+ * The Study tab: what is due, a review session to clear it, and every deck,
+ * quiz and cheat sheet the project has — wherever in the project's chats it
+ * was made. Any of them pops out into a tab beside the chat.
  *
  * "12 cards due" is the whole reason this exists rather than the decks living
  * only in the transcript: spaced repetition only works if the reviews happen,
@@ -50,6 +67,30 @@ export function StudyPanel({ projectId }: { projectId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const openProjectsPanel = useApp((s) => s.openProjectsPanel);
+  const openStudyTab = useApp((s) => s.openStudyTab);
+  const refreshProjects = useApp((s) => s.refreshProjects);
+  const [adding, setAdding] = useState(false);
+  const [addNote, setAddNote] = useState<string | null>(null);
+
+  // Files in, indexed: all a study project made from the composer needs before
+  // it can answer anything. Desktop only — the paths are this machine's.
+  async function addSources() {
+    const picked = await open({ multiple: true, directory: false });
+    const paths = Array.isArray(picked) ? picked : typeof picked === "string" ? [picked] : [];
+    if (paths.length === 0) return;
+    setAdding(true);
+    setAddNote(null);
+    try {
+      const n = await api.addProjectSources(projectId, paths);
+      setAddNote(`Added ${n} file${n === 1 ? "" : "s"} and indexed the project.`);
+      await refreshProjects();
+      load();
+    } catch (e) {
+      setAddNote(String(e));
+    } finally {
+      setAdding(false);
+    }
+  }
 
   const load = useCallback(() => {
     api
@@ -90,6 +131,7 @@ export function StudyPanel({ projectId }: { projectId: string }) {
 
   const decks = overview.sets.filter((s) => s.kind === "flashcards");
   const quizzes = overview.sets.filter((s) => s.kind === "quiz");
+  const sheets = overview.sets.filter((s) => s.kind === "cheatsheet");
 
   return (
     <div className="flex flex-col gap-3">
@@ -99,7 +141,8 @@ export function StudyPanel({ projectId }: { projectId: string }) {
           <div>
             <div className="font-medium text-[var(--color-text)]">The sources aren't indexed yet</div>
             <div className="mt-0.5 text-[var(--color-text-muted)]">
-              Study chats answer only from this project's indexed files. Set up Knowledge in{" "}
+              Study chats answer only from this project's indexed files.{" "}
+              {isRemote() ? "Add them on the computer, or" : "Add some below, or"} set up Knowledge in{" "}
               <button
                 type="button"
                 onClick={() => openProjectsPanel(projectId)}
@@ -123,14 +166,25 @@ export function StudyPanel({ projectId }: { projectId: string }) {
             card{overview.dueCount === 1 ? "" : "s"} due · {overview.cardCount} in total
           </span>
         </div>
-        <button
-          type="button"
-          disabled={overview.dueCount === 0}
-          onClick={() => setReviewing(true)}
-          className="mt-2 flex w-full items-center justify-center gap-1.5 rounded bg-[var(--color-accent)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40"
-        >
-          <Play size={12} /> Review now
-        </button>
+        <div className="mt-2 flex gap-1.5">
+          <button
+            type="button"
+            disabled={overview.dueCount === 0}
+            onClick={() => setReviewing(true)}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded bg-[var(--color-accent)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40"
+          >
+            <Play size={12} /> Review now
+          </button>
+          <button
+            type="button"
+            disabled={overview.dueCount === 0}
+            onClick={() => openStudyTab(studyReviewTab(projectId), "Review")}
+            title="Review in a tab beside the chat, at full size"
+            className="flex items-center justify-center rounded border border-[var(--color-border)] px-2 text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-40"
+          >
+            <SquareArrowOutUpRight size={12} />
+          </button>
+        </div>
         {overview.dueCount === 0 && (
           <div className="mt-1.5 text-center text-[10px] text-[var(--color-text-muted)]">
             {overview.nextDueAt
@@ -140,8 +194,30 @@ export function StudyPanel({ projectId }: { projectId: string }) {
         )}
       </div>
 
+      {!isRemote() && (
+        <div>
+          <button
+            type="button"
+            disabled={adding}
+            onClick={addSources}
+            title="Copy files into the project's folder and index them"
+            className="flex w-full items-center justify-center gap-1.5 rounded border border-dashed border-[var(--color-border)] px-3 py-1.5 text-[11px] text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-60"
+          >
+            {adding ? <Loader2 size={12} className="animate-spin" /> : <FilePlus size={12} />}
+            {adding ? "Copying and indexing…" : "Add sources"}
+          </button>
+          {addNote && <p className="mt-1 text-[10px] text-[var(--color-text-muted)]">{addNote}</p>}
+        </div>
+      )}
+
       <SetList title="Decks" icon={<Layers size={12} />} sets={decks} empty="Ask for flashcards to make one." />
       <SetList title="Quizzes" icon={<GraduationCap size={12} />} sets={quizzes} empty="Ask to be quizzed to make one." />
+      <SetList
+        title="Cheat sheets"
+        icon={<NotebookText size={12} />}
+        sets={sheets}
+        empty="Ask for a cheat sheet on a topic to make one."
+      />
     </div>
   );
 }
@@ -179,6 +255,7 @@ function SetRow({ set }: { set: StudySet }) {
   const [open, setOpen] = useState(false);
   const [detail, setDetail] = useState<StudySetDetail | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const openStudyTab = useApp((s) => s.openStudyTab);
 
   useEffect(() => {
     if (!open) return;
@@ -186,13 +263,15 @@ function SetRow({ set }: { set: StudySet }) {
   }, [open, set.id]);
 
   const badge =
-    set.kind === "quiz"
-      ? set.answered > 0
-        ? `${set.correct}/${set.itemCount}`
-        : `${set.itemCount} q`
-      : set.dueCount > 0
-        ? `${set.dueCount} due`
-        : `${set.itemCount}`;
+    set.kind === "cheatsheet"
+      ? ""
+      : set.kind === "quiz"
+        ? set.answered > 0
+          ? `${set.correct}/${set.itemCount}`
+          : `${set.itemCount} q`
+        : set.dueCount > 0
+          ? `${set.dueCount} due`
+          : `${set.itemCount}`;
 
   return (
     <li className="rounded border border-[var(--color-border)]">
@@ -214,6 +293,14 @@ function SetRow({ set }: { set: StudySet }) {
         >
           {badge}
         </span>
+        <button
+          type="button"
+          onClick={() => openStudyTab(studySetTab(set.id), set.title)}
+          title="Open in its own tab beside the chat"
+          className="shrink-0 text-[var(--color-text-muted)] hover:text-[var(--color-accent)]"
+        >
+          <SquareArrowOutUpRight size={11} />
+        </button>
         {confirming ? (
           <span className="flex shrink-0 items-center gap-1 text-[10px]">
             <button
@@ -242,6 +329,8 @@ function SetRow({ set }: { set: StudySet }) {
         <div className="border-t border-[var(--color-border)] p-2">
           {set.kind === "flashcards" ? (
             <FlashcardDeckBlock setId={set.id} title={set.title} cards={detail.cards} />
+          ) : set.kind === "cheatsheet" ? (
+            <CheatsheetBlock setId={set.id} title={set.title} markdown={detail.body ?? ""} revised={false} />
           ) : (
             <QuizBlock setId={set.id} title={set.title} questions={detail.questions} />
           )}
@@ -257,7 +346,19 @@ function SetRow({ set }: { set: StudySet }) {
  * graded "Again" goes to the back of it, because it comes due again within
  * the sitting.
  */
-function ReviewSession({ projectId, onDone }: { projectId: string; onDone: () => void }) {
+export function ReviewSession({
+  projectId,
+  onDone,
+  keyScope,
+  large,
+}: {
+  projectId: string;
+  onDone: () => void;
+  /** Listen for keys on this element rather than the window — in a tab, so
+   *  Space typed elsewhere never flips a card. */
+  keyScope?: RefObject<HTMLElement | null>;
+  large?: boolean;
+}) {
   const [queue, setQueue] = useState<StudyCard[] | null>(null);
   const [flipped, setFlipped] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -306,9 +407,10 @@ function ReviewSession({ projectId, onDone }: { projectId: string; onDone: () =>
         onDone();
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [flipped, grade, onDone]);
+    const target: HTMLElement | Window = keyScope?.current ?? window;
+    target.addEventListener("keydown", onKey as EventListener);
+    return () => target.removeEventListener("keydown", onKey as EventListener);
+  }, [flipped, grade, onDone, keyScope]);
 
   if (!queue) return <p className="text-[11px] text-[var(--color-text-muted)]">Loading…</p>;
 
@@ -339,6 +441,7 @@ function ReviewSession({ projectId, onDone }: { projectId: string; onDone: () =>
             onFlip={() => setFlipped((f) => !f)}
             onGrade={grade}
             busy={busy}
+            large={large}
           />
           <div className="text-center text-[10px] text-[var(--color-text-muted)]">
             Space flips · 1 Again · 2 Hard · 3 Good · 4 Easy · Esc stops

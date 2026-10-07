@@ -511,7 +511,7 @@ pub async fn turn_overhead(db: &SqlitePool, chat_id: &str) -> AppResult<TurnOver
                     .unwrap_or_else(|| match name.as_str() {
                         "search_local_files" => "knowledge".to_string(),
                         "mark_important" | "forget_important" => "rolling context".to_string(),
-                        "make_flashcards" | "make_quiz" | "study_progress" => "study mode".to_string(),
+                        "make_flashcards" | "make_quiz" | "make_cheatsheet" | "study_progress" => "study mode".to_string(),
                         _ => "plan mode".to_string(),
                     })
             });

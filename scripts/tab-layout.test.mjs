@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import {
   HOME_TAB, chatTab, initialLayout, openTab, closeTab, closeWhere, moveTab, navigate,
   groups, groupOf, measure, isShowing, isBare, parseLayout,
+  openBeside, studySetTab, studyReviewTab, studyOf, isFileTab, isAuxTab,
 } from "../src/lib/tabLayout.ts";
 
 const shape = (n) => (n.kind === "group" ? n.tabs : { [n.dir]: n.children.map(shape) });
@@ -99,4 +100,36 @@ test("a chat that is not open yet can be dropped into a strip or onto an edge", 
   // Onto the empty home screen: there is no edge to split, so it just opens.
   const home = initialLayout();
   assert.deepEqual(shape(moveTab(home, A, home.root.id, "left").root), [A]);
+});
+
+test("a study tab pops out beside the chat, and later ones join it", () => {
+  const Q = studySetTab("q1"), D = studySetTab("d1");
+  let l = navigate(initialLayout(), A);
+  l = openBeside(l, Q);
+  assert.deepEqual(shape(l.root), { row: [[A], [Q]] }, "the chat stays on screen");
+  // Focus back on the chat, then pop out another: it joins the study pane.
+  l = { ...l, focused: groupOf(l, A).id };
+  l = openBeside(l, D);
+  assert.deepEqual(shape(l.root), { row: [[A], [Q, D]] });
+  assert.equal(groupOf(l, D).active, D);
+  // Already open: brought forward, never duplicated.
+  l = openBeside(l, Q);
+  assert.equal(groupOf(l, Q).active, Q);
+  assert.equal(groups(l.root).flatMap((g) => g.tabs).length, 3);
+});
+
+test("navigating from the sidebar keeps a study tab on screen, as it does a file", () => {
+  const Q = studySetTab("q1");
+  let l = openTab(navigate(initialLayout(), A), Q);
+  l = navigate(l, B);
+  assert.deepEqual(shape(l.root), [A, Q, B]);
+});
+
+test("study tab ids", () => {
+  assert.deepEqual(studyOf(studySetTab("x")), { kind: "set", id: "x" });
+  assert.deepEqual(studyOf(studyReviewTab("p")), { kind: "review", id: "p" });
+  assert.equal(studyOf(A), null);
+  assert.equal(studyOf("/home/study:set:x"), null);
+  assert.ok(!isFileTab(studySetTab("x")) && isFileTab("/f") && !isFileTab(HOME_TAB));
+  assert.ok(isAuxTab(studySetTab("x")) && isAuxTab("/f") && !isAuxTab(A) && !isAuxTab(HOME_TAB));
 });

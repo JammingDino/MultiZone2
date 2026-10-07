@@ -333,14 +333,22 @@ export interface Project {
   updatedAt: number;
 }
 
+/** An icon a model drew as SVG, offered in the icon picker under "Generated". */
+export interface GeneratedIcon {
+  id: string;
+  name: string;
+  svg: string;
+  createdAt: number;
+}
+
 // ─── Study mode ──────────────────────────────────────────────────────────────
 
-/** One generated deck or quiz, with its counts. */
+/** One generated deck, quiz or cheat sheet, with its counts. */
 export interface StudySet {
   id: string;
   projectId: string;
   chatId: string | null;
-  kind: "flashcards" | "quiz";
+  kind: "flashcards" | "quiz" | "cheatsheet";
   title: string;
   createdAt: number;
   /** Cards in a deck, questions in a quiz. */
@@ -385,6 +393,9 @@ export interface StudySetDetail {
   set: StudySet;
   cards: StudyCard[];
   questions: StudyQuestion[];
+  /** A cheat sheet's Markdown and when it last changed (cheat sheets only). */
+  body: string | null;
+  updatedAt: number | null;
 }
 
 export interface StudyOverview {

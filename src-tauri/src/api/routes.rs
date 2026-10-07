@@ -52,7 +52,7 @@ const fn open(method: &'static str, path: &'static str, description: &'static st
 
 /// Bumped whenever a route is added, removed or changes shape, so a caller can
 /// tell "the app is older than my script" from "my script is wrong".
-pub const ROUTE_SET_VERSION: u32 = 12;
+pub const ROUTE_SET_VERSION: u32 = 13;
 
 pub const ROUTES: &[RouteDef] = &[
     // Discovery — deliberately unauthenticated. A caller debugging a broken
@@ -96,11 +96,18 @@ pub const ROUTES: &[RouteDef] = &[
     r("DELETE", "/api/schedules/:id", "Delete a scheduled run"),
     r("POST", "/api/schedules/:id/run", "Fire a scheduled run now"),
 
+    // Projects the model sets up, and the icons it draws
+    r("POST", "/api/projects/:id/setup", "Name a new project, pick its icon and colour, and make its folder, from its opening message ({chatId, prompt, iconIds, colors})"),
+    r("POST", "/api/projects/:id/draw-icon", "Have a model draw the project an SVG icon ({chatId?})"),
+    r("GET", "/api/icons", "Icons a model has drawn"),
+    r("DELETE", "/api/icons/:id", "Delete a drawn icon; anything wearing it goes back to the default"),
+
     // Study mode
     r("GET", "/api/projects/:id/study", "A study project's decks and quizzes, cards due, and whether its sources are indexed"),
     r("GET", "/api/projects/:id/study/due", "Flashcards due for review now, most overdue first (?limit=)"),
-    r("GET", "/api/study/sets/:id", "One deck or quiz with its cards or questions and their state"),
-    r("DELETE", "/api/study/sets/:id", "Delete a deck or quiz and its history"),
+    r("GET", "/api/study/sets/:id", "One deck, quiz or cheat sheet with its cards, questions or body and their state"),
+    r("DELETE", "/api/study/sets/:id", "Delete a deck, quiz or cheat sheet and its history"),
+    r("PUT", "/api/study/sets/:id/sheet", "Replace a cheat sheet's Markdown (body) and optionally its title"),
     r("POST", "/api/study/cards/:id/review", "Grade a flashcard review ({grade: again|hard|good|easy}) and reschedule it"),
     r("POST", "/api/study/questions/:id/answer", "Answer a quiz question ({chosenIndex}) and record the attempt"),
     r("POST", "/api/runs/:id/render", "Fill a run's template. Body: { \"values\"? }"),
@@ -327,10 +334,18 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("schedules::upsert_scheduled_run", Route("POST /api/schedules")),
     ("schedules::delete_scheduled_run", Route("DELETE /api/schedules/:id")),
     ("schedules::run_scheduled_now", Route("POST /api/schedules/:id/run")),
+    ("projects::setup_new_project", Route("POST /api/projects/:id/setup")),
+    ("projects::draw_project_icon", Route("POST /api/projects/:id/draw-icon")),
+    ("projects::list_generated_icons", Route("GET /api/icons")),
+    ("projects::delete_generated_icon", Route("DELETE /api/icons/:id")),
+    ("projects::add_project_sources", GuiOnly(
+        "Takes paths on the desktop, chosen in its file dialog; a remote has no way to name one",
+    )),
     ("study::study_overview", Route("GET /api/projects/:id/study")),
     ("study::due_study_cards", Route("GET /api/projects/:id/study/due")),
     ("study::get_study_set", Route("GET /api/study/sets/:id")),
     ("study::delete_study_set", Route("DELETE /api/study/sets/:id")),
+    ("study::update_study_cheatsheet", Route("PUT /api/study/sets/:id/sheet")),
     ("study::review_study_card", Route("POST /api/study/cards/:id/review")),
     ("study::answer_study_question", Route("POST /api/study/questions/:id/answer")),
     ("chats::create_chat", Route("POST /api/chats")),
@@ -750,6 +765,51 @@ pub async fn run_scheduled_now(
     Ok(NO_CONTENT)
 }
 
+pub async fn setup_new_project(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> ApiResult<Response> {
+    let list = |k: &str| -> Vec<String> {
+        body.get(k)
+            .and_then(Value::as_array)
+            .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+            .unwrap_or_default()
+    };
+    let project = commands::projects::setup_new_project(
+        st.app.clone(),
+        app_state(&st),
+        id,
+        required(&body, "chatId")?,
+        s(&body, "prompt").unwrap_or_default(),
+        list("iconIds"),
+        list("colors"),
+    )
+    .await?;
+    Ok(Json(project).into_response())
+}
+
+pub async fn draw_project_icon(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> ApiResult<Response> {
+    let project = commands::projects::draw_project_icon(app_state(&st), id, s(&body, "chatId")).await?;
+    Ok(Json(project).into_response())
+}
+
+pub async fn list_generated_icons(State(st): State<ApiState>) -> ApiResult<Response> {
+    Ok(Json(commands::projects::list_generated_icons(app_state(&st)).await?).into_response())
+}
+
+pub async fn delete_generated_icon(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+) -> ApiResult<StatusCode> {
+    commands::projects::delete_generated_icon(app_state(&st), id).await?;
+    Ok(NO_CONTENT)
+}
+
 pub async fn study_overview(
     State(st): State<ApiState>,
     Path(id): Path<String>,
@@ -779,6 +839,17 @@ pub async fn delete_study_set(
 ) -> ApiResult<StatusCode> {
     commands::study::delete_study_set(st.app.clone(), app_state(&st), id).await?;
     Ok(NO_CONTENT)
+}
+
+pub async fn update_study_cheatsheet(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> ApiResult<Response> {
+    let title = body.get("title").and_then(Value::as_str).map(str::to_string);
+    let text = body.get("body").and_then(Value::as_str).unwrap_or("").to_string();
+    let sheet = commands::study::update_study_cheatsheet(st.app.clone(), app_state(&st), id, title, text).await?;
+    Ok(Json(sheet).into_response())
 }
 
 pub async fn review_study_card(

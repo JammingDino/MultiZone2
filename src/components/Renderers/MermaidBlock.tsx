@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import mermaid from "mermaid";
+import type { Mermaid } from "mermaid";
 import {
   Loader2, GitBranch, Wand2, ZoomIn, ZoomOut, RotateCcw, Move,
   ChevronsUpDown, ChevronsDownUp, Maximize2, Minimize2,
@@ -60,7 +60,18 @@ function readThemeVars() {
   };
 }
 
-function initializeMermaid() {
+/**
+ * mermaid is ~2.9 MB minified — the largest thing in the app. Fetched on the
+ * first diagram rather than at startup, so a session that never draws one never
+ * parses it (and never holds it in memory).
+ */
+let mermaidLoad: Promise<Mermaid> | null = null;
+function loadMermaid(): Promise<Mermaid> {
+  mermaidLoad ??= import("mermaid").then((m) => m.default);
+  return mermaidLoad;
+}
+
+function initializeMermaid(mermaid: Mermaid) {
   const t = readThemeVars();
   mermaid.initialize({
     startOnLoad: false,
@@ -92,14 +103,16 @@ function initializeMermaid() {
 let initialized = false;
 let lastThemeKey = "";
 
-function ensureInitialized() {
+async function ensureInitialized(): Promise<Mermaid> {
+  const mermaid = await loadMermaid();
   const t = readThemeVars();
   const key = `${t.bg}|${t.panel}|${t.text}|${t.accent}|${t.border}`;
   if (!initialized || key !== lastThemeKey) {
-    initializeMermaid();
+    initializeMermaid(mermaid);
     initialized = true;
     lastThemeKey = key;
   }
+  return mermaid;
 }
 
 /**
@@ -113,9 +126,9 @@ export async function renderMermaidSvg(source: string): Promise<string | null> {
   if (!clean) return null;
   const cached = svgCache.get(clean);
   if (cached) return cached;
-  ensureInitialized();
   const id = "mermaid-export-" + Math.random().toString(36).slice(2, 10);
   try {
+    const mermaid = await ensureInitialized();
     const { svg } = await mermaid.render(id, clean);
     const cleaned = svg
       .replace(/(<svg[^>]*?)\s+style="[^"]*background[^"]*"/i, "$1")
@@ -249,9 +262,9 @@ export function MermaidBlock({
     let cancelled = false;
     setLoading(true);
     setError(null);
-    ensureInitialized();
     (async () => {
       try {
+        const mermaid = await ensureInitialized();
         const { svg } = await mermaid.render(renderId, cleanSource);
         if (!cancelled) {
           const cleaned = svg

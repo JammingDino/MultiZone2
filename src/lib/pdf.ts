@@ -1,6 +1,17 @@
-import * as pdfjsLib from "pdfjs-dist";
+import type * as PdfJs from "pdfjs-dist";
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+/**
+ * pdf.js is fetched the first time a PDF is opened, not at startup: most
+ * sessions never touch one, and it is ~350 KB of script to parse and hold.
+ */
+let pdfjsLoad: Promise<typeof PdfJs> | null = null;
+function pdfjs(): Promise<typeof PdfJs> {
+  pdfjsLoad ??= import("pdfjs-dist").then((lib) => {
+    lib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+    return lib;
+  });
+  return pdfjsLoad;
+}
 
 /**
  * Long-edge pixel target for a rasterized page. 1568px is the largest edge the
@@ -25,13 +36,13 @@ const JPEG_QUALITY = 0.95;
  * It lives here rather than in the viewer so that the worker configuration at
  * the top of this file stays the one place pdf.js is set up.
  */
-export function openPdf(url: string) {
-  return pdfjsLib.getDocument({ url }).promise;
+export async function openPdf(url: string) {
+  return (await pdfjs()).getDocument({ url }).promise;
 }
 
 /** Draw one page into a canvas at `cssWidth`, sharp on a HiDPI screen. */
 export async function drawPdfPage(
-  doc: pdfjsLib.PDFDocumentProxy,
+  doc: PdfJs.PDFDocumentProxy,
   n: number,
   canvas: HTMLCanvasElement,
   cssWidth: number,
@@ -52,7 +63,7 @@ export async function drawPdfPage(
   }
 }
 
-export type PdfDoc = pdfjsLib.PDFDocumentProxy;
+export type PdfDoc = PdfJs.PDFDocumentProxy;
 
 export interface PdfRenderProgress {
   page: number;
@@ -105,7 +116,7 @@ export async function extractPdfText(
   onProgress?: (p: PdfRenderProgress) => void,
 ): Promise<string> {
   const buf = await file.arrayBuffer();
-  const doc = await pdfjsLib.getDocument({ data: buf }).promise;
+  const doc = await (await pdfjs()).getDocument({ data: buf }).promise;
   const pages: string[] = [];
 
   for (let i = 1; i <= doc.numPages; i++) {
@@ -129,7 +140,7 @@ export async function extractPdfText(
 }
 
 /** Rasterize one already-loaded page to a base64 JPEG at ~1568px on its long edge. */
-async function renderPage(page: pdfjsLib.PDFPageProxy): Promise<string> {
+async function renderPage(page: PdfJs.PDFPageProxy): Promise<string> {
   const base = page.getViewport({ scale: 1.0 });
   const scale = TARGET_LONG_EDGE / Math.max(base.width, base.height);
   const viewport = page.getViewport({ scale });
@@ -145,7 +156,7 @@ async function renderPage(page: pdfjsLib.PDFPageProxy): Promise<string> {
 }
 
 /** Plain text of one already-loaded page, whitespace-normalized. */
-async function pageText(page: pdfjsLib.PDFPageProxy): Promise<string> {
+async function pageText(page: PdfJs.PDFPageProxy): Promise<string> {
   const content = await page.getTextContent();
   return (content.items as any[])
     .filter((item) => "str" in item)
@@ -161,7 +172,7 @@ export async function renderPdfToJpegs(
   onProgress?: (p: PdfRenderProgress) => void,
 ): Promise<string[]> {
   const buf = await file.arrayBuffer();
-  const doc = await pdfjsLib.getDocument({ data: buf }).promise;
+  const doc = await (await pdfjs()).getDocument({ data: buf }).promise;
   const out: string[] = [];
 
   for (let i = 1; i <= doc.numPages; i++) {
@@ -202,7 +213,7 @@ export async function readPdfPages(
   mode: "images" | "text",
   maxPages: number,
 ): Promise<PdfReadResult> {
-  const doc = await pdfjsLib.getDocument({ data }).promise;
+  const doc = await (await pdfjs()).getDocument({ data }).promise;
   try {
     const wanted = parsePageSpec(spec, doc.numPages, maxPages);
     const pages: PdfReadPage[] = [];

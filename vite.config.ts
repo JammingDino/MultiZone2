@@ -26,9 +26,10 @@ export default defineConfig(async () => ({
   },
   clearScreen: false,
   build: {
-    // mermaid alone is ~2.9 MB minified and can't be split further; this
-    // threshold sits just above it so genuinely new oversized chunks still warn.
-    chunkSizeWarningLimit: 3500,
+    // The app's own entry is ~1.7 MB; mermaid, which used to set this at 3.5 MB,
+    // now loads per diagram type in chunks well under it. Just above the entry,
+    // so a genuinely new oversized chunk still warns.
+    chunkSizeWarningLimit: 2000,
     rollupOptions: {
       output: {
         // Split heavy vendor libraries into their own chunks so the main
@@ -42,13 +43,18 @@ export default defineConfig(async () => ({
         // rehype-katex (which pulls in the hast/unist web) stays in "content"
         // instead of dragging that web into the katex chunk and forming a
         // cycle. markdown + syntax highlighting are coupled enough to share
-        // the "content" chunk; pdfjs and mermaid are self-contained.
+        // the "content" chunk.
         manualChunks(id: string) {
           if (!id.includes("node_modules")) return;
-          if (id.includes("pdfjs-dist")) return "pdfjs";
+          // pdfjs and mermaid are not listed: both are dynamic imports now
+          // (lib/pdf.ts, MermaidBlock.tsx), loaded on the first PDF or diagram.
+          // A manual chunk for either pulled the modules mermaid shares with
+          // the app into that chunk, and with them the whole 2.9 MB into the
+          // startup preload list.
           if (id.includes("/katex/")) return "katex";
-          if (id.includes("/mermaid/") || id.includes("@mermaid-js"))
-            return "mermaid";
+          // Prism grammars load per language (PrismAsyncLight). Matching them
+          // below as "refractor" would fold all ~300 back into the startup chunk.
+          if (id.includes("/refractor/lang/") || id.includes("/async-languages/")) return;
           if (
             id.includes("react-markdown") ||
             id.includes("remark") ||

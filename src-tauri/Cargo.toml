@@ -159,6 +159,14 @@ rand = "0.9"
 # alternative is a state machine nobody would want to change.
 async-stream = "0.3"
 
+# Telling WebView2 the window is hidden (background.rs): Tauri hides and
+# minimises the window but never the webview, so a page in the tray kept
+# painting at full rate. Both crates are already in the tree under wry at these
+# versions — this compiles nothing new. Keep them in step with wry's.
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.38"
+windows-core = "0.61"
+
 [dev-dependencies]
 # Checkpoint tests write real files and restore them — the behaviour under test
 # is filesystem behaviour, so a mock of it would prove nothing.

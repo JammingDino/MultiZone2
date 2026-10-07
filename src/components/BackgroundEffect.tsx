@@ -1,5 +1,52 @@
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "@/store/app";
+import { appActivity, onAppActivity } from "@/lib/appActivity";
+
+/**
+ * Frame pacing for the ambient effects. They are pure decoration, so they
+ * never run faster than 60 fps (a 144 Hz screen used to draw them 144 times a
+ * second, and ran them 2.4x as fast), slow to 20 fps while the window is behind
+ * another one, and stop outright while it is hidden or minimised.
+ *
+ * The effects advance one step per drawn frame, so a slower rate also slows the
+ * motion — which is the right look for something nobody is working in.
+ */
+const FOCUSED_FRAME_MS = 1000 / 60;
+const UNFOCUSED_FRAME_MS = 1000 / 20;
+
+/**
+ * Run `draw` on animation frames, paced as above. Returns the stop function.
+ * A hidden page gets no frames at all; the loop restarts when it is shown.
+ */
+function pacedLoop(draw: () => void): () => void {
+  let raf = 0;
+  let last = 0;
+  let running = false;
+  const tick = (now: number) => {
+    raf = 0;
+    const a = appActivity();
+    if (a.hidden) { running = false; return; }
+    raf = requestAnimationFrame(tick);
+    // A couple of ms of slack: rAF timestamps jitter, and on a 60 Hz screen a
+    // strict comparison would drop every other frame.
+    const gap = (a.focused ? FOCUSED_FRAME_MS : UNFOCUSED_FRAME_MS) - 2;
+    if (now - last < gap) return;
+    last = now;
+    draw();
+  };
+  const start = () => {
+    if (running) return;
+    running = true;
+    raf = requestAnimationFrame(tick);
+  };
+  const unsubscribe = onAppActivity((a) => { if (!a.hidden) start(); });
+  if (!appActivity().hidden) start();
+  return () => {
+    unsubscribe();
+    if (raf) cancelAnimationFrame(raf);
+    running = false;
+  };
+}
 
 function hexToRgb(hex: string): string {
   const clean = (hex.startsWith("#") ? hex.slice(1) : hex).padEnd(6, "0");
@@ -238,20 +285,21 @@ export function BackgroundEffect() {
     return () => window.removeEventListener("mousemove", onMove);
   }, []);
 
-  // Smoothed RAF loop for CSS effects only
+  // Smoothed parallax for the grid. Its motion is CSS; only the pointer offset
+  // comes from here, and once the offset has caught up with the pointer there
+  // is nothing to render — this used to set state, and so re-render, every
+  // frame for as long as the app was open.
   useEffect(() => {
     if (effect !== "grid") return;
-    let raf: number;
     const sm = { x: 0.5, y: 0.5 };
-    function tick() {
+    return pacedLoop(() => {
       const m = mouseRef.current;
-      sm.x += (m.x - sm.x) * 0.045;
-      sm.y += (m.y - sm.y) * 0.045;
+      const dx = m.x - sm.x, dy = m.y - sm.y;
+      if (Math.abs(dx) < 0.0005 && Math.abs(dy) < 0.0005) return;
+      sm.x += dx * 0.045;
+      sm.y += dy * 0.045;
       setCssAnim({ mx: (sm.x - 0.5) * 28, my: (sm.y - 0.5) * 16 });
-      raf = requestAnimationFrame(tick);
-    }
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    });
   }, [effect]);
 
   // Canvas animation loop
@@ -1099,9 +1147,16 @@ export function BackgroundEffect() {
 
       const levels = 11;
       ctx!.lineJoin = "round";
+      // Segments go straight onto the context's own path. This used to build a
+      // Path2D per level and a closure per contour cell, every frame — a steady
+      // stream of garbage from an effect meant to sit quietly in the back.
+      const c2 = ctx!;
+      const seg = (ax: number, ay: number, bx2: number, by2: number) => {
+        c2.moveTo(ax, ay); c2.lineTo(bx2, by2);
+      };
       for (let li = 0; li < levels; li++) {
         const lev = -1 + ((li + 0.5) / levels) * 2;
-        const path = new Path2D();
+        c2.beginPath();
         for (let gy = 0; gy < fieldH - 1; gy++) {
           const row = gy * fieldW, next = row + fieldW;
           const y0 = gy * fieldStep, y1 = y0 + fieldStep;
@@ -1120,9 +1175,6 @@ export function BackgroundEffect() {
             const rY = y0 + (lev - b) / (c - b) * fieldStep;   // right
             const bx = x0 + (lev - d) / (c - d) * fieldStep;   // bottom
             const lY = y0 + (lev - a) / (d - a) * fieldStep;   // left
-            const seg = (ax: number, ay: number, bx2: number, by2: number) => {
-              path.moveTo(ax, ay); path.lineTo(bx2, by2);
-            };
             switch (code) {
               case 1: case 14: seg(tx, y0, x0, lY); break;
               case 2: case 13: seg(tx, y0, x1, rY); break;
@@ -1140,7 +1192,7 @@ export function BackgroundEffect() {
         const index = li % 4 === 0;
         ctx!.strokeStyle = `rgba(${tint((li / (levels - 1)) * 2 - 1)},${index ? 0.5 : 0.26})`;
         ctx!.lineWidth = index ? 1.9 : 1;
-        ctx!.stroke(path);
+        c2.stroke();
       }
       dataRef.current.t = tt;
     }
@@ -1555,15 +1607,14 @@ export function BackgroundEffect() {
         case "mountains":  drawMountains();  break;
         case "fish":       drawFish();       break;
       }
-      rafRef.current = requestAnimationFrame(frame);
     }
 
     window.addEventListener("resize", resize);
     resize();
-    rafRef.current = requestAnimationFrame(frame);
+    const stop = pacedLoop(frame);
     return () => {
       window.removeEventListener("resize", resize);
-      cancelAnimationFrame(rafRef.current);
+      stop();
     };
   }, [effect, speed, density, colorHex, hueSpread]);
 

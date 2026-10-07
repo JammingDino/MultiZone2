@@ -79,6 +79,8 @@ mod stt_api;
 #[cfg(desktop)]
 mod transcode;
 #[cfg(desktop)]
+mod background;
+#[cfg(desktop)]
 mod tray;
 #[cfg(desktop)]
 mod tts_api;
@@ -287,8 +289,10 @@ pub fn run() {
                 if tray::hide_on_close() {
                     api.prevent_close();
                     let _ = window.hide();
+                    background::set_hidden(window.app_handle(), true);
                 }
             }
+            background::on_window_event(window, event);
         })
         .invoke_handler(tauri::generate_handler![
             commands::providers::list_providers,

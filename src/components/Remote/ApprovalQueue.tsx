@@ -18,6 +18,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Check, ChevronDown, ChevronUp, ShieldQuestion, X } from "lucide-react";
 import * as api from "@/lib/tauri";
+import { useApp } from "@/store/app";
 import type { PendingApproval } from "@/lib/types";
 
 /** How often the queue is re-read when something is waiting.
@@ -42,11 +43,22 @@ export function ApprovalQueue() {
     }
   }, []);
 
+  // What the comment above always said, and the code did not: it polled every
+  // two seconds for the life of the app, desktop included. A new approval is
+  // announced by its stream event below; the poll is only for expiry and for
+  // answers given elsewhere, so it runs while there is something to expire.
+  const anyLive = useApp((s) => Object.keys(s.streamingByChat).length > 0);
+  const polling = anyLive || queue.length > 0;
+
   useEffect(() => {
     void refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    if (!polling) return;
     const id = setInterval(() => void refresh(), POLL_MS);
     return () => clearInterval(id);
-  }, [refresh]);
+  }, [refresh, polling]);
 
   // The stream is what makes the first appearance immediate rather than up to
   // two seconds late — the poll is the backstop for expiry, not the mechanism.

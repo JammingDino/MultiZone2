@@ -5,6 +5,111 @@ alone. Newest first. Detail belongs in the linked docs; this is the thread.
 
 ---
 
+## 2026-10-08 (0.19.0) — A lighter app, and the plan cut down to what is current
+
+**Why.** Task Manager showed WebView2 at ~4% CPU and ~5% GPU with the window
+in the tray. The topography background effect was redrawing the whole window
+every frame: Tauri hides the window but never tells WebView2, so the page
+believed it was on screen.
+
+- **Hidden means hidden.** `background.rs` sets the webview invisible and its
+  memory target low while the window is in the tray or minimised; tray, second
+  launch, taskbar and focus all mark it visible again. Timers in a hidden page
+  are throttled to about 1 s, which stream draining tolerates (its timers are
+  not chained, so intensive throttling does not apply).
+- **Effects paced** (`lib/appActivity.ts`): ≤60 fps, 20 fps unfocused, none
+  hidden. Topography's per-frame Path2D and closures are gone; the grid stops
+  re-rendering when the pointer is still.
+- **Pollers.** The approval queue polled every 2 s forever despite a comment
+  saying otherwise; staged edits likewise. Both now poll only while a turn runs.
+- **Startup script 5.9 → 2.3 MB.** mermaid, pdf.js and Prism grammars are
+  dynamic imports. Two traps worth remembering: a `manualChunks` entry for a
+  dynamically imported library pulls the modules it shares with the app into
+  its chunk, and so the whole library back into the preload list; and
+  `PrismAsyncLight` imported from the package root still bundles every grammar
+  through the root's full-Prism export — import it from its own entry.
+- **GPU engine delete.** The release plan's open item turned out to have no
+  code behind it; built (Settings → Dictation) rather than ticked.
+
+**Docs.** RELEASE_PLAN.md drops 0.1.x–0.16.x into RELEASE_HISTORY.md (verbatim,
+by script, links rewritten both ways and checked); their 28 open items are
+carried into the plan. 0.18.2 is written up from its commits. ROADMAP's status
+table had 0.2.x–0.15.x as "Planned" — all shipped — and now matches the tags.
+Six runtime checks confirmed by hand are ticked.
+
+**Version.** 0.18.3 was CI's post-release bump and never shipped; study mode is
+a minor release, so 0.19.0. `releaseBuild` stays false.
+
+**Verified how.** A vite harness with Playwright: 61 / 20 / 0 fps focused /
+unfocused / hidden and 60 again on show; Rust highlighted, a flowchart drawn
+from the lazy chunk. `tsc -b`, `npm test` (105), `cargo test --lib` (453).
+Not run in the Tauri shell: the tray and taskbar paths of `background.rs` are
+the first thing to watch.
+
+---
+
+## 2026-10-08 — Study mode, second slice: cheat sheets, study tabs, projects the model sets up
+
+- **Cheat sheets.** `make_cheatsheet`: one dense Markdown page per topic, kept
+  as a study set (`kind = 'cheatsheet'`, `body` and `updated_at` — migration
+  051), editable by the learner and revisable in place by the model via
+  `set_id`.
+- **Study sets as tabs.** A deck, quiz or sheet pops out of the chat into its
+  own tab (`study:set:<id>`), and a project's review session is
+  `study:review:<projectId>`; `Study/StudyTab.tsx` hosts both, with grid, list
+  and one-at-a-time layouts and printing. An auxiliary tab keeps the chat it
+  came from active, so the workspace panel stays with that chat.
+- **Maths that survives JSON.** `lib/studyMath.ts` puts back LaTeX commands
+  JSON escapes ate (`rac` → form feed + `rac`) and wraps bare LaTeX in short
+  fields; `scripts/study-math.test.mjs`.
+- **Projects the model sets up** (`project_setup.rs`). "New project" and "New
+  study project" from the composer: the project is made under a placeholder,
+  the model names it and picks an icon and colour from the opening message,
+  and it gets a folder under the save directory before the first turn runs.
+  Optionally the model draws an SVG icon (sanitised, kept in
+  `generated_icons` — migration 050) offered under "Generated" in the icon
+  picker for any project or zone. Sources can be added from the same flow and
+  are indexed.
+
+**Verified how.** `tsc -b`, `npm test` (105), `cargo test --lib` (452). Not
+yet run in the Tauri shell.
+
+---
+
+## 2026-10-06 — Study mode, first slice
+
+The backlog entry in [RELEASE_PLAN.md](RELEASE_PLAN.md#backlog--unscheduled),
+cut to grounding + flashcards + quizzes + spaced repetition. No audio, slides,
+probe/plan/teach loop or shared mode surface yet.
+
+- **Per project.** `projects.study_mode` (migration 049), a toggle in the
+  project editor. A chat in a study project gets a `Study mode` system snippet
+  (answer only from the sources, cite everything, say "the sources don't cover
+  this"), the project's `search_local_files` whether or not the chat opted into
+  knowledge, and loses the web tools — withheld from the request and refused at
+  dispatch, the same two locks plan mode uses.
+- **Tools, injected by the mode** (`study::apply`, beside every
+  `apply_plan_mode`): `make_flashcards`, `make_quiz`, `study_progress`. Not a
+  zone tool group, so the toolset budget test is unchanged.
+- **State.** `study_sets`, `study_cards` (SM-2: four grades, "Again" back in 10
+  minutes, Easy ×1.3), `study_questions`, `study_attempts` (every answer kept).
+- **UI.** Inline deck (flip, grade) and quiz (answer, explanation, source,
+  restored on reload) renderers; a Study tab in the workspace panel, shown only
+  in a study project, with the due count, a keyboard review session, and every
+  deck and quiz. Six routes under `/api/projects/:id/study` and `/api/study/*`,
+  and `study-changed` is forwarded to remotes. Exports draw decks and quizzes.
+
+Also fixed in passing: `GET /api/projects` selected its own column list, which
+had been missing the 0.14.5 check commands, so it could not decode a row; it
+uses `PROJECT_COLS` now.
+
+**Verified how.** `cargo test --lib` (447; new tests for the SM-2 ladder,
+lapses, the ease floor, deck/quiz storage, answer-index refusal and the tool
+withholding), `tsc -b`, `npm test` (96, including the route-map drift check).
+Not yet run in the Tauri shell.
+
+---
+
 ## 2026-09-28 (0.18.1) — Visual coherence
 
 A feature request written from an annotated walk-through of the app, then

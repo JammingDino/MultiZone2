@@ -13,12 +13,30 @@
  * change is a new value.
  */
 
-/** A chat's tab id is `chat:<id>`; the new-chat screen is `@home`; anything else is a file's absolute path. */
+/**
+ * A chat's tab id is `chat:<id>`; the new-chat screen is `@home`; a study
+ * set popped out of a chat is `study:set:<id>`, and a project's review
+ * session `study:review:<projectId>`; anything else is a file's absolute path.
+ */
 export const HOME_TAB = "@home";
 export const chatTab = (id: string) => `chat:${id}`;
 export const chatOf = (tab: string | undefined): string | null =>
   tab?.startsWith("chat:") ? tab.slice(5) : null;
-export const isFileTab = (tab: string) => tab !== HOME_TAB && !tab.startsWith("chat:");
+export const studySetTab = (setId: string) => `study:set:${setId}`;
+export const studyReviewTab = (projectId: string) => `study:review:${projectId}`;
+export const isStudyTab = (tab: string) => tab.startsWith("study:");
+/** What a study tab shows, or null for any other tab. */
+export function studyOf(tab: string): { kind: "set" | "review"; id: string } | null {
+  const m = /^study:(set|review):(.+)$/.exec(tab);
+  return m ? { kind: m[1] as "set" | "review", id: m[2] } : null;
+}
+export const isFileTab = (tab: string) => tab !== HOME_TAB && !tab.startsWith("chat:") && !isStudyTab(tab);
+/**
+ * A tab that is not a chat but belongs to one — a file, a study set. Bringing
+ * it forward keeps the chat it was opened from as the active one, so the
+ * workspace panel and the composer's shortcuts stay with that chat.
+ */
+export const isAuxTab = (tab: string) => !!tab && tab !== HOME_TAB && !tab.startsWith("chat:");
 
 export type TabGroup = { kind: "group"; id: string; tabs: string[]; active: string };
 export type TabSplit = { kind: "split"; id: string; dir: "row" | "col"; children: TabNode[]; sizes: number[] };
@@ -160,7 +178,7 @@ export function navigate(layout: TabLayout, tab: string, where: "here" | "tab" |
       fresh.id,
     );
   }
-  if (where === "here" && g.active && !isFileTab(g.active)) {
+  if (where === "here" && g.active && !isAuxTab(g.active)) {
     return withGroups(layout, (x) =>
       x.id === g.id ? { ...x, tabs: x.tabs.map((t) => (t === x.active ? tab : t)), active: tab } : x,
     );
@@ -226,6 +244,22 @@ export function moveTab(layout: TabLayout, tab: string, targetId: string, zone: 
         : g,
     fresh.id,
   );
+}
+
+/**
+ * Pop a study tab out beside the chat: brought forward if it is open; added to
+ * the pane already showing study tabs, so a second quiz does not carve the
+ * column into thirds; otherwise in a new pane to the right of the focused one,
+ * so the chat it came from stays on screen.
+ */
+export function openBeside(layout: TabLayout, tab: string): TabLayout {
+  const home = groupOf(layout, tab);
+  if (home) return activate(layout, home.id, tab);
+  const study = groups(layout.root).find((g) => g.tabs.some(isStudyTab));
+  if (study) {
+    return withGroups(layout, (g) => (g.id === study.id ? { ...g, tabs: [...g.tabs, tab], active: tab } : g), study.id);
+  }
+  return navigate(layout, tab, "right");
 }
 
 export function resizeSplit(layout: TabLayout, splitId: string, sizes: number[]): TabLayout {

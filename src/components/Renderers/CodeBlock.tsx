@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Copy, Check } from "lucide-react";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import SyntaxHighlighter from "react-syntax-highlighter/dist/esm/prism-async-light";
 import { oneDark, oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { MermaidBlock } from "./MermaidBlock";
 import { MathPlotBlock } from "./MathPlotBlock";

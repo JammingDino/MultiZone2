@@ -265,6 +265,9 @@ const VISUAL_TOOLS = new Set([
   "plot_function",
   "render_chart",
   "present_file",
+  "make_flashcards",
+  "make_quiz",
+  "make_cheatsheet",
 ]);
 
 /**
@@ -407,6 +410,10 @@ const LABELS: Record<string, { label: string; icon: ToolIcon }> = {
   draw_diagram: { label: "Diagram", icon: "diagram" },
   plot_function: { label: "Plot", icon: "chart" },
   render_chart: { label: "Chart", icon: "chart" },
+  make_flashcards: { label: "Flashcards", icon: "checklist" },
+  make_quiz: { label: "Quiz", icon: "checklist" },
+  make_cheatsheet: { label: "Cheat sheet", icon: "checklist" },
+  study_progress: { label: "Study progress", icon: "checklist" },
   search_local_files: { label: "Knowledge search", icon: "database" },
   save_memory: { label: "Saved memory", icon: "brain" },
   read_memory: { label: "Read memory", icon: "brain" },
@@ -570,6 +577,11 @@ export function describeTool(item: TraceToolItem): ToolDescription {
       desc.subject = str(args?.caption) ?? (first ? truncate(first, 60) : null);
       break;
     }
+    case "make_flashcards":
+    case "make_quiz":
+    case "make_cheatsheet":
+      desc.subject = str(args?.title);
+      break;
     case "render_chart": {
       const series = Array.isArray(args?.series) ? (args!.series as unknown[]) : [];
       const names = series.map((x) => str(asRecord(x)?.name)).filter(Boolean) as string[];

@@ -44,6 +44,7 @@ import {
   type TraceUnit,
 } from "@/lib/exportTrace";
 import { toPlanData } from "@/components/Renderers/PlanBlock";
+import { toDeckData, toQuizData, toSheetData } from "@/components/Renderers/StudyBlocks";
 import { renderMermaidSvg } from "@/components/Renderers/MermaidBlock";
 import { renderPlotSvg, toMathPlotData } from "@/components/Renderers/MathPlotBlock";
 import { renderChartSvg, toChartData, type ChartTheme } from "@/lib/chart";
@@ -764,6 +765,56 @@ async function renderVisuals(
   return cache;
 }
 
+/**
+ * A study deck or quiz, as something a person could revise from on paper:
+ * each card's question and answer, each question with its options and the
+ * correct one marked. The live renderers' state (grades, answers given) is the
+ * app's, not the transcript's, and is not exported.
+ */
+function renderStudyVisual(name: string, body: any, accent: string, p: Palette): string {
+  const src = (s: string | null) =>
+    s ? `<div style="font-size:11px;color:${p.muted}">${escapeHtml(s)}</div>` : "";
+  if (name === "make_cheatsheet") {
+    const sheet = toSheetData(body);
+    if (!sheet) return "";
+    return `<div><div style="font-weight:600;margin-bottom:6px">${escapeHtml(sheet.title)} · cheat sheet</div>
+      <div style="white-space:pre-wrap;padding:8px 10px;border:1px solid ${p.border};border-radius:6px;font-size:12px">${escapeHtml(sheet.markdown)}</div></div>`;
+  }
+  if (name === "make_flashcards") {
+    const deck = toDeckData(body);
+    if (!deck) return "";
+    const rows = deck.cards
+      .map(
+        (c) => `<li style="margin:0 0 8px;padding:8px 10px;border:1px solid ${p.border};border-radius:6px">
+          <div style="font-weight:600">${escapeHtml(c.front)}</div>
+          <div style="margin-top:4px">${escapeHtml(c.back)}</div>${src(c.source)}</li>`,
+      )
+      .join("");
+    return `<div><div style="font-weight:600;margin-bottom:6px">${escapeHtml(deck.title)} · ${deck.cards.length} cards</div>
+      <ol style="list-style:none;padding:0;margin:0">${rows}</ol></div>`;
+  }
+  const quiz = toQuizData(body);
+  if (!quiz) return "";
+  const rows = quiz.questions
+    .map((q, qi) => {
+      const opts = q.options
+        .map(
+          (o, i) =>
+            `<li style="${i === q.answerIndex ? `color:${accent};font-weight:600` : ""}">${String.fromCharCode(65 + i)}. ${escapeHtml(o)}${
+              i === q.answerIndex ? " ✓" : ""
+            }</li>`,
+        )
+        .join("");
+      return `<li style="margin:0 0 10px"><div style="font-weight:600">${qi + 1}. ${escapeHtml(q.question)}</div>
+        <ul style="list-style:none;padding-left:12px;margin:4px 0">${opts}</ul>${
+          q.explanation ? `<div style="font-size:12px">${escapeHtml(q.explanation)}</div>` : ""
+        }${src(q.source)}</li>`;
+    })
+    .join("");
+  return `<div><div style="font-weight:600;margin-bottom:6px">${escapeHtml(quiz.title)} · ${quiz.questions.length} questions</div>
+    <ol style="list-style:none;padding:0;margin:0">${rows}</ol></div>`;
+}
+
 /** The checklist a `update_plan` call produced, drawn as a checklist. */
 function renderPlanVisual(body: any, accent: string, p: Palette): string {
   const plan = toPlanData(body);
@@ -889,6 +940,9 @@ const NO_PREVIEW = new Set([
   "plot_function",
   "render_chart",
   "present_file",
+  "make_flashcards",
+  "make_quiz",
+  "make_cheatsheet",
   ...SEARCH_TOOLS,
 ]);
 
@@ -977,6 +1031,8 @@ function renderToolCard(
     visual = renderPlanVisual(body, accent, p);
   } else if (name === "present_file") {
     visual = renderFileVisual(body, accent);
+  } else if (name === "make_flashcards" || name === "make_quiz" || name === "make_cheatsheet") {
+    visual = renderStudyVisual(name, body, accent, p);
   } else if (name === "draw_diagram" || name === "plot_function" || name === "render_chart") {
     const svg = visuals.get(key);
     const caption = typeof body?.caption === "string" ? body.caption : null;

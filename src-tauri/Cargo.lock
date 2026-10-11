@@ -3348,7 +3348,7 @@ dependencies = [
 
 [[package]]
 name = "multizone"
-version = "0.18.4"
+version = "0.19.0"
 dependencies = [
  "async-stream",
  "axum",
@@ -3396,6 +3396,8 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "uuid",
+ "webview2-com",
+ "windows-core 0.61.2",
  "wreq",
  "wreq-util",
 ]

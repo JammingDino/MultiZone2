@@ -29,6 +29,7 @@ pub mod context_usage;
 pub mod wsl;
 pub mod terminal;
 pub mod app_control;
+pub mod study;
 
 use crate::commands::messages::{EngineCtx, StreamSink};
 use crate::error::AppResult;
@@ -429,6 +430,9 @@ pub fn tool_safety_by_name(name: &str) -> u8 {
         // Rolling context's notes are the model's own bookkeeping (0.18).
         | "mark_important" | "forget_important"
         | "list_scheduled_runs"
+        // The study tools write only to the project's own study state, which
+        // the user is shown the moment it exists.
+        | "make_flashcards" | "make_quiz" | "make_cheatsheet" | "study_progress"
         // `search_knowledge` is the pre-0.9.0 name for `search_local_files`;
         // stored tool-call history still carries it.
         | "search_local_files" | "search_knowledge" => 0,
@@ -617,6 +621,13 @@ async fn dispatch_inner(
         }
     }
 
+    // Study mode's second lock: the web tools are withheld from a study
+    // project's request, but a model can still name one. Same reasoning as
+    // plan mode's refusal in the turn loop; the lookup only runs for a web tool.
+    if crate::study::withholds(name) && crate::study::study_project_for_chat(db, chat_id).await.is_some() {
+        return Ok(crate::study::refusal(name));
+    }
+
     match name {
         "get_current_datetime" => datetime::run(args).await,
         // The retired `web_search` / `extract_url` names still route here: they
@@ -684,6 +695,17 @@ async fn dispatch_inner(
         "mark_important" => rolling::mark(args, db, chat_id).await,
         "forget_important" => rolling::forget(args, db, chat_id).await,
         "read_context" => context_usage::run(args, db, chat_id, http).await,
+        "make_flashcards" | "make_quiz" | "make_cheatsheet" => {
+            let out = match name {
+                "make_quiz" => study::make_quiz(args, db, chat_id).await,
+                "make_cheatsheet" => study::make_cheatsheet(args, db, chat_id).await,
+                _ => study::make_flashcards(args, db, chat_id).await,
+            };
+            use tauri::Emitter;
+            let _ = sink.app().emit("study-changed", serde_json::json!({ "chatId": chat_id }));
+            out
+        }
+        "study_progress" => study::progress(db, chat_id).await,
         "spawn_subagent" => subchat::spawn(args, ctx, sink, caller_zone_id, chat_id).await,
         "send_subchat_message" => subchat::send(args, ctx, sink).await,
         "collect_subagents" => subchat::collect(args, db, chat_id).await,

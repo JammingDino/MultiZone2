@@ -1251,6 +1251,21 @@ pub async fn effective_zone_and_provider(
     }
 }
 
+/// The zone and provider a chat with no zone would use: the base zone if one
+/// is configured, else the default provider's model with no prompt or tools.
+/// For one-off requests that belong to no chat (drawing a project's icon from
+/// its settings).
+pub async fn base_zone_and_provider(db: &SqlitePool) -> AppResult<(Zone, Provider)> {
+    if let Some(zid) = base_zone_id(db).await {
+        if let Ok(zp) = load_zone_and_provider(db, &zid).await {
+            return Ok(zp);
+        }
+    }
+    let provider = default_provider(db).await?;
+    let zone = simple_zone(&provider)?;
+    Ok((zone, provider))
+}
+
 /// How a single turn picks its zone.
 #[derive(Clone)]
 enum TurnMode {
@@ -1888,6 +1903,7 @@ async fn run_participant_turn(
     }
     // Plan mode (0.12.0). Re-evaluated after every tool batch below, because the
     // model can move the chat in or out of it mid-turn.
+    crate::study::apply(&ctx.db, chat_id, &mut tools).await;
     let mut planning = apply_plan_mode(&ctx.db, chat_id, &mut tools, persp.is_some()).await;
     // Per-zone MCP tool danger levels, refreshed on zone switch, consulted by the
     // approval gate alongside built-in `tool_safety_by_name`.
@@ -2348,6 +2364,7 @@ async fn run_participant_turn(
                 if suppress_ask_user {
                     strip_ask_user(&mut tools);
                 }
+                crate::study::apply(&ctx.db, chat_id, &mut tools).await;
                 planning = apply_plan_mode(&ctx.db, chat_id, &mut tools, persp.is_some()).await;
                 mcp_danger = {
                     let ids: Vec<String> =
@@ -3246,6 +3263,7 @@ async fn run_participant_turn(
             if suppress_ask_user {
                 strip_ask_user(&mut tools);
             }
+            crate::study::apply(&ctx.db, chat_id, &mut tools).await;
             planning = apply_plan_mode(&ctx.db, chat_id, &mut tools, persp.is_some()).await;
         }
 
@@ -3285,6 +3303,7 @@ async fn run_participant_turn(
                         if suppress_ask_user {
                             strip_ask_user(&mut tools);
                         }
+                        crate::study::apply(&ctx.db, chat_id, &mut tools).await;
                         planning = apply_plan_mode(&ctx.db, chat_id, &mut tools, persp.is_some()).await;
                         mcp_danger = {
                             let ids: Vec<String> =

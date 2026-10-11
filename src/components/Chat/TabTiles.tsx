@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Columns2, MessageSquare, Plus, X } from "lucide-react";
+import { Columns2, GraduationCap, MessageSquare, Plus, Repeat, X } from "lucide-react";
 import { useApp } from "@/store/app";
 import { iconFor } from "@/components/Workspace/FilesPanel";
 import {
@@ -14,6 +14,7 @@ import {
   measure,
   moveTab,
   resizeSplit,
+  studyOf,
   type Divider,
   type DropZone,
   type Rect,
@@ -84,6 +85,8 @@ function nameOf(tab: string): string {
   const id = chatOf(tab);
   if (id) return useApp.getState().chats.find((c) => c.id === id)?.title || "Untitled chat";
   if (tab === HOME_TAB) return "New chat";
+  const study = studyOf(tab);
+  if (study) return useApp.getState().studyTabTitles[tab] || (study.kind === "review" ? "Review" : "Study");
   return tab.slice(Math.max(tab.lastIndexOf("/"), tab.lastIndexOf("\\")) + 1);
 }
 
@@ -100,6 +103,7 @@ export function TabTiles({ renderTab }: { renderTab: (tab: string) => ReactNode 
   const change = useApp((s) => s.updateTabLayout);
   // Titles are read when drawn; subscribing keeps the strip current as they change.
   useApp((s) => s.chats);
+  useApp((s) => s.studyTabTitles);
   const box = useRef<HTMLDivElement>(null);
   const [drag, setDragState] = useState<Drag | null>(null);
   // The drop reads this, not `drag`: the pointer listeners outlive the render
@@ -270,11 +274,14 @@ function Tab({
 }) {
   const dragged = useRef(false);
   const label = nameOf(tab);
+  const study = studyOf(tab);
   const { Icon, color } = chatOf(tab)
     ? { Icon: MessageSquare, color: undefined }
     : tab === HOME_TAB
       ? { Icon: Plus, color: undefined }
-      : iconFor(label);
+      : study
+        ? { Icon: study.kind === "review" ? Repeat : GraduationCap, color: "var(--color-accent)" }
+        : iconFor(label);
 
   return (
     <div

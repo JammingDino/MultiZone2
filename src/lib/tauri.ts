@@ -57,6 +57,12 @@ import type {
   Message,
   PendingMode,
   Project,
+  GeneratedIcon,
+  StudyAnswerResult,
+  StudyCard,
+  StudyGrade,
+  StudyOverview,
+  StudySetDetail,
   Provider,
   SessionUsage,
   Skill,
@@ -221,6 +227,38 @@ export const upsertProject = (project: Partial<Project> & { name: string }) =>
 /** Delete a project. `deleteChats` false (default) moves its chats to Ungrouped; true deletes them too. */
 export const deleteProject = (id: string, deleteChats = false) =>
   invoke<void>("delete_project", { id, deleteChats });
+
+// Projects set up by the model (name, icon, colour, folder) from a first message.
+export const setupNewProject = (
+  projectId: string,
+  chatId: string,
+  prompt: string,
+  iconIds: string[],
+  colors: string[],
+) => invoke<Project>("setup_new_project", { projectId, chatId, prompt, iconIds, colors });
+/** Ask a model to draw an SVG icon for a project; it lands in the icon picker
+ *  under "Generated" and becomes the project's icon. Resolves when drawn. */
+export const drawProjectIcon = (projectId: string, chatId?: string | null) =>
+  invoke<Project>("draw_project_icon", { projectId, chatId: chatId ?? null });
+export const listGeneratedIcons = () => invoke<GeneratedIcon[]>("list_generated_icons");
+export const deleteGeneratedIcon = (iconId: string) => invoke<void>("delete_generated_icon", { iconId });
+/** Copy files into a project's directory and index them. */
+export const addProjectSources = (projectId: string, paths: string[]) =>
+  invoke<number>("add_project_sources", { projectId, paths });
+
+// Study mode — decks, quizzes and their review state, per project.
+export const studyOverview = (projectId: string) =>
+  invoke<StudyOverview>("study_overview", { projectId });
+export const getStudySet = (setId: string) => invoke<StudySetDetail>("get_study_set", { setId });
+export const dueStudyCards = (projectId: string, limit?: number) =>
+  invoke<StudyCard[]>("due_study_cards", { projectId, limit });
+export const reviewStudyCard = (cardId: string, grade: StudyGrade) =>
+  invoke<StudyCard>("review_study_card", { cardId, grade });
+export const answerStudyQuestion = (questionId: string, chosenIndex: number) =>
+  invoke<StudyAnswerResult>("answer_study_question", { questionId, chosenIndex });
+export const deleteStudySet = (setId: string) => invoke<void>("delete_study_set", { setId });
+export const updateStudyCheatsheet = (setId: string, body: string, title?: string) =>
+  invoke<StudySetDetail>("update_study_cheatsheet", { setId, body, title });
 
 // Knowledge (RAG) — project-scoped, sourced from the project directory.
 export const setProjectKbConfig = (
@@ -822,6 +860,10 @@ export function onChatZoneUpdated(
     handler(e.payload),
   );
 }
+/** A study deck or quiz was made, reviewed, answered or deleted. */
+export function onStudyChanged(handler: () => void): Promise<UnlistenFn> {
+  return listen("study-changed", () => handler());
+}
 /** A scheduled run was added, changed, or fired (0.18). */
 export function onSchedulesChanged(handler: () => void): Promise<UnlistenFn> {
   return listen("schedules-changed", () => handler());
@@ -922,6 +964,7 @@ export const installLocalStt = (model: string, gpu: boolean) =>
   invoke<void>("install_local_stt", { model, gpu });
 export const cancelLocalSttInstall = () => invoke<void>("cancel_local_stt_install");
 export const removeLocalSttModel = (model: string) => invoke<void>("remove_local_stt_model", { model });
+export const removeLocalSttGpuEngine = () => invoke<void>("remove_local_stt_gpu_engine");
 export function onLocalSttProgress(
   handler: (p: import("./types").LocalSttProgress) => void,
 ): Promise<UnlistenFn> {

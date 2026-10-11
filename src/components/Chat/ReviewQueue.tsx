@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ClipboardCheck, Check, X, Loader2, TriangleAlert } from "lucide-react";
 import * as api from "@/lib/tauri";
+import { useApp } from "@/store/app";
 import type { ApplyOutcome, StagedEdit } from "@/lib/types";
 import { DiffView } from "@/components/common/DiffView";
 import { PRIMARY_ACTION } from "@/lib/chrome";
@@ -44,10 +45,17 @@ export function ReviewQueue({ chatId, embedded }: { chatId: string; embedded?: b
   // navigating away and back. Polling rather than a new event: the queue is off
   // for most people, the cost is one indexed query, and it also catches an edit
   // staged by a background sub-agent in another chat of the same session.
+  // Only while some turn is running — nothing stages an edit between turns —
+  // with one last read when the last one ends.
+  const anyLive = useApp((s) => Object.keys(s.streamingByChat).length > 0);
   useEffect(() => {
+    if (!anyLive) {
+      void refresh();
+      return;
+    }
     const t = setInterval(() => void refresh(), 2000);
     return () => clearInterval(t);
-  }, [refresh]);
+  }, [refresh, anyLive]);
 
   if (edits.length === 0) return null;
 

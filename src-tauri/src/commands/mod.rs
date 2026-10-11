@@ -27,6 +27,7 @@ pub mod usage;
 pub mod search;
 pub mod runs;
 pub mod schedules;
+pub mod study;
 pub mod remote;
 
 pub fn now_ts() -> i64 {

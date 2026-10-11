@@ -52,6 +52,8 @@ pub const FORWARDED: &[&str] = &[
     "chat-file-synced",
     "memory-updated",
     "knowledge-updated",
+    // A study deck or quiz was made or answered (study mode).
+    "study-changed",
     // Preferences changed by another window, a script, or a model.
     "settings-updated",
     // Any write that went through the API, by route — what the window reads to

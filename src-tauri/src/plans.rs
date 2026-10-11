@@ -451,6 +451,8 @@ pub fn allowed_in_plan_mode(name: &str) -> bool {
             | "smart_compact"
             | "mark_important"
             | "forget_important"
+            // Reading how a learner is doing (study mode).
+            | "study_progress"
     )
 }
 

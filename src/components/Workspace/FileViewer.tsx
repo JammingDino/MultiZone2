@@ -4,7 +4,7 @@ import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { formatBytes } from "@/lib/format";
 import { Markdown } from "@/components/Renderers/Markdown";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import SyntaxHighlighter from "react-syntax-highlighter/dist/esm/prism-async-light";
 import { oneDark, oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { useIsLightMode } from "@/components/Renderers/CodeBlock";
 import { openPdf, drawPdfPage, type PdfDoc } from "@/lib/pdf";

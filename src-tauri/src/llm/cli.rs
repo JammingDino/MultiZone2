@@ -7,11 +7,16 @@
 //! OpenAI-compatible SSE chunks the stream consumer already reads — so chat,
 //! panels, compaction and titles work unchanged.
 //!
-//! The CLI is used as a model, not as an agent: Claude Code runs with no
-//! tools, no MCP servers, no user settings and the app's own system prompt;
-//! Codex runs read-only. The app's own tools are not offered to it.
-//! ponytail: no tool bridge; expose the app's tools to the CLI over MCP if
-//! people want tool use through a subscription.
+//! The CLI is used as a model, not as an agent: Claude Code runs with none of
+//! its own tools, no user settings and the app's own system prompt; Codex
+//! runs read-only.
+//!
+//! The app's tools reach it over MCP, but are never run by it. A loopback MCP
+//! server lives for the request and only lists them. When the model calls
+//! one, the call goes back to the app as an ordinary tool call and the CLI is
+//! stopped at the end of that message. The app's own loop then runs the tool
+//! (approvals, visuals, checkpoints, runaway guards) and sends the result on
+//! the next request, exactly as it would to an HTTP provider.
 
 use crate::error::{AppError, AppResult};
 use crate::llm::types::*;
@@ -64,6 +69,12 @@ impl Cli {
 /// Returns (system prompt, prompt).
 fn flatten(messages: &[ChatMessage]) -> (String, String) {
     let text = |m: &ChatMessage| crate::llm::responses::text_of(&m.content);
+    // Tool results carry only the call id; the transcript names the tool.
+    let names: std::collections::HashMap<&str, &str> = messages
+        .iter()
+        .flat_map(|m| m.tool_calls.iter().flatten())
+        .map(|c| (c.id.as_str(), c.function.name.as_str()))
+        .collect();
     let system: Vec<String> =
         messages.iter().filter(|m| m.role == "system").map(text).collect();
     let rest: Vec<&ChatMessage> = messages.iter().filter(|m| m.role != "system").collect();
@@ -78,13 +89,19 @@ fn flatten(messages: &[ChatMessage]) -> (String, String) {
         out.push_str("<conversation_so_far>\n");
         for m in history {
             let who = match m.role.as_str() {
-                "assistant" => "Assistant",
-                "tool" => "Tool result",
-                _ => "User",
+                "assistant" => "Assistant".to_string(),
+                "tool" => {
+                    let id = m.tool_call_id.as_deref().unwrap_or("");
+                    format!("Result of {}", names.get(id).copied().unwrap_or("a tool"))
+                }
+                _ => "User".to_string(),
             };
-            out.push_str(&format!("\n[{who}]\n{}\n", text(m)));
+            let body = text(m);
+            if !body.trim().is_empty() || m.tool_calls.is_none() {
+                out.push_str(&format!("\n[{who}]\n{body}\n"));
+            }
             for c in m.tool_calls.iter().flatten() {
-                out.push_str(&format!("(called {} with {})\n", c.function.name, c.function.arguments));
+                out.push_str(&format!("\n[Assistant called {}]\n{}\n", c.function.name, c.function.arguments));
             }
         }
         out.push_str("</conversation_so_far>\n\n");
@@ -136,8 +153,19 @@ fn command(cli: Cli) -> tokio::process::Command {
 /// Translates one CLI's event lines into OpenAI stream chunks.
 #[derive(Default)]
 struct Translator {
+    /// The CLI reached the end of its answer.
     done: bool,
+    /// The model called an app tool: end the stream here, before the CLI
+    /// tries to run it.
+    cut: bool,
+    /// Claude content-block index → OpenAI tool-call index.
+    blocks: std::collections::HashMap<u64, usize>,
+    /// Claude's running usage, for a turn cut before its `result` line.
+    usage: Option<Value>,
 }
+
+/// What Claude Code calls a tool served by the bridge.
+const CLAUDE_PREFIX: &str = "mcp__multizone__";
 
 impl Translator {
     /// Chunks for one line, or the error the CLI reported.
@@ -152,22 +180,67 @@ impl Translator {
             }})
         };
         let n = |u: &Value, k: &str| u.get(k).and_then(Value::as_i64).unwrap_or(0);
+        let call = |index: usize, id: Option<&str>, name: Option<&str>, args: &str| {
+            let mut f = json!({ "arguments": args });
+            if let Some(name) = name {
+                f["name"] = json!(name);
+            }
+            let mut c = json!({ "index": index, "function": f });
+            if let Some(id) = id {
+                c["id"] = json!(id);
+                c["type"] = json!("function");
+            }
+            json!({ "choices": [{ "index": 0, "delta": { "tool_calls": [c] } }] })
+        };
+        let tool_finish = || json!({ "choices": [{ "index": 0, "delta": {}, "finish_reason": "tool_calls" }] });
         let kind = v.get("type").and_then(Value::as_str).unwrap_or("");
         match cli {
             Cli::Claude => match kind {
                 "stream_event" => {
                     let ev = &v["event"];
-                    if ev["type"] != "content_block_delta" {
-                        return Ok(vec![]);
-                    }
-                    let d = &ev["delta"];
-                    Ok(match d["type"].as_str() {
-                        Some("text_delta") => vec![delta("content", d["text"].as_str().unwrap_or(""))],
-                        Some("thinking_delta") => {
-                            vec![delta("reasoning_content", d["thinking"].as_str().unwrap_or(""))]
+                    let block = ev["index"].as_u64().unwrap_or(0);
+                    match ev["type"].as_str() {
+                        Some("content_block_start") if ev["content_block"]["type"] == "tool_use" => {
+                            let b = &ev["content_block"];
+                            let name = b["name"].as_str().unwrap_or("");
+                            let name = name.strip_prefix(CLAUDE_PREFIX).unwrap_or(name);
+                            let index = self.blocks.len();
+                            self.blocks.insert(block, index);
+                            Ok(vec![call(index, b["id"].as_str(), Some(name), "")])
                         }
-                        _ => vec![],
-                    })
+                        Some("content_block_delta") => {
+                            let d = &ev["delta"];
+                            Ok(match d["type"].as_str() {
+                                Some("text_delta") => vec![delta("content", d["text"].as_str().unwrap_or(""))],
+                                Some("thinking_delta") => {
+                                    vec![delta("reasoning_content", d["thinking"].as_str().unwrap_or(""))]
+                                }
+                                Some("input_json_delta") => match self.blocks.get(&block) {
+                                    Some(&i) => vec![call(i, None, None, d["partial_json"].as_str().unwrap_or(""))],
+                                    None => vec![],
+                                },
+                                _ => vec![],
+                            })
+                        }
+                        Some("message_delta") => {
+                            self.usage = Some(ev["usage"].clone());
+                            Ok(vec![])
+                        }
+                        // The end of a message that called tools: the CLI would
+                        // run them next, and the app is the one that should.
+                        Some("message_stop") if !self.blocks.is_empty() => {
+                            self.done = true;
+                            self.cut = true;
+                            let mut out = vec![tool_finish()];
+                            if let Some(u) = &self.usage {
+                                let cached = n(u, "cache_read_input_tokens");
+                                let prompt = n(u, "input_tokens") + n(u, "cache_creation_input_tokens") + cached;
+                                out.push(usage(prompt, cached, n(u, "output_tokens")));
+                            }
+                            Ok(out)
+                        }
+                        _ => Ok(vec![]),
+                    }
                 }
                 "result" => {
                     self.done = true;
@@ -183,6 +256,20 @@ impl Translator {
                 _ => Ok(vec![]),
             },
             Cli::Codex => match kind {
+                // Codex reports a tool call as it starts; stop it there.
+                "item.started"
+                    if v["item"]["type"] == "mcp_tool_call" && v["item"]["server"] == "multizone" =>
+                {
+                    let item = &v["item"];
+                    let args = match &item["arguments"] {
+                        Value::String(s) => s.clone(),
+                        Value::Null => "{}".to_string(),
+                        a => a.to_string(),
+                    };
+                    self.done = true;
+                    self.cut = true;
+                    Ok(vec![call(0, item["id"].as_str(), item["tool"].as_str(), &args), tool_finish()])
+                }
                 "item.completed" => {
                     let item = &v["item"];
                     let text = item["text"].as_str().unwrap_or("");
@@ -206,12 +293,98 @@ impl Translator {
     }
 }
 
+/// Ends the request's MCP server.
+struct Server(tokio::task::JoinHandle<()>);
+impl Drop for Server {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// The app's tools in MCP's shape.
+fn mcp_tools(tools: &[Tool]) -> Value {
+    Value::Array(
+        tools
+            .iter()
+            .map(|t| {
+                json!({
+                    "name": t.function.name,
+                    "description": t.function.description,
+                    "inputSchema": t.function.parameters,
+                })
+            })
+            .collect(),
+    )
+}
+
+/// One JSON-RPC message to the bridge, answered; `None` for a notification.
+/// A `tools/call` is never answered: by then the stream has been cut, the CLI
+/// is being stopped, and the app runs the tool itself.
+async fn rpc(tools: &Value, msg: &Value) -> Option<Value> {
+    let id = msg.get("id")?.clone();
+    let result = match msg["method"].as_str() {
+        Some("initialize") => json!({
+            "protocolVersion": msg["params"]["protocolVersion"].as_str().unwrap_or("2025-06-18"),
+            "capabilities": { "tools": {} },
+            "serverInfo": { "name": "multizone", "version": env!("CARGO_PKG_VERSION") },
+        }),
+        Some("tools/list") => json!({ "tools": tools }),
+        Some("ping") => json!({}),
+        Some("tools/call") => std::future::pending().await,
+        _ => {
+            return Some(json!({ "jsonrpc": "2.0", "id": id,
+                "error": { "code": -32601, "message": "method not found" } }))
+        }
+    };
+    Some(json!({ "jsonrpc": "2.0", "id": id, "result": result }))
+}
+
+/// A streamable-HTTP MCP server on loopback for one request, at an
+/// unguessable path. Returns its URL.
+async fn serve_tools(tools: &[Tool]) -> AppResult<(String, Server)> {
+    use axum::{http::StatusCode, response::IntoResponse, routing::post, Json, Router};
+    let tools = std::sync::Arc::new(mcp_tools(tools));
+    let path = format!("/mcp/{}", uuid::Uuid::new_v4().simple());
+    let app = Router::new().route(
+        &path,
+        post(move |Json(msg): Json<Value>| {
+            let tools = tools.clone();
+            async move {
+                match rpc(&tools, &msg).await {
+                    Some(reply) => Json(reply).into_response(),
+                    None => StatusCode::ACCEPTED.into_response(),
+                }
+            }
+        })
+        // No server-initiated stream; the spec allows saying so.
+        .get(|| async { StatusCode::METHOD_NOT_ALLOWED })
+        .delete(|| async { StatusCode::METHOD_NOT_ALLOWED }),
+    );
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await?;
+    let url = format!("http://{}{path}", listener.local_addr()?);
+    let task = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    Ok((url, Server(task)))
+}
+
 /// Spawn the CLI for this request and return its reply as an SSE response.
 pub async fn stream(cli: Cli, req: &ChatRequest) -> AppResult<reqwest::Response> {
     let model = safe_model(&req.model)?;
-    let (system, prompt) = flatten(&req.messages);
+    let (system, mut prompt) = flatten(&req.messages);
     let dir = std::env::temp_dir();
     let mut guard = None;
+    let mut mcp_guard = None;
+
+    // The tools this step offers, served to the CLI for the life of the run.
+    let server = match req.tools.as_deref().filter(|t| !t.is_empty()) {
+        Some(t) => Some(serve_tools(t).await?),
+        None => None,
+    };
+    // Neither CLI can be made to call a particular tool; ask instead.
+    if let Some(name) = req.tool_choice.as_ref().and_then(|c| c["function"]["name"].as_str()) {
+        prompt.push_str(&format!("\n\nAnswer by calling the {name} tool."));
+    }
 
     let mut cmd = command(cli);
     match cli {
@@ -232,6 +405,13 @@ pub async fn stream(cli: Cli, req: &ChatRequest) -> AppResult<reqwest::Response>
             if let Some(m) = model {
                 cmd.args(["--model", m]);
             }
+            if let Some((url, _)) = &server {
+                let path = dir.join(format!("multizone-mcp-{}.json", uuid::Uuid::new_v4()));
+                let config = json!({ "mcpServers": { "multizone": { "type": "http", "url": url } } });
+                std::fs::write(&path, config.to_string())?;
+                cmd.arg("--mcp-config").arg(&path);
+                mcp_guard = Some(TempFile(path));
+            }
             if !system.trim().is_empty() {
                 // A file, not an argument: system prompts outgrow Windows'
                 // 32K command line.
@@ -248,6 +428,9 @@ pub async fn stream(cli: Cli, req: &ChatRequest) -> AppResult<reqwest::Response>
             }
             if let Some(e) = req.reasoning_effort.as_deref().filter(|e| ["low", "medium", "high"].contains(e)) {
                 cmd.args(["-c", &format!("model_reasoning_effort={e}")]);
+            }
+            if let Some((url, _)) = &server {
+                cmd.args(["-c", &format!("mcp_servers.multizone.url={}", json!(url))]);
             }
             cmd.arg("-");
         }
@@ -293,9 +476,17 @@ pub async fn stream(cli: Cli, req: &ChatRequest) -> AppResult<reqwest::Response>
         stderr: Option<tokio::process::ChildStderr>,
         t: Translator,
         ended: bool,
-        _guard: Option<TempFile>,
+        _guards: (Option<TempFile>, Option<TempFile>, Option<(String, Server)>),
     }
-    let st = St { cli, child, lines: stdout, stderr: Some(stderr), t: Translator::default(), ended: false, _guard: guard };
+    let st = St {
+        cli,
+        child,
+        lines: stdout,
+        stderr: Some(stderr),
+        t: Translator::default(),
+        ended: false,
+        _guards: (guard, mcp_guard, server),
+    };
 
     // Dropping the stream (stop button, finished turn) drops the child, and
     // kill_on_drop ends the process.
@@ -310,8 +501,14 @@ pub async fn stream(cli: Cli, req: &ChatRequest) -> AppResult<reqwest::Response>
                     match st.t.line(st.cli, &v) {
                         Ok(chunks) if chunks.is_empty() => continue,
                         Ok(chunks) => {
-                            let sse: String =
+                            let mut sse: String =
                                 chunks.iter().map(|c| format!("data: {c}\n\n")).collect();
+                            // Ending here drops the state, and with it the
+                            // CLI, before it can try to run the tool.
+                            if st.t.cut {
+                                sse.push_str("data: [DONE]\n\n");
+                                st.ended = true;
+                            }
                             return Some((Ok::<_, std::io::Error>(sse), st));
                         }
                         Err(msg) => {
@@ -455,6 +652,121 @@ mod tests {
         assert_eq!(u.usage.unwrap().cached_prompt_tokens(), 40);
         let fail = json!({"type":"turn.failed","error":{"message":"usage limit"}});
         assert_eq!(t.line(Cli::Codex, &fail).unwrap_err(), "usage limit");
+    }
+
+    #[test]
+    fn a_claude_tool_call_is_handed_back_and_the_run_cut() {
+        let mut t = Translator::default();
+        let ev = |e: Value| json!({ "type": "stream_event", "event": e });
+        let start = ev(json!({"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"mcp__multizone__read_file","input":{}}}));
+        let c: StreamChunk = serde_json::from_value(t.line(Cli::Claude, &start).unwrap()[0].clone()).unwrap();
+        let tc = &c.choices[0].delta.tool_calls.as_ref().unwrap()[0];
+        assert_eq!((tc.index, tc.id.as_deref()), (0, Some("toolu_1")));
+        assert_eq!(tc.function.as_ref().unwrap().name.as_deref(), Some("read_file"), "prefix stripped");
+
+        let args = ev(json!({"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"path\":"}}));
+        let c: StreamChunk = serde_json::from_value(t.line(Cli::Claude, &args).unwrap()[0].clone()).unwrap();
+        let tc = &c.choices[0].delta.tool_calls.as_ref().unwrap()[0];
+        assert_eq!(tc.function.as_ref().unwrap().arguments.as_deref(), Some("{\"path\":"));
+
+        t.line(Cli::Claude, &ev(json!({"type":"message_delta","usage":{"input_tokens":3,"output_tokens":4}}))).unwrap();
+        let out = t.line(Cli::Claude, &ev(json!({"type":"message_stop"}))).unwrap();
+        let c: StreamChunk = serde_json::from_value(out[0].clone()).unwrap();
+        assert_eq!(c.choices[0].finish_reason.as_deref(), Some("tool_calls"));
+        assert!(t.cut && out.len() == 2, "cut, with usage");
+
+        // A message with no tool calls is not cut; it ends on `result`.
+        let mut plain = Translator::default();
+        assert!(plain.line(Cli::Claude, &ev(json!({"type":"message_stop"}))).unwrap().is_empty());
+        assert!(!plain.cut);
+    }
+
+    #[test]
+    fn a_codex_tool_call_is_handed_back() {
+        let mut t = Translator::default();
+        let other = json!({"type":"item.started","item":{"type":"mcp_tool_call","server":"github","tool":"x","arguments":{}}});
+        assert!(t.line(Cli::Codex, &other).unwrap().is_empty(), "someone else's server");
+        let ours = json!({"type":"item.started","item":{"id":"item_2","type":"mcp_tool_call","server":"multizone","tool":"list_dir","arguments":{"path":"."}}});
+        let out = t.line(Cli::Codex, &ours).unwrap();
+        let c: StreamChunk = serde_json::from_value(out[0].clone()).unwrap();
+        let f = c.choices[0].delta.tool_calls.as_ref().unwrap()[0].function.clone().unwrap();
+        assert_eq!((f.name.as_deref(), f.arguments.as_deref()), (Some("list_dir"), Some("{\"path\":\".\"}")));
+        assert!(t.cut);
+    }
+
+    #[test]
+    fn tool_history_reads_as_a_transcript() {
+        let mut a = msg("assistant", "");
+        a.content = None;
+        a.tool_calls = Some(vec![ToolCall {
+            id: "c1".into(),
+            call_type: "function".into(),
+            function: FunctionCall { name: "read_file".into(), arguments: "{\"path\":\"a\"}".into() },
+        }]);
+        let mut r = msg("tool", "hello");
+        r.tool_call_id = Some("c1".into());
+        let (_, p) = flatten(&[msg("user", "read a"), a, r]);
+        assert!(p.contains("[Assistant called read_file]\n{\"path\":\"a\"}"), "{p}");
+        assert!(p.contains("[Result of read_file]\nhello"), "{p}");
+        assert!(p.ends_with("Continue."), "a turn after a tool result has no new user message");
+    }
+
+    #[tokio::test]
+    async fn the_bridge_lists_tools_and_never_runs_them() {
+        let tools = json!([{ "name": "read_file" }]);
+        let init = rpc(&tools, &json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26"}})).await.unwrap();
+        assert_eq!(init["result"]["protocolVersion"], "2025-03-26");
+        assert!(rpc(&tools, &json!({"jsonrpc":"2.0","method":"notifications/initialized"})).await.is_none());
+        let list = rpc(&tools, &json!({"jsonrpc":"2.0","id":2,"method":"tools/list"})).await.unwrap();
+        assert_eq!(list["result"]["tools"][0]["name"], "read_file");
+        let msg = json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"read_file"}});
+        let call = rpc(&tools, &msg);
+        assert!(tokio::time::timeout(std::time::Duration::from_millis(100), call).await.is_err());
+    }
+
+    /// The bridge end to end: Claude sees an app tool over MCP, calls it, and
+    /// the call comes back as an OpenAI tool call. `-- --ignored`, as below.
+    #[tokio::test]
+    #[ignore]
+    async fn live_claude_tool_call() {
+        let tool = Tool {
+            tool_type: "function".into(),
+            function: ToolFunction {
+                name: "get_weather".into(),
+                description: "Current weather for a city.".into(),
+                parameters: json!({"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}),
+            },
+        };
+        let req = ChatRequest {
+            model: "haiku".into(),
+            messages: vec![msg("system", "Use your tools."), msg("user", "What's the weather in Oslo?")],
+            temperature: None, max_tokens: None, top_p: None, tools: Some(vec![tool]), tool_choice: None,
+            reasoning_effort: None, chat_template_kwargs: None, thinking_extra: Default::default(),
+            thinking_ask: None, stream_options: None, stream: true,
+        };
+        let response = stream(Cli::Claude, &req).await.unwrap();
+        let s = crate::llm::client::LlmStream { response, dialect: crate::llm::responses::Dialect::ChatCompletions };
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let agg = crate::llm::streaming::consume_stream(s, cancel, false, |_| {}).await.unwrap();
+        assert!(agg.error.is_none(), "{:?}", agg.error);
+        assert_eq!(agg.finish_reason.as_deref(), Some("tool_calls"));
+        assert_eq!(agg.tool_calls[0].function.name, "get_weather");
+        assert!(agg.tool_calls[0].function.arguments.contains("Oslo"), "{}", agg.tool_calls[0].function.arguments);
+
+        // The app ran it; the result goes back and the model answers from it
+        // instead of calling again.
+        let mut next = req.clone();
+        let mut called = msg("assistant", "");
+        called.tool_calls = Some(agg.tool_calls.clone());
+        let mut result = msg("tool", "Oslo: -3°C, snowing");
+        result.tool_call_id = Some(agg.tool_calls[0].id.clone());
+        next.messages.extend([called, result]);
+        let response = stream(Cli::Claude, &next).await.unwrap();
+        let s = crate::llm::client::LlmStream { response, dialect: crate::llm::responses::Dialect::ChatCompletions };
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let agg = crate::llm::streaming::consume_stream(s, cancel, false, |_| {}).await.unwrap();
+        assert!(agg.tool_calls.is_empty(), "called again: {:?}", agg.tool_calls);
+        assert!(agg.content.contains("-3") || agg.content.to_lowercase().contains("snow"), "{}", agg.content);
     }
 
     /// Against the real CLI, through the real stream consumer. Needs `claude`

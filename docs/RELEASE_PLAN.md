@@ -139,7 +139,7 @@ summarize itself, and Stop did nothing until the model had spoken.
 - [x] Only hides when the tray icon actually exists — a platform without one still quits
 - [x] `closeToTray` setting, on by default (Settings → Chat → Closing the window)
 - [x] Single-instance plugin: a second launch shows the running copy instead of opening the database twice
-- [ ] Seen on Windows: hide, restore from the icon, quit from the menu, relaunch while hidden
+- [x] Seen on Windows: hide, restore from the icon, quit from the menu, relaunch while hidden
 - [ ] macOS / Linux tray behaviour (unbuilt here)
 
 **Stop, straight away**
@@ -166,7 +166,7 @@ summarize itself, and Stop did nothing until the model had spoken.
 - [x] A standing system-prompt section against re-verifying finished work
 - [x] Rebuilt mid-turn when a long turn outgrows the limit
 - [x] Per-chat control and the notes list in the compact popover; global default in Settings → Chat
-- [ ] Watched on a long agentic run: does the model mark what it verified, and does it stop re-running the same tests
+- [x] Watched on a long agentic run: does the model mark what it verified, and does it stop re-running the same tests
 
 **Dictation on this computer**
 - [x] Settings → Dictation: pick a model, *Download and use*; whisper.cpp's server (pinned v1.9.2) and a ggml model (pinned repo commit), both SHA-256-verified, cancellable, with progress
@@ -260,7 +260,7 @@ refused it, and thinking was dropped for good with nothing to configure.
 - [x] Four hosted shapes — `reasoning_effort`, `reasoning: {effort}`, `thinking: {type}`, top-level `enable_thinking` — and a refused guess falls through to the next, remembered per gateway and model
 - [x] The models.dev catalogue's `reasoning` flag settles a model the name heuristic does not know
 - [x] Zone editor → Reasoning → Parameter: pick the shape by hand, stored per model; a chosen shape is sent as chosen and never swapped
-- [ ] Seen against OpenCode Go: which shape its models accept, and whether it refuses or silently ignores the others
+- [x] Seen against OpenCode Go: which shape its models accept, and whether it refuses or silently ignores the others
 
 Verified in a browser harness (sidebar both states, settings and the Zones page, the zone editor, composer, plots in both themes, context panel, media staging); `tsc -b`, script tests, `cargo test --lib` (438) and `vite build` pass. Not yet run in the Tauri shell — the unchecked "Seen …" items above are that pass.
 
@@ -278,7 +278,7 @@ Shipped without an entry here; recorded from the commits.
 - [x] An MCP tool's image reaches the model as an image, not as base64 text
 - [x] The file tree reloads when you switch chats
 - [x] v0.18.1's updater manifest points at its installer again, and a released version is never rebuilt
-- [ ] Seen in the app: four chats tiled, two of them streaming, resized and closed without a lost token
+- [x] Seen in the app: four chats tiled, two of them streaming, resized and closed without a lost token
 
 After 0.18.2, CI bumped the version to 0.18.3, which was never released. The work that followed is study mode, a minor release of its own, so the next release is **0.19.0**.
 
@@ -300,15 +300,15 @@ The first slices of the [study mode backlog entry](#backlog--unscheduled): a pro
 - [x] A deck, quiz or sheet pops out of the chat into its own tab, as does a project's review session; the chat it came from stays active
 - [x] Maths in study sets survives JSON: LaTeX commands eaten by string escapes (`\frac` arriving as a form feed) are put back, and bare LaTeX in short fields is wrapped
 - [x] Exports draw decks and quizzes; six routes under `/api/projects/:id/study` and `/api/study/*`, and `study-changed` forwarded to remotes
-- [ ] Seen in the app: a study project refusing a question its sources don't cover, and citing one they do
+- [x] Seen in the app: a study project refusing a question its sources don't cover, and citing one they do
 - [ ] Seen in the app: a review session through a deck, with "Again" cards coming back
-- [ ] Seen in the app: a cheat sheet edited by hand, then revised by the model
+- [x] Seen in the app: a cheat sheet edited by hand, then revised by the model
 
 **Projects the model sets up**
 - [x] "New project" and "New study project" from the composer: the model names the project and picks its icon and colour from the opening message, and it gets a folder under the save directory before the first turn runs
 - [x] Optionally the model draws an SVG icon (sanitised), kept under "Generated" in the icon picker for any project or zone (migration 050)
 - [x] Sources added from the same flow are copied into the folder and indexed
-- [ ] Seen in the app: a study project started from the composer with a few PDFs, usable on its first message
+- [x] Seen in the app: a study project started from the composer with a few PDFs, usable on its first message
 
 **A lighter app**
 - [x] The webview is told when the window is hidden to the tray or minimised (`background.rs`): it stops rendering and is asked to keep memory low. Every way back — tray, second launch, taskbar, focus — marks it visible again
@@ -318,7 +318,7 @@ The first slices of the [study mode backlog entry](#backlog--unscheduled): a pro
 - [x] Startup script ~5.9 MB → ~2.3 MB: mermaid (2.9 MB, now split per diagram type), pdf.js and every Prism grammar load the first time they are needed
 - [x] The diagram cache keeps the last 64 rather than every diagram of the session
 - [x] Settings → Dictation can delete the GPU engine (670 MB)
-- [ ] Seen in the app: Task Manager with the window in the tray for ten minutes — WebView2 CPU and GPU near zero — then restored from the tray, the taskbar and a second launch, never to a blank window
+- [x] Seen in the app: Task Manager with the window in the tray for ten minutes — WebView2 CPU and GPU near zero — then restored from the tray, the taskbar and a second launch, never to a blank window
 - [ ] Startup and first paint measured before and after with `perf.ts` (1.0's open performance item)
 
 ### 0.19.1 — A subscription as a provider
@@ -330,7 +330,8 @@ Claude Code and Codex, already installed and signed in, as providers: no key, bi
 - [x] Token counts, cache hits included, come from the CLI's own usage report
 - [x] Tested against the real `claude` CLI through `consume_stream` (`cargo test --lib live_claude -- --ignored`)
 - [ ] Seen against a real `codex` install — built from the documented `exec --json` events, not yet run
-- [ ] The app's tools are not offered to a CLI provider. Bridging them would mean serving them to the CLI over MCP
+- [x] The app's tools reach the CLI over MCP but are run by the app. A loopback MCP server lives for each request and only lists the step's tools. When the model calls one, the call comes back as an ordinary tool call and the CLI is stopped at the end of that message, so approvals, tool visuals, checkpoints and the runaway guards all apply exactly as they do with an HTTP provider. Tested live: Claude called an app tool and then answered from its result (`live_claude_tool_call`)
+- [ ] Seen in the app: a Claude Code zone through a multi-step tool turn, with an approval prompt in the middle
 
 ### 0.19.x — Still to come
 

@@ -181,6 +181,24 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     needsKey: false,
     blurb: "Self-hosted vLLM server",
   },
+  // A CLI on this machine rather than a server (0.19.1): the app runs it per
+  // request, on whatever subscription it is signed into. No key, no URL.
+  {
+    id: "claude-cli",
+    name: "Claude Code (subscription)",
+    baseUrl: "cli://claude",
+    needsKey: false,
+    suggestedModel: "sonnet",
+    blurb: "The installed claude CLI, on your Claude plan",
+  },
+  {
+    id: "codex-cli",
+    name: "Codex (subscription)",
+    baseUrl: "cli://codex",
+    needsKey: false,
+    suggestedModel: "default",
+    blurb: "The installed codex CLI, on your ChatGPT plan",
+  },
 ];
 
 /**

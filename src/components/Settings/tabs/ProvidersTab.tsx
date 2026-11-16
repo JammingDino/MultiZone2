@@ -272,7 +272,7 @@ function ProviderForm({ value, onClose, onDeleted }: { value: Partial<Provider>;
           placeholder="http://localhost:11434/v1"
         />
       </Field>
-      <Field label={preset && !preset.needsKey ? "API key (not needed for a local server)" : "API key (optional)"}>
+      <Field label={preset && !preset.needsKey ? (preset.baseUrl.startsWith("cli://") ? "API key (not needed — the CLI uses its own sign-in)" : "API key (not needed for a local server)") : "API key (optional)"}>
         <input value={apiKey} onChange={(e) => setApiKey(e.target.value)} type="password" className="input" placeholder="sk-..." />
       </Field>
       {/* Said where the key is typed rather than only in the privacy statement,

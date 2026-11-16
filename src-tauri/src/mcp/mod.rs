@@ -464,7 +464,7 @@ impl Manager {
     /// Returns `None` when nothing matches, so the caller can fall through to
     /// the original name and produce the normal spawn error.
     #[cfg(windows)]
-    fn resolve_program_windows(program: &str) -> Option<std::path::PathBuf> {
+    pub(crate) fn resolve_program_windows(program: &str) -> Option<std::path::PathBuf> {
         use std::path::Path;
 
         // An explicit path or an already-extensioned name needs no lookup.

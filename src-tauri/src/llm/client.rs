@@ -192,7 +192,15 @@ impl<'a> LlmClient<'a> {
         req
     }
 
+    /// A `cli://` provider is a local CLI, not an HTTP server (0.19.1).
+    fn cli(&self) -> Option<crate::llm::cli::Cli> {
+        crate::llm::cli::Cli::from_base_url(&self.base_url)
+    }
+
     pub async fn list_models(&self) -> AppResult<Vec<String>> {
+        if let Some(cli) = self.cli() {
+            return Ok(cli.models());
+        }
         let req = self.http.get(self.url("/models"));
         let res = self.auth(req).send().await?;
         if !res.status().is_success() {
@@ -212,6 +220,9 @@ impl<'a> LlmClient<'a> {
     /// (`nomic-embed-text`, etc.), and any other compatible provider — an
     /// embedding model is just a model id on a normal provider.
     pub async fn embed(&self, model: &str, inputs: &[String]) -> AppResult<Vec<Vec<f32>>> {
+        if self.cli().is_some() {
+            return Err(AppError::Provider("a CLI provider cannot embed; pick an embedding model on another provider".into()));
+        }
         #[derive(serde::Serialize)]
         struct EmbeddingRequest<'a> {
             model: &'a str,
@@ -261,6 +272,9 @@ impl<'a> LlmClient<'a> {
     }
 
     pub async fn chat_completion(&self, req: &ChatRequest) -> AppResult<ChatResponse> {
+        if let Some(cli) = self.cli() {
+            return crate::llm::cli::complete(cli, req).await;
+        }
         let (path, body) = self.wire(req);
         let http_req = self.http.post(self.url(path)).json(&body);
         let res = self.auth(http_req).send().await?;
@@ -296,6 +310,10 @@ impl<'a> LlmClient<'a> {
         req: &ChatRequest,
         on_retry: RetryHook<'_>,
     ) -> AppResult<LlmStream> {
+        if let Some(cli) = self.cli() {
+            let response = crate::llm::cli::stream(cli, req).await?;
+            return Ok(LlmStream { response, dialect: Dialect::ChatCompletions });
+        }
         let mut attempt = 0;
         loop {
             match self.chat_stream_once(req).await {

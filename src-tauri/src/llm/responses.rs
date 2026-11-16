@@ -51,7 +51,7 @@ pub fn dialect_for(model: &str, base_url: &str) -> Dialect {
 
 // ── Request ──────────────────────────────────────────────────────────────────
 
-fn text_of(content: &Option<MessageContent>) -> String {
+pub(crate) fn text_of(content: &Option<MessageContent>) -> String {
     match content {
         Some(MessageContent::Text(t)) => t.clone(),
         Some(MessageContent::Parts(parts)) => parts

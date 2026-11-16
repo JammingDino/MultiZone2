@@ -321,6 +321,17 @@ The first slices of the [study mode backlog entry](#backlog--unscheduled): a pro
 - [ ] Seen in the app: Task Manager with the window in the tray for ten minutes — WebView2 CPU and GPU near zero — then restored from the tray, the taskbar and a second launch, never to a blank window
 - [ ] Startup and first paint measured before and after with `perf.ts` (1.0's open performance item)
 
+### 0.19.1 — A subscription as a provider
+
+Claude Code and Codex, already installed and signed in, as providers: no key, billed to the user's Claude or ChatGPT plan. Two presets in Settings → Providers, base URLs `cli://claude` and `cli://codex`.
+- [x] `llm/cli.rs`: each request spawns the CLI in print mode, sends the conversation on stdin, and turns its JSON events into the OpenAI chunks the stream consumer already reads, so chat, panels, compaction and titles need no change. Stop kills the process
+- [x] Claude Code runs as a model, not an agent: no built-in tools, no MCP, no user settings or hooks, the app's own system prompt (via a temp file — system prompts outgrow Windows' command line), a scratch working directory. A one-word reply costs ~900 prompt tokens, not ~82K
+- [x] Codex runs `exec --json`, read-only sandbox, `model_reasoning_effort` from the zone's thinking level
+- [x] Token counts, cache hits included, come from the CLI's own usage report
+- [x] Tested against the real `claude` CLI through `consume_stream` (`cargo test --lib live_claude -- --ignored`)
+- [ ] Seen against a real `codex` install — built from the documented `exec --json` events, not yet run
+- [ ] The app's tools are not offered to a CLI provider. Bridging them would mean serving them to the CLI over MCP
+
 ### 0.19.x — Still to come
 
 From the backlog entry; each one a tool plus a renderer unless said otherwise.

@@ -212,6 +212,14 @@ where
                 if data.is_empty() {
                     continue;
                 }
+                // A failure reported inside the stream — a usage limit, a
+                // gateway error — with its own words, rather than whatever a
+                // broken connection would have said instead (0.19.2).
+                if let Some(message) = crate::llm::cli::stream_error(&data) {
+                    on_event(StreamEvent::Error { message: message.clone() });
+                    agg.error = Some(message);
+                    break;
+                }
                 let chunks: Vec<StreamChunk> = match &mut translator {
                     Some(t) => match serde_json::from_str::<serde_json::Value>(&data) {
                         Ok(v) => match t.translate(&v) {

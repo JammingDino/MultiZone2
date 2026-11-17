@@ -333,6 +333,17 @@ Claude Code and Codex, already installed and signed in, as providers: no key, bi
 - [x] The app's tools reach the CLI over MCP but are run by the app. A loopback MCP server lives for each request and only lists the step's tools. When the model calls one, the call comes back as an ordinary tool call and the CLI is stopped at the end of that message, so approvals, tool visuals, checkpoints and the runaway guards all apply exactly as they do with an HTTP provider. Tested live: Claude called an app tool and then answered from its result (`live_claude_tool_call`)
 - [ ] Seen in the app: a Claude Code zone through a multi-step tool turn, with an approval prompt in the middle
 
+### 0.19.2 — A subscription that lasts
+
+**Found in 0.19.1:** one agentic chat on a Claude Code zone (Opus) used a whole five-hour window. `chat_usage` said why: 44 requests, 3.35M input tokens, 16% of them cached. Every tool step started a fresh CLI and wrote the whole transcript into one new user message, and the prompt cache matches whole blocks, so every step paid for the conversation again — at the cache-write rate. Used directly, the same CLI keeps one process and caches nearly everything.
+- [x] The CLI process belongs to the chat. A tool call waits inside it on the MCP bridge while the app runs the tool (approvals included); the next request delivers the result to the same process, which carries on with its cache intact. Claude Code also stays alive between turns (`--input-format stream-json`), so the next user message goes to the same conversation
+- [x] Continued only when the request provably follows on: the same user messages, and after the call only its results (and the step-budget notes, which ride on the last result). An edited or regenerated message, compaction, a steer mid-turn or a different tool set starts a fresh run — always correct, only dearer. Four parked runs at most; an idle one is ended after 30 minutes
+- [x] Claude Code is told to allow the bridge's tools (`--allowedTools=mcp__multizone`): the app asks for approval itself, and print mode would otherwise refuse every call
+- [x] A failure inside a stream arrives as an `{"error": …}` frame and is shown in its own words. The two "connection dropped — error decoding response body" failures in that chat were the CLI reporting an error the stream could not carry; any OpenAI-compatible server that reports errors this way benefits too
+- [x] Live test: one process across a tool call, its result and the next user turn; 2,038 of 2,805 prompt tokens cached on the continued step, 1,451 of 1,513 on the next turn (`live_claude_tool_call`)
+- [ ] Seen in the app: the same kind of long agentic chat, with `chat_usage` showing most input cached
+- [ ] A system prompt that changes between turns (memory, skills) reaches a parked Claude run only when a fresh run starts
+
 ### 0.19.x — Still to come
 
 From the backlog entry; each one a tool plus a renderer unless said otherwise.

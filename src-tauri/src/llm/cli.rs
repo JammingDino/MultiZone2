@@ -2,21 +2,20 @@
 //! running on whatever subscription the user signed it into.
 //!
 //! A provider whose base URL is `cli://claude` or `cli://codex` is not reached
-//! over HTTP. Each request spawns the CLI in print mode, feeds it the
-//! conversation on stdin, and translates its JSON event lines into the
-//! OpenAI-compatible SSE chunks the stream consumer already reads — so chat,
-//! panels, compaction and titles work unchanged.
+//! over HTTP. The app runs the CLI in print mode, feeds it the conversation on
+//! stdin, and translates its JSON event lines into the OpenAI-compatible SSE
+//! chunks the stream consumer already reads — so chat, panels, compaction and
+//! titles work unchanged.
 //!
 //! The CLI is used as a model, not as an agent: Claude Code runs with none of
 //! its own tools, no user settings and the app's own system prompt; Codex
 //! runs read-only.
 //!
-//! The app's tools reach it over MCP, but are never run by it. A loopback MCP
-//! server lives for the request and only lists them. When the model calls
-//! one, the call goes back to the app as an ordinary tool call and the CLI is
-//! stopped at the end of that message. The app's own loop then runs the tool
-//! (approvals, visuals, checkpoints, runaway guards) and sends the result on
-//! the next request, exactly as it would to an HTTP provider.
+//! The app's tools reach it over a loopback MCP server, but the app runs them.
+//! When the model calls one, the call goes back to the app as an ordinary tool
+//! call while the CLI waits on the bridge; the app's own loop runs the tool
+//! (approvals, visuals, checkpoints, runaway guards) and its next request
+//! delivers the result to the same process. See "Runs that outlive a request".
 
 use crate::error::{AppError, AppResult};
 use crate::llm::types::*;
@@ -155,11 +154,13 @@ fn command(cli: Cli) -> tokio::process::Command {
 struct Translator {
     /// The CLI reached the end of its answer.
     done: bool,
-    /// The model called an app tool: end the stream here, before the CLI
-    /// tries to run it.
+    /// The model called app tools: this request's answer ends here, and the
+    /// CLI waits on the bridge for the results.
     cut: bool,
     /// Claude content-block index → OpenAI tool-call index.
     blocks: std::collections::HashMap<u64, usize>,
+    /// The calls made, as (id, name, arguments so far).
+    calls: Vec<(String, String, String)>,
     /// Claude's running usage, for a turn cut before its `result` line.
     usage: Option<Value>,
 }
@@ -206,7 +207,9 @@ impl Translator {
                             let name = name.strip_prefix(CLAUDE_PREFIX).unwrap_or(name);
                             let index = self.blocks.len();
                             self.blocks.insert(block, index);
-                            Ok(vec![call(index, b["id"].as_str(), Some(name), "")])
+                            let id = b["id"].as_str().unwrap_or("");
+                            self.calls.push((id.to_string(), name.to_string(), String::new()));
+                            Ok(vec![call(index, Some(id), Some(name), "")])
                         }
                         Some("content_block_delta") => {
                             let d = &ev["delta"];
@@ -216,7 +219,11 @@ impl Translator {
                                     vec![delta("reasoning_content", d["thinking"].as_str().unwrap_or(""))]
                                 }
                                 Some("input_json_delta") => match self.blocks.get(&block) {
-                                    Some(&i) => vec![call(i, None, None, d["partial_json"].as_str().unwrap_or(""))],
+                                    Some(&i) => {
+                                        let part = d["partial_json"].as_str().unwrap_or("");
+                                        self.calls[i].2.push_str(part);
+                                        vec![call(i, None, None, part)]
+                                    }
                                     None => vec![],
                                 },
                                 _ => vec![],
@@ -226,8 +233,8 @@ impl Translator {
                             self.usage = Some(ev["usage"].clone());
                             Ok(vec![])
                         }
-                        // The end of a message that called tools: the CLI would
-                        // run them next, and the app is the one that should.
+                        // The end of a message that called tools: the app runs
+                        // them, and the CLI waits for the results.
                         Some("message_stop") if !self.blocks.is_empty() => {
                             self.done = true;
                             self.cut = true;
@@ -256,7 +263,8 @@ impl Translator {
                 _ => Ok(vec![]),
             },
             Cli::Codex => match kind {
-                // Codex reports a tool call as it starts; stop it there.
+                // Codex reports a tool call as it starts, then waits on the
+                // bridge for the app's result.
                 "item.started"
                     if v["item"]["type"] == "mcp_tool_call" && v["item"]["server"] == "multizone" =>
                 {
@@ -266,9 +274,11 @@ impl Translator {
                         Value::Null => "{}".to_string(),
                         a => a.to_string(),
                     };
+                    let (id, name) = (item["id"].as_str().unwrap_or(""), item["tool"].as_str().unwrap_or(""));
+                    self.calls.push((id.to_string(), name.to_string(), args.clone()));
                     self.done = true;
                     self.cut = true;
-                    Ok(vec![call(0, item["id"].as_str(), item["tool"].as_str(), &args), tool_finish()])
+                    Ok(vec![call(0, Some(id), Some(name), &args), tool_finish()])
                 }
                 "item.completed" => {
                     let item = &v["item"];
@@ -293,7 +303,7 @@ impl Translator {
     }
 }
 
-/// Ends the request's MCP server.
+/// Ends the run's MCP server.
 struct Server(tokio::task::JoinHandle<()>);
 impl Drop for Server {
     fn drop(&mut self) {
@@ -317,10 +327,41 @@ fn mcp_tools(tools: &[Tool]) -> Value {
     )
 }
 
+/// A tool call the model made and the app has yet to answer. The app's half
+/// (`tx`) is taken when the next request carries the result; the bridge's half
+/// (`rx`) when the CLI's `tools/call` arrives. Either can come first.
+struct Call {
+    id: String,
+    name: String,
+    args: Value,
+    tx: Option<tokio::sync::oneshot::Sender<String>>,
+    rx: Option<tokio::sync::oneshot::Receiver<String>>,
+}
+
+type Calls = std::sync::Arc<std::sync::Mutex<Vec<Call>>>;
+
+/// The waiting half for a `tools/call`. MCP does not carry the model's
+/// tool-use id, so the call is matched by name and arguments; by name alone if
+/// the CLI re-serialised the arguments differently. The CLI can call before the
+/// app has read the end of the message that made the call, so this waits.
+async fn claim(calls: &Calls, name: &str, args: &Value) -> Option<tokio::sync::oneshot::Receiver<String>> {
+    for _ in 0..600 {
+        if let Ok(mut list) = calls.lock() {
+            let open = |c: &&mut Call| c.rx.is_some() && c.name == name;
+            let i = list.iter_mut().position(|c| open(&c) && &c.args == args)
+                .or_else(|| list.iter_mut().position(|c| open(&c)));
+            if let Some(i) = i {
+                return list[i].rx.take();
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    None
+}
+
 /// One JSON-RPC message to the bridge, answered; `None` for a notification.
-/// A `tools/call` is never answered: by then the stream has been cut, the CLI
-/// is being stopped, and the app runs the tool itself.
-async fn rpc(tools: &Value, msg: &Value) -> Option<Value> {
+/// A `tools/call` waits for the app to run the tool and send the result.
+async fn rpc(tools: &Value, calls: &Calls, msg: &Value) -> Option<Value> {
     let id = msg.get("id")?.clone();
     let result = match msg["method"].as_str() {
         Some("initialize") => json!({
@@ -330,7 +371,19 @@ async fn rpc(tools: &Value, msg: &Value) -> Option<Value> {
         }),
         Some("tools/list") => json!({ "tools": tools }),
         Some("ping") => json!({}),
-        Some("tools/call") => std::future::pending().await,
+        Some("tools/call") => {
+            let p = &msg["params"];
+            let name = p["name"].as_str().unwrap_or("");
+            let args = p.get("arguments").cloned().unwrap_or_else(|| json!({}));
+            let (text, err) = match claim(calls, name, &args).await {
+                Some(rx) => match rx.await {
+                    Ok(text) => (text, false),
+                    Err(_) => ("The app did not run this tool.".to_string(), true),
+                },
+                None => (format!("No call to {name} is waiting for a result."), true),
+            };
+            json!({ "content": [{ "type": "text", "text": text }], "isError": err })
+        }
         _ => {
             return Some(json!({ "jsonrpc": "2.0", "id": id,
                 "error": { "code": -32601, "message": "method not found" } }))
@@ -339,18 +392,18 @@ async fn rpc(tools: &Value, msg: &Value) -> Option<Value> {
     Some(json!({ "jsonrpc": "2.0", "id": id, "result": result }))
 }
 
-/// A streamable-HTTP MCP server on loopback for one request, at an
-/// unguessable path. Returns its URL.
-async fn serve_tools(tools: &[Tool]) -> AppResult<(String, Server)> {
+/// A streamable-HTTP MCP server on loopback for one run, at an unguessable
+/// path. Returns its URL.
+async fn serve_tools(tools: &[Tool], calls: Calls) -> AppResult<(String, Server)> {
     use axum::{http::StatusCode, response::IntoResponse, routing::post, Json, Router};
     let tools = std::sync::Arc::new(mcp_tools(tools));
     let path = format!("/mcp/{}", uuid::Uuid::new_v4().simple());
     let app = Router::new().route(
         &path,
         post(move |Json(msg): Json<Value>| {
-            let tools = tools.clone();
+            let (tools, calls) = (tools.clone(), calls.clone());
             async move {
-                match rpc(&tools, &msg).await {
+                match rpc(&tools, &calls, &msg).await {
                     Some(reply) => Json(reply).into_response(),
                     None => StatusCode::ACCEPTED.into_response(),
                 }
@@ -368,17 +421,205 @@ async fn serve_tools(tools: &[Tool]) -> AppResult<(String, Server)> {
     Ok((url, Server(task)))
 }
 
-/// Spawn the CLI for this request and return its reply as an SSE response.
-pub async fn stream(cli: Cli, req: &ChatRequest) -> AppResult<reqwest::Response> {
+// ---------------------------------------------------------------------------
+// Runs that outlive a request (0.19.2)
+// ---------------------------------------------------------------------------
+//
+// 0.19.1 started a fresh CLI for every request and wrote the whole
+// conversation into one new user message each time. The prompt cache matches
+// whole blocks, so every tool step paid for the transcript again: one study
+// chat made 44 requests, 3.35M input tokens, 16% of them cached, and spent a
+// five-hour subscription window. A CLI used directly keeps one process and
+// one conversation, and caches nearly everything.
+//
+// So the process now belongs to the chat. A tool call waits inside the CLI on
+// the bridge while the app runs the tool; the app's next request delivers the
+// result and the same process carries on. Claude Code also stays alive between
+// turns (stream-json on stdin), so the next user message goes to it rather than
+// to a new process. Anything the run cannot account for — an edited or
+// regenerated message, compaction, a different tool set — starts a fresh run,
+// which is always correct, only dearer.
+
+/// One CLI process and what it has been told.
+struct Run {
+    cli: Cli,
+    model: String,
+    tools_sig: u64,
+    child: tokio::process::Child,
+    /// Claude's stdin, held open for the next turn. Codex reads one prompt.
+    stdin: Option<tokio::process::ChildStdin>,
+    lines: tokio::io::Lines<BufReader<tokio::process::ChildStdout>>,
+    stderr: Option<tokio::process::ChildStderr>,
+    calls: Calls,
+    /// The user messages of the request it last answered, hashed in order.
+    users: Vec<u64>,
+    /// Bumped on every park, so a stale idle timer leaves a newer run alone.
+    gen: u64,
+    _server: Option<(String, Server)>,
+    _files: (Option<TempFile>, Option<TempFile>),
+}
+
+impl Run {
+    /// Tool calls the app has yet to answer.
+    fn pending(&self) -> Vec<String> {
+        self.calls.lock().map(|l| l.iter().filter(|c| c.tx.is_some()).map(|c| c.id.clone()).collect()).unwrap_or_default()
+    }
+}
+
+/// Parked runs, by chat and model. An idle Claude process holds a few hundred
+/// MB, so only a handful are kept.
+fn runs() -> &'static std::sync::Mutex<std::collections::HashMap<String, Run>> {
+    static RUNS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, Run>>> =
+        std::sync::OnceLock::new();
+    RUNS.get_or_init(Default::default)
+}
+const MAX_PARKED: usize = 4;
+const IDLE: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+
+fn hash<T: std::hash::Hash>(v: T) -> u64 {
+    use std::hash::Hasher;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    v.hash(&mut h);
+    h.finish()
+}
+
+fn tools_sig(req: &ChatRequest) -> u64 {
+    hash(req.tools.as_ref().map(|t| t.iter().map(|t| t.function.name.clone()).collect::<Vec<_>>()))
+}
+
+fn user_hashes(messages: &[ChatMessage]) -> Vec<u64> {
+    messages
+        .iter()
+        .filter(|m| m.role == "user")
+        .map(|m| hash(crate::llm::responses::text_of(&m.content)))
+        .collect()
+}
+
+fn run_key(session: &str, cli: Cli, req: &ChatRequest) -> String {
+    format!("{session}\u{0}{cli:?}\u{0}{}\u{0}{}", req.model, tools_sig(req))
+}
+
+/// How a request continues a parked run, if it does.
+#[derive(Debug, PartialEq)]
+enum Resume {
+    /// Results for the pending calls, by id. Any system notes the app added
+    /// since (step-budget nudges) ride on the last one.
+    Results(Vec<(String, String)>),
+    /// The next user message, for a Claude run idle between turns.
+    User(String),
+}
+
+fn resume_plan(users: &[u64], pending: &[String], has_stdin: bool, req: &ChatRequest) -> Option<Resume> {
+    let now = user_hashes(&req.messages);
+    let text = |m: &ChatMessage| crate::llm::responses::text_of(&m.content);
+    if !pending.is_empty() {
+        // Same user messages; after the message that made the calls, only
+        // their results and system notes.
+        if now != users {
+            return None;
+        }
+        let last_call = req.messages.iter().rposition(|m| m.tool_calls.is_some())?;
+        let ids: Vec<&str> = req.messages[last_call].tool_calls.iter().flatten().map(|c| c.id.as_str()).collect();
+        let mut want: Vec<&str> = pending.iter().map(String::as_str).collect();
+        let mut got: Vec<&str> = ids.clone();
+        want.sort();
+        got.sort();
+        if want != got {
+            return None;
+        }
+        let mut results = Vec::new();
+        let mut notes = Vec::new();
+        for m in &req.messages[last_call + 1..] {
+            match m.role.as_str() {
+                "tool" => results.push((m.tool_call_id.clone()?, text(m))),
+                "system" => notes.push(text(m)),
+                _ => return None,
+            }
+        }
+        if results.len() != pending.len() {
+            return None;
+        }
+        if let (Some(last), false) = (results.last_mut(), notes.is_empty()) {
+            last.1.push_str(&format!("\n\n<system_note>\n{}\n</system_note>", notes.join("\n\n")));
+        }
+        return Some(Resume::Results(results));
+    }
+    // Idle between turns: exactly one new user message, at the end.
+    let last = req.messages.iter().rposition(|m| m.role != "system")?;
+    if !has_stdin || req.messages[last].role != "user" || now.len() != users.len() + 1 || now[..users.len()] != *users {
+        return None;
+    }
+    Some(Resume::User(text(&req.messages[last])))
+}
+
+/// One user message in Claude's stream-json input.
+fn user_line(text: &str) -> String {
+    format!("{}\n", json!({ "type": "user", "message": { "role": "user", "content": [{ "type": "text", "text": text }] } }))
+}
+
+/// Take a parked run this request continues, and hand it its input.
+async fn resume(key: &str, cli: Cli, req: &ChatRequest) -> Option<Run> {
+    let mut run = runs().lock().ok()?.remove(key)?;
+    if run.cli != cli || run.model != req.model || run.tools_sig != tools_sig(req) {
+        return None;
+    }
+    if !matches!(run.child.try_wait(), Ok(None)) {
+        return None;
+    }
+    match resume_plan(&run.users, &run.pending(), run.stdin.is_some(), req)? {
+        Resume::Results(results) => {
+            let mut list = run.calls.lock().ok()?;
+            for (id, text) in results {
+                if let Some(tx) = list.iter_mut().find(|c| c.id == id).and_then(|c| c.tx.take()) {
+                    let _ = tx.send(text);
+                }
+            }
+            list.retain(|c| c.tx.is_some() || c.rx.is_some());
+        }
+        Resume::User(text) => {
+            run.stdin.as_mut()?.write_all(user_line(&text).as_bytes()).await.ok()?;
+            run.stdin.as_mut()?.flush().await.ok()?;
+        }
+    }
+    Some(run)
+}
+
+/// Keep a run for the request that continues it. The oldest goes when too
+/// many are parked; an idle one goes after half an hour.
+fn park(key: String, mut run: Run, req: &ChatRequest) {
+    static GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    run.users = user_hashes(&req.messages);
+    run.gen = GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let gen = run.gen;
+    let Ok(mut map) = runs().lock() else { return };
+    map.insert(key.clone(), run);
+    while map.len() > MAX_PARKED {
+        let Some(oldest) = map.iter().min_by_key(|(_, r)| r.gen).map(|(k, _)| k.clone()) else { break };
+        map.remove(&oldest);
+    }
+    drop(map);
+    tokio::spawn(async move {
+        tokio::time::sleep(IDLE).await;
+        if let Ok(mut map) = runs().lock() {
+            if map.get(&key).is_some_and(|r| r.gen == gen) {
+                map.remove(&key);
+            }
+        }
+    });
+}
+
+/// Start a CLI on this request's whole conversation.
+async fn spawn(cli: Cli, req: &ChatRequest) -> AppResult<Run> {
     let model = safe_model(&req.model)?;
     let (system, mut prompt) = flatten(&req.messages);
     let dir = std::env::temp_dir();
-    let mut guard = None;
-    let mut mcp_guard = None;
+    let mut prompt_file = None;
+    let mut mcp_file = None;
+    let calls: Calls = Default::default();
 
-    // The tools this step offers, served to the CLI for the life of the run.
+    // The tools this request offers, served to the CLI for the life of the run.
     let server = match req.tools.as_deref().filter(|t| !t.is_empty()) {
-        Some(t) => Some(serve_tools(t).await?),
+        Some(t) => Some(serve_tools(t, calls.clone()).await?),
         None => None,
     };
     // Neither CLI can be made to call a particular tool; ask instead.
@@ -391,6 +632,8 @@ pub async fn stream(cli: Cli, req: &ChatRequest) -> AppResult<reqwest::Response>
         Cli::Claude => {
             cmd.args([
                 "-p",
+                "--input-format",
+                "stream-json",
                 "--output-format",
                 "stream-json",
                 "--verbose",
@@ -410,7 +653,10 @@ pub async fn stream(cli: Cli, req: &ChatRequest) -> AppResult<reqwest::Response>
                 let config = json!({ "mcpServers": { "multizone": { "type": "http", "url": url } } });
                 std::fs::write(&path, config.to_string())?;
                 cmd.arg("--mcp-config").arg(&path);
-                mcp_guard = Some(TempFile(path));
+                // The app asks for approval itself; Claude Code's own check
+                // would refuse every call in print mode.
+                cmd.arg("--allowedTools=mcp__multizone");
+                mcp_file = Some(TempFile(path));
             }
             if !system.trim().is_empty() {
                 // A file, not an argument: system prompts outgrow Windows'
@@ -418,8 +664,10 @@ pub async fn stream(cli: Cli, req: &ChatRequest) -> AppResult<reqwest::Response>
                 let path = dir.join(format!("multizone-cli-{}.txt", uuid::Uuid::new_v4()));
                 std::fs::write(&path, &system)?;
                 cmd.arg("--system-prompt-file").arg(&path);
-                guard = Some(TempFile(path));
+                prompt_file = Some(TempFile(path));
             }
+            // A tool call waits on the bridge for as long as an approval takes.
+            cmd.env("MCP_TOOL_TIMEOUT", "86400000");
         }
         Cli::Codex => {
             cmd.args(["exec", "--json", "--skip-git-repo-check", "--sandbox", "read-only"]);
@@ -431,15 +679,11 @@ pub async fn stream(cli: Cli, req: &ChatRequest) -> AppResult<reqwest::Response>
             }
             if let Some((url, _)) = &server {
                 cmd.args(["-c", &format!("mcp_servers.multizone.url={}", json!(url))]);
+                cmd.args(["-c", "mcp_servers.multizone.tool_timeout_sec=86400"]);
             }
             cmd.arg("-");
         }
     }
-    // Codex has no system-prompt flag; Claude's went in a file above.
-    let stdin_text = match cli {
-        Cli::Codex if !system.trim().is_empty() => format!("<instructions>\n{system}\n</instructions>\n\n{prompt}"),
-        _ => prompt,
-    };
 
     // A scratch directory, so neither CLI picks up a CLAUDE.md, AGENTS.md or
     // git state from wherever the app happened to be launched.
@@ -462,83 +706,124 @@ pub async fn stream(cli: Cli, req: &ChatRequest) -> AppResult<reqwest::Response>
     })?;
 
     let mut stdin = child.stdin.take().expect("piped");
-    tokio::spawn(async move {
-        let _ = stdin.write_all(stdin_text.as_bytes()).await;
-        // Dropped here, closing stdin so the CLI starts.
-    });
-    let stdout = BufReader::new(child.stdout.take().expect("piped")).lines();
-    let stderr = child.stderr.take().expect("piped");
+    let stdin = match cli {
+        // Kept open: the next turn is written to the same process.
+        Cli::Claude => {
+            stdin.write_all(user_line(&prompt).as_bytes()).await?;
+            stdin.flush().await?;
+            Some(stdin)
+        }
+        // Codex has no system-prompt flag, and starts once stdin closes.
+        Cli::Codex => {
+            let text = if system.trim().is_empty() {
+                prompt
+            } else {
+                format!("<instructions>\n{system}\n</instructions>\n\n{prompt}")
+            };
+            tokio::spawn(async move {
+                let _ = stdin.write_all(text.as_bytes()).await;
+            });
+            None
+        }
+    };
+    let lines = BufReader::new(child.stdout.take().expect("piped")).lines();
+    let stderr = child.stderr.take();
+    Ok(Run {
+        cli,
+        model: req.model.clone(),
+        tools_sig: tools_sig(req),
+        child,
+        stdin,
+        lines,
+        stderr,
+        calls,
+        users: Vec::new(),
+        gen: 0,
+        _server: server,
+        _files: (prompt_file, mcp_file),
+    })
+}
+
+/// The CLI's reply to this request as an SSE response: from the chat's parked
+/// run when the request continues it, otherwise from a new one.
+pub async fn stream(cli: Cli, req: &ChatRequest, session: &str) -> AppResult<reqwest::Response> {
+    let key = run_key(session, cli, req);
+    let run = match resume(&key, cli, req).await {
+        Some(run) => run,
+        None => spawn(cli, req).await?,
+    };
+    // Only a request with tools is a chat's own turn; a title or a summary
+    // asked of the same chat is answered and let go.
+    let keep = req.tools.as_ref().is_some_and(|t| !t.is_empty());
+    let messages = req.clone();
 
     struct St {
-        cli: Cli,
-        child: tokio::process::Child,
-        lines: tokio::io::Lines<BufReader<tokio::process::ChildStdout>>,
-        stderr: Option<tokio::process::ChildStderr>,
+        run: Option<Run>,
         t: Translator,
-        ended: bool,
-        _guards: (Option<TempFile>, Option<TempFile>, Option<(String, Server)>),
+        key: String,
+        keep: bool,
+        req: ChatRequest,
     }
-    let st = St {
-        cli,
-        child,
-        lines: stdout,
-        stderr: Some(stderr),
-        t: Translator::default(),
-        ended: false,
-        _guards: (guard, mcp_guard, server),
-    };
+    let st = St { run: Some(run), t: Translator::default(), key, keep, req: messages };
+    let error = |msg: &str| format!("data: {}\n\n", json!({ "error": { "message": msg } }));
 
-    // Dropping the stream (stop button, finished turn) drops the child, and
+    // Dropping the stream (stop button) without parking drops the run, and
     // kill_on_drop ends the process.
-    let body = futures_util::stream::unfold(st, |mut st| async move {
-        if st.ended {
-            return None;
-        }
+    let body = futures_util::stream::unfold(st, move |mut st| async move {
+        let run = st.run.as_mut()?;
         loop {
-            match st.lines.next_line().await {
+            match run.lines.next_line().await {
                 Ok(Some(line)) => {
                     let Ok(v) = serde_json::from_str::<Value>(line.trim()) else { continue };
-                    match st.t.line(st.cli, &v) {
+                    match st.t.line(run.cli, &v) {
                         Ok(chunks) if chunks.is_empty() => continue,
                         Ok(chunks) => {
-                            let mut sse: String =
-                                chunks.iter().map(|c| format!("data: {c}\n\n")).collect();
-                            // Ending here drops the state, and with it the
-                            // CLI, before it can try to run the tool.
-                            if st.t.cut {
+                            let mut sse: String = chunks.iter().map(|c| format!("data: {c}\n\n")).collect();
+                            if st.t.cut || st.t.done {
                                 sse.push_str("data: [DONE]\n\n");
-                                st.ended = true;
+                                let run = st.run.take()?;
+                                // The calls wait on the bridge for the app's results.
+                                if let Ok(mut list) = run.calls.lock() {
+                                    for (id, name, args) in st.t.calls.drain(..) {
+                                        let (tx, rx) = tokio::sync::oneshot::channel();
+                                        let args = serde_json::from_str(&args).unwrap_or_else(|_| json!({}));
+                                        list.push(Call { id, name, args, tx: Some(tx), rx: Some(rx) });
+                                    }
+                                }
+                                // Parked before the [DONE] goes out: the reader
+                                // drops the stream as soon as it sees it.
+                                let alive = st.t.cut || run.stdin.is_some();
+                                if st.keep && alive {
+                                    park(st.key.clone(), run, &st.req);
+                                }
                             }
                             return Some((Ok::<_, std::io::Error>(sse), st));
                         }
                         Err(msg) => {
-                            st.ended = true;
-                            return Some((Err(std::io::Error::other(msg)), st));
+                            st.run = None;
+                            return Some((Ok(error(&msg)), st));
                         }
                     }
                 }
                 Ok(None) => {
-                    st.ended = true;
-                    if st.t.done {
-                        return Some((Ok("data: [DONE]\n\n".to_string()), st));
-                    }
                     // Exited without finishing: stderr says why.
+                    let mut run = st.run.take()?;
                     let mut err = String::new();
-                    if let Some(mut e) = st.stderr.take() {
+                    if let Some(mut e) = run.stderr.take() {
                         let _ = tokio::io::AsyncReadExt::read_to_string(&mut e, &mut err).await;
                     }
-                    let status = st.child.wait().await.ok();
+                    let status = run.child.wait().await.ok();
                     let msg = format!(
                         "{} exited ({}) without an answer: {}",
-                        st.cli.label(),
+                        run.cli.label(),
                         status.map(|s| s.to_string()).unwrap_or_default(),
                         err.trim()
                     );
-                    return Some((Err(std::io::Error::other(msg)), st));
+                    return Some((Ok(error(&msg)), st));
                 }
                 Err(e) => {
-                    st.ended = true;
-                    return Some((Err(e), st));
+                    st.run = None;
+                    return Some((Ok(error(&e.to_string())), st));
                 }
             }
         }
@@ -553,14 +838,17 @@ pub async fn stream(cli: Cli, req: &ChatRequest) -> AppResult<reqwest::Response>
 }
 
 /// The whole reply at once, for the callers that do not stream.
-pub async fn complete(cli: Cli, req: &ChatRequest) -> AppResult<ChatResponse> {
-    let res = stream(cli, req).await?;
+pub async fn complete(cli: Cli, req: &ChatRequest, session: &str) -> AppResult<ChatResponse> {
+    let res = stream(cli, req, session).await?;
     let mut events = eventsource_stream::Eventsource::eventsource(res.bytes_stream());
     let (mut content, mut usage) = (String::new(), None);
     while let Some(ev) = events.next().await {
         let ev = ev.map_err(|e| AppError::Provider(e.to_string()))?;
         if ev.data == "[DONE]" {
             break;
+        }
+        if let Some(msg) = stream_error(&ev.data) {
+            return Err(AppError::Provider(msg));
         }
         let Ok(chunk) = serde_json::from_str::<StreamChunk>(&ev.data) else { continue };
         if chunk.usage.is_some() {
@@ -583,6 +871,17 @@ pub async fn complete(cli: Cli, req: &ChatRequest) -> AppResult<ChatResponse> {
         }],
         usage,
     })
+}
+
+/// The message of an `{"error": …}` frame — how OpenAI-compatible servers, and
+/// this module, report a failure inside a stream that has already started.
+pub fn stream_error(data: &str) -> Option<String> {
+    if !data.contains("\"error\"") {
+        return None;
+    }
+    let v: Value = serde_json::from_str(data).ok()?;
+    let e = v.get("error").filter(|e| !e.is_null())?;
+    Some(e.get("message").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| e.to_string()))
 }
 
 #[cfg(test)]
@@ -712,16 +1011,71 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_bridge_lists_tools_and_never_runs_them() {
+    async fn the_bridge_answers_a_call_with_the_apps_result() {
         let tools = json!([{ "name": "read_file" }]);
-        let init = rpc(&tools, &json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26"}})).await.unwrap();
+        let calls: Calls = Default::default();
+        let init = rpc(&tools, &calls, &json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26"}})).await.unwrap();
         assert_eq!(init["result"]["protocolVersion"], "2025-03-26");
-        assert!(rpc(&tools, &json!({"jsonrpc":"2.0","method":"notifications/initialized"})).await.is_none());
-        let list = rpc(&tools, &json!({"jsonrpc":"2.0","id":2,"method":"tools/list"})).await.unwrap();
+        assert!(rpc(&tools, &calls, &json!({"jsonrpc":"2.0","method":"notifications/initialized"})).await.is_none());
+        let list = rpc(&tools, &calls, &json!({"jsonrpc":"2.0","id":2,"method":"tools/list"})).await.unwrap();
         assert_eq!(list["result"]["tools"][0]["name"], "read_file");
-        let msg = json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"read_file"}});
-        let call = rpc(&tools, &msg);
-        assert!(tokio::time::timeout(std::time::Duration::from_millis(100), call).await.is_err());
+
+        // The CLI calls before the app has registered the call: it waits.
+        let msg = json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"read_file","arguments":{"path":"a"}}});
+        let (t2, c2) = (tools.clone(), calls.clone());
+        let pending = tokio::spawn(async move { rpc(&t2, &c2, &msg).await });
+        tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        calls.lock().unwrap().push(Call { id: "t1".into(), name: "read_file".into(), args: json!({"path":"a"}), tx: None, rx: Some(rx) });
+        tx.send("contents of a".into()).unwrap();
+        let reply = pending.await.unwrap().unwrap();
+        assert_eq!(reply["result"]["content"][0]["text"], "contents of a");
+        assert_eq!(reply["result"]["isError"], false);
+    }
+
+    #[test]
+    fn a_request_continues_a_run_only_when_it_follows_on() {
+        let base = vec![msg("system", "s"), msg("user", "read a")];
+        let users = user_hashes(&base);
+        let mut called = msg("assistant", "");
+        called.tool_calls = Some(vec![ToolCall {
+            id: "t1".into(),
+            call_type: "function".into(),
+            function: FunctionCall { name: "read_file".into(), arguments: "{}".into() },
+        }]);
+        let mut result = msg("tool", "A");
+        result.tool_call_id = Some("t1".into());
+        let req = |m: Vec<ChatMessage>| ChatRequest {
+            model: "m".into(), messages: m, temperature: None, max_tokens: None, top_p: None, tools: None,
+            tool_choice: None, reasoning_effort: None, chat_template_kwargs: None, thinking_extra: Default::default(),
+            thinking_ask: None, stream_options: None, stream: true,
+        };
+        let pending = vec!["t1".to_string()];
+        let step = [base.clone(), vec![called.clone(), result.clone(), msg("system", "two steps left")]].concat();
+        assert_eq!(
+            resume_plan(&users, &pending, true, &req(step)),
+            Some(Resume::Results(vec![("t1".into(), "A\n\n<system_note>\ntwo steps left\n</system_note>".into())])),
+            "the result, with the nudge riding on it",
+        );
+        let steered = [base.clone(), vec![called.clone(), result.clone(), msg("user", "stop")]].concat();
+        assert_eq!(resume_plan(&users, &pending, true, &req(steered)), None, "a new user message mid-turn");
+        let edited = vec![msg("system", "s"), msg("user", "read b"), called.clone(), result.clone()];
+        assert_eq!(resume_plan(&users, &pending, true, &req(edited)), None, "an edited message");
+
+        // Idle between turns: one new user message continues it.
+        let done = [base.clone(), vec![called, result, msg("assistant", "A says hi")]].concat();
+        let users = user_hashes(&done);
+        let next = [done.clone(), vec![msg("user", "thanks")]].concat();
+        assert_eq!(resume_plan(&users, &[], true, &req(next.clone())), Some(Resume::User("thanks".into())));
+        assert_eq!(resume_plan(&users, &[], false, &req(next)), None, "Codex cannot take another turn");
+        assert_eq!(resume_plan(&users, &[], true, &req(base)), None, "a regenerated reply");
+    }
+
+    #[test]
+    fn an_error_frame_is_read_as_an_error() {
+        assert_eq!(stream_error(r#"{"error":{"message":"usage limit reached"}}"#).as_deref(), Some("usage limit reached"));
+        assert_eq!(stream_error(r#"{"choices":[],"error":null}"#), None);
+        assert_eq!(stream_error(r#"{"choices":[{"delta":{"content":"the error was"}}]}"#), None);
     }
 
     /// The bridge end to end: Claude sees an app tool over MCP, calls it, and
@@ -744,12 +1098,15 @@ mod tests {
             reasoning_effort: None, chat_template_kwargs: None, thinking_extra: Default::default(),
             thinking_ask: None, stream_options: None, stream: true,
         };
-        let response = stream(Cli::Claude, &req).await.unwrap();
+        let session = "live-tool-test";
+        let response = stream(Cli::Claude, &req, session).await.unwrap();
         let s = crate::llm::client::LlmStream { response, dialect: crate::llm::responses::Dialect::ChatCompletions };
         let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let agg = crate::llm::streaming::consume_stream(s, cancel, false, |_| {}).await.unwrap();
         assert!(agg.error.is_none(), "{:?}", agg.error);
         assert_eq!(agg.finish_reason.as_deref(), Some("tool_calls"));
+        let key = run_key(session, Cli::Claude, &req);
+        let pid = runs().lock().unwrap().get(&key).and_then(|r| r.child.id()).expect("parked, waiting on the bridge");
         assert_eq!(agg.tool_calls[0].function.name, "get_weather");
         assert!(agg.tool_calls[0].function.arguments.contains("Oslo"), "{}", agg.tool_calls[0].function.arguments);
 
@@ -761,12 +1118,33 @@ mod tests {
         let mut result = msg("tool", "Oslo: -3°C, snowing");
         result.tool_call_id = Some(agg.tool_calls[0].id.clone());
         next.messages.extend([called, result]);
-        let response = stream(Cli::Claude, &next).await.unwrap();
+        let response = stream(Cli::Claude, &next, session).await.unwrap();
         let s = crate::llm::client::LlmStream { response, dialect: crate::llm::responses::Dialect::ChatCompletions };
         let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let agg = crate::llm::streaming::consume_stream(s, cancel, false, |_| {}).await.unwrap();
+        assert!(agg.error.is_none(), "{:?}", agg.error);
         assert!(agg.tool_calls.is_empty(), "called again: {:?}", agg.tool_calls);
         assert!(agg.content.contains("-3") || agg.content.to_lowercase().contains("snow"), "{}", agg.content);
+        let u = agg.usage.clone().expect("usage");
+        eprintln!("step 2: {} prompt tokens, {} cached", u.prompt_tokens, u.cached_prompt_tokens());
+        assert!(u.cached_prompt_tokens() > 0, "the continued request read its prefix from cache");
+        let pid2 = runs().lock().unwrap().get(&key).and_then(|r| r.child.id()).expect("idle between turns");
+        assert_eq!(pid2, pid, "the same process, not a new one");
+
+        // The next user turn goes to the same process too.
+        let mut answered = next.clone();
+        answered.messages.push(msg("assistant", &agg.content));
+        answered.messages.push(msg("user", "And in Bergen? Use the tool."));
+        let response = stream(Cli::Claude, &answered, session).await.unwrap();
+        let s = crate::llm::client::LlmStream { response, dialect: crate::llm::responses::Dialect::ChatCompletions };
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let agg = crate::llm::streaming::consume_stream(s, cancel, false, |_| {}).await.unwrap();
+        assert!(agg.error.is_none(), "{:?}", agg.error);
+        assert!(agg.tool_calls[0].function.arguments.contains("Bergen"), "{:?}", agg.tool_calls);
+        let u = agg.usage.clone().expect("usage");
+        eprintln!("turn 2: {} prompt tokens, {} cached", u.prompt_tokens, u.cached_prompt_tokens());
+        let run = runs().lock().unwrap().remove(&key).expect("parked again");
+        assert_eq!(run.child.id(), Some(pid));
     }
 
     /// Against the real CLI, through the real stream consumer. Needs `claude`
@@ -781,13 +1159,13 @@ mod tests {
             reasoning_effort: None, chat_template_kwargs: None, thinking_extra: Default::default(),
             thinking_ask: None, stream_options: None, stream: true,
         };
-        let response = stream(Cli::Claude, &req).await.unwrap();
+        let response = stream(Cli::Claude, &req, "live-test").await.unwrap();
         let s = crate::llm::client::LlmStream { response, dialect: crate::llm::responses::Dialect::ChatCompletions };
         let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let agg = crate::llm::streaming::consume_stream(s, cancel, false, |_| {}).await.unwrap();
         assert!(agg.error.is_none(), "{:?}", agg.error);
         assert!(agg.content.contains("Paris"), "{}", agg.content);
         assert!(agg.usage.is_some());
-        assert!(complete(Cli::Claude, &req).await.unwrap().choices[0].message.content.is_some());
+        assert!(complete(Cli::Claude, &req, "live-test").await.unwrap().choices[0].message.content.is_some());
     }
 }

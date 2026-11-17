@@ -273,7 +273,7 @@ impl<'a> LlmClient<'a> {
 
     pub async fn chat_completion(&self, req: &ChatRequest) -> AppResult<ChatResponse> {
         if let Some(cli) = self.cli() {
-            return crate::llm::cli::complete(cli, req).await;
+            return crate::llm::cli::complete(cli, req, &self.session).await;
         }
         let (path, body) = self.wire(req);
         let http_req = self.http.post(self.url(path)).json(&body);
@@ -311,7 +311,7 @@ impl<'a> LlmClient<'a> {
         on_retry: RetryHook<'_>,
     ) -> AppResult<LlmStream> {
         if let Some(cli) = self.cli() {
-            let response = crate::llm::cli::stream(cli, req).await?;
+            let response = crate::llm::cli::stream(cli, req, &self.session).await?;
             return Ok(LlmStream { response, dialect: Dialect::ChatCompletions });
         }
         let mut attempt = 0;

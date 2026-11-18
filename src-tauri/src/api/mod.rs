@@ -298,6 +298,12 @@ fn build_router(state: ApiState) -> Router {
         )
         .route("/api/chats/:id/terminals/:terminalId/input", post(h::write_terminal))
         .route("/api/chats/:id/working-dir", get(h::chat_working_dir))
+        .route(
+            "/api/chats/:id/paths",
+            get(h::list_chat_paths).post(h::grant_chat_path).delete(h::revoke_chat_path),
+        )
+        .route("/api/fs/stat", get(h::stat_path))
+        .route("/api/fs/context", get(h::path_context))
         .route("/api/fs/list", get(h::list_dir))
         .route("/api/fs/file", get(h::read_workspace_file).put(h::write_workspace_file))
         .route("/api/chats/:id/fix-diagram", post(h::fix_diagram))

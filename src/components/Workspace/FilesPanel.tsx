@@ -20,6 +20,9 @@ import { formatBytes } from "@/lib/format";
 import type { DirEntry } from "@/lib/types";
 import { ErrorNote } from "@/components/common/ErrorNote";
 import { isShowing } from "@/lib/tabLayout";
+import { useChatPaths } from "@/components/Chat/GrantChip";
+import { reportError } from "@/lib/reportError";
+import { Lock, X } from "lucide-react";
 
 /**
  * The chat's working directory as a tree (0.17.9, reworked 0.18).
@@ -41,6 +44,17 @@ export function FilesPanel({ chatId }: { chatId: string }) {
   // project re-resolves it, as does changing the default directory.
   const projectId = useApp((s) => s.chats.find((c) => c.id === chatId)?.projectId ?? null);
   const defaultDir = useApp((s) => s.appSettings.defaultDirectory);
+  // Paths handed to the chat (0.19.3). A chat with no project works in its
+  // first granted folder, so a grant can move the root too.
+  const { paths: granted } = useChatPaths(chatId);
+  const grantKey = granted.map((g) => g.path).join("|");
+  // A granted folder clicked below re-roots the tree on it, until the chat
+  // changes or the grant goes.
+  const [viewing, setViewing] = useState<string | null>(null);
+  useEffect(() => { setViewing(null); }, [chatId]);
+  useEffect(() => {
+    if (viewing && !granted.some((g) => g.path === viewing)) setViewing(null);
+  }, [grantKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     let live = true;
@@ -48,36 +62,81 @@ export function FilesPanel({ chatId }: { chatId: string }) {
       .then((d) => { if (live) setRoot(d); })
       .catch(() => { if (live) setRoot(null); });
     return () => { live = false; };
-  }, [chatId, projectId, defaultDir]);
+  }, [chatId, projectId, defaultDir, grantKey]);
 
   if (root === undefined) return null;
+  const treeRoot = viewing ?? root;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col text-xs">
-      {root ? (
+      {granted.length > 0 && (
+        <div className="shrink-0 border-b border-[var(--color-border)] py-1">
+          <div className="px-2.5 pb-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--color-text-muted)]">
+            Granted
+          </div>
+          <ul>
+            {granted.map((g) => (
+              <li key={g.path} className="flex h-[22px] items-center gap-1 px-2.5 hover:bg-[var(--color-panel-hover)]">
+                <button
+                  className={`flex min-w-0 flex-1 items-center gap-1 text-left ${g.exists ? "" : "opacity-50"}`}
+                  title={`${g.path}${g.inherited ? "\nGranted on the chat this one belongs to" : ""}`}
+                  disabled={!g.isDir || !g.exists}
+                  onClick={() => setViewing((v) => (v === g.path ? null : g.path))}
+                >
+                  {g.isDir ? (
+                    <Folder size={12} className={`shrink-0 ${viewing === g.path ? "text-[var(--color-accent)]" : "text-[var(--color-text-muted)]"}`} />
+                  ) : (
+                    <FileIcon size={12} className="shrink-0 text-[var(--color-text-muted)]" />
+                  )}
+                  <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-[var(--color-text-muted)]">
+                    <RootLabel path={g.path} />
+                  </span>
+                  {!g.exists && <span className="shrink-0 text-[9px] uppercase text-[var(--color-danger)]">stale</span>}
+                </button>
+                {g.exists && (
+                  <IconButton title="Show in the file manager" onClick={() => api.revealPath(g.path).catch(reportError("Couldn't show it"))}>
+                    <ExternalLink size={11} />
+                  </IconButton>
+                )}
+                {g.inherited ? (
+                  <span className="shrink-0 p-0.5 text-[var(--color-text-muted)]" title="Granted on the chat this one belongs to — take it back there">
+                    <Lock size={10} />
+                  </span>
+                ) : (
+                  <IconButton title="Take access back" onClick={() => api.revokeChatPath(chatId, g.path).catch(reportError("Couldn't take the access back"))}>
+                    <X size={11} />
+                  </IconButton>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {treeRoot ? (
         <>
           <div className="flex shrink-0 items-center gap-1 border-b border-[var(--color-border)] px-2.5 py-1.5">
             <Folder size={12} className="shrink-0 text-[var(--color-text-muted)]" />
-            <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-[var(--color-text-muted)]" title={root}>
-              <RootLabel path={root} />
+            <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-[var(--color-text-muted)]" title={treeRoot}>
+              <RootLabel path={treeRoot} />
             </span>
             <IconButton title="Re-read the tree" onClick={() => setRefreshKey((k) => k + 1)}>
               <RefreshCw size={11} />
             </IconButton>
-            <IconButton title="Open in the file manager" onClick={() => api.openPath(root).catch(console.warn)}>
+            <IconButton title="Open in the file manager" onClick={() => api.openPath(treeRoot).catch(console.warn)}>
               <ExternalLink size={11} />
             </IconButton>
           </div>
           <div className="min-h-0 flex-1 overflow-auto overscroll-contain py-1">
             {/* Keyed by chat and root too: a `Dir` reads its folder once, so without
                 a remount switching chats kept showing the last chat's tree. */}
-            <Dir key={`${chatId}:${root}:${refreshKey}`} path={root} depth={0} open />
+            <Dir key={`${chatId}:${treeRoot}:${refreshKey}`} path={treeRoot} depth={0} open />
           </div>
         </>
       ) : (
         <p className="px-2.5 py-2.5 text-[11px] leading-relaxed text-[var(--color-text-muted)]">
-          No working directory. Give this chat a project with a directory, or set a default
-          directory in Settings, and the file tools — and this tree — will be scoped to it.
+          No working directory. Give this chat a project with a directory, drop a folder on
+          it, or set a default directory in Settings, and the file tools — and this tree —
+          will be scoped to it.
         </p>
       )}
     </div>

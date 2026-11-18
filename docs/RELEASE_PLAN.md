@@ -344,6 +344,49 @@ Claude Code and Codex, already installed and signed in, as providers: no key, bi
 - [ ] Seen in the app: the same kind of long agentic chat, with `chat_usage` showing most input cached
 - [ ] A system prompt that changes between turns (memory, skills) reaches a parked Claude run only when a fresh run starts
 
+### 0.19.3 — Folders you hand a chat
+
+A folder dropped on a chat, a path pasted into it, one picked with "Add folder", or one the app was opened on from Explorer becomes something the chat's agents — and their sub-agents — can read and edit, without making a project. A path inside a known project opens in that project instead. Planned as 0.19.1; that number and 0.19.2 went to the subscription providers.
+
+**Getting a path out of a drop**
+- [x] `dropbridge.rs`: the page hands the dropped DOM objects to the host with `chrome.webview.postMessageWithAdditionalObjects`, and the host reads each path off `ICoreWebView2File`, then `ICoreWebView2FileSystemHandle`. HTML5 drag-and-drop stays on (`dragDropEnabled: false`) — Tauri's native handler would have cost the composer, zone library and settings-import drops (tauri#15138). Built on the `webview2-com` already in the tree; no plugin
+- [x] `dropPaths.ts` splits a drop: folders' zero-byte `File` stand-ins are no longer attached, files attach as before. Times out to no paths after 1.5 s, so a runtime without the API never hangs a drop
+- [x] Seen in the app: one file, one folder and a mixed drop of three, each with the right path and kind. **Open: whether a folder's path arrives on its `File` or only on its `FileSystemHandle` has not been observed** — both are posted; if neither carries it, folder drops say "Couldn't read that folder's location — paste its path or use Add folder"
+- [x] Seen in the app: the zone-library drop and the settings-import drop still work
+
+**Grants**
+- [x] `chat_paths` (migration 053) and `grants.rs`: stored canonical, refused for a whole drive or anything under Windows, inherited by sub-agents and branches from their parent chats rather than copied, so a revoke reaches every agent under it
+- [x] Enforced through the per-turn tool config (`file_system.granted_roots`, read once per turn and on a zone switch), not through fifteen file-tool signatures. A chat with no project works in its first granted folder — its `AGENTS.md`, repo map and Files tree with it
+- [x] `<env>` names the extra paths (`Also granted: …`); the scope error lists them among the allowed roots
+- [x] Tests: refused before, readable after, refused after revoking; a sub-agent inherits; a projectless chat's working directory; cascade on delete; a drive refused; a granted file readable and its sibling not
+- [x] Five routes (`/api/chats/:id/paths`, `/api/fs/stat`, `/api/fs/context`) and `chat-paths-changed` forwarded to remotes
+- [ ] Edit approval rules: an allow list of `{project}` still asks about edits in a granted folder outside it — kept as the safer reading; see the `{granted}` backlog item
+
+**Handing one over**
+- [x] Drop a folder on a chat: granted at once, shown on an **Access** strip above the composer (✕ takes it back) and under Files → **Granted** (re-root the tree on it, show it in Explorer, revoke; stale ones marked, inherited ones locked)
+- [x] Paste a path (Explorer's *Copy as path* quotes included): it stays text, and a **Give access** chip appears once the desktop confirms it exists. `pathText.ts`, 7 tests
+- [x] **Add folder…** beside the attach button: the native picker, which works whatever a drop manages
+- [x] On the Home screen, paths wait for the chat being started and are granted before its first message goes
+- [x] Seen in the app: each of the four, with the next turn reaching the path and a revoke refusing it again
+- Deviation: no folder count in the chat header — the Access strip above the composer does the same job where it is read
+
+**Smart project detection**
+- [x] `path_context`: the deepest project whose directory is or contains the path, compared by component and case-insensitively on Windows (`D:\dev2` is not inside `D:\dev`); and whether an unregistered folder looks like a project (`.git`, `package.json`, `Cargo.toml`, `pyproject.toml`, `go.mod`, `AGENTS.md`, `CLAUDE.md` at its top). Tests for each case
+- [x] Home screen: a known project's folder defaults to **→ in *Project*** (picker follows; "Just this folder" reverts); a project-looking folder offers **Make it a project**
+- [x] In a chat: a folder already inside its project is not granted again; one in another project is granted and **Move chat to *X*** offered, never done
+- [x] Seen in the app: a folder inside an existing project dropped on the Home screen, and the chat that results listed under that project
+
+**Opening on a path**
+- [x] `launch.rs`: `multizone.exe <path>` (relative to the launch directory, so `multizone .` works) and `--open-cwd`. A bare launch opens nothing, whatever its cwd. Cold start and second launch both park the path and the window pulls it, so one fired before the listener exists is not lost. 6 tests
+- [x] `useLaunchPath`: a chat in the path's project, or a chat with the path granted; nothing is sent. Mid-turn it opens in a tab rather than taking the running chat's place
+- [x] Seen in the app: with the app closed; with it in the tray; `multizone .` from a terminal in a project directory
+
+**Explorer**
+- [x] Installer hooks (HKCU): App Paths entry, and **Open in MultiZone** on a folder and on a folder's background. Removed on uninstall; `uninstall-audit.ps1` now scans those keys
+- [x] Seen on a fresh install: both right-click verbs (Windows 11: under *Show more options*), Win+R `multizone`, and after uninstall none of the keys left
+- [ ] **Unverified: whether Explorer's address bar starts `multizone .` in the folder on screen.** If it does not, the address bar is documented as unsupported and the right-click verbs are the way in
+- Cut for now: a Settings toggle that removes the verbs without uninstalling
+
 ### 0.19.x — Still to come
 
 From the backlog entry; each one a tool plus a renderer unless said otherwise.
@@ -395,6 +438,14 @@ From the backlog entry; each one a tool plus a renderer unless said otherwise.
 ---
 
 ## Backlog — unscheduled
+
+- [ ] **From 0.19.3, folders handed to a chat.** Each small, each built on `chat_paths`:
+  - Reference a large dropped file by path instead of inlining it — a 40 MB log does not need to be in context once the agent can open it
+  - Files panel right-click: copy path, reveal in Explorer, grant to another chat
+  - A `{granted}` placeholder for edit approval rules beside `{project}`, so editing a granted folder can be made as quiet as editing the project
+  - Recent folders on the Home screen
+  - Windows 11's compact right-click menu: an `IExplorerCommand` handler, which needs a packaged (sparse MSIX) identity — a distribution question as much as an engineering one
+  - A Settings toggle for the Explorer verbs
 
 - [ ] **Retrieval and spend** — *scheduled as 0.14.7, unscheduled before it started.* Each of the three is a real improvement and none of them is what this app is for: a local-first interface whose corpus is one person's projects, not a cloud index or a benchmark harness.
   - Hybrid retrieval: BM25 over FTS5 fused with the existing cosine score at roughly equal weight, then a cross-encoder rerank of the top ~20 down to ~8. Embedding-only search misses exact-token queries — an error string, a config key, a function name — which is most of what a coding agent looks up. Same RRF shape `smart_search` already uses, applied to the local index. The honest case for deferring: at one project's scale the embedding-only miss is a second query, not a dead end

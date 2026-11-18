@@ -55,7 +55,12 @@ $FileRoots = @(
 $RegistryRoots = @(
   "HKCU:\Software",
   "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
-  "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall"
+  "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall",
+  # Explorer integration (0.19.3, installer-hooks.nsh). Deeper than $Depth
+  # reaches from HKCU:\Software, so their parents are scanned directly.
+  "HKCU:\Software\Microsoft\Windows\CurrentVersion\App Paths",
+  "HKCU:\Software\Classes\Directory\shell",
+  "HKCU:\Software\Classes\Directory\Background\shell"
 )
 
 # Depth 3 keeps the snapshot to seconds rather than minutes while still reaching

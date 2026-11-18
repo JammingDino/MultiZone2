@@ -7,6 +7,10 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import type { PdfReadPage } from "@/lib/pdf";
 import type {
   DirEntry,
+  ChatPath,
+  ChatPathSource,
+  PathStat,
+  PathContext,
   FileText,
   TerminalInfo,
   TerminalRead,
@@ -589,6 +593,22 @@ export const readWorkspaceFile = (path: string) =>
   invoke<FileText>("read_workspace_file", { path });
 export const writeWorkspaceFile = (path: string, content: string) =>
   invoke<FileText>("write_workspace_file", { path, content });
+
+// Paths handed to a chat (0.19.3) — see `src-tauri/src/grants.rs`.
+export const listChatPaths = (chatId: string) =>
+  invoke<ChatPath[]>("list_chat_paths", { chatId });
+export const grantChatPath = (chatId: string, path: string, source: ChatPathSource) =>
+  invoke<ChatPath>("grant_chat_path", { chatId, path, source });
+export const revokeChatPath = (chatId: string, path: string) =>
+  invoke<boolean>("revoke_chat_path", { chatId, path });
+export const statPath = (path: string) => invoke<PathStat>("stat_path", { path });
+export const pathContext = (path: string) => invoke<PathContext>("path_context", { path });
+/** The path this window was launched on (0.19.3), taken once. Desktop only. */
+export const takePendingLaunch = () => invoke<string | null>("take_pending_launch");
+/** A second launch parked a path; call `takePendingLaunch`. */
+export const onOpenPath = (fn: () => void): Promise<UnlistenFn> => listen("open-path", () => fn());
+export const onChatPathsChanged = (fn: (chatId: string | null) => void): Promise<UnlistenFn> =>
+  listen<{ chatId?: string }>("chat-paths-changed", (e) => fn(e.payload?.chatId ?? null));
 /**
  * A URL the webview can load a local file from, via the app's `mzfile` scheme
  * (0.17.9) — so an HTML report's relative `src`/`href` find the files beside

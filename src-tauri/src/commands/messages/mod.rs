@@ -681,7 +681,8 @@ async fn ocr_language(db: &SqlitePool) -> String {
 ///
 /// Re-applied on a zone switch, because both entries depend on which zone (and
 /// so which model) is now answering.
-async fn inject_global_tool_config(zone_config: &mut Value, db: &SqlitePool, model: &str) {
+async fn inject_global_tool_config(zone_config: &mut Value, db: &SqlitePool, model: &str, chat_id: &str) {
+    inject_grants(zone_config, db, chat_id).await;
     // A PDF read returns page images by default, which is only useful to a model
     // that can see them. For a vision-incapable one the tool extracts text
     // instead — the same call attachments make, and for the same reason:
@@ -692,6 +693,26 @@ async fn inject_global_tool_config(zone_config: &mut Value, db: &SqlitePool, mod
     // The language an image read falls back to OCR in, for the same zones.
     if !vision_capable {
         obj.insert("ocr_language".to_string(), Value::String(ocr_language(db).await));
+    }
+}
+
+/// Write the chat's granted paths (0.19.3, `grants`) into the turn's tool
+/// config, where `filesystem::allowed_roots` reads them. Read once per turn and
+/// again on a zone switch — never per tool call, so the scope cannot change
+/// halfway through a step. The key is replaced, not merged, so a zone config
+/// that somehow carried one in never adds to it.
+pub(crate) async fn inject_grants(zone_config: &mut Value, db: &SqlitePool, chat_id: &str) {
+    let roots = crate::grants::roots(db, chat_id).await;
+    let Some(obj) = zone_config.as_object_mut() else { return };
+    let fs = obj
+        .entry("file_system".to_string())
+        .or_insert_with(|| Value::Object(Default::default()));
+    if let Some(fs) = fs.as_object_mut() {
+        if roots.is_empty() {
+            fs.remove("granted_roots");
+        } else {
+            fs.insert("granted_roots".to_string(), serde_json::json!(roots));
+        }
     }
 }
 
@@ -1914,7 +1935,7 @@ async fn run_participant_turn(
     let mut zone_config: Value =
         serde_json::from_str(&zone.tool_config).unwrap_or(Value::Object(Default::default()));
 
-    inject_global_tool_config(&mut zone_config, &ctx.db, &zone.model).await;
+    inject_global_tool_config(&mut zone_config, &ctx.db, &zone.model, chat_id).await;
 
     // The directory that scopes the filesystem tools. Resolved with the tool
     // context above, so the descriptions the model sees and the roots the tools
@@ -2373,7 +2394,7 @@ async fn run_participant_turn(
                 };
                 zone_config = serde_json::from_str(&zone.tool_config)
                     .unwrap_or(Value::Object(Default::default()));
-                inject_global_tool_config(&mut zone_config, &ctx.db, &zone.model).await;
+                inject_global_tool_config(&mut zone_config, &ctx.db, &zone.model, chat_id).await;
                 client =
                     LlmClient::new(&ctx.http, &provider.base_url, provider.api_key.as_deref())
                         .for_chat(chat_id);
@@ -3312,7 +3333,7 @@ async fn run_participant_turn(
                         };
                         zone_config = serde_json::from_str(&zone.tool_config)
                             .unwrap_or(Value::Object(Default::default()));
-                        inject_global_tool_config(&mut zone_config, &ctx.db, &zone.model).await;
+                        inject_global_tool_config(&mut zone_config, &ctx.db, &zone.model, chat_id).await;
                         client = LlmClient::new(
                             &ctx.http,
                             &provider.base_url,
@@ -3583,8 +3604,9 @@ async fn load_tool_context(
     ToolContext { theme, project_dir, vision_capable }
 }
 
-/// The directory the file tools are scoped to: the chat's project directory, or
-/// the app-level default when the chat has no project. Resolved once per turn
+/// The directory the file tools are scoped to: the chat's project directory,
+/// else the first folder handed to the chat (0.19.3, `grants`), else the
+/// app-level default. Resolved once per turn
 /// and used twice — to execute the file tools, and to tell the model in each
 /// tool's description which directory its paths resolve against.
 pub(crate) async fn resolve_working_dir(db: &SqlitePool, chat_id: &str) -> AppResult<Option<String>> {
@@ -3598,8 +3620,14 @@ pub(crate) async fn resolve_working_dir(db: &SqlitePool, chat_id: &str) -> AppRe
     .await?
     .flatten();
 
-    if from_project.is_some() {
+    if from_project.as_deref().is_some_and(|d| !d.trim().is_empty()) {
         return Ok(from_project);
+    }
+
+    // A chat opened on a folder works in that folder, the way a project chat
+    // works in its project — relative paths, its AGENTS.md, a repo map.
+    if let Some(dir) = crate::grants::first_folder(db, chat_id).await {
+        return Ok(Some(dir));
     }
 
     let raw: Option<String> =

@@ -8,9 +8,10 @@
 
 use serde::Serialize;
 use std::path::Path;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
 use crate::error::{AppError, AppResult};
+use crate::grants::{ChatPath, PathContext, PathStat};
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize)]
@@ -32,6 +33,58 @@ pub async fn chat_working_dir(
     chat_id: String,
 ) -> AppResult<Option<String>> {
     crate::commands::messages::resolve_working_dir(&state.db, &chat_id).await
+}
+
+// ─── Paths handed to a chat (0.19.3) — see `grants` ───────────────────────────────
+
+fn paths_changed(app: &AppHandle, chat_id: &str) {
+    let _ = app.emit("chat-paths-changed", serde_json::json!({ "chatId": chat_id }));
+}
+
+/// Give the chat (and every agent under it) a folder or file. Takes effect from
+/// the chat's next turn.
+#[tauri::command]
+pub async fn grant_chat_path(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    chat_id: String,
+    path: String,
+    source: Option<String>,
+) -> AppResult<ChatPath> {
+    let out = crate::grants::grant(&state.db, &chat_id, &path, source.as_deref().unwrap_or("picker")).await?;
+    paths_changed(&app, &chat_id);
+    Ok(out)
+}
+
+#[tauri::command]
+pub async fn revoke_chat_path(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    chat_id: String,
+    path: String,
+) -> AppResult<bool> {
+    let out = crate::grants::revoke(&state.db, &chat_id, &path).await?;
+    paths_changed(&app, &chat_id);
+    Ok(out)
+}
+
+/// Everything the chat may reach beyond its working directory, inherited
+/// grants included and marked.
+#[tauri::command]
+pub async fn list_chat_paths(state: State<'_, AppState>, chat_id: String) -> AppResult<Vec<ChatPath>> {
+    crate::grants::list(&state.db, &chat_id).await
+}
+
+/// Whether a pasted path exists, and is a folder. Metadata only.
+#[tauri::command]
+pub async fn stat_path(path: String) -> AppResult<PathStat> {
+    Ok(crate::grants::stat(&path))
+}
+
+/// Which project, if any, a path belongs to — for opening a chat in it.
+#[tauri::command]
+pub async fn path_context(state: State<'_, AppState>, path: String) -> AppResult<PathContext> {
+    crate::grants::path_context(&state.db, &path).await
 }
 
 /// One directory's children, folders first, each group by name. Hidden

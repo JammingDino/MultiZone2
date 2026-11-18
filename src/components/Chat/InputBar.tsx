@@ -23,6 +23,17 @@ import {
 import { resolveVisionCapable } from "@/lib/vision";
 import { resolveBaseModel, resolveBaseProvider } from "@/lib/baseZone";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
+import {
+  AddFolderButton,
+  GrantedStrip,
+  PathOffers,
+  grantAll,
+  makeProjectFrom,
+  takeQueuedOutcome,
+  usePasteOffers,
+  type OfferAction,
+  type PathOffer,
+} from "@/components/Chat/GrantChip";
 
 /** Shared empty result for store selectors. A selector that builds its own `[]`
  *  hands `useSyncExternalStore` a new snapshot on every read, which re-renders
@@ -42,6 +53,8 @@ export type { PendingAttachment };
 
 export interface InputBarHandle {
   addFiles: (files: FileList | File[]) => Promise<void>;
+  /** What a folder drop left to say or offer (0.19.3) — shown above the box. */
+  showDropOutcome: (notice: string | null, offers: PathOffer[]) => void;
 }
 
 interface InputBarProps {
@@ -256,7 +269,63 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
   })();
   function clearOverride() { setOvZone(undefined); setOvModel(""); }
 
-  useImperativeHandle(ref, () => ({ addFiles: (files) => tray.addFiles(files) }), [chatId]);
+  // Paths handed to the chat (0.19.3): offers from a paste, and what a folder
+  // drop had to say. Both are per chat, so a switch clears them.
+  const pasteOffers = usePasteOffers();
+  const [dropNotice, setDropNotice] = useState<string | null>(null);
+  const chatProjectId = chats.find((c) => c.id === chatId)?.projectId ?? null;
+  const projects = useApp((s) => s.projects);
+  const setChatProject = useApp((s) => s.setChatProject);
+  useEffect(() => {
+    // A chat opened from Explorer may have left something to say (0.19.3).
+    const queued = takeQueuedOutcome(chatId);
+    pasteOffers.setOffers(queued?.offers ?? []);
+    setDropNotice(queued?.notice ?? null);
+  }, [chatId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function offerActions(o: PathOffer): OfferAction[] {
+    const out: OfferAction[] = [];
+    // Already reachable through the chat's own project: nothing to grant.
+    if (!o.granted && !(o.project && o.project.projectId === chatProjectId)) {
+      out.push({
+        label: "Give access",
+        primary: true,
+        title: "Let this chat's agents read and edit it, from your next message",
+        run: async (x) => { await grantAll(chatId, [x.path], "paste"); pasteOffers.dismiss(x.path); },
+      });
+    }
+    const target = o.project;
+    if (target && target.projectId !== chatProjectId && projects.some((p) => p.id === target.projectId)) {
+      out.push({
+        label: `Move chat to ${target.name}`,
+        title: "Its working directory, context and knowledge become the project's",
+        run: async (x) => {
+          await setChatProject(chatId, target.projectId).catch(reportError("Couldn't move the chat"));
+          pasteOffers.dismiss(x.path);
+        },
+      });
+    } else if (!target && o.looksLikeProject && o.isDir && !chatProjectId) {
+      out.push({
+        label: "Make it a project",
+        title: "A project on this folder, with this chat in it",
+        run: async (x) => {
+          await makeProjectFrom(chatId, x.path).catch(reportError("Couldn't make the project"));
+          pasteOffers.dismiss(x.path);
+        },
+      });
+    }
+    return out;
+  }
+
+  useImperativeHandle(ref, () => ({
+    addFiles: (files) => tray.addFiles(files),
+    showDropOutcome: (notice, offers) => {
+      setDropNotice(notice);
+      if (offers.length) {
+        pasteOffers.setOffers((cur) => [...cur.filter((c) => !offers.some((o) => o.path === c.path)), ...offers]);
+      }
+    },
+  }), [chatId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Grow the textarea with its content up to the CSS max-height, after which
   // the `overflow-y-auto` class takes over and a scrollbar appears.
@@ -360,6 +429,10 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
   }
 
   async function onPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    // A pasted path goes in as text, as it always did, and is also offered as
+    // a grant once the desktop confirms it exists.
+    const pastedText = e.clipboardData?.getData("text/plain");
+    if (pastedText) pasteOffers.fromText(pastedText);
     const items = e.clipboardData?.items;
     if (!items) return;
     const imageItems = Array.from(items).filter((it) => it.type.startsWith("image/"));
@@ -389,6 +462,8 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
         <AttachError tray={tray} />
         <AudioModeRow tray={tray} />
         <AttachmentRow tray={tray} />
+        <GrantedStrip chatId={chatId} notice={dropNotice} onDismissNotice={() => setDropNotice(null)} />
+        <PathOffers offers={pasteOffers.offers} actions={offerActions} onDismiss={pasteOffers.dismiss} />
         {ocrFallback && hasVisualAttachment && (
           <div
             className="mb-2 flex w-fit items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-600 dark:text-amber-400"
@@ -551,6 +626,7 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
           >
             <Paperclip size={16} />
           </button>
+          <AddFolderButton onPick={(paths) => void grantAll(chatId, paths, "picker")} />
           <input
             ref={fileRef}
             type="file"

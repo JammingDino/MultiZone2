@@ -2080,6 +2080,44 @@ export interface DirEntry {
   modifiedMs: number | null;
 }
 
+// ── Paths handed to a chat (0.19.3) ──────────────────────────────────────────
+
+export type ChatPathSource = "drop" | "paste" | "picker" | "launch";
+
+/** A folder or file a chat may reach beyond its working directory. */
+export interface ChatPath {
+  path: string;
+  isDir: boolean;
+  source: ChatPathSource;
+  createdAt: number;
+  /** False once it has been moved or deleted — shown as stale. */
+  exists: boolean;
+  /** Granted on a parent chat; read-only here. */
+  inherited: boolean;
+}
+
+export interface PathStat {
+  exists: boolean;
+  isDir: boolean;
+  /** Canonical form, when it exists. */
+  path: string | null;
+}
+
+export interface ProjectMatch {
+  projectId: string;
+  name: string;
+  directory: string;
+  /** The path is the project directory itself, not somewhere inside it. */
+  exact: boolean;
+}
+
+export interface PathContext {
+  path: string;
+  isDir: boolean;
+  project: ProjectMatch | null;
+  looksLikeProject: boolean;
+}
+
 // ── Thinking (0.17.9) ───────────────────────────────────────────────────────
 
 export type ThinkingEffort = "low" | "medium" | "high";

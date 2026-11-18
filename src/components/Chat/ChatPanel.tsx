@@ -31,6 +31,8 @@ import { ReplayView } from "@/components/Chat/ReplayView";
 import { resolveBaseModel } from "@/lib/baseZone";
 import { PRIMARY_ACTION } from "@/lib/chrome";
 import type { FileDiff, StreamEnvelope } from "@/lib/types";
+import { canReadDropPaths, splitDrop } from "@/lib/dropPaths";
+import { grantDroppedFolders, missedFoldersNotice } from "./GrantChip";
 
 /** How long stream events are collected before being applied as one batch. */
 const STREAM_DRAIN_MS = 16;
@@ -416,8 +418,17 @@ function ChatPane({ chatId }: { chatId: string }) {
     dragDepth.current = 0;
     setIsDragOver(false);
     // Copy out of the event before awaiting — `dataTransfer` is cleared once
-    // the handler returns.
-    const files = Array.from(e.dataTransfer.files);
+    // the handler returns. Folders are split off here (0.19.3): they carry no
+    // content to attach, only a location to grant.
+    const { files, paths } = splitDrop(e.dataTransfer);
+    const chatId = activeChat.id;
+    const projectId = activeChat.projectId ?? null;
+    void paths.then(async (drop) => {
+      const folders = drop.paths.filter((p) => p.isDir).map((p) => p.path);
+      if (folders.length === 0 && drop.folderCount === 0) return;
+      const out = await grantDroppedFolders(chatId, projectId, folders);
+      inputRef.current?.showDropOutcome(missedFoldersNotice(drop) ?? out.notice, out.moveOffers);
+    });
     if (files.length === 0) return;
     // A dropped settings export is an import, not an attachment.
     void claimSettingsDrop(files, stageImport).then((claimed) => {
@@ -569,7 +580,7 @@ function ChatPane({ chatId }: { chatId: string }) {
         <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-[var(--color-bg)]/70 backdrop-blur-sm">
           <div className="flex flex-col items-center gap-3 rounded-xl border-2 border-dashed border-[var(--color-accent)] bg-[var(--color-panel)]/80 px-10 py-8 text-sm text-[var(--color-text)]">
             <Upload size={28} className="text-[var(--color-accent)]" />
-            <div>Drop files to attach</div>
+            <div>{canReadDropPaths() ? "Drop files to attach · folders to give access" : "Drop files to attach"}</div>
             <div className="text-xs text-[var(--color-text-muted)]">
               Images, PDFs, and text files supported
             </div>

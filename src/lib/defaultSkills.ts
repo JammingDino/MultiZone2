@@ -63,6 +63,7 @@ A project groups chats and, more importantly, gives them a **directory**. That d
 
 Configuring one well:
 - **Set the directory** first. Most "the assistant can't find my file" problems are this.
+- **No project needed for one folder.** Drop a folder on a chat, paste its path and click *Give access*, use *Add folder…* beside the attach button, or right-click it in Explorer → *Open in MultiZone*. The chat's agents (and its sub-agents) can then read and edit it; a chat with no project works in it. What a chat can reach is on the *Access* strip above the composer and under Files → *Granted*, where it can be taken back. A folder inside an existing project opens in that project instead.
 - Keep the **context snippet** short and factual — it is prepended to every chat in the project, so it is paid for on every turn. Conventions and constraints, not documentation.
 - **Knowledge (RAG)** is opt-in per chat. Index the directory when you want meaning-based search over a lot of prose; for code, the exact \`file_search\` tools are usually better and cost nothing to keep current.
 

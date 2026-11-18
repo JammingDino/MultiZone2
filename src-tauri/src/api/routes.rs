@@ -52,7 +52,7 @@ const fn open(method: &'static str, path: &'static str, description: &'static st
 
 /// Bumped whenever a route is added, removed or changes shape, so a caller can
 /// tell "the app is older than my script" from "my script is wrong".
-pub const ROUTE_SET_VERSION: u32 = 13;
+pub const ROUTE_SET_VERSION: u32 = 14;
 
 pub const ROUTES: &[RouteDef] = &[
     // Discovery — deliberately unauthenticated. A caller debugging a broken
@@ -163,6 +163,11 @@ pub const ROUTES: &[RouteDef] = &[
     r("POST", "/api/chats/:id/terminals/:terminalId/input", "Type into a terminal; `submit: false` sends no newline"),
     r("DELETE", "/api/chats/:id/terminals/:terminalId", "Stop a terminal and everything it started"),
     r("GET", "/api/chats/:id/working-dir", "The directory the chat's file tools are scoped to"),
+    r("GET", "/api/chats/:id/paths", "Folders and files handed to the chat beyond its working directory, inherited ones marked"),
+    r("POST", "/api/chats/:id/paths", "Give the chat a folder or file (`path`, `source`?); applies from its next turn"),
+    r("DELETE", "/api/chats/:id/paths", "Take a granted path back (`path`)"),
+    r("GET", "/api/fs/stat", "Whether `path` exists and is a folder, and its canonical form"),
+    r("GET", "/api/fs/context", "Which project `path` belongs to, or whether it looks like one"),
     r("GET", "/api/fs/list", "One directory's children (`path`), folders first"),
     r("GET", "/api/fs/file", "One file's text (`path`), for the workspace viewer"),
     r("PUT", "/api/fs/file", "Overwrite an existing file's text (`path`, `content`)"),
@@ -404,6 +409,11 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("terminals::write_terminal", Route("POST /api/chats/:id/terminals/:terminalId/input")),
     ("terminals::stop_terminal", Route("DELETE /api/chats/:id/terminals/:terminalId")),
     ("workspace::chat_working_dir", Route("GET /api/chats/:id/working-dir -> directory")),
+    ("workspace::list_chat_paths", Route("GET /api/chats/:id/paths")),
+    ("workspace::grant_chat_path", Route("POST /api/chats/:id/paths")),
+    ("workspace::revoke_chat_path", Route("DELETE /api/chats/:id/paths -> removed")),
+    ("workspace::stat_path", Route("GET /api/fs/stat")),
+    ("workspace::path_context", Route("GET /api/fs/context")),
     ("workspace::list_dir", Route("GET /api/fs/list")),
     ("workspace::read_workspace_file", Route("GET /api/fs/file")),
     ("workspace::write_workspace_file", Route("PUT /api/fs/file")),
@@ -491,6 +501,7 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("pdf_bridge::resolve_pdf_read", GuiOnly(
         "answers a request the backend made *of the window*: it hands back page text the webview rasterized, so there is nobody on the other end of it remotely",
     )),
+    ("launch::take_pending_launch", GuiOnly("hands the desktop window the path this machine launched it on")),
     ("files::open_path", GuiOnly("opens a path in this machine's shell — nothing a remote caller can observe")),
     ("files::reveal_path", GuiOnly("shows a path in this machine's file manager")),
     ("files::read_output_file", GuiOnly("feeds the in-window report preview; the file tools read files for callers")),
@@ -1287,6 +1298,49 @@ pub async fn chat_working_dir(
 ) -> ApiResult<Response> {
     let dir = commands::workspace::chat_working_dir(app_state(&st), id).await?;
     Ok(Json(json!({ "directory": dir })).into_response())
+}
+
+pub async fn list_chat_paths(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+) -> ApiResult<Response> {
+    Ok(Json(commands::workspace::list_chat_paths(app_state(&st), id).await?).into_response())
+}
+
+pub async fn grant_chat_path(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> ApiResult<Response> {
+    let path = required(&body, "path")?;
+    let out = commands::workspace::grant_chat_path(st.app.clone(), app_state(&st), id, path, s(&body, "source"))
+        .await?;
+    Ok(Json(out).into_response())
+}
+
+pub async fn revoke_chat_path(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> ApiResult<Response> {
+    let path = required(&body, "path")?;
+    let removed = commands::workspace::revoke_chat_path(st.app.clone(), app_state(&st), id, path).await?;
+    Ok(Json(json!({ "removed": removed })).into_response())
+}
+
+pub async fn stat_path(
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> ApiResult<Response> {
+    let path = q.get("path").cloned().unwrap_or_default();
+    Ok(Json(commands::workspace::stat_path(path).await?).into_response())
+}
+
+pub async fn path_context(
+    State(st): State<ApiState>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> ApiResult<Response> {
+    let path = q.get("path").cloned().unwrap_or_default();
+    Ok(Json(commands::workspace::path_context(app_state(&st), path).await?).into_response())
 }
 
 pub async fn list_dir(

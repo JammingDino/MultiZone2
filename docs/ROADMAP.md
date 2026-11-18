@@ -41,7 +41,7 @@ Semantic versioning. Each release is tagged `vMAJOR.MINOR.PATCH`.
 | **0.16.x** | In-chat rendering — charts from data, richer artifacts | Shipped |
 | **0.17.x** | The phone as a second window — LAN bind, pairing, device registry, the remote transport, the Android shell | Shipped |
 | **0.18.x** | Runs nobody is watching — close to tray, scheduled runs, smart compaction, rolling context, a Stop that works before the first token; 0.18.2 added tiled chat tabs | Shipped |
-| **0.19.x** | Study mode — grounded answers, flashcards, quizzes, cheat sheets, spaced review — and a lighter app; 0.19.1 adds Claude Code and Codex subscriptions as providers | 0.19.0 and 0.19.1 built — runtime testing open |
+| **0.19.x** | Study mode — grounded answers, flashcards, quizzes, cheat sheets, spaced review — and a lighter app; 0.19.1 adds Claude Code and Codex subscriptions as providers; 0.19.3 lets a chat be handed folders by drag, paste or Explorer | 0.19.0–0.19.3 built — runtime testing open |
 | **1.0.0** | Hardening & Public Release | Planned |
 | **1.2.x** | Signed-in connectors — OAuth, keychain, per-scope consent | Planned |
 | **Post-1.0** | Code interface + edit engine, shared mode surface, scratchpad, moddable app surface, Diffusion LLM | Backlog |

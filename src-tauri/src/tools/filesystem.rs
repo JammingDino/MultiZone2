@@ -563,6 +563,17 @@ fn allowed_roots(zone_config: &Value, project_dir: Option<&str>) -> Vec<PathBuf>
                 .collect()
         })
         .unwrap_or_default();
+    // Paths the user handed this chat (0.19.3, `grants`). A separate key from
+    // the zone's own `allowed_roots`, and written per turn rather than stored,
+    // so a zone config that is exported or copied never carries one chat's
+    // grants into another.
+    if let Some(arr) = zone_config
+        .get("file_system")
+        .and_then(|v| v.get("granted_roots"))
+        .and_then(|v| v.as_array())
+    {
+        roots.extend(arr.iter().filter_map(|v| v.as_str().map(PathBuf::from)));
+    }
     if let Some(dir) = project_dir {
         if !dir.trim().is_empty() {
             roots.push(PathBuf::from(dir));
@@ -1274,6 +1285,18 @@ pub async fn present_file(args: &Value, project_dir: Option<&str>) -> AppResult<
 // ---------------------------------------------------------------------------
 // 0.9.1 — file management: move/rename, copy, delete, create folder.
 // ---------------------------------------------------------------------------
+
+/// The scope check every tool makes, and nothing else — for tests elsewhere in
+/// the crate (`grants`) that need to prove a path is or is not reachable
+/// without standing up a stream sink.
+#[cfg(test)]
+pub(crate) async fn read_for_test(args: &Value, zone_config: &Value, project_dir: Option<&str>) -> String {
+    let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
+    match checked_path(path, zone_config, project_dir) {
+        Ok(p) => std::fs::read_to_string(p).unwrap_or_default(),
+        Err(e) => e,
+    }
+}
 
 /// Resolve a path and check it against the allowed roots, returning the error
 /// JSON the tools return verbatim when it fails. Shared by every file tool so

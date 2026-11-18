@@ -28,6 +28,7 @@ import { resolveBaseProvider } from "./lib/baseZone";
 import * as api from "./lib/tauri";
 import { installPerfHandle, mark, markInteractive } from "./lib/perf";
 import { useBackDismiss } from "./lib/useBackDismiss";
+import { useLaunchPath } from "./lib/useLaunchPath";
 
 /**
  * The sidebar, positioned for the window it is in.
@@ -100,6 +101,9 @@ export default function App() {
   // Answers `read`'s PDF page requests — the rasterizer is PDF.js, and it
   // lives in the window (see lib/usePdfReadBridge.ts).
   usePdfReadBridge();
+  // `multizone <path>` and Explorer's "Open in MultiZone" (0.19.3). Desktop
+  // only, and only once the settings it reads the default zone from are in.
+  useLaunchPath(!remote.session && appSettingsLoaded && providersLoaded);
   // Guard against concurrent invocations of the one-time seeders.
   const libRef = useRef(false);
   const zonesRef = useRef(false);

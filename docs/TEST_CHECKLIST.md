@@ -299,6 +299,25 @@ cut, smart-compaction rules); none of it has been seen in the Tauri shell.
 - [ ] Fires with the window hidden in the tray
 - [ ] A run due while the app was closed fires once at the next start
 
+## 11f. Folders handed to a chat (0.19.3) 🖥️
+
+- [x] Drop a folder on an open chat: it appears on the *Access* strip and under Files → *Granted*; the next turn can `read` inside it
+- [x] Drop a file: it still attaches, and is not granted
+- [x] Drop a file and a folder together: the file attaches, the folder is granted
+- [x] The zone-library drop and dropping a settings export still work
+- [x] Paste `"C:\…\something.pdf"` (Explorer → *Copy as path*): the text stays, a *Give access* chip appears, clicking it grants
+- [x] *Add folder…* grants through the picker
+- [x] ✕ on the Access strip (or Revoke under Files) and the next turn is refused
+- [x] A sub-agent of a chat with a grant can read it; its Files panel shows the grant locked
+- [x] Home screen: drop a folder, send — the first turn already reaches it
+- [x] Home screen: a folder inside an existing project shows *→ in Project*, and the chat lands in that project
+- [x] A folder that looks like a repo offers *Make it a project*; doing it moves the chat in and drops the grant
+- [x] `multizone.exe D:\some\folder` with the app closed, then again with it in the tray: a new chat on it each time
+- [x] `multizone.exe` with no argument behaves exactly as before
+- [x] Right-click a folder → *Show more options* → *Open in MultiZone*; same on a folder's background
+- [ ] Explorer address bar: `multizone .` — record whether it opened the folder on screen
+- [x] After uninstall, none of `App Paths\multizone.exe`, `Directory\shell\MultiZone`, `Directory\Background\shell\MultiZone` remain under HKCU
+
 ## 12. Performance
 
 - [ ] Cold start time recorded: ______

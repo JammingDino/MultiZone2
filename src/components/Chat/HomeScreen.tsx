@@ -16,6 +16,19 @@ import {
   readFileAsDataUrl,
   useAttachments,
 } from "@/components/Chat/Attachments";
+import { canReadDropPaths, splitDrop } from "@/lib/dropPaths";
+import {
+  AddFolderButton,
+  PathOffers,
+  PendingPaths,
+  addPending,
+  baseName,
+  contextsFor,
+  grantAll,
+  missedFoldersNotice,
+  usePasteOffers,
+  type PendingPath,
+} from "./GrantChip";
 import { useDictation, MicButton, DictationMeter } from "@/components/Chat/useDictation";
 import { resolveMediaCapable } from "@/lib/media";
 import { resolveVisionCapable } from "@/lib/vision";
@@ -250,6 +263,33 @@ export function HomeScreen() {
   const videoOverrides = useApp((s) => s.appSettings.videoOverrides);
   const dragDepth = useRef(0);
   const [isDragOver, setIsDragOver] = useState(false);
+  // Paths for the chat about to be created (0.19.3). Nothing is stored until
+  // it exists; they are granted, or turned into its project, right after
+  // `createChat` and before the first message goes, so the first turn has them.
+  const [pendingPaths, setPendingPaths] = useState<PendingPath[]>([]);
+  const [dropNotice, setDropNotice] = useState<string | null>(null);
+  const pasteOffers = usePasteOffers();
+  // A known project's folder starts the chat in that project by default —
+  // mirrored into the project picker, and taken back out if the user says
+  // "Just this folder".
+  const pendingProjectId = pendingPaths.find((p) => p.mode === "project")?.ctx.project?.projectId ?? null;
+  const appliedPendingProject = useRef<string | null>(null);
+  useEffect(() => {
+    if (pendingProjectId && pendingProjectId !== appliedPendingProject.current) {
+      setSelectedProjectId(pendingProjectId);
+      setNewProjectKind(null);
+    } else if (!pendingProjectId && appliedPendingProject.current) {
+      setSelectedProjectId((cur) => (cur === appliedPendingProject.current ? null : cur));
+    }
+    appliedPendingProject.current = pendingProjectId;
+  }, [pendingProjectId]);
+  const canChooseProject =
+    !newProjectKind && (selectedProjectId === null || selectedProjectId === pendingProjectId);
+  function addPendingPaths(paths: string[]) {
+    void contextsFor(paths).then((ctxs) => {
+      if (ctxs.length) setPendingPaths((cur) => addPending(cur, ctxs, !canChooseProject));
+    });
+  }
 
   // Persist draft text across navigations — and the files staged with it, which
   // are as much of the draft as the words are.
@@ -271,6 +311,9 @@ export function HomeScreen() {
       : quickAvailable ? { type: "quick" } : zones[0] ? { type: "zone", id: zones[0].id } : { type: "quick" });
     setSelectedTagIds(new Set());
     tray.clear();
+    setPendingPaths([]);
+    setDropNotice(null);
+    pasteOffers.clear();
     setSelectedPerspectiveIds(new Set());
     setSelectedSubagentIds(new Set());
     setMultizoneLeaderId(null);
@@ -362,7 +405,13 @@ export function HomeScreen() {
     dragDepth.current = 0;
     setIsDragOver(false);
     // Copied out before awaiting — `dataTransfer` is cleared on return.
-    const files = Array.from(e.dataTransfer.files);
+    // Folders are split off (0.19.3) and held for the chat about to exist.
+    const { files, paths } = splitDrop(e.dataTransfer);
+    void paths.then((drop) => {
+      const folders = drop.paths.filter((p) => p.isDir).map((p) => p.path);
+      setDropNotice(missedFoldersNotice(drop));
+      if (folders.length) addPendingPaths(folders);
+    });
     if (files.length === 0) return;
     // A dropped settings export is an import, not an attachment.
     void claimSettingsDrop(files, stageImport).then((claimed) => {
@@ -371,6 +420,8 @@ export function HomeScreen() {
   }
 
   async function onPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const pastedText = e.clipboardData?.getData("text/plain");
+    if (pastedText) pasteOffers.fromText(pastedText);
     const items = e.clipboardData?.items;
     if (!items) return;
     const imageItems = Array.from(items).filter((it) => it.type.startsWith("image/"));
@@ -422,6 +473,7 @@ export function HomeScreen() {
 
     let currentProjectId = selectedProjectId;
     const currentNewProject = newProjectKind;
+    const currentPendingPaths = pendingPaths;
     const currentDrawIcon = drawIcon;
     const currentTagIds = new Set(selectedTagIds);
     const currentPerspectiveIds = new Set(selectedPerspectiveIds);
@@ -449,7 +501,27 @@ export function HomeScreen() {
         });
         currentProjectId = project.id;
       }
+      // A folder the user chose to make a project of (0.19.3): the project is
+      // made on that folder and the chat starts in it.
+      const asProject = currentPendingPaths.find((p) => p.mode === "newProject");
+      let madeProjectFrom: string | null = null;
+      if (asProject && !currentProjectId) {
+        madeProjectFrom = asProject.ctx.path;
+        const project = await api.upsertProject({
+          name: baseName(asProject.ctx.path),
+          directory: asProject.ctx.path,
+        });
+        currentProjectId = project.id;
+        await refreshProjects();
+      }
       const chat = await api.createChat(zoneId, currentProjectId);
+      // Everything else is granted before the first turn runs. A path inside
+      // the project the chat is now in needs no grant — the project covers it.
+      const toGrant = currentPendingPaths
+        .filter((p) => p.ctx.path !== madeProjectFrom)
+        .filter((p) => !(p.ctx.project && p.ctx.project.projectId === currentProjectId))
+        .map((p) => p.ctx.path);
+      if (toGrant.length) await grantAll(chat.id, toGrant, "drop");
       if (currentNewProject && currentProjectId) {
         const projectId = currentProjectId;
         try {
@@ -514,6 +586,8 @@ export function HomeScreen() {
       setHomeScreenDraft("");
       setHomeScreenAttachments([]);
       tray.clear();
+      setPendingPaths([]);
+      pasteOffers.clear();
       // The home screen is gone by the time this settles. A failed turn shows
       // its reason in the new chat's error card; the text goes into that chat's
       // composer so it can be sent again, rather than vanishing with the page.
@@ -568,7 +642,7 @@ export function HomeScreen() {
         <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-[var(--color-bg)]/70 backdrop-blur-sm">
           <div className="flex flex-col items-center gap-3 rounded-xl border-2 border-dashed border-[var(--color-accent)] bg-[var(--color-panel)]/80 px-10 py-8 text-sm text-[var(--color-text)]">
             <Upload size={28} className="text-[var(--color-accent)]" />
-            <div>Drop files to attach</div>
+            <div>{canReadDropPaths() ? "Drop files to attach · folders to give access" : "Drop files to attach"}</div>
             <div className="text-xs text-[var(--color-text-muted)]">
               Images, PDFs, and text files supported
             </div>
@@ -593,6 +667,28 @@ export function HomeScreen() {
           <AttachError tray={tray} />
           <AudioModeRow tray={tray} />
           <AttachmentRow tray={tray} />
+          <PendingPaths items={pendingPaths} onChange={setPendingPaths} canChooseProject={canChooseProject} />
+          <PathOffers
+            offers={pasteOffers.offers}
+            actions={() => [{
+              label: "Give access",
+              primary: true,
+              title: "Hand it to the chat this message starts",
+              run: (o) => {
+                setPendingPaths((cur) => addPending(cur, [o], !canChooseProject));
+                pasteOffers.dismiss(o.path);
+              },
+            }]}
+            onDismiss={pasteOffers.dismiss}
+          />
+          {dropNotice && (
+            <div className="mb-2 flex w-fit items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-600 dark:text-amber-400">
+              <span>{dropNotice}</span>
+              <button onClick={() => setDropNotice(null)} className="hover:text-[var(--color-text)]" title="Dismiss">
+                <X size={11} />
+              </button>
+            </div>
+          )}
           {ocrFallback && hasVisualAttachment && (
             <div
               className="mb-2 flex w-fit items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-600 dark:text-amber-400"
@@ -631,6 +727,7 @@ export function HomeScreen() {
             >
               <Paperclip size={15} />
             </button>
+            <AddFolderButton onPick={addPendingPaths} className="shrink-0 rounded-full p-1.5" size={15} />
             <input
               ref={fileRef}
               type="file"

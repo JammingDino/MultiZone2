@@ -151,8 +151,18 @@ pub const DEFAULT_RULES: &str = "# Working in a codebase\n\
 /// The `<env>` block: working directory and how paths are written, platform,
 /// and today's date. The date is bucketed to the day, so the prefix cache is
 /// lost once at midnight rather than on every turn.
-pub fn env_block(project_dir: Option<&str>) -> String {
+///
+/// `granted` is every path the user handed the chat (0.19.3, `grants`); the one
+/// that became the working directory is not repeated. Without this line the
+/// model only finds out a grant exists by tripping over it.
+pub fn env_block(project_dir: Option<&str>, granted: &[String]) -> String {
     let mut lines = vec!["<env>".to_string()];
+    let wd = project_dir.map(|d| d.trim().trim_end_matches(['/', '\\']).to_string());
+    let extra: Vec<&str> = granted
+        .iter()
+        .map(|g| g.as_str())
+        .filter(|g| wd.as_deref() != Some(g.trim_end_matches(['/', '\\'])))
+        .collect();
     match project_dir.map(str::trim).filter(|d| !d.is_empty()) {
         Some(dir) => {
             let dir = dir.trim_end_matches(['/', '\\']);
@@ -161,13 +171,20 @@ pub fn env_block(project_dir: Option<&str>) -> String {
             lines.push(format!(
                 "  Paths: write them relative to the working directory (`notes.md`, \
                  `docs{sep}notes.md`); a leading `/` or `~` is read as relative to it too. \
-                 An absolute path works only inside it; anywhere else on disk is refused."
+                 An absolute path works only inside it{}; anywhere else on disk is refused.",
+                if extra.is_empty() { "" } else { " or the granted paths below" }
             ));
         }
         None => lines.push(
             "  Working directory: none set — paths resolve against the zone's allowed roots."
                 .to_string(),
         ),
+    }
+    if !extra.is_empty() {
+        lines.push(format!(
+            "  Also granted: {} (use absolute paths for these)",
+            extra.join(", ")
+        ));
     }
     lines.push(format!("  Platform: {}", std::env::consts::OS));
     lines.push(format!("  Today's date: {}", chrono::Local::now().format("%Y-%m-%d")));
@@ -268,7 +285,8 @@ pub async fn build_system_snippets(
     // section put it instead. Only zones with tools have anywhere to act.
     if !zone_tool_ids.is_empty() {
         let dir = resolve_working_dir(db, chat_id).await.ok().flatten();
-        snippets.push((SnippetKind::Env, env_block(dir.as_deref())));
+        let granted = crate::grants::roots(db, chat_id).await;
+        snippets.push((SnippetKind::Env, env_block(dir.as_deref(), &granted)));
     }
 
     // Rolling context (0.18): standing instructions, stable for as long as the

@@ -26,6 +26,12 @@ mod db;
 #[cfg(desktop)]
 mod diffs;
 #[cfg(desktop)]
+mod dropbridge;
+#[cfg(desktop)]
+mod grants;
+#[cfg(desktop)]
+mod launch;
+#[cfg(desktop)]
 mod instructions;
 #[cfg(desktop)]
 mod knowledge;
@@ -182,12 +188,18 @@ pub fn run() {
     tracing_subscriber::fmt().with_env_filter(filter()).init();
 
     tracing::info!("MultiZone {} starting", env!("CARGO_PKG_VERSION"));
+    // A path on the command line (0.19.3) is parked for the window to pull once
+    // it is listening — see `launch`. Read before the single-instance plugin
+    // can hand this launch to a running copy, which then reads it itself.
+    launch::capture_cold_start();
 
     tauri::Builder::default()
         // First, so a second launch is handed over before it initialises
         // anything of its own.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            tray::show_main(app)
+        .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+            tray::show_main(app);
+            // `multizone <path>` while already running opens a chat on it.
+            launch::on_second_instance(app, &args, &cwd);
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -216,6 +228,9 @@ pub fn run() {
         .register_uri_scheme_protocol(preview::SCHEME, |_ctx, request| preview::serve(request))
         .setup(|app| {
             let handle = app.handle().clone();
+            // Paths for dropped files and folders (0.19.3), without giving up
+            // the webview's own HTML5 drag-and-drop — see `dropbridge`.
+            dropbridge::init(&handle);
             tauri::async_runtime::block_on(async move {
                 // `setup()` runs after the window exists, so panicking here shows
                 // the user a window that opens and instantly closes, with the
@@ -444,6 +459,12 @@ pub fn run() {
             commands::terminals::stop_terminal,
             commands::terminals::start_terminal,
             commands::workspace::chat_working_dir,
+            commands::workspace::grant_chat_path,
+            commands::workspace::revoke_chat_path,
+            commands::workspace::list_chat_paths,
+            commands::workspace::stat_path,
+            commands::workspace::path_context,
+            launch::take_pending_launch,
             commands::workspace::list_dir,
             commands::workspace::read_workspace_file,
             commands::workspace::write_workspace_file,

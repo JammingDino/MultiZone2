@@ -175,7 +175,8 @@ export function MessageThread({ chatId, bottomInset = 0 }: {
     let clickedInside = false;
     let grabbedScrollbar = false;
     const onPointerDown = (e: PointerEvent) => {
-      clickedInside = c.contains(e.target as Node);
+      // A pointer event aimed at the window itself has no Node target.
+      clickedInside = e.target instanceof Node && c.contains(e.target);
       // The scrollbar belongs to the scroller itself, right of its client box.
       if (e.target === c && e.offsetX >= c.clientWidth) {
         grabbedScrollbar = true;

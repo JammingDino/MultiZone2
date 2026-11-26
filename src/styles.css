@@ -763,6 +763,21 @@ html.translucent .trellis [data-trellis-part="panel"] {
 html.translucent .trellis [data-trellis-part="surface"] {
   background: transparent;
 }
+
+/* ===== Soft text after zooming a pane (0.21) =====
+ * Trellis gives every surface `will-change: transform`. While a pane zooms in
+ * or out (Ctrl+Enter, the overview) the surfaces beside it slide at
+ * fractional offsets with their content scaled, and Chromium keeps
+ * rasterising a will-change layer the way it did mid-animation: once the
+ * panes settle on whole pixels the text there (in practice the sidebar) stays
+ * soft — repainting it does not help — until the layer is rebuilt. Without
+ * the hint the surface still gets composited (it overlaps a composited pane)
+ * but is rastered afresh where it lands. The content is repainted every
+ * frame of a zoom anyway, so the hint saved nothing there. Panels keep
+ * theirs. */
+.trellis [data-trellis-part="surface"] {
+  will-change: auto;
+}
 html.glass-tinted {
   --mz-pane-tint: color-mix(in srgb, var(--color-accent) 14%, var(--color-bg));
 }

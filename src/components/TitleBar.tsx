@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { PhysicalPosition } from "@tauri-apps/api/dpi";
-import { LayoutTemplate, Minus, PanelLeft, PanelRight, Square, X, Maximize2 } from "lucide-react";
+import { Check, LayoutTemplate, Minus, Square, X, Maximize2 } from "lucide-react";
 import { useApp } from "@/store/app";
+import { Popover } from "@/components/common/Popover";
 
 /**
  * How long after a touch/pen press we treat an incoming `mousedown` as the
@@ -246,7 +247,7 @@ export function TitleBar() {
         </span>
       </div>
       <div className="flex h-full items-stretch">
-        <LayoutButtons />
+        <LayoutMenu />
         <WinBtn title="Minimize" onClick={() => { appWindow.minimize().catch(() => {}); }}>
           <Minus size={12} />
         </WinBtn>
@@ -263,28 +264,47 @@ export function TitleBar() {
 
 /**
  * The sidebar and the workspace are panes of the layout (0.21.0) and can be
- * closed, moved or floated anywhere; these bring them back, and put them back
- * where they started.
+ * closed, moved or floated anywhere; this brings them back, and puts them back
+ * where they started. One button, not three, beside the window's own.
  */
-function LayoutButtons() {
+function LayoutMenu() {
   const sidebarOpen = useApp((s) => s.sidebarOpen);
   const workspaceOpen = useApp((s) => s.workspaceOpen);
-  const setSidebarOpen = useApp((s) => s.setSidebarOpen);
-  const setWorkspaceOpen = useApp((s) => s.setWorkspaceOpen);
-  const resetPanels = useApp((s) => s.resetPanels);
-  const on = { color: "var(--color-text)" };
+  const [open, setOpen] = useState(false);
+  const anchor = useRef<HTMLDivElement>(null);
+  const s = useApp.getState();
+  const items: { label: string; on?: boolean; hint?: string; run: () => void }[] = [
+    { label: "Sidebar", on: sidebarOpen, hint: "Ctrl+B", run: () => s.setSidebarOpen(!sidebarOpen) },
+    { label: "Workspace", on: workspaceOpen, run: () => s.setWorkspaceOpen(!workspaceOpen) },
+    { label: "Reset layout", run: s.resetPanels },
+  ];
   return (
-    <>
-      <WinBtn title="Put the sidebar and the workspace back at the window's edges" onClick={resetPanels}>
+    <div ref={anchor} className="flex h-full">
+      <WinBtn title="Layout: sidebar, workspace, reset" onClick={() => setOpen((v) => !v)}>
         <LayoutTemplate size={12} />
       </WinBtn>
-      <WinBtn title={sidebarOpen ? "Close the sidebar (Ctrl+B)" : "Open the sidebar (Ctrl+B)"} onClick={() => setSidebarOpen(!sidebarOpen)}>
-        <PanelLeft size={13} style={sidebarOpen ? on : undefined} />
-      </WinBtn>
-      <WinBtn title={workspaceOpen ? "Close the workspace" : "Open the workspace"} onClick={() => setWorkspaceOpen(!workspaceOpen)}>
-        <PanelRight size={13} style={workspaceOpen ? on : undefined} />
-      </WinBtn>
-    </>
+      <Popover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={anchor}
+        align="end"
+        className="min-w-[180px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 text-xs shadow-lg"
+      >
+        <div>
+          {items.map((i) => (
+            <button
+              key={i.label}
+              onClick={() => { setOpen(false); i.run(); }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-[var(--color-panel-hover)]"
+            >
+              <Check size={12} className={i.on ? "" : "invisible"} />
+              <span className="flex-1">{i.label}</span>
+              {i.hint && <span className="text-[var(--color-text-muted)]">{i.hint}</span>}
+            </button>
+          ))}
+        </div>
+      </Popover>
+    </div>
   );
 }
 

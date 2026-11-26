@@ -6,12 +6,9 @@ import {
   Columns2,
   Columns3,
   Copy,
-  GraduationCap,
   LayoutGrid,
-  Layers,
   List,
   MessageSquarePlus,
-  NotebookText,
   Pencil,
   Printer,
   Rows3,
@@ -56,21 +53,18 @@ export function StudyTab({ tab }: { tab: string }) {
 }
 
 /**
- * The tab's frame: a header that stays put and a body that scrolls. Keys go
+ * The tab's frame: a toolbar that stays put and a body that scrolls. Keys go
  * to the frame, not the window, so Space in a quiz never flips a card in
- * another pane — and the frame takes focus when it opens.
+ * another pane — and the frame takes focus when it opens. The tab names the
+ * set (0.21.0), so the toolbar does not.
  */
 function Frame({
-  icon,
-  title,
   meta,
   actions,
   children,
   onKey,
   wide,
 }: {
-  icon: ReactNode;
-  title: string;
   meta?: ReactNode;
   actions?: ReactNode;
   children: ReactNode;
@@ -94,10 +88,8 @@ function Frame({
       }}
       className="mz-view-in flex min-h-0 flex-1 flex-col bg-[var(--color-bg)] outline-none"
     >
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-[var(--color-border)] px-4">
-        <span className="shrink-0 text-[var(--color-accent)]">{icon}</span>
-        <span className="truncate text-sm font-medium text-[var(--color-text)]">{title}</span>
-        {meta && <span className="shrink-0 truncate text-xs text-[var(--color-text-muted)]">{meta}</span>}
+      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-[var(--color-border)] px-3">
+        {meta && <span className="min-w-0 truncate text-xs text-[var(--color-text-muted)]">{meta}</span>}
         <div className="ml-auto flex shrink-0 items-center gap-1">{actions}</div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
@@ -267,8 +259,6 @@ function QuizTab({ detail }: { detail: StudySetDetail }) {
 
   return (
     <Frame
-      icon={<GraduationCap size={15} />}
-      title={set.title}
       meta={`${correct.length}/${answered.length} right · ${questions.length - answered.length} left`}
       onKey={onKey}
       actions={
@@ -511,8 +501,6 @@ function DeckTab({ detail }: { detail: StudySetDetail }) {
 
   return (
     <Frame
-      icon={<Layers size={15} />}
-      title={set.title}
       meta={`${cards.length} cards · ${due} due`}
       onKey={onKey}
       wide={mode === "browse"}
@@ -687,8 +675,6 @@ function SheetTab({ detail }: { detail: StudySetDetail }) {
 
   return (
     <Frame
-      icon={<NotebookText size={15} />}
-      title={set.title}
       meta={updated ? `Updated ${updated}` : undefined}
       wide={cols !== "1"}
       actions={

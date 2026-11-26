@@ -1,7 +1,7 @@
 import "@danfessler/trellis/style.css";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { GraduationCap, MessageSquare, PanelLeft, Plus, Repeat } from "lucide-react";
-import { ViewType, Workspace, useView, useViewBadge, useViewTitle, type WorkspaceHandle } from "@danfessler/trellis-react";
+import { ViewType, Workspace, useView, useViewBadge, useViewTitle, type MenuEntry, type WorkspaceHandle } from "@danfessler/trellis-react";
 import { Sidebar } from "@/components/Sidebar/Sidebar";
 import { SectionBody, TABS as SECTIONS, usePlanFocus } from "@/components/Workspace/WorkspacePanel";
 import { useIsNarrow } from "@/lib/useIsNarrow";
@@ -123,7 +123,11 @@ const TOKENS: Record<string, string> = {
  * change made in the tiles comes back as a document; a change made anywhere
  * else (the sidebar, a shortcut, a tool) is handed to Trellis to draw.
  */
-export function Tiles({ renderTab }: { renderTab: (tab: string) => ReactNode }) {
+export function Tiles({ renderTab, renderBar }: {
+  renderTab: (tab: string) => ReactNode;
+  /** A chat's controls, at the end of its pane's tab bar. */
+  renderBar: (tab: string) => ReactNode;
+}) {
   const layout = useApp((s) => s.tabLayout);
   const change = useApp((s) => s.updateTabLayout);
   const mode = useApp((s) => s.theme.mode);
@@ -218,7 +222,8 @@ export function Tiles({ renderTab }: { renderTab: (tab: string) => ReactNode }) 
             id={k}
             title={(v) => nameOf(v.id, useApp.getState())}
             icon={<TabIcon />}
-            menu={k === "sidebar" ? SIDEBAR_MENU : undefined}
+            menu={MENUS[k]}
+            accessory={k === "chat" ? (v) => renderBar(v.id) : undefined}
           >
             <Tile render={renderTab} />
           </ViewType>
@@ -261,6 +266,48 @@ const SIDEBAR_MENU = [
   { label: "New project", run: () => useApp.getState().openProjectsPanel("__new__") },
   "separator" as const,
 ];
+
+// A chat's pane has no header of its own (0.21.0); what is not in its tab
+// bar is here. Read when the menu opens, so the ticks are current.
+function chatMenu(view: { id: string }): MenuEntry[] {
+  const id = chatOf(view.id);
+  if (!id) return [];
+  const s = useApp.getState();
+  return [
+    { label: "Rename…", run: () => renameChat(id) },
+    { label: "View replay session", run: () => s.openReplay(id) },
+    { label: "Workspace", checked: s.workspaceOpen, run: () => s.setWorkspaceOpen(!s.workspaceOpen) },
+    "separator",
+  ];
+}
+
+function renameChat(id: string) {
+  const s = useApp.getState();
+  const old = s.chats.find((c) => c.id === id)?.title ?? "";
+  const title = window.prompt("Rename chat", old)?.trim();
+  if (!title || title === old) return;
+  api.renameChat(id, title)
+    .then(() => {
+      s.setChatTitle(id, title);
+      return s.refreshChats();
+    })
+    .catch(console.error);
+}
+
+// The file viewer's toolbar keeps what is used while reading; the rest is here.
+function fileMenu(view: { id: string }): MenuEntry[] {
+  return [
+    { label: "Open in the default app", run: () => void api.openPath(view.id).catch(console.warn) },
+    { label: "Show in the file manager", run: () => void api.revealPath(view.id).catch(console.warn) },
+    "separator",
+  ];
+}
+
+const MENUS: Partial<Record<string, MenuEntry[] | ((view: { id: string }) => MenuEntry[])>> = {
+  sidebar: SIDEBAR_MENU,
+  chat: chatMenu,
+  file: fileMenu,
+};
 
 const DIRS: Record<string, "left" | "right" | "top" | "bottom"> = {
   ArrowLeft: "left", ArrowRight: "right", ArrowUp: "top", ArrowDown: "bottom",

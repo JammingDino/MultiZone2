@@ -33,6 +33,7 @@ import { PRIMARY_ACTION } from "@/lib/chrome";
 import type { FileDiff, StreamEnvelope } from "@/lib/types";
 import { canReadDropPaths, splitDrop } from "@/lib/dropPaths";
 import { grantDroppedFolders, missedFoldersNotice } from "./GrantChip";
+import { useIsNarrow } from "@/lib/useIsNarrow";
 
 /** How long stream events are collected before being applied as one batch. */
 const STREAM_DRAIN_MS = 16;
@@ -201,6 +202,10 @@ export function ChatPanel() {
       {/* Chats, files, study sets and the new-chat screen, as tabs that tile the column
           (0.18.3) — as many as you like, side by side or stacked. */}
       <Tiles
+        renderBar={(tab) => {
+          const id = chatOf(tab);
+          return id ? <ChatBar chatId={id} /> : null;
+        }}
         renderTab={(tab) => {
           const id = chatOf(tab);
           if (id) return <ChatPane chatId={id} />;
@@ -223,7 +228,39 @@ export function ChatPanel() {
 }
 
 /**
- * One chat, as a tab in the main column's tiles (0.18.3): its header, its
+ * What the chat's own header held besides its name, at the end of its pane's
+ * tab bar (0.21.0): the things read every message, one click away, without a
+ * second row under the tabs. The rest is in the pane's ⋯ menu.
+ */
+function ChatBar({ chatId }: { chatId: string }) {
+  const chat = useApp((s) => s.chats.find((c) => c.id === chatId));
+  const routing = useApp((s) => s.routingByChat[chatId] ?? null);
+  const noZones = useApp((s) => s.zones.length === 0);
+  // A phone has no workspace pane to reach for, only the drawer.
+  const narrow = useIsNarrow();
+  if (!chat) return null;
+  return (
+    <>
+      <ConversationIndicator chatId={chatId} />
+      <ContextMeter chatId={chatId} />
+      <ZonePicker
+        chatId={chatId}
+        currentZoneId={chat.zoneId}
+        smartRouting={chat.smartRouting ?? false}
+        routingState={routing}
+      />
+      {chat.smartRouting && noZones && (
+        <span className="text-xs text-[var(--color-text-muted)]" title="Add a zone to enable routing">
+          No zones
+        </span>
+      )}
+      {narrow && <WorkspaceToggle />}
+    </>
+  );
+}
+
+/**
+ * One chat, as a tab in the main column's tiles (0.18.3): its
  * transcript, and whatever is waiting on the user — approvals, a question, the
  * composer. Everything here is about `chatId`, not "the active chat", so two
  * of these side by side each run their own conversation.
@@ -248,7 +285,6 @@ function ChatPane({ chatId }: { chatId: string }) {
 
   const pendingApprovalByChat = useApp((s) => s.pendingApprovalByChat);
   const setActiveChat = useApp((s) => s.setActiveChat);
-  const routingByChat = useApp((s) => s.routingByChat);
   const stageImport = useApp((s) => s.stageImport);
   const pendingApprovals = chatId ? (pendingApprovalByChat[chatId] ?? []) : [];
 
@@ -473,46 +509,17 @@ function ChatPane({ chatId }: { chatId: string }) {
     <PaneChat.Provider value={chatId}>
     <div
       /* `min-w-0` is what keeps a narrow pane usable (0.17.9). A flex item
-         defaults to min-width:auto — its content's width — so the header's
-         run of controls, which cannot shrink, used to make the whole panel
-         wider than the window. Zero lets the pane be its tile's width and
-         the header sort out its own overflow below. */
+         defaults to min-width:auto — its content's width — so a run of
+         controls that cannot shrink used to make the whole panel wider than
+         the window. Zero lets the pane be its tile's width. */
       className="mz-view-in relative flex min-h-0 min-w-0 flex-1 flex-col"
       onDragEnter={onDragEnter}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
-      <header className="mz-drop-in flex min-h-12 flex-wrap items-center gap-2 border-b border-[var(--color-border)] px-3 py-1.5 sm:flex-nowrap sm:gap-3 sm:px-4">
-        {/* A floor on the title so the controls cannot squeeze it to
-            nothing, and no ceiling: it takes whatever they leave. */}
-        <div className="min-w-[5rem] flex-1 truncate text-sm font-medium" title={activeChat.title}>{activeChat.title}</div>
-        <ConversationIndicator chatId={activeChat.id} />
-        {/* The controls scroll sideways when there is not room for them
-            all, rather than pushing the panel past the window. Each stays
-            its natural size (`shrink-0` on the children) so nothing
-            collapses into an unreadable sliver. Project, tags,
-            perspectives and export live in the workspace panel now
-            (0.17.9); what is left is what gets read every message. */}
-        <div className="hide-scrollbar flex min-w-0 shrink items-center gap-2 overflow-x-auto [&>*]:shrink-0">
-        <ContextMeter chatId={activeChat.id} />
-        <ZonePicker
-          chatId={activeChat.id}
-          currentZoneId={activeChat.zoneId}
-          smartRouting={activeChat.smartRouting ?? false}
-          routingState={routingByChat[activeChat.id] ?? null}
-        />
-        {isSmartChat && zones.length === 0 && (
-          <span className="text-xs text-[var(--color-text-muted)]">
-            No zones — add one to enable routing
-          </span>
-        )}
-        </div>
-        {/* Always the rightmost thing in the row: it opens the panel on
-            the right, and a control for the edge belongs at the edge. */}
-        <WorkspaceToggle />
-      </header>
-
+      {/* No header of its own (0.21.0): the tab names the chat, and what
+          the header held besides sits in the tab bar — see ChatBar. */}
       {/* Keyed by chat id so switching chats remounts the thread instead of
           reusing the previous chat's component instances. Turns and text
           blocks inside are keyed by index (a turn has no stable id until it

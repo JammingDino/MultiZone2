@@ -1102,3 +1102,27 @@ body,
   padding: 0 0.35em;
   box-shadow: 0 0 10px 1px rgb(240 180 90 / 0.45);
 }
+
+/* Pane tabs (0.21.0, owner: layout). Trellis keeps room for the close button
+   on every tab, so in a narrow pane each label was cut to a letter. A tab
+   behind the selected one keeps no room for it; on hover its X lies over the
+   tab's right end instead of pushing the label aside. Trellis has no option
+   for this; its own rules are :where(), so these win. The selected tab keeps
+   its whole label (up to the tab's max width); the others shrink first. */
+.trellis [data-trellis-part="tab"][aria-selected="true"] {
+  flex-shrink: 0;
+}
+.trellis [data-trellis-part="tab"][aria-selected="false"] {
+  padding-right: 10px;
+}
+.trellis [data-trellis-part="tab"][aria-selected="false"] [data-trellis-part="tab-close"] {
+  display: none;
+}
+.trellis [data-trellis-part="tab"][aria-selected="false"]:hover [data-trellis-part="tab-close"] {
+  display: inline-grid;
+  position: absolute;
+  right: 4px;
+  opacity: 1;
+  color: var(--trellis-text-muted);
+  background: var(--trellis-tab-hover);
+}

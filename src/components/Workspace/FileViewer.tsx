@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, Code2, ExternalLink, Eye, FileText as FileTextIcon, FolderOpen, Loader2, Minus, Plus, RefreshCw, Save, X } from "lucide-react";
+import { AlertCircle, Code2, Eye, FileText as FileTextIcon, Loader2, Minus, Plus, RefreshCw, Save } from "lucide-react";
+import { useViewBadge } from "@danfessler/trellis-react";
 import * as api from "@/lib/tauri";
-import { useApp } from "@/store/app";
 import { formatBytes } from "@/lib/format";
 import { Markdown } from "@/components/Renderers/Markdown";
 import SyntaxHighlighter from "react-syntax-highlighter/dist/esm/prism-async-light";
@@ -9,7 +9,6 @@ import { oneDark, oneLight } from "react-syntax-highlighter/dist/esm/styles/pris
 import { useIsLightMode } from "@/components/Renderers/CodeBlock";
 import { openPdf, drawPdfPage, type PdfDoc } from "@/lib/pdf";
 import type { FileText as FileTextData } from "@/lib/types";
-import { iconFor } from "./FilesPanel";
 import { errorText } from "@/lib/errors";
 import { ErrorNote } from "@/components/common/ErrorNote";
 
@@ -90,7 +89,6 @@ function Zoom({ value, onChange }: { value: number; onChange: (z: number) => voi
  * runs scripts but cannot resolve relative references.
  */
 export function FileViewer({ path }: { path: string }) {
-  const close = useApp((s) => s.closeWorkspaceFile);
   const [file, setFile] = useState<FileTextData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -151,20 +149,18 @@ export function FileViewer({ path }: { path: string }) {
     }
   }, [file, dirty, saving, path, draft]);
 
+  useViewBadge(dirty || null);
+
   const paneRef = useCtrlWheelZoom(setZoom);
-  const { Icon, color } = iconFor(file?.name ?? path);
   const name = file?.name ?? path.slice(Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-[var(--color-bg)]">
-      <div className="flex shrink-0 items-center gap-1.5 border-b border-[var(--color-border)] px-3 py-1.5">
-        <Icon size={13} className="shrink-0" style={{ color }} />
-        <span className="min-w-0 flex-1 truncate text-[var(--color-text)]" title={path}>
-          {name}
-          {dirty && <span className="ml-1 text-[var(--color-accent)]" title="Unsaved changes">●</span>}
-        </span>
+      {/* The tab names the file, marks it unsaved and closes it; opening it
+          elsewhere is in the pane's ⋯ menu (0.21.0). */}
+      <div className="flex shrink-0 items-center justify-end gap-1.5 border-b border-[var(--color-border)] px-3 py-1">
         {file && (
-          <span className="shrink-0 font-mono text-[10px] text-[var(--color-text-muted)]">{formatBytes(file.size)}</span>
+          <span className="mr-auto shrink-0 font-mono text-[10px] text-[var(--color-text-muted)]" title={path}>{formatBytes(file.size)}</span>
         )}
         {previewable && (
           <div className="ml-1 flex shrink-0 overflow-hidden rounded border border-[var(--color-border)]">
@@ -184,15 +180,6 @@ export function FileViewer({ path }: { path: string }) {
         )}
         <Action title="Re-read from disk" onClick={load}>
           <RefreshCw size={12} />
-        </Action>
-        <Action title="Open in the default app" onClick={() => api.openPath(path).catch(console.warn)}>
-          <ExternalLink size={12} />
-        </Action>
-        <Action title="Show in the file manager" onClick={() => api.revealPath(path).catch(console.warn)}>
-          <FolderOpen size={12} />
-        </Action>
-        <Action title="Close" onClick={() => close(path)}>
-          <X size={12} />
         </Action>
       </div>
 

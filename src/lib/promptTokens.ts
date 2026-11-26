@@ -24,20 +24,37 @@ export function slashAt(text: string, caret: number): { start: number; end: numb
   return { start, end, query };
 }
 
-export type Segment = { kind: "text" | "command" | "path"; text: string };
+/**
+ * What a `/word` is: a known command (any case), the start of at least one
+ * ("partial", so the composer can show it becoming one), or neither.
+ */
+export function commandState(word: string, commands: Set<string>): "none" | "partial" | "command" {
+  const name = word.slice(1).toLowerCase();
+  if (!word.startsWith("/") || !NAME.test(name)) return "none";
+  if (commands.has(name)) return "command";
+  for (const c of commands) if (c.startsWith(name)) return "partial";
+  return "none";
+}
+
+export type Segment = { kind: "text" | "command" | "partial" | "path"; text: string };
 
 /**
  * Split a prompt into prose, known `/commands` (matched case-insensitively,
- * whole words only) and occurrences of the given paths.
+ * whole words only) and occurrences of the given paths. With a caret, the
+ * `/word` being typed there is "partial" while it is the start of a command.
  */
-export function segments(text: string, commands: Set<string>, paths: string[] = []): Segment[] {
-  const marks: { start: number; end: number; kind: "command" | "path" }[] = [];
+export function segments(text: string, commands: Set<string>, paths: string[] = [], caret?: number): Segment[] {
+  const marks: { start: number; end: number; kind: "command" | "partial" | "path" }[] = [];
   const cmd = /(^|\s)\/([\w.:-]+)(?=\s|$)/g;
   for (let m; (m = cmd.exec(text)); ) {
     if (commands.has(m[2].toLowerCase())) {
       const start = m.index + m[1].length;
       marks.push({ start, end: start + 1 + m[2].length, kind: "command" });
     }
+  }
+  const w = caret === undefined ? null : slashAt(text, caret);
+  if (w && commandState(text.slice(w.start, w.end), commands) === "partial") {
+    marks.push({ start: w.start, end: w.end, kind: "partial" });
   }
   // Longest first, so a granted folder inside another one marks the longer path.
   for (const p of [...paths].filter(Boolean).sort((a, b) => b.length - a.length)) {

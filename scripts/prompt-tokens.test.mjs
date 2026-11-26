@@ -2,7 +2,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { slashAt, segments, commandsIn, replaceRange, withoutCommand } from "../src/lib/promptTokens.ts";
+import { slashAt, segments, commandState, commandsIn, replaceRange, withoutCommand } from "../src/lib/promptTokens.ts";
 
 const known = new Set(["review", "commit", "impeccable"]);
 
@@ -47,6 +47,29 @@ test("an acting command comes out of the prompt with its space, and nothing else
   assert.equal(withoutCommand("do it\n/plan", "plan"), "do it");
   assert.equal(withoutCommand("see /planning and a/plan", "plan"), "see /planning and a/plan");
   assert.equal(withoutCommand("/plan why does\n    code()  fail", "plan"), "why does\n    code()  fail");
+});
+
+test("a /word is a command, the start of one, or neither", () => {
+  assert.equal(commandState("/review", known), "command");
+  assert.equal(commandState("/Commit", known), "command");
+  assert.equal(commandState("/rev", known), "partial");
+  assert.equal(commandState("/", known), "partial");
+  assert.equal(commandState("/nope", known), "none");
+  assert.equal(commandState("/review-pr", known), "none");
+  assert.equal(commandState("/usr/bin", known), "none");
+  assert.equal(commandState("review", known), "none");
+});
+
+test("only the caret's /word is drawn as becoming a command", () => {
+  assert.deepEqual(segments("fix /rev", known, [], 8), [
+    { kind: "text", text: "fix " },
+    { kind: "partial", text: "/rev" },
+  ]);
+  assert.deepEqual(segments("/rev and more", known, [], 13), [{ kind: "text", text: "/rev and more" }], "caret elsewhere");
+  assert.deepEqual(segments("/rev", known), [{ kind: "text", text: "/rev" }], "no caret, no partial");
+  assert.deepEqual(segments("/nope", known, [], 5), [{ kind: "text", text: "/nope" }]);
+  assert.deepEqual(segments("/usr/bin", known, [], 8), [{ kind: "text", text: "/usr/bin" }]);
+  assert.deepEqual(segments("/review", known, [], 7), [{ kind: "command", text: "/review" }], "typed in full is a command");
 });
 
 test("commandsIn lists each invoked command once, in order, any case", () => {

@@ -736,6 +736,7 @@ export function HomeScreen() {
               ref={tokens.overlayRef}
               text={text}
               commands={tokens.names}
+              caret={tokens.caret}
               paths={pendingPaths.map((p) => p.ctx.path)}
               className="px-2 py-1.5 text-sm leading-relaxed"
             />

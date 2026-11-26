@@ -23,7 +23,9 @@ export function usePromptTokens(
   const word = dismissed ? null : slashAt(text, caret);
   const skills = useSkillCommands();
   const names = builtins.length ? new Set([...skills.names, ...builtins]) : skills.names;
-  const highlighted = hasTokens(text, names, paths);
+  // The `/word` being typed, while the menu is open for it, draws as becoming a command.
+  const typingAt = word ? caret : undefined;
+  const highlighted = hasTokens(text, names, paths, typingAt);
   const overlayRef = useRef<HTMLDivElement>(null);
   return {
     /** The menu's query, or null when the caret is not in a `/word`. */
@@ -32,6 +34,8 @@ export function usePromptTokens(
     /** Skills only: what `skillParts` should look up. */
     skillNames: skills.names,
     highlighted,
+    /** The overlay's caret: set only while the menu is open for its `/word`. */
+    caret: typingAt,
     overlayRef,
     /** Put a pick in place of the caret's `/word`. */
     pick(insert: string) {
@@ -59,8 +63,13 @@ export function usePromptTokens(
         if (overlayRef.current) overlayRef.current.scrollTop = e.currentTarget.scrollTop;
       },
     },
-    /** Classes for the textarea: its own text hides while the overlay draws it. */
-    textClass: highlighted ? "text-transparent caret-[var(--color-text)]" : "",
+    /**
+     * Classes for the textarea: its own text hides while the overlay draws it.
+     * Important, because styles.css gives textarea an unlayered `color: inherit`
+     * that beats Tailwind's layered utility: without it the plain text painted
+     * over the overlay and every token looked like ordinary words.
+     */
+    textClass: highlighted ? "text-transparent! caret-[var(--color-text)]" : "",
   };
 }
 
@@ -82,16 +91,16 @@ export function insertAtCaret(cur: string, ta: HTMLTextAreaElement | null, inser
  * the caret stays where the eye expects it. The parent keeps `scrollTop` in
  * step.
  */
-export const PromptHighlight = forwardRef<HTMLDivElement, { text: string; commands: Set<string>; paths: string[]; className: string }>(
-  function PromptHighlight({ text, commands, paths, className }, ref) {
-    const segs = segments(text, commands, paths);
+export const PromptHighlight = forwardRef<HTMLDivElement, { text: string; commands: Set<string>; paths: string[]; caret?: number; className: string }>(
+  function PromptHighlight({ text, commands, paths, caret, className }, ref) {
+    const segs = segments(text, commands, paths, caret);
     return (
       <div ref={ref} aria-hidden style={{ scrollbarGutter: "stable" }} className={`pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words ${className}`}>
         {segs.map((s, i) =>
           s.kind === "text" ? (
             <span key={i}>{s.text}</span>
           ) : (
-            <span key={i} className={s.kind === "command" ? "mz-prompt-command" : "mz-prompt-path"}>{s.text}</span>
+            <span key={i} className={`mz-prompt-${s.kind}`}>{s.text}</span>
           ),
         )}
         {/* A trailing newline needs a character after it to take up its line. */}
@@ -102,8 +111,8 @@ export const PromptHighlight = forwardRef<HTMLDivElement, { text: string; comman
 );
 
 /** Whether a prompt has anything for the overlay to draw. */
-export function hasTokens(text: string, commands: Set<string>, paths: string[]): boolean {
-  return segments(text, commands, paths).some((s) => s.kind !== "text");
+export function hasTokens(text: string, commands: Set<string>, paths: string[], caret?: number): boolean {
+  return segments(text, commands, paths, caret).some((s) => s.kind !== "text");
 }
 
 // One list for every composer, refreshed when the window regains focus — a
@@ -111,10 +120,17 @@ export function hasTokens(text: string, commands: Set<string>, paths: string[]):
 let cached: { name: string; description: string }[] = [];
 let inflight: Promise<void> | null = null;
 const listeners = new Set<() => void>();
+// A failed load used to leave the list empty until the window next regained
+// focus, so every skill read as plain text while `/plan` (built in) still
+// lit up. Retry a failure, backing off, until one load succeeds.
+let retryMs = 1000;
 function load() {
   inflight ??= api.listSkillCommands()
-    .then((l) => { cached = l; })
-    .catch(() => {})
+    .then((l) => { cached = l; retryMs = 1000; })
+    .catch(() => {
+      setTimeout(load, retryMs);
+      retryMs = Math.min(retryMs * 2, 30_000);
+    })
     .finally(() => { inflight = null; listeners.forEach((f) => f()); });
 }
 

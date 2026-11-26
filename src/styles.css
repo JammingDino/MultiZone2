@@ -1349,12 +1349,25 @@ html.light {
   --mz-bad: #c0392b;
 }
 
-/* Composer tokens (the overlay rule above applies). */
+/* Composer tokens (the overlay rule above applies). A command wears the sent
+   bubble's gradient and a glow, so it reads as something that will run rather
+   than a word; the `/word` still being typed (-partial) is accent ink on a
+   faint tint with a dotted underline: on its way, not there yet. */
 .mz-prompt-command {
   color: #fff;
-  background: var(--mz-deep);
-  box-shadow: 0 0 0 2px var(--mz-deep);
+  background: linear-gradient(135deg, var(--mz-deep), var(--mz-deep2));
+  box-shadow: 0 0 0 2px var(--mz-deep), 0 0 12px 1px color-mix(in srgb, var(--color-accent) 45%, transparent);
   border-radius: 4px;
+}
+.mz-prompt-partial {
+  /* Pulled towards the text colour, so a pale accent stays legible on a light
+     theme and a dark one on a dark theme. */
+  color: color-mix(in srgb, var(--color-accent) 65%, var(--color-text));
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  border-radius: 3px;
+  text-decoration: underline dotted color-mix(in srgb, var(--color-accent) 80%, transparent);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 4px;
 }
 .mz-prompt-path {
   color: #2a1800;
@@ -1362,11 +1375,19 @@ html.light {
   box-shadow: 0 0 0 2px var(--mz-folder), 0 0 14px 2px color-mix(in srgb, var(--mz-folder) 55%, transparent);
   border-radius: 4px;
 }
+/* Editorial: a keycap in the skill colour, the sent message's .mz-kbd. */
 html.mz-editorial .mz-prompt-command {
-  color: var(--color-text);
-  background: var(--color-panel-hover);
+  --cap: color-mix(in srgb, var(--mz-skill) 14%, var(--color-panel));
+  --cap-edge: color-mix(in srgb, var(--mz-skill) 60%, transparent);
+  color: var(--mz-skill);
+  background: var(--cap);
   border-radius: 3px;
-  box-shadow: 0 0 0 2px var(--color-panel-hover), 0 0 0 3px var(--color-border-strong), 0 2px 0 3px var(--color-border-strong);
+  box-shadow: 0 0 0 2px var(--cap), 0 0 0 3px var(--cap-edge), 0 2px 0 3px var(--cap-edge);
+}
+html.mz-editorial .mz-prompt-partial {
+  color: var(--mz-skill);
+  background: none;
+  text-decoration-color: color-mix(in srgb, var(--mz-skill) 80%, transparent);
 }
 html.mz-editorial .mz-prompt-path {
   color: var(--mz-folder-ink);

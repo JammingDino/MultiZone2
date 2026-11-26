@@ -660,6 +660,7 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
               ref={tokens.overlayRef}
               text={text}
               commands={tokens.names}
+              caret={tokens.caret}
               paths={grantedList}
               className="px-1 py-1 text-sm leading-relaxed"
             />

@@ -251,7 +251,7 @@ pub const ROUTES: &[RouteDef] = &[
     r("GET", "/api/stats", "Row counts: chats, messages, zones, projects, tags"),
     r("GET", "/api/settings/:key", "Read one settings row"),
     r("PUT", "/api/settings/:key", "Write one settings row"),
-    r("PATCH", "/api/settings/:key", "Merge fields into a JSON settings row (e.g. {\"mode\":\"dark\"} on `theme`)"),
+    r("PATCH", "/api/settings/:key", "Merge fields into a JSON settings row (e.g. {\"mode\":\"dark\"} on `theme`; on `app_settings`, {\"chatClickOpens\":\"tab\"|\"replace\"} sets whether clicking a chat opens a new tab, the default, or replaces the one on screen)"),
     // Remote access (0.17.0)
     r("GET", "/api/remote", "Whether the app is reachable from the network, on which address, and whether it is being advertised"),
     r("GET", "/api/network-interfaces", "The addresses this machine could bind"),

@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import type { Chat, ChatTagLink } from "@/lib/types";
-import { Pencil, Trash2, Sparkles, Loader2, FolderInput, FolderMinus, ChevronRight, ShieldAlert, History, FileText, FileType, Columns2, SquarePlus, Download, Lock, LockOpen, LockKeyholeOpen } from "lucide-react";
+import { Pencil, Trash2, Sparkles, Loader2, FolderInput, FolderMinus, ChevronRight, ShieldAlert, History, FileText, FileType, Columns2, SquarePlus, Replace, Download, Lock, LockOpen, LockKeyholeOpen } from "lucide-react";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { useShallow } from "zustand/react/shallow";
@@ -77,6 +77,7 @@ export function ChatList({ chats, activeId, onSelect, projectId, limit }: Props)
   const moveRef = useRef<HTMLDivElement>(null);
   const openReplay = useApp((s) => s.openReplay);
   const setActiveChat = useApp((s) => s.setActiveChat);
+  const clickReplaces = useApp((s) => s.appSettings.chatClickOpens === "replace");
   // Set when a press became a drag into the tiles, so the click it ends in
   // does not also open the chat where it was.
   const dragged = useRef(false);
@@ -182,14 +183,15 @@ export function ChatList({ chats, activeId, onSelect, projectId, limit }: Props)
     const lockOpen = lockedBy !== null && unlockedLocks.includes(lockedBy);
     const row = (
       <div
-        // Ctrl/⌘-click or middle-click opens the chat in a new tab, beside
-        // what is open, the way a link does in a browser (0.18.3).
-        // Or drag it onto the tiles: into a tab strip, or onto a pane's edge
-        // to open it beside what is there (0.18.3).
+        // A click opens the chat as the "Clicking a chat" setting says;
+        // middle-click always opens a new tab, the way a link does in a
+        // browser, and Ctrl/⌘-click opens it to the side (0.21.0). Or drag
+        // it onto the tiles: into a tab strip, or onto a pane's edge to open
+        // it beside what is there (0.18.3).
         onPointerDown={(e) => { if (e.button === 0 && !editing) dragIntoTiles(e, chatTab(chat.id), dragged); }}
         onClick={(e) => {
           if (dragged.current) { dragged.current = false; return; }
-          if (e.ctrlKey || e.metaKey) void setActiveChat(chat.id, "tab");
+          if (e.ctrlKey || e.metaKey) void setActiveChat(chat.id, "right");
           else onSelect(chat.id);
         }}
         onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }}
@@ -311,11 +313,18 @@ export function ChatList({ chats, activeId, onSelect, projectId, limit }: Props)
           y={menu.y}
           onClose={() => setMenu(null)}
           items={[
-            {
-              label: "Open in new tab",
-              icon: <SquarePlus size={14} />,
-              onClick: () => { const id = menu.chatId; setMenu(null); void setActiveChat(id, "tab"); },
-            },
+            // The menu offers whichever of the two a plain click does not.
+            clickReplaces
+              ? {
+                  label: "Open in new tab",
+                  icon: <SquarePlus size={14} />,
+                  onClick: () => { const id = menu.chatId; setMenu(null); void setActiveChat(id, "tab"); },
+                }
+              : {
+                  label: "Open here (replace tab)",
+                  icon: <Replace size={14} />,
+                  onClick: () => { const id = menu.chatId; setMenu(null); void setActiveChat(id, "here"); },
+                },
             {
               label: "Open to the side",
               icon: <Columns2 size={14} />,

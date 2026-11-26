@@ -607,7 +607,8 @@ interface AppStore {
   refreshChats: () => Promise<void>;
   /**
    * Show a chat (or, with null, the new-chat screen) in the main column's
-   * tiles — see `navigate` in lib/tabLayout.ts for what `where` does.
+   * tiles — see `navigate` in lib/tabLayout.ts for what `where` does. Left
+   * out, it is the user's "Clicking a chat" setting (`chatClickOpens`).
    */
   setActiveChat: (id: string | null, where?: "here" | "tab" | "right") => Promise<void>;
   /**
@@ -1385,7 +1386,7 @@ export const useApp = create<AppStore>((set, get) => ({
   clearPendingJump() {
     set({ pendingJumpMessageId: null });
   },
-  async setActiveChat(id, where = "here") {
+  async setActiveChat(id, where = get().appSettings.chatClickOpens === "replace" ? "here" : "tab") {
     get().updateTabLayout((l) => navigate(l, id ? chatTab(id) : HOME_TAB, where));
     set({ activeChatId: id });
     if (id) {

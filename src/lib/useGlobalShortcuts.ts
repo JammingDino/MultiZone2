@@ -66,7 +66,9 @@ export function useGlobalShortcuts() {
             next = action === "nextChat" ? idx + 1 : idx - 1;
             if (next < 0 || next >= list.length) break; // stop at the ends
           }
-          void s.setActiveChat(list[next].id);
+          // Stepping moves the one view along whatever "Clicking a chat" is
+          // set to: a tab per keypress would bury the tabs the user opened.
+          void s.setActiveChat(list[next].id, "here");
           break;
         }
         case "toggleShortcutsHelp":

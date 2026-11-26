@@ -196,8 +196,10 @@ export function closeWhere(layout: TabLayout, drop: (tab: string) => boolean): T
  * takes the focused group's place when that group is showing a chat, so
  * clicking down the chat list moves one view along rather than piling up a
  * tab per click, as the single view always did; a file on screen is kept and
- * the chat opens beside it as a tab. `tab` always adds one; `right` opens it
- * in a new group to the right.
+ * the chat opens beside it as a tab. `tab` adds one (the default for a click
+ * since 0.21.0), except over the new-chat screen, which the chat started from
+ * it takes the place of rather than leaving an empty screen behind; `right`
+ * opens it in a new group to the right.
  */
 export function navigate(layout: TabLayout, tab: string, where: "here" | "tab" | "right" = "here"): TabLayout {
   const home = groupOf(layout, tab);
@@ -213,7 +215,7 @@ export function navigate(layout: TabLayout, tab: string, where: "here" | "tab" |
       fresh.id,
     );
   }
-  if (where === "here" && g.active && !isAuxTab(g.active)) {
+  if (where === "here" ? g.active && !isAuxTab(g.active) : g.active === HOME_TAB) {
     return withGroups(layout, (x) =>
       x.id === g.id ? { ...x, tabs: x.tabs.map((t) => (t === x.active ? tab : t)), active: tab } : x,
     );

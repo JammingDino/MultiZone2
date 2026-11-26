@@ -66,9 +66,9 @@ export async function openChatOnPath(path: string): Promise<string> {
 
   await st.refreshChats();
   // Mid-turn, the new chat opens beside the running one rather than taking
-  // its place.
+  // its place; otherwise it opens the way a clicked chat does.
   const busy = !!(st.activeChatId && st.streamingByChat[st.activeChatId]);
-  await st.setActiveChat(chat.id, busy ? "tab" : "here");
+  await st.setActiveChat(chat.id, busy ? "tab" : undefined);
   useApp.getState().focusComposer();
   return chat.id;
 }

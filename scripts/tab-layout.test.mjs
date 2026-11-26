@@ -31,6 +31,23 @@ test("navigating replaces the chat on screen, keeps a file, and never duplicates
   assert.deepEqual(shape(l.root), [HOME_TAB, A, "/f", C]);
 });
 
+test("opening in a new tab adds one per chat, focuses an open one, and takes the new-chat screen's place", () => {
+  let l = navigate(initialLayout(), A, "tab");
+  l = navigate(l, B, "tab");
+  assert.deepEqual(shape(l.root), [A, B]);
+  l = navigate(l, A, "tab");
+  assert.deepEqual(shape(l.root), [A, B]);
+  assert.equal(groupOf(l, A).active, A);
+  // New chat opens its screen as a tab; the chat started there replaces it.
+  l = navigate(l, HOME_TAB, "tab");
+  assert.deepEqual(shape(l.root), [A, B, HOME_TAB]);
+  l = navigate(l, HOME_TAB, "tab");
+  assert.deepEqual(shape(l.root), [A, B, HOME_TAB]);
+  l = navigate(l, C, "tab");
+  assert.deepEqual(shape(l.root), [A, B, C]);
+  assert.equal(groupOf(l, C).active, C);
+});
+
 test("open to the side makes a second chat pane", () => {
   const l = navigate(navigate(initialLayout(), A), B, "right");
   assert.deepEqual(shape(l.root), { row: [[A], [B]] });

@@ -56,6 +56,21 @@ export function ChatTab() {
         />
       </section>
       <section>
+        <h3 className="mb-1 text-sm font-medium">Clicking a chat</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          In the sidebar, search and the command palette; New chat follows it too. A chat that is already open is brought forward.
+          Middle-click always opens a new tab, Ctrl+click opens it to the side.
+        </p>
+        <OptionCards
+          value={appSettings.chatClickOpens === "replace" ? "replace" : "tab"}
+          onChange={(chatClickOpens) => setAppSettings({ chatClickOpens })}
+          options={[
+            ["tab", "Opens a new tab"],
+            ["replace", "Replaces the current tab"],
+          ]}
+        />
+      </section>
+      <section>
         <h3 className="mb-2 text-sm font-medium">Messages</h3>
         <div className="flex flex-col gap-2">
           <ToggleRow

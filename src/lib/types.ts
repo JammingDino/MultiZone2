@@ -1006,6 +1006,13 @@ export interface StreamEnvelope {
 export interface AppSettings {
   /** Which key combination triggers a send. */
   sendKey: "enter" | "ctrl_enter";
+  /**
+   * Where a chat opens when clicked in the sidebar, search or the palette, and
+   * where New chat puts its screen (0.21.0): "tab" adds a tab (a chat already
+   * open is brought forward instead); "replace" swaps out the chat on screen,
+   * as before 0.21.0. Anything else reads as "tab".
+   */
+  chatClickOpens: "tab" | "replace";
   /** Automatically generate a chat title after the first assistant response. */
   autoTitle: boolean;
   /** Start thinking/reasoning blocks expanded instead of collapsed. */
@@ -1507,6 +1514,7 @@ export interface AppSettings {
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   sendKey: "enter",
+  chatClickOpens: "tab",
   autoTitle: true,
   expandThinkingByDefault: false,
   compactSteps: true,

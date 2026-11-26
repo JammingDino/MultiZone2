@@ -28,6 +28,8 @@ export function normalizeApprovals(v: Partial<ApprovalPolicy> | null | undefined
     shellDeny: v?.shellDeny ?? [],
     editAllow: v?.editAllow ?? [],
     editDeny: v?.editDeny ?? [],
+    // Only when set, so a global or zone policy never grows the key.
+    ...(v?.planEntry ? { planEntry: v.planEntry } : {}),
   };
 }
 
@@ -49,6 +51,7 @@ export function serializeApprovals(p: ApprovalPolicy): string | null {
     p.shellAllow.length === 0 &&
     p.shellDeny.length === 0 &&
     p.editAllow.length === 0 &&
-    p.editDeny.length === 0;
+    p.editDeny.length === 0 &&
+    !p.planEntry;
   return empty ? null : JSON.stringify(p);
 }

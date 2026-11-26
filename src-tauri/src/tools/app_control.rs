@@ -59,7 +59,12 @@ fn control_definition() -> Tool {
                  first for the route and its shape. PATCH /api/theme with {\"mode\":\"dark\"} \
                  switches to dark mode (app_read \"/api/theme\" first for the palette, the \
                  effects and the custom-CSS field, each with its range); POST /api/zones creates \
-                 or updates a zone. Changes are live in the open window immediately."
+                 or updates a zone. To set up a project, app_read \"/api/projects/schema\" (icons, \
+                 colours, zones, approval keys), then POST /api/projects with {\"name\":\"Garden \
+                 Planner\",\"icon\":\"Leaf\",\"accentColor\":\"#22c55e\",\"directory\":\"<absolute path>\",\
+                 \"defaultZoneId\":\"<zone id>\",\"approvals\":{\"categories\":{\"edit\":true},\
+                 \"editAllow\":[\"{project}\"]}}; PATCH /api/projects/<id> changes only the fields sent. \
+                 Changes are live in the open window immediately."
                     .into(),
             parameters: json!({
                 "type": "object",

@@ -407,15 +407,34 @@ pub enum PlanEntry {
 }
 
 impl PlanEntry {
-    pub fn from_settings(settings: &Value) -> Self {
-        match settings.get("planEntry").and_then(Value::as_str) {
-            Some("auto") => Self::Auto,
-            Some("manual") => Self::Manual,
-            _ => Self::Ask,
+    pub fn from_key(key: &str) -> Option<Self> {
+        match key {
+            "auto" => Some(Self::Auto),
+            "ask" => Some(Self::Ask),
+            "manual" => Some(Self::Manual),
+            _ => None,
         }
     }
 
-    pub async fn load(db: &SqlitePool) -> Self {
+    pub fn from_settings(settings: &Value) -> Self {
+        settings
+            .get("planEntry")
+            .and_then(Value::as_str)
+            .and_then(Self::from_key)
+            .unwrap_or_default()
+    }
+
+    /// The chat's project's `approvals.planEntry` if it sets one (0.20.0),
+    /// else the app setting. Must agree with `approvals::Policy::load`, which
+    /// decides the same question for the call itself.
+    pub async fn load(db: &SqlitePool, chat_id: &str) -> Self {
+        let project = crate::commands::projects::approvals_for_chat(db, chat_id)
+            .await
+            .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+            .and_then(|v| v.get("planEntry").and_then(Value::as_str).and_then(Self::from_key));
+        if let Some(p) = project {
+            return p;
+        }
         let raw: Option<String> =
             sqlx::query_scalar("SELECT value FROM settings WHERE key = 'app_settings'")
                 .fetch_optional(db)

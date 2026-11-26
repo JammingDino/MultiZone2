@@ -314,7 +314,7 @@ pub async fn build_system_snippets(
         snippets.push((SnippetKind::TaskList, crate::plans::task_list_block(&plan)));
     } else if !zone_tool_ids.is_empty()
         && !is_perspective
-        && crate::plans::PlanEntry::load(db).await != crate::plans::PlanEntry::Manual
+        && crate::plans::PlanEntry::load(db, chat_id).await != crate::plans::PlanEntry::Manual
     {
         // Planning is available and off (0.14.6). Saying so is the fix for the
         // mode's real failure — not misuse but disuse. It lived entirely in one
@@ -1304,7 +1304,7 @@ pub(super) async fn apply_plan_mode(
         // the shared controls belong to the primary.
         if has_tools
             && !is_perspective
-            && crate::plans::PlanEntry::load(db).await != crate::plans::PlanEntry::Manual
+            && crate::plans::PlanEntry::load(db, chat_id).await != crate::plans::PlanEntry::Manual
         {
             tools.push(crate::tools::plan_mode::enter_definition());
         }

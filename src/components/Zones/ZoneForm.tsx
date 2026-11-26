@@ -10,26 +10,15 @@ import { ModelCombobox } from "@/components/common/ModelCombobox";
 import { MediaOverrideSelect, VisionOverrideSelect } from "@/components/common/VisionOverrideSelect";
 import { IconPicker } from "@/components/common/IconPicker";
 import { ColorPicker } from "@/components/common/ColorPicker";
-import type { ApprovalCategory, ApprovalPolicy, Provider, ToolFunctionInfo, ToolPreset, ToolUsage, Zone, ThinkingEffort, ThinkingControl, ThinkingProfile } from "@/lib/types";
+import type { ApprovalPolicy, Provider, ToolFunctionInfo, ToolPreset, ToolUsage, Zone, ThinkingEffort, ThinkingControl, ThinkingProfile } from "@/lib/types";
 import { ALL_TOOLS, TOOL_CATEGORIES, mcpToolEnableId } from "@/lib/types";
 import { useApp } from "@/store/app";
 import { resolveZoneRun } from "@/lib/baseZone";
 import { DEFAULT_ZONES } from "@/lib/defaultZones";
 import { EMPTY_APPROVALS, parseApprovals, serializeApprovals } from "@/lib/approvals";
+import { ApprovalsEditor } from "@/components/common/ApprovalsEditor";
 import { ErrorNote } from "@/components/common/ErrorNote";
 import { reportError } from "@/lib/reportError";
-
-/** Zone override categories, short labels — the long descriptions live in
- * Settings, where the global policy is set and explained. */
-const ZONE_APPROVAL_CATEGORIES: [ApprovalCategory, string][] = [
-  ["read", "Read"],
-  ["edit", "Edit"],
-  ["shell", "Shell"],
-  ["web", "Web"],
-  ["mcp", "MCP"],
-  ["spawn", "Sub-agents"],
-  ["state", "App state"],
-];
 
 const SAFETY_BADGE: Record<number, { label: string; cls: string }> = {
   0: { label: "Safe",      cls: "border-green-600/40  bg-green-600/10  text-green-500" },
@@ -1348,69 +1337,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
 
         <Field label="Approvals">
           <p className="mb-2 text-[11px] text-[var(--color-text-muted)]">Overrides for this zone. Inherit follows Settings → Approvals.</p>
-          <div className="divide-y divide-[var(--color-border)] rounded border border-[var(--color-border)]">
-            {ZONE_APPROVAL_CATEGORIES.map(([cat, label]) => {
-              const current = approvals.categories[cat];
-              return (
-                <div key={cat} className="flex items-center gap-3 px-2 py-1.5">
-                  <span className="min-w-0 flex-1 text-xs">{label}</span>
-                  <div className="flex shrink-0 overflow-hidden rounded border border-[var(--color-border)] text-[11px]">
-                    {([
-                      [undefined, "Inherit"],
-                      [false, "Ask"],
-                      [true, "Auto"],
-                    ] as [boolean | undefined, string][]).map(([state, text]) => (
-                      <button
-                        key={text}
-                        type="button"
-                        onClick={() =>
-                          setApprovals((p) => {
-                            const categories = { ...p.categories };
-                            if (state === undefined) delete categories[cat];
-                            else categories[cat] = state;
-                            return { ...p, categories };
-                          })
-                        }
-                        className={`px-2 py-0.5 ${
-                          current === state
-                            ? "bg-[var(--color-accent)] text-white"
-                            : "bg-[var(--color-panel)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-                        }`}
-                      >
-                        {text}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          <div className="mt-2 grid gap-2 sm:grid-cols-2">
-            {([
-              ["shellAllow", "Run without asking", "npm run test"],
-              ["shellDeny", "Never run", "git push"],
-              ["editAllow", "Edit without asking", "{project}"],
-              ["editDeny", "Never edit", "{project}/.git"],
-            ] as ["shellAllow" | "shellDeny" | "editAllow" | "editDeny", string, string][]).map(([key, label, placeholder]) => (
-              <label key={key} className="block">
-                <span className="mb-1 block text-[11px] font-medium">{label}</span>
-                <textarea
-                  value={approvals[key].join("\n")}
-                  onChange={(e) =>
-                    setApprovals((p) => ({
-                      ...p,
-                      [key]: e.target.value.split("\n").map((s) => s.trim()).filter(Boolean),
-                    }))
-                  }
-                  rows={3}
-                  spellCheck={false}
-                  placeholder={placeholder}
-                  className="w-full rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 font-mono text-[11px] outline-none focus:border-[var(--color-accent)]"
-                />
-              </label>
-            ))}
-          </div>
-          <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">Added to the global lists. One per line; <code>{"{project}"}</code> is the chat's project.</p>
+          <ApprovalsEditor value={approvals} onChange={setApprovals} />
         </Field>
 
         <Field label="Fallback zone">

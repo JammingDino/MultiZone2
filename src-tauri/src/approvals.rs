@@ -180,14 +180,76 @@ struct ApprovalConfig {
     edit_allow: Vec<String>,
     #[serde(default)]
     edit_deny: Vec<String>,
+    /// "auto" | "ask" | "manual", overriding the global `planEntry` setting.
+    /// Read from a project's policy only (0.20.0).
+    #[serde(default)]
+    plan_entry: Option<String>,
+}
+
+fn parse_config(raw: Option<&str>) -> ApprovalConfig {
+    raw.map(str::trim)
+        .filter(|s| !s.is_empty())
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default()
+}
+
+/// Check a policy someone is about to store (a project's, via the API).
+///
+/// Stricter than reading one back: an agent that writes `"shel"` or
+/// `"categories": {"shell": "yes"}` would otherwise store a policy that
+/// silently means nothing, and say it had restricted something it had not.
+pub fn check_config(v: &Value) -> Result<(), String> {
+    let obj = v.as_object().ok_or("approvals must be a JSON object")?;
+    let strings = |k: &str, val: &Value| -> Result<(), String> {
+        match val.as_array() {
+            Some(a) if a.iter().all(Value::is_string) => Ok(()),
+            _ => Err(format!("approvals.{k} must be an array of strings")),
+        }
+    };
+    for (k, val) in obj {
+        match k.as_str() {
+            "categories" => {
+                let cats = val.as_object().ok_or("approvals.categories must be an object")?;
+                for (cat, auto) in cats {
+                    if Category::from_key(cat).is_none() {
+                        return Err(format!(
+                            "unknown approval category `{cat}`: use read, edit, shell, web, mcp, spawn or state"
+                        ));
+                    }
+                    if !auto.is_boolean() {
+                        return Err(format!(
+                            "approvals.categories.{cat} must be true (auto-approve) or false (always ask)"
+                        ));
+                    }
+                }
+            }
+            "shellAllow" | "shellDeny" | "editAllow" | "editDeny" => strings(k, val)?,
+            "planEntry" => {
+                if val.as_str().and_then(crate::plans::PlanEntry::from_key).is_none() {
+                    return Err("approvals.planEntry must be \"auto\", \"ask\" or \"manual\"".into());
+                }
+            }
+            other => {
+                return Err(format!(
+                    "unknown approvals key `{other}`: use categories, shellAllow, shellDeny, editAllow, editDeny, planEntry"
+                ))
+            }
+        }
+    }
+    Ok(())
 }
 
 impl Policy {
-    /// Read the global settings, then let the zone's own overrides win.
+    /// Read the global settings, then the chat's project's overrides, then the
+    /// zone's own — each layer winning over the one before.
     ///
     /// Merged per key rather than wholesale: a zone that says one thing about
     /// shell should not thereby discard the user's global decision about reads.
-    pub async fn load(db: &SqlitePool, zone_approvals: Option<&str>) -> Self {
+    pub async fn load(
+        db: &SqlitePool,
+        project_approvals: Option<&str>,
+        zone_approvals: Option<&str>,
+    ) -> Self {
         let raw: Option<String> =
             sqlx::query_scalar("SELECT value FROM settings WHERE key = 'app_settings'")
                 .fetch_optional(db)
@@ -210,18 +272,28 @@ impl Policy {
             .cloned()
             .and_then(|v| serde_json::from_value(v).ok())
             .unwrap_or_default();
-        let zone: ApprovalConfig = zone_approvals
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .and_then(|s| serde_json::from_str(s).ok())
-            .unwrap_or_default();
+        let project = parse_config(project_approvals);
+        let zone = parse_config(zone_approvals);
 
         let mut categories = HashMap::new();
-        for (key, auto) in global.categories.iter().chain(zone.categories.iter()) {
+        for (key, auto) in global
+            .categories
+            .iter()
+            .chain(project.categories.iter())
+            .chain(zone.categories.iter())
+        {
             if let Some(cat) = Category::from_key(key) {
                 categories.insert(cat, *auto);
             }
         }
+
+        // Project only, matching `PlanEntry::load`, which decides whether the
+        // tool is offered at all and has no zone to hand.
+        let plan_entry = project
+            .plan_entry
+            .as_deref()
+            .and_then(crate::plans::PlanEntry::from_key)
+            .unwrap_or_else(|| crate::plans::PlanEntry::from_settings(&settings));
 
         Self {
             level,
@@ -230,11 +302,11 @@ impl Policy {
             // "deny `git push`" must not silently drop the global deny list —
             // the whole point of a deny list is that it cannot be lost by
             // configuring something else.
-            shell_allow: [global.shell_allow, zone.shell_allow].concat(),
-            shell_deny: [global.shell_deny, zone.shell_deny].concat(),
-            edit_allow: [global.edit_allow, zone.edit_allow].concat(),
-            edit_deny: [global.edit_deny, zone.edit_deny].concat(),
-            plan_entry: crate::plans::PlanEntry::from_settings(&settings),
+            shell_allow: [global.shell_allow, project.shell_allow, zone.shell_allow].concat(),
+            shell_deny: [global.shell_deny, project.shell_deny, zone.shell_deny].concat(),
+            edit_allow: [global.edit_allow, project.edit_allow, zone.edit_allow].concat(),
+            edit_deny: [global.edit_deny, project.edit_deny, zone.edit_deny].concat(),
+            plan_entry,
         }
     }
 
@@ -965,5 +1037,27 @@ mod tests {
         assert_eq!(p.decide("edit", &edit("src/a.rs"), 1, Some(&dir)), Decision::Auto);
         assert_eq!(p.decide("edit", &edit("escape/a.rs"), 1, Some(&dir)), Decision::Ask);
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// Global, then project, then zone (0.20.0): the project can loosen what
+    /// the global setting asks about, the zone can tighten it back, and the
+    /// project's deny list adds to the rest rather than replacing them.
+    #[tokio::test]
+    async fn a_project_policy_sits_between_global_and_zone() {
+        let db = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&db).await.unwrap();
+        let project = r#"{"categories":{"shell":true,"web":true},"shellDeny":["git push"],"planEntry":"manual"}"#;
+        let zone = r#"{"categories":{"web":false}}"#;
+        let p = Policy::load(&db, Some(project), Some(zone)).await;
+        assert_eq!(p.decide("bash", r#"{"command":"ls"}"#, 2, None), Decision::Auto);
+        assert!(matches!(p.decide("bash", r#"{"command":"git push"}"#, 2, None), Decision::Deny { .. }));
+        assert_eq!(p.decide("smart_search", "{}", 1, None), Decision::Ask);
+        assert!(matches!(p.decide("enter_plan_mode", "{}", 0, None), Decision::Deny { .. }));
+        assert!(check_config(&json!({ "categories": { "shell": true }, "planEntry": "ask" })).is_ok());
+        assert!(check_config(&json!({ "shellAlow": [] })).is_err());
     }
 }

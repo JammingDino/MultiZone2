@@ -52,7 +52,7 @@ const fn open(method: &'static str, path: &'static str, description: &'static st
 
 /// Bumped whenever a route is added, removed or changes shape, so a caller can
 /// tell "the app is older than my script" from "my script is wrong".
-pub const ROUTE_SET_VERSION: u32 = 14;
+pub const ROUTE_SET_VERSION: u32 = 15;
 
 pub const ROUTES: &[RouteDef] = &[
     // Discovery — deliberately unauthenticated. A caller debugging a broken
@@ -78,7 +78,10 @@ pub const ROUTES: &[RouteDef] = &[
 
     // Projects & tags
     r("GET", "/api/projects", "All projects"),
-    r("POST", "/api/projects", "Create or update a project"),
+    r("GET", "/api/projects/schema", "What a project write accepts: every field, the allowed icons, preset colours, zones, approval keys, and an example"),
+    r("POST", "/api/projects", "Create a project ({name, icon, accentColor, directory, defaultZoneId, contextSnippet, approvals, spendLimit, ...}; see /api/projects/schema), or update one by id"),
+    r("GET", "/api/projects/:id", "One project"),
+    r("PATCH", "/api/projects/:id", "Change some of a project's fields; absent fields are kept, null clears one"),
     r("DELETE", "/api/projects/:id", "Delete a project (?deleteChats=true also deletes its chats)"),
     r("GET", "/api/tags", "All tags"),
     r("POST", "/api/tags", "Create or update a tag"),
@@ -680,6 +683,35 @@ pub async fn upsert_project(
     Json(body): Json<commands::projects::ProjectInput>,
 ) -> ApiResult<Response> {
     Ok(Json(commands::projects::upsert_project(app_state(&st), body).await?).into_response())
+}
+
+pub async fn get_project(State(st): State<ApiState>, Path(id): Path<String>) -> ApiResult<Response> {
+    Ok(Json(commands::projects::get_project(&st.db, &id).await?).into_response())
+}
+
+/// Change some of a project's fields, leaving the rest. The upsert with the id
+/// taken from the path, except that PATCH never creates: an agent that got the
+/// id wrong should hear so, not find a second project.
+pub async fn patch_project(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+    Json(mut body): Json<Value>,
+) -> ApiResult<Response> {
+    commands::projects::get_project(&st.db, &id).await?;
+    let obj = body.as_object_mut().ok_or_else(|| {
+        ApiError(crate::error::AppError::Invalid("the body must be a JSON object".into()))
+    })?;
+    obj.insert("id".into(), json!(id));
+    let input: commands::projects::ProjectInput = serde_json::from_value(body).map_err(|e| {
+        ApiError(crate::error::AppError::Invalid(format!(
+            "{e} (GET /api/projects/schema lists the fields)"
+        )))
+    })?;
+    Ok(Json(commands::projects::upsert_project(app_state(&st), input).await?).into_response())
+}
+
+pub async fn project_schema(State(st): State<ApiState>) -> ApiResult<Response> {
+    Ok(Json(commands::projects::project_schema(&st.db).await?).into_response())
 }
 
 #[derive(Deserialize)]

@@ -1,11 +1,13 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { X, Plus, Trash2, Folder, FolderOpen, Database, RefreshCw, FileText, Loader2, AlertTriangle, ChevronLeft, GraduationCap, PenTool } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useApp } from "@/store/app";
 import { useShallow } from "zustand/react/shallow";
 import * as api from "@/lib/tauri";
 import { isRemote } from "@/lib/remote/transport";
-import type { IndexSummary, KbDocument, KnowledgeStatus, Project, Tag, Zone } from "@/lib/types";
+import type { ApprovalPolicy, IndexSummary, KbDocument, KnowledgeStatus, Project, Tag, Zone } from "@/lib/types";
+import { EMPTY_APPROVALS, parseApprovals, serializeApprovals } from "@/lib/approvals";
+import { ApprovalsEditor } from "@/components/common/ApprovalsEditor";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import { IconPicker } from "@/components/common/IconPicker";
 import { ColorPicker } from "@/components/common/ColorPicker";
@@ -246,13 +248,21 @@ function ProjectForm({
   const [lintCommand, setLintCommand] = useState("");
   const [testCommand, setTestCommand] = useState("");
   const [studyMode, setStudyMode] = useState(false);
+  const [approvals, setApprovals] = useState<ApprovalPolicy>(EMPTY_APPROVALS);
+  const [spendLimit, setSpendLimit] = useState("");
   const [drawing, setDrawing] = useState(false);
   const [drawError, setDrawError] = useState<unknown>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<unknown>(null);
   const refreshProjects = useApp((s) => s.refreshProjects);
+  // `updatedAt` of this form's own last save. A newer one on the project came
+  // from somewhere else — an agent's app_control call — and the form takes it
+  // in, or it would show stale values and its next autosave would put them
+  // back over the agent's.
+  const ownSaveAt = useRef<number | null>(null);
 
   useEffect(() => {
+    if (project && project.updatedAt === ownSaveAt.current) return;
     if (project) {
       setName(project.name);
       setIcon(project.icon ?? null);
@@ -264,13 +274,16 @@ function ProjectForm({
       setLintCommand(project.lintCommand ?? "");
       setTestCommand(project.testCommand ?? "");
       setStudyMode(project.studyMode ?? false);
+      setApprovals(parseApprovals(project.approvals));
+      setSpendLimit(project.spendLimit == null ? "" : String(project.spendLimit));
     } else {
       setName(""); setIcon(null); setAccentColor(null);
       setDefaultZoneId(null); setContextSnippet(""); setDirectory(null);
       setDefaultContextEnabled(false);
       setStudyMode(false);
+      setApprovals(EMPTY_APPROVALS); setSpendLimit("");
     }
-  }, [project?.id]);
+  }, [project?.id, project?.updatedAt]);
 
   /**
    * The folder picker is *this* window's file dialog, and this window is not
@@ -306,6 +319,9 @@ function ProjectForm({
       lintCommand: lintCommand.trim() || null,
       testCommand: testCommand.trim() || null,
       studyMode,
+      approvals: serializeApprovals(approvals),
+      // Blank inherits the global limit; anything not a whole number is too.
+      spendLimit: /^\d+$/.test(spendLimit.trim()) ? Number(spendLimit.trim()) : null,
     };
   }
 
@@ -327,7 +343,7 @@ function ProjectForm({
     const timer = setTimeout(async () => {
       setSaving(true);
       try {
-        await api.upsertProject(payload());
+        ownSaveAt.current = (await api.upsertProject(payload())).updatedAt;
         await refreshProjects();
         setSaveError(null);
       } catch (e) {
@@ -337,7 +353,7 @@ function ProjectForm({
     }, 600);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project?.id, name, icon, accentColor, defaultZoneId, contextSnippet, directory, defaultContextEnabled, lintCommand, testCommand, studyMode]);
+  }, [project?.id, name, icon, accentColor, defaultZoneId, contextSnippet, directory, defaultContextEnabled, lintCommand, testCommand, studyMode, approvals, spendLimit]);
 
   async function onDelete() {
     if (!project) return;
@@ -543,6 +559,25 @@ function ProjectForm({
             </label>
           </div>
           <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">One command per line, run after each turn's edits. Failures go back to the model.</p>
+        </div>
+
+        {/* Permissions (0.20.0): what every chat here may do without asking.
+            Shown so whatever an agent set through app_control is visible. */}
+        <div className="mt-3">
+          <div className="mb-1 text-xs text-[var(--color-text-muted)]">Approvals for chats in this project</div>
+          <p className="mb-2 text-[11px] text-[var(--color-text-muted)]">Inherit follows Settings → Approvals; a zone's own overrides still win.</p>
+          <ApprovalsEditor value={approvals} onChange={setApprovals} withPlanEntry />
+          <label className="mt-2 flex items-center justify-between gap-2 text-xs">
+            <span className="text-[var(--color-text-muted)]">Session token limit</span>
+            <input
+              value={spendLimit}
+              onChange={(e) => setSpendLimit(e.target.value)}
+              inputMode="numeric"
+              placeholder="Global default"
+              className="input w-36"
+            />
+          </label>
+          <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">For chats with no limit of their own. 0 = unmetered.</p>
         </div>
 
         {/* Knowledge (RAG) — only for saved projects, since indexing needs a

@@ -222,7 +222,11 @@ fn build_router(state: ApiState) -> Router {
         .route("/api/zone-library/:id", axum::routing::delete(h::delete_library))
         // Projects, tags
         .route("/api/projects", get(list_projects).post(h::upsert_project))
-        .route("/api/projects/:id", axum::routing::delete(h::delete_project))
+        .route("/api/projects/schema", get(h::project_schema))
+        .route(
+            "/api/projects/:id",
+            get(h::get_project).patch(h::patch_project).delete(h::delete_project),
+        )
         .route("/api/tags", get(list_tags).post(h::upsert_tag))
         .route("/api/tags/:id", axum::routing::delete(h::delete_tag))
         .route("/api/chat-tags", get(h::all_chat_tags))

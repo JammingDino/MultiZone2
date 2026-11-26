@@ -161,6 +161,13 @@ pub struct Project {
     /// A project for learning its sources rather than working on them: chats
     /// answer only from them, and get the study tools (see `study`).
     pub study_mode: bool,
+    /// Approval overrides for every chat in the project, as JSON: the zone
+    /// `approvals` shape plus an optional `planEntry`. Applied between the
+    /// global policy and the zone's own. None = inherit.
+    pub approvals: Option<String>,
+    /// Session token ceiling for chats here without their own. None = the
+    /// global default, 0 = unmetered.
+    pub spend_limit: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
 }

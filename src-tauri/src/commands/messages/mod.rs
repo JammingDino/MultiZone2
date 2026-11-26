@@ -111,13 +111,16 @@ pub(crate) async fn max_session_tokens(db: &SqlitePool, chat_id: &str) -> i64 {
     // `Some(0)` is a real answer — "this session runs unmetered" — so it has to
     // beat the global default rather than read as unset.
     if let Ok(root) = crate::tools::teamwork::session_root(db, chat_id).await {
-        let own: Option<Option<i64>> =
-            sqlx::query_scalar("SELECT spend_limit FROM chats WHERE id = ?1")
-                .bind(&root)
-                .fetch_optional(db)
-                .await
-                .ok()
-                .flatten();
+        // The chat's own limit, else its project's (0.20.0), else the global.
+        let own: Option<Option<i64>> = sqlx::query_scalar(
+            "SELECT COALESCE(c.spend_limit, p.spend_limit) FROM chats c
+             LEFT JOIN projects p ON p.id = c.project_id WHERE c.id = ?1",
+        )
+        .bind(&root)
+        .fetch_optional(db)
+        .await
+        .ok()
+        .flatten();
         if let Some(limit) = own.flatten() {
             return limit.max(0);
         }
@@ -2800,8 +2803,14 @@ async fn run_participant_turn(
         // per step rather than per turn: a user watching a long run and deciding
         // halfway through to stop being asked about reads should not have to
         // start a new turn for it (0.14.2).
-        let policy =
-            crate::approvals::Policy::load(&ctx.db, zone.approvals.as_deref()).await;
+        let project_approvals =
+            crate::commands::projects::approvals_for_chat(&ctx.db, chat_id).await;
+        let policy = crate::approvals::Policy::load(
+            &ctx.db,
+            project_approvals.as_deref(),
+            zone.approvals.as_deref(),
+        )
+        .await;
         let approval_key = approval_key(chat_id, persp);
         // Set when this step's calls tripped loop detection. Handled after the
         // step rather than inside it, so the call that tripped it is still

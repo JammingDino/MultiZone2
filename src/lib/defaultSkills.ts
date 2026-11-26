@@ -24,7 +24,8 @@ export const DEFAULT_SKILLS: DefaultSkillDef[] = [
       "it is, what it can do, how providers, zones, projects, sub-agents, tools, skills, " +
       "memory or knowledge work, how to configure or troubleshoot any of it, and how to get " +
       "better answers out of it. Covers \"tell me about MultiZone\", \"what is this app\", " +
-      "\"how does MultiZone mode work\", \"how should I set up a project\", \"why can't you " +
+      "\"how does MultiZone mode work\", \"how should I set up a project\", \"set up a project " +
+      "for me\", \"why can't you " +
       "read that file\", \"which zone should answer this\". Load it before explaining the " +
       "environment rather than guessing at it.",
     content: `# The app you are running in
@@ -66,6 +67,9 @@ Configuring one well:
 - **No project needed for one folder.** Drop a folder on a chat, paste its path and click *Give access*, use *Add folder…* beside the attach button, or right-click it in Explorer → *Open in MultiZone*. The chat's agents (and its sub-agents) can then read and edit it; a chat with no project works in it. What a chat can reach is on the *Access* strip above the composer and under Files → *Granted*, where it can be taken back. A folder inside an existing project opens in that project instead.
 - Keep the **context snippet** short and factual — it is prepended to every chat in the project, so it is paid for on every turn. Conventions and constraints, not documentation.
 - **Knowledge (RAG)** is opt-in per chat. Index the directory when you want meaning-based search over a lot of prose; for code, the exact \`file_search\` tools are usually better and cost nothing to keep current.
+- **Project defaults** apply to every chat in it: a default zone, approval overrides (which tool categories run without asking, shell and edit allow/deny lists, and whether the model may enter plan mode itself), and a session token limit. They sit between Settings → Approvals and a zone's own overrides.
+
+**You can set a project up for the user** — name, icon, colour, directory, default zone, permissions, context snippet, checks — with \`app_control\`. Read \`/api/projects/schema\` first (it lists the allowed icons, preset colours, zones and approval keys, with an example), then \`POST /api/projects\` to create or \`PATCH /api/projects/<id>\` to change only the fields you send. The directory must already exist. Say what you set; it shows in the project's settings at once.
 
 ## Memory, skills, tags
 

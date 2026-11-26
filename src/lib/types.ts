@@ -329,6 +329,15 @@ export interface Project {
   /** Study mode: chats answer only from the project's sources, and get the
    * flashcard and quiz tools. */
   studyMode: boolean;
+  /**
+   * Approval overrides for every chat in the project (0.20.0), as a JSON
+   * `ApprovalPolicy` plus an optional `planEntry`, or null to inherit. Layered
+   * between Settings → Approvals and the zone's own.
+   */
+  approvals: string | null;
+  /** Session token ceiling for chats here with none of their own; 0 = unmetered,
+   * null = the global default. */
+  spendLimit: number | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -821,7 +830,12 @@ export interface ApprovalPolicy {
   editAllow: string[];
   /** Paths an edit is refused outright, longest match winning over `editAllow`. */
   editDeny: string[];
+  /** A project's override of the global `planEntry` setting (0.20.0); read
+   * from project policies only. Absent = inherit. */
+  planEntry?: PlanEntry;
 }
+
+export type PlanEntry = "auto" | "ask" | "manual";
 
 /** Stream event payloads emitted by the backend over the `stream` event. */
 export type StreamEvent =

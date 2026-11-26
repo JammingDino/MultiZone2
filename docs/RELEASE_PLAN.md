@@ -404,7 +404,8 @@ Adding a provider in Claude Code is one step and then you work. Here it was the 
 
 ### 0.20.0 — Zones are roles, and Claude Code's setup is already here
 
-- [ ] Skill packs under the home folder's harness folders (`~/.claude/skills`, `~/.agents/skills`, …) and under the chat's project folder are found without adding a folder in Settings
+- [x] Skill packs under the home folder's harness folders (`~/.claude/skills`, `~/.agents/skills`, …) are found without adding a folder in Settings — on this machine, 24 packs and ~2K tokens of catalog for a zone with `load_skill`; each still switchable off
+- [ ] The chat's project folder as a skill root — needs the catalog built per chat rather than once for the app, or one project's skills reach every chat
 - [ ] A zone can leave its model unset and follow the chat: the composer's pick, else the base zone's. Starter zones are seeded that way, so a new provider needs no new zones
 - [ ] Tool presets in the zone editor — *Read-only*, *Research*, *Code*, *Everything* — one click instead of a column of checkboxes. MCP servers and their tools stay a checklist under the presets; a preset never decides which MCP tools a zone gets
 - [ ] `spawn_subagent` takes a one-off spec instead of a zone — a preset or a tool list, optionally a model and instructions — narrowed to the tools the caller itself has, so a leader can make the helper it needs without anyone configuring one first

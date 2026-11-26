@@ -134,20 +134,32 @@ fn string_list(settings: &serde_json::Value, key: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Every root to scan: the managed folder first, then any folder the user added.
+/// Every root to scan: the managed folder first, then any folder the user added,
+/// then each harness folder in the home directory (`~/.claude`, `~/.agents`, …),
+/// so a skill installed for Claude Code or any other harness is here with no
+/// setup. Each pack can still be switched off in Settings → Skills.
 pub async fn roots(db: &SqlitePool) -> Vec<PathBuf> {
     let settings = app_settings(db).await;
     let mut out: Vec<PathBuf> = Vec::new();
     if let Some(managed) = managed_root() {
         out.push(managed);
     }
-    for dir in string_list(&settings, "skillPackDirs") {
-        let p = PathBuf::from(dir);
+    let added = string_list(&settings, "skillPackDirs").into_iter().map(PathBuf::from);
+    for p in added.chain(home_harness_dirs()) {
         if !out.iter().any(|r| r == &p) {
             out.push(p);
         }
     }
     out
+}
+
+/// The harness folders that exist under the user's home directory.
+fn home_harness_dirs() -> Vec<PathBuf> {
+    let Some(home) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")) else {
+        return Vec::new();
+    };
+    let home = PathBuf::from(home);
+    PROVIDER_DIRS.iter().map(|d| home.join(d)).filter(|p| p.is_dir()).collect()
 }
 
 /// All packs across all roots, in catalog order. Names are unique: the first

@@ -448,7 +448,7 @@ impl StreamSink {
     /// Ask an open GUI to show a chat — a sub-agent the model wants the user
     /// to watch (0.21.0). `show` is "beside" or "window". GUI-only; no SSE.
     pub fn show_chat(&self, chat_id: &str, from_chat_id: &str, show: &str) {
-        self.emit_event("show-chat", serde_json::json!({ "chatId": chat_id, "fromChatId": from_chat_id, "show": show }));
+        self.emit_event("show-tab", serde_json::json!({ "tab": format!("chat:{chat_id}"), "fromChatId": from_chat_id, "show": show }));
     }
 }
 

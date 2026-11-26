@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { GraduationCap, MessageSquare, Plus, Repeat } from "lucide-react";
 import { ViewType, Workspace, useView, useViewTitle, type WorkspaceHandle } from "@danfessler/trellis-react";
 import { useApp } from "@/store/app";
+import * as api from "@/lib/tauri";
 import { iconFor } from "@/components/Workspace/FilesPanel";
 import { HOME_TAB, chatOf, focusGroup, focusedGroup, groupOf, moveTab, studyOf, type DropZone, type TabLayout } from "@/lib/tabLayout";
 import { fromDocument, toDocument } from "@/lib/trellisLayout";
@@ -120,6 +121,12 @@ export function Tiles({ renderTab }: { renderTab: (tab: string) => ReactNode }) 
     const g = focusedGroup(layout);
     if (g.tabs.length && ws.getSnapshot().focusedPanel !== g.id) ws.focus(g.id);
   }, [ws, layout]);
+
+  // The backend keeps the last layout for GET /api/layout (0.21.0).
+  useEffect(() => {
+    const t = window.setTimeout(() => void api.reportLayout(layout).catch(() => {}), 300);
+    return () => window.clearTimeout(t);
+  }, [layout]);
 
   // Drags from the sidebar: the pane under the pointer, and which part of it.
   const [drop, setDrop] = useState<{ tab: string; x: number; y: number; target: Target | null } | null>(null);

@@ -900,9 +900,20 @@ export function onSchedulesChanged(handler: () => void): Promise<UnlistenFn> {
 export function onChatsChanged(handler: () => void): Promise<UnlistenFn> {
   return listen("chats-changed", () => handler());
 }
-/** A model asked for a chat (a sub-agent it started) to be shown beside the one it came from, or in a window (0.21.0). */
-export function onShowChat(handler: (e: { chatId: string; fromChatId: string; show: "beside" | "window" }) => void): Promise<UnlistenFn> {
-  return listen<{ chatId: string; fromChatId: string; show: "beside" | "window" }>("show-chat", (e) => handler(e.payload));
+export type ShowTab = { tab: string; show: "tab" | "beside" | "window" | "close"; fromChatId?: string };
+/**
+ * Open, float or close a tab (0.21.0): asked for over the API, or by a model
+ * for a sub-agent it started (`fromChatId` is then the chat that started it).
+ */
+export function onShowTab(handler: (e: ShowTab) => void): Promise<UnlistenFn> {
+  return listen<ShowTab>("show-tab", (e) => handler(e.payload));
+}
+/** A whole layout sent over the API (0.21.0); the window checks its shape. */
+export function onLayoutSet(handler: (layout: unknown) => void): Promise<UnlistenFn> {
+  return listen<{ layout: unknown }>("layout-set", (e) => handler(e.payload.layout));
+}
+export function reportLayout(layout: unknown): Promise<void> {
+  return invoke("report_layout", { layout });
 }
 /** Emitted after an external edit to a mirrored `.md` was synced into the DB (0.7.2). */
 export function onChatFileSynced(

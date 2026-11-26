@@ -238,6 +238,9 @@ pub const ROUTES: &[RouteDef] = &[
     r("POST", "/api/transcribe", "Transcribe uploaded audio through the configured speech provider ({fileName, audioB64, withMetadata?, language?})"),
     r("GET", "/api/tools", "Every callable tool function, with its safety level"),
     r("GET", "/api/tools/presets", "The tool presets a zone or a one-off sub-agent can take (built-in tools only)"),
+    r("GET", "/api/layout", "What is open in the window's main column: panes, tabs and floating windows, and what a tab id names"),
+    r("PUT", "/api/layout", "Replace the main column's layout ({layout}, the shape GET returns)"),
+    r("POST", "/api/layout/show", "Open a tab, a pane beside, or a floating window, or close one ({tab, show: tab|beside|window|close})"),
     r("GET", "/api/tool-usage", "Per-zone tool call counters (?zoneId= for one zone)"),
     r("DELETE", "/api/tool-usage", "Reset the counters (?zoneId= for one zone)"),
     r("GET", "/api/usage", "Lifetime token spend"),
@@ -405,6 +408,10 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("messages::update_message", Route("PATCH /api/chats/:id/messages/:messageId")),
     ("messages::list_tool_functions", Route("GET /api/tools")),
     ("messages::list_tool_presets", Route("GET /api/tools/presets")),
+    ("layout::get_layout", Route("GET /api/layout")),
+    ("layout::set_layout", Route("PUT /api/layout")),
+    ("layout::show_tab", Route("POST /api/layout/show")),
+    ("layout::report_layout", GuiOnly("the window reporting its own layout; read it with GET /api/layout")),
     ("pending::queue_chat_message", Route("POST /api/chats/:id/queue")),
     ("pending::cancel_pending_message", Route("DELETE /api/chats/:id/queue/:messageId -> removed")),
     ("terminals::list_terminals", Route("GET /api/chats/:id/terminals")),
@@ -1828,6 +1835,23 @@ pub async fn list_tools(State(st): State<ApiState>) -> ApiResult<Response> {
 
 pub async fn list_tool_presets() -> ApiResult<Response> {
     Ok(Json(commands::messages::list_tool_presets().await?).into_response())
+}
+
+pub async fn get_layout() -> ApiResult<Response> {
+    Ok(Json(commands::layout::get_layout().await?).into_response())
+}
+
+pub async fn set_layout(State(st): State<ApiState>, Json(body): Json<Value>) -> ApiResult<Response> {
+    let layout = body.get("layout").cloned().unwrap_or(Value::Null);
+    commands::layout::set_layout(st.app.clone(), layout).await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+pub async fn show_tab(State(st): State<ApiState>, Json(body): Json<Value>) -> ApiResult<Response> {
+    let tab = body.get("tab").and_then(Value::as_str).unwrap_or("").to_string();
+    let show = body.get("show").and_then(Value::as_str).map(str::to_string);
+    commands::layout::show_tab(st.app.clone(), tab, show).await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 #[derive(Deserialize)]

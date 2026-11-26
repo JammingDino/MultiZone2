@@ -29,6 +29,7 @@ pub mod runs;
 pub mod schedules;
 pub mod study;
 pub mod remote;
+pub mod layout;
 
 pub fn now_ts() -> i64 {
     chrono::Utc::now().timestamp_millis()

@@ -6,7 +6,7 @@ import * as api from "@/lib/tauri";
 import { MessageThread } from "./MessageThread";
 import { FileViewer } from "@/components/Workspace/FileViewer";
 import { Tiles } from "./Tiles";
-import { chatOf, chatTab, floatTab, focusGroup, isFileTab, isShowing, isStudyTab, navigate } from "@/lib/tabLayout";
+import { chatOf, chatTab, closeTab, floatTab, focusGroup, isFileTab, isShowing, isStudyTab, navigate, parseLayout } from "@/lib/tabLayout";
 import { StudyTab } from "@/components/Study/StudyTab";
 import { PaneChat } from "@/lib/paneChat";
 import { InputBar, type InputBarHandle } from "./InputBar";
@@ -85,6 +85,7 @@ export function ChatPanel() {
     let unlistenChats: (() => void) | undefined;
     let unlistenFileSync: (() => void) | undefined;
     let unlistenShow: (() => void) | undefined;
+    let unlistenLayout: (() => void) | undefined;
     // Stream events arrive one per token, and applying each on arrival meant a
     // store write and a React pass per token — with two zones answering at once
     // the app spent its whole frame budget re-rendering and visibly stuttered.
@@ -141,20 +142,31 @@ export function ChatPanel() {
       if (cancelled) u();
       else unlistenChats = u;
     });
-    api.onShowChat(({ chatId, fromChatId, show }) => {
-      // A sub-agent the model wants watched (0.21.0). Beside only next to the
-      // chat that started it, if that is on screen; a window over anything.
+    api.onShowTab(({ tab, show, fromChatId }) => {
+      // Over the API, or a sub-agent the model wants watched (0.21.0). A
+      // sub-agent opens beside only next to the chat that started it, if that
+      // is on screen, and the user's own chat keeps the composer and the
+      // workspace panel.
       const s = useApp.getState();
       const keep = s.tabLayout.focused;
-      if (show === "beside" && !isShowing(s.tabLayout, chatTab(fromChatId))) return;
+      if (fromChatId && show === "beside" && !isShowing(s.tabLayout, chatTab(fromChatId))) return;
       s.updateTabLayout((l) => {
-        const next = show === "window" ? floatTab(l, chatTab(chatId)) : navigate(l, chatTab(chatId), "right");
-        // The user's own chat keeps the composer and the workspace panel.
-        return focusGroup(next, keep);
+        const next =
+          show === "close" ? closeTab(l, tab)
+          : show === "window" ? floatTab(l, tab)
+          : navigate(l, tab, show === "beside" ? "right" : "tab");
+        return fromChatId ? focusGroup(next, keep) : next;
       });
     }).then((u) => {
       if (cancelled) u();
       else unlistenShow = u;
+    });
+    api.onLayoutSet((raw) => {
+      const next = parseLayout(raw);
+      if (next) useApp.getState().updateTabLayout(() => next);
+    }).then((u) => {
+      if (cancelled) u();
+      else unlistenLayout = u;
     });
     api.onChatFileSynced(({ chatId }) => {
       // An external edit to a mirrored `.md` was synced into the DB (0.7.2) —
@@ -178,6 +190,7 @@ export function ChatPanel() {
       unlistenChats?.();
       unlistenFileSync?.();
       unlistenShow?.();
+      unlistenLayout?.();
     };
     // Deliberately empty — see actionsRef comment above.
     // eslint-disable-next-line react-hooks/exhaustive-deps

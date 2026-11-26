@@ -370,6 +370,8 @@ fn build_router(state: ApiState) -> Router {
         .route("/api/transcribe", post(h::transcribe_upload))
         .route("/api/tools", get(h::list_tools))
         .route("/api/tools/presets", get(h::list_tool_presets))
+        .route("/api/layout", get(h::get_layout).put(h::set_layout))
+        .route("/api/layout/show", post(h::show_tab))
         .route("/api/tool-usage", get(h::tool_usage).delete(h::reset_tool_usage))
         .route("/api/usage", get(h::lifetime_usage))
         .route("/api/stats", get(h::db_stats))

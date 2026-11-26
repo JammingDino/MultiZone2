@@ -1,6 +1,68 @@
-import { forwardRef, useEffect, useState } from "react";
+import { forwardRef, useEffect, useRef, useState, type RefObject } from "react";
 import * as api from "@/lib/tauri";
-import { segments } from "@/lib/promptTokens";
+import { replaceRange, segments, slashAt } from "@/lib/promptTokens";
+
+/**
+ * Everything a composer needs for commands and folders as words (0.20.1): the
+ * caret's `/word` for the menu, what a pick does, and the overlay's state. One
+ * hook so the chat composer and the Home screen's behave the same.
+ */
+export function usePromptTokens(
+  text: string,
+  setText: (t: string) => void,
+  taRef: RefObject<HTMLTextAreaElement | null>,
+  paths: string[],
+) {
+  const [caret, setCaret] = useState(0);
+  const [dismissed, setDismissed] = useState(false);
+  const word = dismissed ? null : slashAt(text, caret);
+  const skills = useSkillCommands();
+  const highlighted = hasTokens(text, skills.names, paths);
+  const overlayRef = useRef<HTMLDivElement>(null);
+  return {
+    /** The menu's query, or null when the caret is not in a `/word`. */
+    slash: word?.query ?? null,
+    names: skills.names,
+    highlighted,
+    overlayRef,
+    /** Put a pick in place of the caret's `/word`. */
+    pick(insert: string) {
+      if (!word) return;
+      const next = replaceRange(text, word.start, word.end, insert);
+      setText(next.text);
+      setCaret(next.caret);
+      setDismissed(true);
+      requestAnimationFrame(() => {
+        taRef.current?.focus();
+        taRef.current?.setSelectionRange(next.caret, next.caret);
+      });
+    },
+    dismiss: () => setDismissed(true),
+    /** Call from the textarea's onChange, after setting the text. */
+    changed(value: string, at: number) {
+      setCaret(at);
+      // Re-arm once the caret leaves a `/word`, so dismissing once does not
+      // disable the menu for the session.
+      if (slashAt(value, at) === null) setDismissed(false);
+    },
+    textareaProps: {
+      onSelect: (e: React.SyntheticEvent<HTMLTextAreaElement>) => setCaret(e.currentTarget.selectionStart ?? 0),
+      onScroll: (e: React.UIEvent<HTMLTextAreaElement>) => {
+        if (overlayRef.current) overlayRef.current.scrollTop = e.currentTarget.scrollTop;
+      },
+    },
+    /** Classes for the textarea: its own text hides while the overlay draws it. */
+    textClass: highlighted ? "text-transparent caret-[var(--color-text)]" : "",
+  };
+}
+
+/** Put `insert` at the textarea's caret, with a space either side as needed. */
+export function insertAtCaret(cur: string, ta: HTMLTextAreaElement | null, insert: string): string {
+  const at = Math.min(ta?.selectionStart ?? cur.length, cur.length);
+  const before = cur.slice(0, at);
+  const lead = before && !/\s$/.test(before) ? " " : "";
+  return `${before}${lead}${insert} ${cur.slice(at)}`;
+}
 
 /**
  * The composer's commands and folders, drawn behind its textarea (0.20.1).

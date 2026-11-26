@@ -423,7 +423,7 @@ Claude Code runs a slash command only as the whole message. Here a command is a 
 - [x] On send, each `/skill` hands the model its `load_skill` result as a hidden part (`invoke_skill`); the word stays in the transcript. MCP prompts and resources still expand when picked, at the caret, so what they add is visible before sending
 - [x] A folder granted while the composer is open — dropped, picked, pasted — is inserted at the caret and glows amber there, as well as on the Access strip
 - [x] The sent message draws its `/commands` and path-shaped words the same way
-- [ ] The Home screen's composer — the first message of a new chat has neither the menu anywhere nor the overlay yet
+- [x] The Home screen's composer does the same (`usePromptTokens`, shared with the chat composer): menu anywhere, overlay, a folder added there glows in the prompt, skills load with the first message
 - [ ] A message queued behind a running turn goes as text only, so a `/skill` in it is a plain word
 - [ ] Seen in the app: the overlay lined up with the caret through wrapping, scrolling and a 22px interface size; `/a then /b` loading both; a folder drop landing in the prompt
 

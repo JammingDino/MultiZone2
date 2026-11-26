@@ -35,6 +35,9 @@ import { resolveVisionCapable } from "@/lib/vision";
 import { resolveBaseModel, resolveBaseZone } from "@/lib/baseZone";
 import { claimSettingsDrop } from "@/lib/importSettings";
 import { useZoneModel } from "@/lib/useZoneModel";
+import { SlashMenu } from "./SlashMenu";
+import { PromptHighlight, insertAtCaret, skillParts, usePromptTokens } from "./PromptHighlight";
+import { commandsIn } from "@/lib/promptTokens";
 
 /**
  * What the landing view says hello with, by hour.
@@ -289,9 +292,17 @@ export function HomeScreen() {
     !newProjectKind && (selectedProjectId === null || selectedProjectId === pendingProjectId);
   function addPendingPaths(paths: string[]) {
     void contextsFor(paths).then((ctxs) => {
-      if (ctxs.length) setPendingPaths((cur) => addPending(cur, ctxs, !canChooseProject));
+      if (!ctxs.length) return;
+      setPendingPaths((cur) => addPending(cur, ctxs, !canChooseProject));
+      // The folder goes into the words too (0.20.1), where it glows.
+      setText((cur) => {
+        const add = ctxs.map((c) => c.path).filter((p) => !cur.includes(p));
+        return add.length ? insertAtCaret(cur, taRef.current, add.join(" ")) : cur;
+      });
     });
   }
+  // Commands and folders as words, the same as in a chat's composer (0.20.1).
+  const tokens = usePromptTokens(text, setText, taRef, pendingPaths.map((p) => p.ctx.path));
 
   // Persist draft text across navigations — and the files staged with it, which
   // are as much of the draft as the words are.
@@ -454,6 +465,7 @@ export function HomeScreen() {
     // above is the one exception, and it deliberately leaves the composer
     // alone — its transcript arrives as `dictated` instead.)
     const currentText = dictated ?? text;
+    const skillNames = tokens.names;
     const currentPending = pending;
     const currentMode = mode;
 
@@ -594,6 +606,8 @@ export function HomeScreen() {
       // its reason in the new chat's error card; the text goes into that chat's
       // composer so it can be sent again, rather than vanishing with the page.
       const sentText = currentText;
+      // Each `/skill` hands the model its instructions, unseen (0.20.1).
+      parts.push(...(await skillParts(commandsIn(currentText, skillNames))));
       api.sendMessage(chat.id, parts).catch((e) => {
         console.error("first message failed:", e);
         if (sentText.trim()) setComposerDraft(sentText, "append");
@@ -605,6 +619,8 @@ export function HomeScreen() {
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // The slash menu took this key (a pick), so it is not a send.
+    if (e.defaultPrevented) return;
     const trigger =
       sendKey === "ctrl_enter"
         ? e.key === "Enter" && (e.ctrlKey || e.metaKey)
@@ -709,17 +725,36 @@ export function HomeScreen() {
               </button>
             </div>
           )}
+          <div className="relative">
+          {tokens.slash !== null && (
+            <SlashMenu query={tokens.slash} onPick={tokens.pick} onClose={tokens.dismiss} />
+          )}
+          {tokens.highlighted && (
+            <PromptHighlight
+              ref={tokens.overlayRef}
+              text={text}
+              commands={tokens.names}
+              paths={pendingPaths.map((p) => p.ctx.path)}
+              className="px-2 py-1.5 text-sm leading-relaxed"
+            />
+          )}
           <textarea
             ref={taRef}
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => {
+              setText(e.target.value);
+              tokens.changed(e.target.value, e.target.selectionStart ?? e.target.value.length);
+            }}
+            {...tokens.textareaProps}
             onKeyDown={onKeyDown}
             onPaste={onPaste}
             rows={2}
             autoFocus
             placeholder="Send a message…"
-            className="max-h-[40vh] min-h-[52px] w-full resize-none overflow-y-auto bg-transparent px-2 py-1.5 text-sm leading-relaxed outline-none"
+            className={`relative block max-h-[40vh] min-h-[52px] w-full resize-none overflow-y-auto bg-transparent px-2 py-1.5 text-sm leading-relaxed outline-none ${tokens.textClass}`}
+            style={{ scrollbarGutter: "stable" }}
           />
+          </div>
           <div className="flex items-center gap-2 px-1 pt-1">
             {/* Attach */}
             <button

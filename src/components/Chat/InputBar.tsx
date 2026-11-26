@@ -12,8 +12,8 @@ import { resolveMediaCapable } from "@/lib/media";
 import type { InputPart, PendingMode } from "@/lib/types";
 import { attachmentToParts, type PendingAttachment } from "@/lib/attachFiles";
 import { SlashMenu } from "./SlashMenu";
-import { PromptHighlight, hasTokens, skillParts, useSkillCommands } from "./PromptHighlight";
-import { commandsIn, replaceRange, slashAt } from "@/lib/promptTokens";
+import { PromptHighlight, insertAtCaret, skillParts, usePromptTokens } from "./PromptHighlight";
+import { commandsIn } from "@/lib/promptTokens";
 import {
   appendTranscript,
   AttachError,
@@ -93,17 +93,13 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
     taRef.current?.focus();
   }, [composerDraft]);
 
-  const [slashDismissed, setSlashDismissed] = useState(false);
+  const taRef = useRef<HTMLTextAreaElement>(null);
   // Commands are words anywhere in the prompt (0.20.1): the menu follows the
   // caret's `/word`, and the overlay draws commands and granted folders.
-  const [caret, setCaret] = useState(0);
-  const slashWord = slashDismissed ? null : slashAt(text, caret);
-  const slash = slashWord?.query ?? null;
-  const skillCommands = useSkillCommands();
   const { paths: grantedPaths } = useChatPaths(chatId);
   const grantedList = grantedPaths.map((p) => p.path);
-  const highlighted = hasTokens(text, skillCommands.names, grantedList);
-  const overlayRef = useRef<HTMLDivElement>(null);
+  const tokens = usePromptTokens(text, setText, taRef, grantedList);
+  const slash = tokens.slash;
   // A folder granted while this composer is open — dropped, picked, pasted —
   // goes into the prompt at the caret, so what was handed over is in the words.
   const grantsSince = useRef(Date.now());
@@ -117,11 +113,7 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
     fresh.forEach((p) => insertedPaths.current.add(p.path));
     setText((cur) => {
       const add = fresh.map((p) => p.path).filter((p) => !cur.includes(p));
-      if (add.length === 0) return cur;
-      const at = Math.min(taRef.current?.selectionStart ?? cur.length, cur.length);
-      const before = cur.slice(0, at);
-      const lead = before && !/\s$/.test(before) ? " " : "";
-      return `${before}${lead}${add.join(" ")} ${cur.slice(at)}`;
+      return add.length === 0 ? cur : insertAtCaret(cur, taRef.current, add.join(" "));
     });
   }, [grantedPaths]);
   const [sending, setSending] = useState(false);
@@ -136,7 +128,6 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
   const videoOverrides = useApp((s) => s.appSettings.videoOverrides);
   const planMode = !!chats.find((c) => c.id === chatId)?.planMode;
   const fileRef = useRef<HTMLInputElement>(null);
-  const taRef = useRef<HTMLTextAreaElement>(null);
   // Focus-the-composer shortcut (Ctrl/Cmd+K): the store bumps a nonce and the
   // mounted composer takes focus.
   const focusComposerNonce = useApp((s) => s.focusComposerNonce);
@@ -400,7 +391,7 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
       }
       // Each `/skill` in the prompt hands the model that skill's instructions,
       // unseen in the transcript, where the word itself stays (0.20.1).
-      parts.push(...(await skillParts(commandsIn(sourceText, skillCommands.names))));
+      parts.push(...(await skillParts(commandsIn(sourceText, tokens.names))));
 
       for (const att of pending) {
         parts.push(...attachmentToParts(att));
@@ -619,26 +610,16 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
           {slash !== null && (
             <SlashMenu
               query={slash}
-              onPick={(t) => {
-                if (!slashWord) return;
-                const next = replaceRange(text, slashWord.start, slashWord.end, t);
-                setText(next.text);
-                setCaret(next.caret);
-                setSlashDismissed(true);
-                requestAnimationFrame(() => {
-                  taRef.current?.focus();
-                  taRef.current?.setSelectionRange(next.caret, next.caret);
-                });
-              }}
-              onClose={() => setSlashDismissed(true)}
+              onPick={tokens.pick}
+              onClose={tokens.dismiss}
             />
           )}
           <div className="relative">
-          {highlighted && (
+          {tokens.highlighted && (
             <PromptHighlight
-              ref={overlayRef}
+              ref={tokens.overlayRef}
               text={text}
-              commands={skillCommands.names}
+              commands={tokens.names}
               paths={grantedList}
               className="px-1 py-1 text-sm leading-relaxed"
             />
@@ -647,18 +628,13 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
             value={text}
             onChange={(e) => {
               setText(e.target.value);
-              const c = e.target.selectionStart ?? e.target.value.length;
-              setCaret(c);
-              // Re-arm once the caret leaves a `/word`, so dismissing once does
-              // not disable the menu for the session.
-              if (slashAt(e.target.value, c) === null) setSlashDismissed(false);
+              tokens.changed(e.target.value, e.target.selectionStart ?? e.target.value.length);
             }}
-            onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
-            onScroll={(e) => {
-              if (overlayRef.current) overlayRef.current.scrollTop = e.currentTarget.scrollTop;
-            }}
+            {...tokens.textareaProps}
             onPaste={onPaste}
             onKeyDown={(e) => {
+              // The slash menu took this key (a pick), so it is not a send.
+              if (e.defaultPrevented) return;
               const trigger = sendKey === "ctrl_enter"
                 ? e.key === "Enter" && (e.ctrlKey || e.metaKey)
                 : e.key === "Enter" && !e.shiftKey;
@@ -674,7 +650,7 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
               disabled ? "Configure a zone for this chat first" : "Send a message…"
             }
             className={`relative block w-full resize-none overflow-y-auto bg-transparent px-1 py-1 text-sm leading-relaxed outline-none ${
-              highlighted ? "text-transparent caret-[var(--color-text)]" : ""
+              tokens.textClass
             }`}
             style={{ maxHeight: expanded ? "70vh" : "40vh", minHeight: expanded ? "40vh" : 24, scrollbarGutter: "stable" }}
             disabled={disabled}

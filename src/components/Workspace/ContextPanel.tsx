@@ -6,6 +6,7 @@ import { hitRate, useContextUsage, type ContextUsage } from "@/lib/useContextUsa
 import { ALL_TOOLS, type McpServer, type OverheadPart } from "@/lib/types";
 import { humanizeTool, mcpServerName, parseMcpName } from "@/lib/useToolName";
 import { CompactControls } from "./CompactControls";
+import { FirstRequestButton } from "@/components/Zones/FirstRequest";
 
 /**
  * The context readout as bars (0.17.9).
@@ -27,7 +28,12 @@ export function ContextPanel({ chatId }: { chatId: string }) {
   const servers = useApp((s) => s.mcpServers);
 
   if (u.empty) {
-    return <p className="text-[11px] text-[var(--color-text-muted)]">Nothing sent yet.</p>;
+    return (
+      <div className="flex flex-col items-start gap-1">
+        <p className="text-[11px] text-[var(--color-text-muted)]">Nothing sent yet.</p>
+        <FirstRequestButton chatId={chatId} />
+      </div>
+    );
   }
 
   const systemTokens = u.current?.systemTokens ?? Math.max(0, u.baseline - (u.current?.toolsTokens ?? 0));
@@ -104,6 +110,7 @@ export function ContextPanel({ chatId }: { chatId: string }) {
           sub="estimated"
         />
         <StackedBar segments={composition} total={u.chatTotal} />
+        <div className="mt-1 text-right"><FirstRequestButton chatId={chatId} /></div>
         <Legend items={composition} total={u.chatTotal} />
         {u.current && (
           <div className="mt-2 flex flex-col gap-0.5">

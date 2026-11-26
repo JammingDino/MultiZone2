@@ -17,6 +17,7 @@ import { resolveZoneRun } from "@/lib/baseZone";
 import { DEFAULT_ZONES } from "@/lib/defaultZones";
 import { EMPTY_APPROVALS, parseApprovals, serializeApprovals } from "@/lib/approvals";
 import { ApprovalsEditor } from "@/components/common/ApprovalsEditor";
+import { PromptSections } from "./FirstRequest";
 import { ErrorNote } from "@/components/common/ErrorNote";
 import { reportError } from "@/lib/reportError";
 
@@ -999,6 +1000,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
                 ))}
               </div>
             )}
+            <PromptSections tools={tools} toolConfig={toolConfig} setToolConfig={setToolConfig} draft={buildPayload()} />
             {readOnly && (
               <p className="text-[11px] text-[var(--color-text-muted)]">
                 Read-only: only tools that cannot change anything are offered, whatever is ticked below. MCP tools you tick still apply.

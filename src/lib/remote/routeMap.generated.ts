@@ -61,6 +61,7 @@ export const ROUTE_MAP: Record<string, RouteBinding> = {
   draw_project_icon: { method: "POST", path: "/api/projects/:id/draw-icon" },
   due_study_cards: { method: "GET", path: "/api/projects/:id/study/due" },
   fetch_models: { method: "GET", path: "/api/providers/:id/models" },
+  first_request: { method: "POST", path: "/api/first-request" },
   fix_diagram: { method: "POST", path: "/api/chats/:id/fix-diagram" },
   forget_paired_device: { method: "DELETE", path: "/api/devices/:id" },
   generate_title: { method: "POST", path: "/api/chats/:id/generate-title", unwrap: "title" },

@@ -1923,26 +1923,7 @@ async fn run_participant_turn(
     // tool when this chat opted in AND its project has a non-empty index. It's
     // independent of the zone's `tools_enabled`, so it's appended after every
     // (re)build of the toolset below rather than going through `build_tools_for_zone`.
-    let knowledge_available = {
-        let enabled: bool = sqlx::query_scalar("SELECT knowledge_enabled FROM chats WHERE id = ?1")
-            .bind(chat_id)
-            .fetch_optional(&ctx.db)
-            .await?
-            .unwrap_or(false);
-        if enabled {
-            let pid: Option<String> =
-                sqlx::query_scalar("SELECT project_id FROM chats WHERE id = ?1")
-                    .bind(chat_id)
-                    .fetch_optional(&ctx.db)
-                    .await?
-                    .flatten();
-            // No project → the global KB (default-directory index), if any.
-            let scope = pid.unwrap_or_else(|| crate::knowledge::GLOBAL_KB_ID.to_string());
-            crate::knowledge::has_index(&ctx.db, &scope).await
-        } else {
-            false
-        }
-    };
+    let knowledge_available = knowledge_available(&ctx.db, chat_id).await;
 
     // A sub-agent turn that a *leader* is driving suppresses `ask_user`: the
     // question would render in a chat nobody is watching, and the turn would
@@ -1976,21 +1957,16 @@ async fn run_participant_turn(
         None => crate::tools::ask_zone::offer(&ctx.db, chat_id, &zone.id).await,
         Some(_) => None,
     };
-    let mut tools = build_tools_for_zone(&ctx.db, &zone, &tool_ctx).await;
-    if knowledge_available {
-        tools.push(crate::tools::knowledge::definition());
-    }
-    tools.extend(ask_zone_tool.clone());
-    if rolling_limit > 0 {
-        tools.extend(crate::tools::rolling::definitions());
-    }
-    if suppress_ask_user {
-        strip_ask_user(&mut tools);
-    }
+    let extras = TurnExtras {
+        knowledge: knowledge_available,
+        ask_zone: ask_zone_tool,
+        rolling: rolling_limit > 0,
+        no_ask_user: suppress_ask_user,
+    };
     // Plan mode (0.12.0). Re-evaluated after every tool batch below, because the
     // model can move the chat in or out of it mid-turn.
-    crate::study::apply(&ctx.db, chat_id, &mut tools).await;
-    let mut planning = apply_plan_mode(&ctx.db, chat_id, &mut tools, persp.is_some()).await;
+    let (mut tools, mut planning) =
+        turn_toolset(&ctx.db, chat_id, &zone, &tool_ctx, &extras, persp.is_some()).await;
     // Per-zone MCP tool danger levels, refreshed on zone switch, consulted by the
     // approval gate alongside built-in `tool_safety_by_name`.
     let mut mcp_danger = {
@@ -2240,61 +2216,26 @@ async fn run_participant_turn(
             },
         );
 
-        // How this model is asked to think — or told not to — is its own
-        // business (0.17.9): `reasoning_effort` for OpenAI-style reasoning
-        // models and hosted gateways, a chat-template toggle for local Qwen and
-        // DeepSeek servers, nothing at all for Gemma (inline tags) or gpt-4o
-        // (no reasoning to switch on). See `llm::thinking::profile_with`.
-        let thinking = crate::llm::thinking::controls_with(
-            &zone.model,
-            &provider.base_url,
-            zone.thinking_enabled,
-            &zone.thinking_effort,
-            thinking_hint(&ctx.db, &zone.model).await,
-        );
-        let reasoning_effort = thinking.reasoning_effort;
-        let chat_template_kwargs = thinking.chat_template_kwargs;
-        let thinking_extra = thinking.extra;
-        let thinking_ask = thinking.ask;
-        let parse_inline_think = thinking.parse_inline;
-
-        let req = ChatRequest {
-            model: zone.model.clone(),
-            messages: api_messages.clone(),
-            temperature: zone.temperature,
-            max_tokens: zone.max_tokens,
-            top_p: zone.top_p,
-            // Tools are withheld on the final step so the model has no option
-            // but to answer. Every other step offers the full set — except a
-            // planning turn's last step, which keeps exactly the tools that end
-            // it properly (see `plan_endgame`).
-            tools: if tools.is_empty() {
-                None
-            } else if plan_endgame {
-                let filing: Vec<Tool> = tools
-                    .iter()
-                    .filter(|t| {
-                        matches!(t.function.name.as_str(), "exit_plan_mode" | "draft_plan_step")
-                    })
-                    .cloned()
-                    .collect();
-                if filing.is_empty() { None } else { Some(filing) }
-            } else if final_step {
-                None
-            } else {
-                Some(tools.clone())
-            },
-            tool_choice: None,
-            reasoning_effort,
-            chat_template_kwargs,
-            thinking_extra,
-            thinking_ask,
-            // Ask the provider for its own token counts. Exact where ours are
-            // estimated, and the only way to see prompt cache hits — which on a
-            // long agentic turn are most of what gets billed.
-            stream_options: Some(serde_json::json!({ "include_usage": true })),
-            stream: true,
+        // Tools are withheld on the final step so the model has no option
+        // but to answer. Every other step offers the full set — except a
+        // planning turn's last step, which keeps exactly the tools that end
+        // it properly (see `plan_endgame`).
+        let step_tools = if tools.is_empty() {
+            None
+        } else if plan_endgame {
+            let filing: Vec<Tool> = tools
+                .iter()
+                .filter(|t| matches!(t.function.name.as_str(), "exit_plan_mode" | "draft_plan_step"))
+                .cloned()
+                .collect();
+            if filing.is_empty() { None } else { Some(filing) }
+        } else if final_step {
+            None
+        } else {
+            Some(tools.clone())
         };
+        let (req, parse_inline_think) =
+            step_request(&ctx.db, &zone, &provider, api_messages.clone(), step_tools).await;
 
         // The last thing before the request goes out, deliberately: `req` is
         // fully assembled here, so measuring it counts the system prompt, the
@@ -2441,19 +2382,8 @@ async fn run_participant_turn(
                 zone = fz;
                 provider = fp;
                 tool_ctx.vision_capable = model_vision_capable(&ctx.db, &zone.model).await;
-                tools = build_tools_for_zone(&ctx.db, &zone, &tool_ctx).await;
-                if knowledge_available {
-                    tools.push(crate::tools::knowledge::definition());
-                }
-                tools.extend(ask_zone_tool.clone());
-                if rolling_limit > 0 {
-                    tools.extend(crate::tools::rolling::definitions());
-                }
-                if suppress_ask_user {
-                    strip_ask_user(&mut tools);
-                }
-                crate::study::apply(&ctx.db, chat_id, &mut tools).await;
-                planning = apply_plan_mode(&ctx.db, chat_id, &mut tools, persp.is_some()).await;
+                (tools, planning) =
+                    turn_toolset(&ctx.db, chat_id, &zone, &tool_ctx, &extras, persp.is_some()).await;
                 mcp_danger = {
                     let ids: Vec<String> =
                         serde_json::from_str(&zone.tools_enabled).unwrap_or_default();
@@ -3360,19 +3290,8 @@ async fn run_participant_turn(
         // on the next turn.
         let planning_now = crate::plans::in_plan_mode(&ctx.db, chat_id).await;
         if planning_now != planning {
-            tools = build_tools_for_zone(&ctx.db, &zone, &tool_ctx).await;
-            if knowledge_available {
-                tools.push(crate::tools::knowledge::definition());
-            }
-            tools.extend(ask_zone_tool.clone());
-            if rolling_limit > 0 {
-                tools.extend(crate::tools::rolling::definitions());
-            }
-            if suppress_ask_user {
-                strip_ask_user(&mut tools);
-            }
-            crate::study::apply(&ctx.db, chat_id, &mut tools).await;
-            planning = apply_plan_mode(&ctx.db, chat_id, &mut tools, persp.is_some()).await;
+            (tools, planning) =
+                turn_toolset(&ctx.db, chat_id, &zone, &tool_ctx, &extras, persp.is_some()).await;
         }
 
         // A tool may have switched the chat's primary zone (`change_zone`). If so,
@@ -3400,19 +3319,8 @@ async fn run_participant_turn(
                         provider = new_provider;
                         tool_ctx.vision_capable =
                             model_vision_capable(&ctx.db, &zone.model).await;
-                        tools = build_tools_for_zone(&ctx.db, &zone, &tool_ctx).await;
-                        if knowledge_available {
-                            tools.push(crate::tools::knowledge::definition());
-                        }
-                        tools.extend(ask_zone_tool.clone());
-                        if rolling_limit > 0 {
-                            tools.extend(crate::tools::rolling::definitions());
-                        }
-                        if suppress_ask_user {
-                            strip_ask_user(&mut tools);
-                        }
-                        crate::study::apply(&ctx.db, chat_id, &mut tools).await;
-                        planning = apply_plan_mode(&ctx.db, chat_id, &mut tools, persp.is_some()).await;
+                        (tools, planning) =
+                            turn_toolset(&ctx.db, chat_id, &zone, &tool_ctx, &extras, persp.is_some()).await;
                         mcp_danger = {
                             let ids: Vec<String> =
                                 serde_json::from_str(&zone.tools_enabled).unwrap_or_default();
@@ -3638,6 +3546,18 @@ pub struct ToolFunctionInfo {
 #[tauri::command]
 pub async fn list_tool_presets() -> AppResult<Vec<crate::tools::presets::ToolPreset>> {
     Ok(crate::tools::presets::presets())
+}
+
+/// The request a chat or zone would send next, built and never sent (0.21.0).
+/// See `context::first_request`.
+#[tauri::command]
+pub async fn first_request(
+    state: State<'_, AppState>,
+    chat_id: Option<String>,
+    zone_id: Option<String>,
+    draft: Option<crate::commands::zones::ZoneInput>,
+) -> AppResult<FirstRequest> {
+    context::first_request(&state.db, chat_id.as_deref(), zone_id.as_deref(), draft).await
 }
 
 #[tauri::command]

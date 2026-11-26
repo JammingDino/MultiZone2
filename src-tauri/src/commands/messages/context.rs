@@ -79,6 +79,93 @@ impl SnippetKind {
             Self::Trust => "Trust and refusals",
         }
     }
+
+    /// The name a switch uses for this section: its serde name (`env`,
+    /// `project_instructions`, …), so the API and the stored switches agree.
+    pub fn id(self) -> String {
+        serde_json::to_value(self)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_default()
+    }
+}
+
+/// The sections a zone, or the app default, may switch off (0.21.0).
+///
+/// Not here: the zone's own prompt (edit it instead), and plan mode and the
+/// approved plan, which are the chat's state rather than the zone's settings —
+/// switching those off would leave a chat in a mode nobody told the model about.
+pub const SWITCHABLE: &[SnippetKind] = &[
+    SnippetKind::Continuity,
+    SnippetKind::Trust,
+    SnippetKind::DefaultRules,
+    SnippetKind::Env,
+    SnippetKind::ProjectInstructions,
+    SnippetKind::Skills,
+    SnippetKind::Memory,
+    SnippetKind::PlanOffer,
+    SnippetKind::RepoMap,
+    SnippetKind::Knowledge,
+    SnippetKind::ProjectContext,
+    SnippetKind::TagContext,
+    SnippetKind::RollingContext,
+    SnippetKind::Study,
+    SnippetKind::Leader,
+    SnippetKind::Identity,
+];
+
+/// Not a prompt section but switched the same way: off sends each tool's
+/// description cut to its first sentence. The parameter schemas are untouched.
+pub const TOOL_DESCRIPTIONS: &str = "tool_descriptions";
+
+/// The sections switched off for this zone: the app default (`promptSections`
+/// in app settings) with the zone's own `prompt_sections` (in its tool config)
+/// laid over it. Both are `{id: bool}`; an id named in neither is on, so a zone
+/// nobody touched sends what it always sent.
+pub async fn sections_off(db: &SqlitePool, tool_config: &str) -> std::collections::HashSet<String> {
+    let app: Option<Value> =
+        sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key = 'app_settings'")
+            .fetch_optional(db)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+            .and_then(|v| v.get("promptSections").cloned());
+    let zone = serde_json::from_str::<Value>(tool_config)
+        .ok()
+        .and_then(|c| c.get("prompt_sections").cloned());
+    let mut off = std::collections::HashSet::new();
+    for layer in [app, zone].into_iter().flatten() {
+        for (id, on) in layer.as_object().into_iter().flatten() {
+            match on.as_bool() {
+                Some(true) => {
+                    off.remove(id);
+                }
+                Some(false) => {
+                    off.insert(id.clone());
+                }
+                None => {}
+            }
+        }
+    }
+    off.retain(|id| id == TOOL_DESCRIPTIONS || SWITCHABLE.iter().any(|k| k.id() == *id));
+    off
+}
+
+/// A description's first sentence — the short form `tool_descriptions` off
+/// sends. "e.g." and "i.e." do not end one.
+pub fn short_description(d: &str) -> String {
+    let d = d.trim();
+    let mut from = 0;
+    while let Some(i) = d[from..].find(". ") {
+        let end = from + i;
+        let before = &d[..end];
+        if !(before.ends_with("e.g") || before.ends_with("i.e")) {
+            return d[..=end].to_string();
+        }
+        from = end + 2;
+    }
+    d.to_string()
 }
 
 /// See `SnippetKind::Trust`. Two rules the corpus of open harnesses mostly
@@ -446,6 +533,14 @@ pub async fn build_system_snippets(
         snippets.push((SnippetKind::Memory, block));
     }
 
+    // Switched-off sections (0.21.0) are dropped after the build rather than
+    // skipped inside it, so the default — nothing off — is the same code path
+    // it always was.
+    let off = sections_off(db, &zone.tool_config).await;
+    if !off.is_empty() {
+        snippets.retain(|(k, _)| !off.contains(&k.id()));
+    }
+
     Ok(snippets)
 }
 
@@ -491,37 +586,35 @@ pub async fn turn_overhead(db: &SqlitePool, chat_id: &str) -> AppResult<TurnOver
     let snippets = build_system_snippets(db, chat_id, &zone, chat.as_ref(), false).await?;
 
     let tool_ctx = load_tool_context(db, Some(chat_id), Some(&zone.model)).await;
-    let mut tools = build_tools_for_zone(db, &zone, &tool_ctx).await;
-    // Project knowledge is offered independently of the zone's toolset, so it
-    // is appended after the build here exactly as it is in the turn.
-    if chat.as_ref().map_or(false, |c| c.knowledge_enabled) {
-        let scope = chat
-            .as_ref()
-            .and_then(|c| c.project_id.clone())
-            .unwrap_or_else(|| crate::knowledge::GLOBAL_KB_ID.to_string());
-        if crate::knowledge::has_index(db, &scope).await {
-            tools.push(crate::tools::knowledge::definition());
-        }
-    }
-    if rolling_active(db, chat_id).await {
-        tools.extend(crate::tools::rolling::definitions());
-    }
-    crate::study::apply(db, chat_id, &mut tools).await;
+    // The same toolset the turn builds — plan-mode and ask_zone tools included
+    // since 0.21.0, which the meter used to leave out.
+    let extras = turn_extras(db, chat_id, &zone).await;
+    let (tools, _) = turn_toolset(db, chat_id, &zone, &tool_ctx, &extras, false).await;
+    let tool_parts = tool_groups(&zone, &tool_ctx, &tools);
 
-    // Function name → the group it belongs to, over the zone's enabled ids.
-    // Anything not found there came from elsewhere: `mcp__<server>__<tool>`
-    // names its server, knowledge and plan-mode tools are appended by the turn.
+    Ok(TurnOverhead {
+        tools_json: serde_json::to_string(&tools).unwrap_or_default(),
+        tool_count: tools.len(),
+        tool_parts,
+        snippets,
+    })
+}
+
+/// `(group, function name, chars)` for each tool: the group is the zone's tool
+/// id that offered it; anything else came from elsewhere — `mcp__<server>__…`
+/// names its server, and knowledge, rolling, study, ask_zone and plan-mode
+/// tools are added by the turn.
+fn tool_groups(zone: &Zone, ctx: &ToolContext, tools: &[Tool]) -> Vec<(String, String, usize)> {
     let ids: Vec<String> = serde_json::from_str(&zone.tools_enabled).unwrap_or_default();
-    let mut group_of: std::collections::HashMap<String, String> =
-        std::collections::HashMap::new();
+    let mut group_of: HashMap<String, String> = HashMap::new();
     for id in &ids {
         if let Some(tid) = crate::tools::ToolId::from_str(id) {
-            for def in tid.definitions(&tool_ctx) {
+            for def in tid.definitions(ctx) {
                 group_of.insert(def.function.name, tid.as_str().to_string());
             }
         }
     }
-    let tool_parts = tools
+    tools
         .iter()
         .map(|t| {
             let name = &t.function.name;
@@ -533,19 +626,287 @@ pub async fn turn_overhead(db: &SqlitePool, chat_id: &str) -> AppResult<TurnOver
                         "search_local_files" => "knowledge".to_string(),
                         "mark_important" | "forget_important" => "rolling context".to_string(),
                         "make_flashcards" | "make_quiz" | "make_cheatsheet" | "study_progress" => "study mode".to_string(),
+                        "ask_zone" => "zones".to_string(),
                         _ => "plan mode".to_string(),
                     })
             });
             let chars = serde_json::to_string(t).map(|s| s.chars().count()).unwrap_or(0);
             (group, name.clone(), chars)
         })
-        .collect();
+        .collect()
+}
 
-    Ok(TurnOverhead {
-        tools_json: serde_json::to_string(&tools).unwrap_or_default(),
-        tool_count: tools.len(),
-        tool_parts,
-        snippets,
+/// What a chat adds to a zone's own tools.
+pub(super) struct TurnExtras {
+    pub knowledge: bool,
+    pub ask_zone: Option<Tool>,
+    pub rolling: bool,
+    /// A sub-agent turn its leader drives cannot ask the user anything.
+    pub no_ask_user: bool,
+}
+
+/// The extras a user's own message in this chat would get: the dry run's and
+/// the meter's view of a turn. The turn works its own out, since it knows who
+/// sent it and whether it is answering a consult.
+pub(super) async fn turn_extras(db: &SqlitePool, chat_id: &str, zone: &Zone) -> TurnExtras {
+    TurnExtras {
+        knowledge: knowledge_available(db, chat_id).await,
+        ask_zone: crate::tools::ask_zone::offer(db, chat_id, &zone.id).await,
+        rolling: rolling_active(db, chat_id).await,
+        no_ask_user: false,
+    }
+}
+
+/// Project knowledge is offered when the chat opted in and its scope (the
+/// project, else the global knowledge base) has a non-empty index.
+pub(super) async fn knowledge_available(db: &SqlitePool, chat_id: &str) -> bool {
+    let row: Option<(bool, Option<String>)> =
+        sqlx::query_as("SELECT knowledge_enabled, project_id FROM chats WHERE id = ?1")
+            .bind(chat_id)
+            .fetch_optional(db)
+            .await
+            .ok()
+            .flatten();
+    match row {
+        Some((true, pid)) => {
+            let scope = pid.unwrap_or_else(|| crate::knowledge::GLOBAL_KB_ID.to_string());
+            crate::knowledge::has_index(db, &scope).await
+        }
+        _ => false,
+    }
+}
+
+/// The tools one step offers before the final-step rules: the zone's own and
+/// what the chat adds. One function because the turn rebuilds this at the
+/// start, on a fallback, on a plan-mode change and on a zone switch, and the
+/// dry run (0.21.0) has to build exactly the same thing. Returns the tools and
+/// whether the chat is planning.
+pub(super) async fn turn_toolset(
+    db: &SqlitePool,
+    chat_id: &str,
+    zone: &Zone,
+    ctx: &ToolContext,
+    extras: &TurnExtras,
+    is_perspective: bool,
+) -> (Vec<Tool>, bool) {
+    let mut tools = build_tools_for_zone(db, zone, ctx).await;
+    if extras.knowledge {
+        tools.push(crate::tools::knowledge::definition());
+    }
+    tools.extend(extras.ask_zone.clone());
+    if extras.rolling {
+        tools.extend(crate::tools::rolling::definitions());
+    }
+    if extras.no_ask_user {
+        strip_ask_user(&mut tools);
+    }
+    crate::study::apply(db, chat_id, &mut tools).await;
+    let planning = apply_plan_mode(db, chat_id, &mut tools, is_perspective).await;
+    (tools, planning)
+}
+
+/// One step's request. Shared by the turn and the dry run so the body the
+/// viewer copies is the body that is sent. Also returns whether the stream is
+/// to be watched for inline `<think>` tags.
+pub(super) async fn step_request(
+    db: &SqlitePool,
+    zone: &Zone,
+    provider: &Provider,
+    messages: Vec<ChatMessage>,
+    tools: Option<Vec<Tool>>,
+) -> (ChatRequest, bool) {
+    // How this model is asked to think — or told not to — is its own
+    // business (0.17.9): `reasoning_effort` for OpenAI-style reasoning
+    // models and hosted gateways, a chat-template toggle for local Qwen and
+    // DeepSeek servers, nothing at all for Gemma (inline tags) or gpt-4o
+    // (no reasoning to switch on). See `llm::thinking::profile_with`.
+    let thinking = crate::llm::thinking::controls_with(
+        &zone.model,
+        &provider.base_url,
+        zone.thinking_enabled,
+        &zone.thinking_effort,
+        thinking_hint(db, &zone.model).await,
+    );
+    let req = ChatRequest {
+        model: zone.model.clone(),
+        messages,
+        temperature: zone.temperature,
+        max_tokens: zone.max_tokens,
+        top_p: zone.top_p,
+        tools,
+        tool_choice: None,
+        reasoning_effort: thinking.reasoning_effort,
+        chat_template_kwargs: thinking.chat_template_kwargs,
+        thinking_extra: thinking.extra,
+        thinking_ask: thinking.ask,
+        // Ask the provider for its own token counts. Exact where ours are
+        // estimated, and the only way to see prompt cache hits — which on a
+        // long agentic turn are most of what gets billed.
+        stream_options: Some(serde_json::json!({ "include_usage": true })),
+        stream: true,
+    };
+    (req, thinking.parse_inline)
+}
+
+/// One section of the system prompt, as the first-request viewer shows it.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptSection {
+    pub id: String,
+    pub title: &'static str,
+    pub tokens: i64,
+    pub text: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestTool {
+    pub name: String,
+    pub group: String,
+    pub tokens: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwitchInfo {
+    pub id: String,
+    pub label: &'static str,
+}
+
+/// The request a chat (or a zone, for a new chat) would send next — built,
+/// measured, never sent (0.21.0).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FirstRequest {
+    pub zone_name: String,
+    pub model: String,
+    pub provider_name: String,
+    /// Where on the provider it would go: `/chat/completions`, `/responses`,
+    /// or `cli` for a local CLI provider. The base URL is left out on purpose.
+    pub endpoint: String,
+    pub sections: Vec<PromptSection>,
+    pub tools: Vec<RequestTool>,
+    pub system_tokens: i64,
+    pub tools_tokens: i64,
+    pub history_tokens: i64,
+    pub total_tokens: i64,
+    pub message_count: usize,
+    /// The request body as JSON, exactly as it would go on the wire. Keys
+    /// travel in headers, so none can be in here.
+    pub body: String,
+    /// The sections switched off for this zone, and every id that can be.
+    pub off: Vec<String>,
+    pub switchable: Vec<SwitchInfo>,
+}
+
+fn zone_from_draft(d: crate::commands::zones::ZoneInput) -> Zone {
+    Zone {
+        id: d.id.unwrap_or_default(),
+        name: d.name,
+        provider_id: d.provider_id,
+        model: d.model,
+        system_prompt: d.system_prompt,
+        temperature: d.temperature,
+        max_tokens: d.max_tokens,
+        top_p: d.top_p,
+        tools_enabled: d.tools_enabled.unwrap_or_else(|| "[]".into()),
+        tool_config: d.tool_config.unwrap_or_else(|| "{}".into()),
+        thinking_enabled: d.thinking_enabled.unwrap_or(true),
+        thinking_effort: d.thinking_effort.unwrap_or_else(|| "medium".into()),
+        include_thinking_in_context: d.include_thinking_in_context.unwrap_or(false),
+        icon: d.icon,
+        accent_color: d.accent_color,
+        is_leader: d.is_leader.unwrap_or(false),
+        fallback_zone_id: d.fallback_zone_id,
+        approvals: d.approvals,
+        created_at: 0,
+        updated_at: 0,
+    }
+}
+
+/// The dry run behind the first-request viewer. `draft` is the zone editor's
+/// unsaved state; else `zone_id`; else the chat's own zone. Without a chat it
+/// is what a new chat's first message would carry, less the message.
+///
+/// Built from the turn's own functions (`build_message_history`,
+/// `turn_toolset`, `step_request`, the client's wire format) so it cannot
+/// describe a request the turn would not send. What it cannot know is left
+/// out: the user's next message and any nudge that message would trigger.
+pub async fn first_request(
+    db: &SqlitePool,
+    chat_id: Option<&str>,
+    zone_id: Option<&str>,
+    draft: Option<crate::commands::zones::ZoneInput>,
+) -> AppResult<FirstRequest> {
+    let chat_id = chat_id.unwrap_or("");
+    let (zone, provider) = match (draft, zone_id) {
+        (Some(d), _) => resolve_zone_model(db, zone_from_draft(d)).await?,
+        (None, Some(z)) => load_zone_and_provider(db, z).await?,
+        (None, None) if !chat_id.is_empty() => effective_zone_and_provider(db, chat_id).await?,
+        _ => return Err(AppError::Invalid("name a chat, a zone or a draft zone".into())),
+    };
+    let chat = sqlx::query_as::<_, crate::db::models::Chat>(&format!(
+        "SELECT {CHAT_COLS} FROM chats WHERE id = ?1"
+    ))
+    .bind(chat_id)
+    .fetch_optional(db)
+    .await?;
+
+    let tool_ctx = load_tool_context(db, Some(chat_id), Some(&zone.model)).await;
+    let extras = turn_extras(db, chat_id, &zone).await;
+    let (tools, _) = turn_toolset(db, chat_id, &zone, &tool_ctx, &extras, false).await;
+    let snippets = build_system_snippets(db, chat_id, &zone, chat.as_ref(), false).await?;
+    let messages = build_message_history(db, chat_id, &zone, None).await?;
+    let groups = tool_groups(&zone, &tool_ctx, &tools);
+    let (req, _) = step_request(
+        db,
+        &zone,
+        &provider,
+        messages,
+        (!tools.is_empty()).then(|| tools.clone()),
+    )
+    .await;
+
+    let cpt = crate::llm::tokens::chars_per_token(db, &zone.model).await;
+    let measure = crate::llm::tokens::measure_request(&req, cpt);
+    let tokens = |chars: usize| (chars as f64 / cpt).round() as i64;
+
+    // No key on this client: the preview never needs one, so none can leak.
+    let http = reqwest::Client::new();
+    let (endpoint, body) = LlmClient::new(&http, &provider.base_url, None).preview(&req);
+
+    let mut off: Vec<String> = sections_off(db, &zone.tool_config).await.into_iter().collect();
+    off.sort();
+    let mut switchable: Vec<SwitchInfo> =
+        SWITCHABLE.iter().map(|k| SwitchInfo { id: k.id(), label: k.label() }).collect();
+    switchable.push(SwitchInfo { id: TOOL_DESCRIPTIONS.into(), label: "Full tool descriptions" });
+
+    Ok(FirstRequest {
+        zone_name: zone.name.clone(),
+        model: zone.model.clone(),
+        provider_name: provider.name.clone(),
+        endpoint,
+        sections: snippets
+            .into_iter()
+            .map(|(k, text)| PromptSection {
+                id: k.id(),
+                title: k.label(),
+                tokens: tokens(text.chars().count()),
+                text,
+            })
+            .collect(),
+        tools: groups
+            .into_iter()
+            .map(|(group, name, chars)| RequestTool { name, group, tokens: tokens(chars) })
+            .collect(),
+        system_tokens: measure.system_tokens,
+        tools_tokens: measure.tools_tokens,
+        history_tokens: measure.history_tokens,
+        total_tokens: measure.input_tokens,
+        message_count: req.messages.len(),
+        body: serde_json::to_string_pretty(&body).unwrap_or_default(),
+        off,
+        switchable,
     })
 }
 
@@ -1337,6 +1698,13 @@ pub(super) async fn build_tools_for_zone(db: &SqlitePool, zone: &Zone, ctx: &Too
     if crate::tools::presets::is_read_only(&zone.tool_config) {
         tools.retain(|t| crate::tools::presets::read_only_allows(&t.function.name));
     }
+    // Short descriptions (0.21.0) before the overrides, so wording the user
+    // wrote for this zone is sent whole.
+    if sections_off(db, &zone.tool_config).await.contains(TOOL_DESCRIPTIONS) {
+        for tool in &mut tools {
+            tool.function.description = short_description(&tool.function.description);
+        }
+    }
 
     // Per-zone description overrides (0.9.3). A tool's description is the whole
     // of what the model knows about when and how to call it, and the wording
@@ -1363,4 +1731,240 @@ pub(super) async fn build_tools_for_zone(db: &SqlitePool, zone: &Zone, ctx: &Too
     }
 
     tools
+}
+
+#[cfg(test)]
+mod section_tests {
+    use super::*;
+
+    async fn pool() -> SqlitePool {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        sqlx::query("INSERT INTO chats (id, title, created_at, updated_at) VALUES ('c1','t',0,0)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO memories (id, scope, scope_id, content, created_at, updated_at)
+             VALUES ('m1', 'global', NULL, 'The user prefers metric units.', 0, 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    fn zone() -> Zone {
+        Zone {
+            id: "z1".into(),
+            name: "Z".into(),
+            provider_id: None,
+            model: "m".into(),
+            system_prompt: Some("You are a careful engineer.".into()),
+            temperature: None,
+            max_tokens: None,
+            top_p: None,
+            tools_enabled: r#"["read","plan","context_usage"]"#.into(),
+            tool_config: "{}".into(),
+            thinking_enabled: false,
+            thinking_effort: "medium".into(),
+            include_thinking_in_context: false,
+            icon: None,
+            accent_color: None,
+            is_leader: false,
+            fallback_zone_id: None,
+            approvals: None,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    async fn prompt(pool: &SqlitePool, zone: &Zone) -> String {
+        let joined = build_system_snippets(pool, "c1", zone, None, false)
+            .await
+            .unwrap()
+            .iter()
+            .map(|(_, s)| s.as_str())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        // The two lines that differ by machine and by day.
+        joined
+            .lines()
+            .map(|l| {
+                if l.starts_with("  Platform: ") {
+                    "  Platform: <os>".to_string()
+                } else if l.starts_with("  Today's date: ") {
+                    "  Today's date: <date>".to_string()
+                } else {
+                    l.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// The default prompt is what every existing zone already sends; making
+    /// it switchable must not move a byte of it (0.21.0).
+    #[tokio::test]
+    async fn the_default_prompt_is_unchanged() {
+        let pool = pool().await;
+        let got = prompt(&pool, &zone()).await;
+        let golden = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/commands/messages/testdata/default_prompt.txt");
+        if std::env::var("UPDATE_GOLDEN").is_ok() {
+            std::fs::create_dir_all(golden.parent().unwrap()).unwrap();
+            std::fs::write(&golden, &got).unwrap();
+        }
+        let want = std::fs::read_to_string(&golden).unwrap().replace("\r\n", "\n");
+        assert_eq!(got, want);
+    }
+
+    fn with_switches(mut z: Zone, switches: &str) -> Zone {
+        z.tool_config = format!(r#"{{"prompt_sections": {switches}}}"#);
+        z
+    }
+
+    async fn kinds(pool: &SqlitePool, zone: &Zone) -> Vec<SnippetKind> {
+        build_system_snippets(pool, "c1", zone, None, false)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|(k, _)| k)
+            .collect()
+    }
+
+    /// A section switched off is gone and nothing else moves; one switched
+    /// back on explicitly is the default again.
+    #[tokio::test]
+    async fn a_switched_off_section_is_left_out() {
+        let pool = pool().await;
+        let all = kinds(&pool, &zone()).await;
+        assert!(all.contains(&SnippetKind::Memory) && all.contains(&SnippetKind::Env));
+
+        let lean = kinds(&pool, &with_switches(zone(), r#"{"memory": false, "env": false}"#)).await;
+        let expected: Vec<SnippetKind> = all
+            .iter()
+            .copied()
+            .filter(|k| !matches!(k, SnippetKind::Memory | SnippetKind::Env))
+            .collect();
+        assert_eq!(lean, expected);
+
+        let explicit_on = with_switches(zone(), r#"{"memory": true, "env": true}"#);
+        assert_eq!(prompt(&pool, &explicit_on).await, prompt(&pool, &zone()).await);
+    }
+
+    /// The app default applies to every zone; a zone's own switch beats it.
+    /// The zone prompt cannot be switched off at all.
+    #[tokio::test]
+    async fn zone_switches_override_the_app_default() {
+        let pool = pool().await;
+        sqlx::query(
+            r#"INSERT INTO settings (key, value) VALUES ('app_settings',
+               '{"promptSections": {"memory": false, "trust": false}}')"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let k = kinds(&pool, &zone()).await;
+        assert!(!k.contains(&SnippetKind::Memory) && !k.contains(&SnippetKind::Trust));
+
+        let z = with_switches(zone(), r#"{"memory": true, "zone_prompt": false}"#);
+        let k = kinds(&pool, &z).await;
+        assert!(k.contains(&SnippetKind::Memory), "the zone switched it back on");
+        assert!(!k.contains(&SnippetKind::Trust), "still off by default");
+        assert!(k.contains(&SnippetKind::ZonePrompt), "not switchable");
+    }
+
+    /// The zone editor lists switches from its own table; a section added
+    /// here and not there could only be switched through the API.
+    #[test]
+    fn the_editor_lists_every_switch() {
+        let ts = include_str!("../../../../src/lib/promptSections.ts");
+        for id in SWITCHABLE.iter().map(|k| k.id()).chain([TOOL_DESCRIPTIONS.to_string()]) {
+            assert!(ts.contains(&format!("id: \"{id}\"")), "{id} is missing from promptSections.ts");
+        }
+    }
+
+    #[test]
+    fn short_descriptions_keep_the_first_sentence() {
+        assert_eq!(
+            short_description("Read a file, e.g. notes.md. Use before editing."),
+            "Read a file, e.g. notes.md."
+        );
+        assert_eq!(short_description("One sentence only"), "One sentence only");
+    }
+
+    /// The dry run builds the request the turn would send: the system message
+    /// is the joined sections, the tools are the zone's, the body is the wire
+    /// JSON — and no key is in it.
+    #[tokio::test]
+    async fn the_dry_run_matches_what_would_be_sent() {
+        let pool = pool().await;
+        sqlx::query(
+            "INSERT INTO providers (id, name, base_url, api_key, default_model, created_at)
+             VALUES ('p1', 'Local', 'http://127.0.0.1:1234/v1', 'sk-secret-key', 'm', 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let z = zone();
+        sqlx::query(
+            "INSERT INTO zones (id, name, provider_id, model, system_prompt, tools_enabled, tool_config, created_at, updated_at)
+             VALUES ('z1', 'Z', 'p1', 'm', ?1, ?2, '{}', 0, 0)",
+        )
+        .bind(&z.system_prompt)
+        .bind(&z.tools_enabled)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let fr = first_request(&pool, Some("c1"), Some("z1"), None).await.unwrap();
+        assert_eq!(fr.endpoint, "/chat/completions");
+        assert!(!fr.body.contains("sk-secret-key"));
+        let body: Value = serde_json::from_str(&fr.body).unwrap();
+        let system = body["messages"][0]["content"].as_str().unwrap();
+        let joined = fr.sections.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join("\n\n");
+        assert_eq!(system, joined);
+        let names: Vec<&str> = body["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["function"]["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, fr.tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>());
+        assert!(names.contains(&"enter_plan_mode"), "{names:?}");
+        assert!(fr.total_tokens >= fr.system_tokens + fr.tools_tokens);
+
+        // A draft with a section off and short descriptions is smaller, and
+        // says what it switched off.
+        let draft = crate::commands::zones::ZoneInput {
+            id: Some("z1".into()),
+            name: "Z".into(),
+            provider_id: Some("p1".into()),
+            model: "m".into(),
+            system_prompt: z.system_prompt.clone(),
+            temperature: None,
+            max_tokens: None,
+            top_p: None,
+            tools_enabled: Some(z.tools_enabled.clone()),
+            tool_config: Some(r#"{"prompt_sections": {"memory": false, "tool_descriptions": false}}"#.into()),
+            thinking_enabled: Some(false),
+            thinking_effort: None,
+            include_thinking_in_context: None,
+            icon: None,
+            accent_color: None,
+            is_leader: None,
+            fallback_zone_id: None,
+            approvals: None,
+        };
+        let lean = first_request(&pool, None, None, Some(draft)).await.unwrap();
+        assert_eq!(lean.off, vec!["memory".to_string(), "tool_descriptions".to_string()]);
+        assert!(lean.sections.iter().all(|s| s.id != "memory"));
+        assert!(lean.tools_tokens < fr.tools_tokens);
+        assert!(lean.total_tokens < fr.total_tokens);
+    }
 }

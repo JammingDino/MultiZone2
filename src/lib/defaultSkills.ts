@@ -82,6 +82,7 @@ Configuring one well:
 Grouped as Files, Web, Knowledge, Agents, System, and enabled per zone. Notes that matter:
 
 - **Every enabled tool costs context on every single turn**, used or not. A focused toolset makes a zone both cheaper and more accurate. Per-zone usage counters in the zone editor show which ones actually earn their place.
+- **The first request** (zone editor → Tools → First request, or Context → View the exact request) shows every system-prompt section and tool schema with its size, and copies the exact JSON body; nothing is sent. Each section can be switched off per zone (\`prompt_sections\` in the zone's tool config, e.g. \`{"memory": false}\`) or app-wide (the \`promptSections\` app setting). **Lean** keeps only what the zone's tools need, for small local models. \`POST /api/first-request {zoneId}\` returns the same.
 - Web research is keyless out of the box — \`smart_search\` queries several engines at once and merges them.
 - \`bash\` runs a command and waits for it to finish. For something that keeps running — a dev server, a REPL, a program that prompts part-way through — the **terminal** tools start it and stay attached, so you can read its output and type into it across several turns.
 - Tools are classified safe / moderate / dangerous, and **Settings → Approvals** decides which prompt first.

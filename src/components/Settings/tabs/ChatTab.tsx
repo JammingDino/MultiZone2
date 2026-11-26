@@ -5,6 +5,7 @@ import { ToggleRow } from "@/components/common/Toggle";
 import { resolveBaseProvider } from "@/lib/baseZone";
 import { ApprovalCategoryGrid, OptionCards, PrefixList, SettingSelect } from "../controls";
 import { useZoneModel } from "@/lib/useZoneModel";
+import { PromptSectionDefaults } from "@/components/Zones/FirstRequest";
 
 export function ChatTab() {
   const zoneModel = useZoneModel();
@@ -375,6 +376,7 @@ export function AgentsTab() {
           onChange={(v) => setAppSettings({ projectInstructions: v })}
         />
       </section>
+      <PromptSectionDefaults />
       <section>
         <h3 className="mb-1 text-sm font-medium">Plan mode</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">

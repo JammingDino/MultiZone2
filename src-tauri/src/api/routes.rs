@@ -52,7 +52,7 @@ const fn open(method: &'static str, path: &'static str, description: &'static st
 
 /// Bumped whenever a route is added, removed or changes shape, so a caller can
 /// tell "the app is older than my script" from "my script is wrong".
-pub const ROUTE_SET_VERSION: u32 = 15;
+pub const ROUTE_SET_VERSION: u32 = 16;
 
 pub const ROUTES: &[RouteDef] = &[
     // Discovery — deliberately unauthenticated. A caller debugging a broken
@@ -242,6 +242,7 @@ pub const ROUTES: &[RouteDef] = &[
     r("POST", "/api/transcribe", "Transcribe uploaded audio through the configured speech provider ({fileName, audioB64, withMetadata?, language?})"),
     r("GET", "/api/tools", "Every callable tool function, with its safety level"),
     r("GET", "/api/tools/presets", "The tool presets a zone or a one-off sub-agent can take (built-in tools only)"),
+    r("POST", "/api/first-request", "Dry run, never sent: the request a chat or zone would send next ({chatId?, zoneId?, draft?}) — each system-prompt section with its id and tokens, each tool with its size, the totals, and the exact JSON body. The section ids in `switchable` are what a zone's tool_config `prompt_sections` and the app setting `promptSections` (PATCH /api/settings/app_settings) switch off: {\"memory\": false}; `tool_descriptions: false` sends one-sentence tool descriptions"),
     r("GET", "/api/layout", "What is open in the window's main column: panes, tabs and floating windows, and what a tab id names"),
     r("PUT", "/api/layout", "Replace the main column's layout ({layout}, the shape GET returns)"),
     r("POST", "/api/layout/show", "Open a tab, a pane beside, or a floating window, or close one ({tab, show: tab|beside|window|close})"),
@@ -419,6 +420,7 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("messages::update_message", Route("PATCH /api/chats/:id/messages/:messageId")),
     ("messages::list_tool_functions", Route("GET /api/tools")),
     ("messages::list_tool_presets", Route("GET /api/tools/presets")),
+    ("messages::first_request", Route("POST /api/first-request")),
     ("layout::get_layout", Route("GET /api/layout")),
     ("layout::set_layout", Route("PUT /api/layout")),
     ("layout::show_tab", Route("POST /api/layout/show")),
@@ -1896,6 +1898,22 @@ pub async fn list_tools(State(st): State<ApiState>) -> ApiResult<Response> {
 
 pub async fn list_tool_presets() -> ApiResult<Response> {
     Ok(Json(commands::messages::list_tool_presets().await?).into_response())
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FirstRequestBody {
+    chat_id: Option<String>,
+    zone_id: Option<String>,
+    draft: Option<commands::zones::ZoneInput>,
+}
+
+pub async fn first_request(
+    State(st): State<ApiState>,
+    Json(b): Json<FirstRequestBody>,
+) -> ApiResult<Response> {
+    let out = commands::messages::first_request(app_state(&st), b.chat_id, b.zone_id, b.draft).await?;
+    Ok(Json(out).into_response())
 }
 
 pub async fn get_layout() -> ApiResult<Response> {

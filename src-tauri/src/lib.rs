@@ -436,6 +436,7 @@ pub fn run() {
             commands::files::reveal_path,
             commands::messages::list_tool_functions,
             commands::messages::list_tool_presets,
+            commands::messages::first_request,
             commands::layout::report_layout,
             commands::layout::get_layout,
             commands::layout::set_layout,

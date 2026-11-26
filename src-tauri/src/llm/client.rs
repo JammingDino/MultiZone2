@@ -361,23 +361,7 @@ impl<'a> LlmClient<'a> {
         req: &ChatRequest,
     ) -> Result<reqwest::Response, (Option<reqwest::StatusCode>, Option<Duration>, AppError)> {
         let key = (self.base_url.clone(), req.model.clone());
-        let mut req = req.clone();
-        // The Responses body has no `stream_options`; usage rides on the
-        // final event unasked. Dropping the field keeps the probe below from
-        // blaming it for a rejection it could not have caused.
-        if self.dialect(&req.model) == Dialect::Responses
-            || no_stream_options().lock().map(|s| s.contains(&self.base_url)).unwrap_or(false)
-        {
-            req.stream_options = None;
-        }
-        // Only a guess is corrected from memory. A shape the user picked is
-        // sent as picked every time — they may have picked it *because* the
-        // guesses all failed.
-        if req.thinking_ask.is_some() {
-            if let Some(learned) = thinking_learned().lock().ok().and_then(|m| m.get(&key).copied()) {
-                set_thinking(&mut req, learned);
-            }
-        }
+        let mut req = self.prepared(req);
 
         loop {
             let has_usage = req.stream_options.is_some();
@@ -428,6 +412,42 @@ impl<'a> LlmClient<'a> {
                 }
             }
         }
+    }
+
+    /// The request as this provider is first sent it: what it is known to
+    /// refuse taken out, before any probing.
+    fn prepared(&self, req: &ChatRequest) -> ChatRequest {
+        let key = (self.base_url.clone(), req.model.clone());
+        let mut req = req.clone();
+        // The Responses body has no `stream_options`; usage rides on the
+        // final event unasked. Dropping the field keeps the probe in
+        // `chat_stream_once` from blaming it for a rejection it could not
+        // have caused.
+        if self.dialect(&req.model) == Dialect::Responses
+            || no_stream_options().lock().map(|s| s.contains(&self.base_url)).unwrap_or(false)
+        {
+            req.stream_options = None;
+        }
+        // Only a guess is corrected from memory. A shape the user picked is
+        // sent as picked every time — they may have picked it *because* the
+        // guesses all failed.
+        if req.thinking_ask.is_some() {
+            if let Some(learned) = thinking_learned().lock().ok().and_then(|m| m.get(&key).copied()) {
+                set_thinking(&mut req, learned);
+            }
+        }
+        req
+    }
+
+    /// What `chat_stream` would send, without sending it (0.21.0): the
+    /// endpoint path and the body. A CLI provider has no HTTP body; it is
+    /// shown the request as built.
+    pub fn preview(&self, req: &ChatRequest) -> (String, serde_json::Value) {
+        if self.cli().is_some() {
+            return ("cli".into(), serde_json::to_value(req).unwrap_or_default());
+        }
+        let (path, body) = self.wire(&self.prepared(req));
+        (path.into(), body)
     }
 
     /// The response status and any `Retry-After`, alongside the error, so the

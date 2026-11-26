@@ -316,6 +316,9 @@ export const deleteTag = (id: string) => invoke<void>("delete_tag", { id });
  */
 export const listToolFunctions = () => invoke<ToolFunctionInfo[]>("list_tool_functions");
 export const listToolPresets = () => invoke<ToolPreset[]>("list_tool_presets");
+/** The request a chat or zone would send next, built and never sent (0.21.0). */
+export const firstRequest = (args: { chatId?: string | null; zoneId?: string | null; draft?: unknown }) =>
+  invoke<import("@/lib/promptSections").FirstRequest>("first_request", args);
 export const scanClaudeCode = () => invoke<ClaudeCodeSetup>("scan_claude_code");
 
 /** Per-zone tool call counters (0.9.3). Omit `zoneId` for every zone. */

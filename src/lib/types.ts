@@ -1350,6 +1350,12 @@ export interface AppSettings {
    */
   planOfferFull: boolean;
   /**
+   * App-wide prompt-section switches (0.21.0), `{sectionId: false}` to leave a
+   * section out of every zone's system prompt. A zone's own `prompt_sections`
+   * in its tool config wins. Empty = everything on, as before.
+   */
+  promptSections: Record<string, boolean>;
+  /**
    * How the model may enter plan mode by itself (`plans::PlanEntry`). The user
    * always can, with `/plan` or the Plan panel's switch.
    * "auto"   — like any other tool
@@ -1573,6 +1579,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   reviewQueue: false,
   projectInstructions: true,
   planOfferFull: true,
+  promptSections: {},
   planEntry: "ask",
   repoMapTokens: 1000,
   checkpointMaxMb: 512,

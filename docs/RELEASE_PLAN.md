@@ -417,11 +417,15 @@ Adding a provider in Claude Code is one step and then you work. Here it was the 
 ### 0.20.1 — Commands anywhere in a prompt
 
 Claude Code runs a slash command only as the whole message. Here a command is a word in the prompt: `/review the parser, then /commit` is one message.
-- [ ] `/` opens the menu anywhere a word starts, not only in the first column — skills, skill packs, saved runs and MCP prompts in one list, with autocomplete
-- [ ] A chosen command has a look of its own in the composer — drawn by an overlay behind the textarea, so the composer stays a textarea (dictation, paste, undo unchanged)
-- [ ] On send, the commands run first and the prose goes with them: a skill is loaded for that turn, an MCP prompt or saved run expands in place
-- [ ] A folder handed to the chat shows in the prompt as a glowing inline path, as well as on the Access strip
-- [ ] The sent message shows its commands and folders the same way in the transcript
+- [x] `/` opens the menu anywhere a word starts (`slashAt`), not only in the first column — skills and skill packs first, then MCP prompts and resources, filtered as you type. A `/word` with a second slash is a path, not a command
+- [ ] Saved runs in the same menu (they are in the palette today)
+- [x] A chosen command has a look of its own in the composer — `PromptHighlight`, an overlay behind the textarea in the same font and box that adds colour, background and glow only, so no glyph moves; the textarea's own text goes transparent only while there is a token to draw
+- [x] On send, each `/skill` hands the model its `load_skill` result as a hidden part (`invoke_skill`); the word stays in the transcript. MCP prompts and resources still expand when picked, at the caret, so what they add is visible before sending
+- [x] A folder granted while the composer is open — dropped, picked, pasted — is inserted at the caret and glows amber there, as well as on the Access strip
+- [x] The sent message draws its `/commands` and path-shaped words the same way
+- [ ] The Home screen's composer — the first message of a new chat has neither the menu anywhere nor the overlay yet
+- [ ] A message queued behind a running turn goes as text only, so a `/skill` in it is a plain word
+- [ ] Seen in the app: the overlay lined up with the caret through wrapping, scrolling and a 22px interface size; `/a then /b` loading both; a folder drop landing in the prompt
 
 ### 0.20.2 — The first request is yours (soon)
 

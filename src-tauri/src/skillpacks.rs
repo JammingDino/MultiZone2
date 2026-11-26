@@ -153,8 +153,12 @@ pub async fn roots(db: &SqlitePool) -> Vec<PathBuf> {
     out
 }
 
-/// The harness folders that exist under the user's home directory.
+/// The harness folders that exist under the user's home directory. None under
+/// test, so a test's catalog is only what the test wrote, not this machine's.
 fn home_harness_dirs() -> Vec<PathBuf> {
+    if cfg!(test) {
+        return Vec::new();
+    }
     let Some(home) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")) else {
         return Vec::new();
     };

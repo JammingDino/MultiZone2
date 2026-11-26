@@ -19,6 +19,9 @@ import { getZoneIcon } from "@/lib/zoneIcons";
 import * as api from "@/lib/tauri";
 import { useZoneModel } from "@/lib/useZoneModel";
 import { TABS } from "@/components/Workspace/WorkspacePanel";
+import { openSettingAt } from "@/components/Settings/SettingsSearch";
+import { SETTINGS_INDEX } from "@/lib/settingsIndex.generated";
+import { fuzzyMatch, scoreSetting } from "@/lib/settingsSearch";
 
 const NAMES: Record<string, string> = { chat: "This chat", terminals: "Terminals", context: "Context" };
 const WORKSPACE_TABS = TABS.map((t) => ({ ...t, name: NAMES[t.id] ?? t.label }));
@@ -45,40 +48,13 @@ type Item = {
   group: string;
   icon: React.ReactNode;
   run: () => void;
+  /** Its own matcher, in place of the label and detail. */
+  score?: (query: string) => number | null;
 };
 
-/**
- * Subsequence match, the standard palette contract: the query's characters must
- * appear in order but not adjacently, so "nwc" finds "New chat" and "zonlib"
- * finds "Zone library".
- *
- * Returns a score (lower is better) or null for no match. Consecutive runs and
- * matches at a word boundary score better, which is what makes a short query
- * put the obvious answer first instead of whichever item happened to be built
- * earliest.
- */
+/** The palette's match score (lower is better), or null; shared with Settings search. */
 export function fuzzyScore(query: string, text: string): number | null {
-  if (!query) return 0;
-  const q = query.toLowerCase();
-  const t = text.toLowerCase();
-  let score = 0;
-  let ti = 0;
-  let prevMatch = -2;
-  for (let qi = 0; qi < q.length; qi++) {
-    const ch = q[qi];
-    const found = t.indexOf(ch, ti);
-    if (found === -1) return null;
-    // Distance from the previous match is the gap we skipped over.
-    score += found - prevMatch - 1;
-    // A match at the start of a word is worth more than one mid-word.
-    const atBoundary = found === 0 || /[\s\-_/:]/.test(t[found - 1] ?? "");
-    if (atBoundary) score -= 2;
-    prevMatch = found;
-    ti = found + 1;
-  }
-  // Prefer shorter targets when the match is otherwise equal, so "chat" ranks
-  // "New chat" above "Show / hide the sidebar in a chat".
-  return score + t.length * 0.01;
+  return fuzzyMatch(query, text)?.score ?? null;
 }
 
 export function CommandPalette() {
@@ -216,6 +192,19 @@ export function CommandPalette() {
       });
     }
 
+    // Every section of every Settings tab, opened scrolled to and highlighted.
+    for (const e of SETTINGS_INDEX) {
+      out.push({
+        id: `setting:${e.tab}:${e.heading}`,
+        label: `Settings › ${e.tabLabel} › ${e.heading}`,
+        group: "Settings",
+        icon: <SettingsIcon size={14} />,
+        run: go(() => openSettingAt(e)),
+        // By its section's words and options too, not only the name.
+        score: (q) => scoreSetting(e, q),
+      });
+    }
+
     return out;
   }, [open, chats, zones, projects, skills, savedRuns, activeChatId, close]);
 
@@ -224,6 +213,10 @@ export function CommandPalette() {
     if (!q) return items.slice(0, 60);
     return items
       .map((it) => {
+        if (it.score) {
+          const s = it.score(q);
+          return s === null ? null : { it, score: s };
+        }
         // Score the label and the detail separately and keep the better of the
         // two, so a zone found by its model name still ranks on that match
         // rather than on a poor read of its title.

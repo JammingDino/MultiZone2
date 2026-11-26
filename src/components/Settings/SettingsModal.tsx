@@ -19,6 +19,7 @@ import { SkillsTab } from "./tabs/SkillsTab";
 import { SpeechTab } from "./tabs/SpeechTab";
 import { VoiceTab } from "./tabs/VoiceTab";
 import { ZoneLibrary } from "@/components/Zones/ZoneLibrary";
+import { useSettingsSearch } from "./SettingsSearch";
 
 type Tab = "providers" | "zones" | "appearance" | "chat" | "notifications" | "agents" | "approvals" | "schedules" | "voice" | "speech" | "skills" | "mcp" | "knowledge" | "memory" | "remote" | "api" | "data";
 
@@ -64,7 +65,13 @@ export function SettingsModal() {
   // In the store, so "edit this zone" from anywhere can land on Zones.
   const stored = useApp((s) => s.settingsTab);
   const tab: Tab = isTab(stored) ? stored : "providers";
-  const setTab = useApp((s) => s.setSettingsTab);
+  const setStoredTab = useApp((s) => s.setSettingsTab);
+  const search = useSettingsSearch();
+  // Picking a tab while results are up means "show me that tab".
+  const setTab = (t: Tab) => {
+    search.clear();
+    setStoredTab(t);
+  };
   const zonesNonce = useApp((s) => s.zoneLibraryNonce);
 
   // The one rail, with the Zones page's own items nested under "Zones" while
@@ -105,7 +112,7 @@ export function SettingsModal() {
   );
 
   return (
-    <Modal onClose={closeSettings} header={<ModalTitle>Settings</ModalTitle>}>
+    <Modal onClose={closeSettings} header={<><ModalTitle>Settings</ModalTitle>{search.field}</>}>
       <UnsavableWarning />
       <style>{`.input { width: 100%; border: 1px solid var(--color-border); border-radius: 4px; padding: 8px 12px; background: var(--color-panel); font-size: 13px; outline: none; } .input:focus { border-color: var(--color-accent); }`}</style>
         {/* A left rail of tabs is 176px the phone does not have (0.17.3). On a
@@ -114,7 +121,12 @@ export function SettingsModal() {
             has to stay reachable from every panel, and a strip keeps it visible
             without a second navigation concept to learn. */}
         <div className="flex flex-1 overflow-hidden narrow:flex-col">
-          {tab === "zones" ? (
+          {search.results ? (
+            <>
+              {rail()}
+              {search.results}
+            </>
+          ) : tab === "zones" ? (
             // The Zones page draws the rail itself, so its list can sit under
             // "Zones" in it; keyed so each "open zones" request starts fresh.
             <ErrorBoundary label="Zones settings" resetKey={zonesNonce}>
@@ -126,7 +138,7 @@ export function SettingsModal() {
           {/* `items-start`: a flex row stretches its child to the scroller's
               own height, which put the page's bottom padding at the bottom
               of the view instead of after the last section. */}
-          <div className="flex flex-1 items-start overflow-y-auto p-5">
+          <div data-settings-content={tab} className="flex flex-1 items-start overflow-y-auto p-5">
             {/* Per tab, and remounted when the tab changes: one screen that
                 throws is one screen, not the window. The bottom padding keeps
                 the last section off the panel's edge. */}

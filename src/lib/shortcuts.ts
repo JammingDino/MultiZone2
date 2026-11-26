@@ -113,6 +113,12 @@ export const CONTEXTUAL_GROUPS: ShortcutGroup[] = [
     ],
   },
   {
+    title: "Settings",
+    items: [
+      { keys: [MOD, "F"], description: "Search every settings tab (also / outside a field); Esc clears" },
+    ],
+  },
+  {
     title: "Lists & fields",
     items: [
       { keys: ["Enter"], description: "Confirm a rename or inline text field" },

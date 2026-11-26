@@ -1644,3 +1644,20 @@ html.mz-editorial .mz-queue-chip {
 .mz-step[data-bad] .nm { color: var(--mz-bad); }
 .mz-step .mz-run-detail { padding: 7px 10px 8px; border-top: 1px solid var(--color-border); }
 /* ── end: your messages ── */
+
+/* ── settings search: the section a result opens on (SettingsSearch.tsx) ── */
+/* Room above it for the highlight, which would otherwise sit under the edge. */
+[data-settings-target] { scroll-margin-top: 12px; }
+[data-settings-target]:focus { outline: none; }
+.mz-settings-flash {
+  border-radius: 8px;
+  animation: mz-settings-flash 1.6s ease-out;
+}
+@keyframes mz-settings-flash {
+  0%, 35% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-accent) 22%, transparent); background: color-mix(in srgb, var(--color-accent) 7%, transparent); }
+  100% { box-shadow: 0 0 0 6px transparent; background: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mz-settings-flash { animation: none; box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-accent) 22%, transparent); }
+}
+/* ── end: settings search ── */

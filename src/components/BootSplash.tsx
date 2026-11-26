@@ -5,6 +5,9 @@ import { useEffect, useState } from "react";
 const HOLD_MS = 620;
 const FADE_MS = 260;
 
+/** The "M" from the window icon. */
+const MARK = "M22 78 L22 30 L50 58 L78 30 L78 78";
+
 /**
  * Once per launch, not once per mount. `<App>` mounts twice under StrictMode in
  * development, and a splash that replayed on the second mount would be a
@@ -22,10 +25,13 @@ let shown = false;
  * moment of every launch was visibly the app assembling itself.
  *
  * So it is covered by the app's own mark being drawn — the "M" from the window
- * icon, in the user's accent — on the background colour the window is already
- * using, which means the splash leaving reveals a finished window rather than
- * cutting to a different one. It dismisses itself, and any click, tap or keypress
- * dismisses it immediately: nobody should ever be made to watch this twice.
+ * icon, in the user's accent, with a glow, a sheen and (with glass on) a glass
+ * tile — over the window's own backdrop. The splash paints no background: while
+ * it is up the rest of the app is hidden (styles.css, "Boot splash"), so what
+ * shows behind the mark *is* the backdrop the app sits on, gradient, drift and
+ * see-through window included, and leaving can only reveal that same background.
+ * It dismisses itself, and any click, tap or keypress dismisses it immediately:
+ * nobody should ever be made to watch this twice.
  */
 export function BootSplash() {
   const [state, setState] = useState<"in" | "out" | "gone">(() => (shown ? "gone" : "in"));
@@ -61,30 +67,20 @@ export function BootSplash() {
 
   return (
     <div
-      className={`fixed inset-0 z-[100] flex items-center justify-center ${
-        state === "out" ? "mz-splash-out" : ""
-      }`}
-      style={{ background: "var(--color-bg)" }}
+      className="mz-splash fixed inset-0 z-[100] flex items-center justify-center"
+      data-state={state}
       aria-hidden
     >
-      <div className="flex flex-col items-center gap-4">
-        <svg
-          viewBox="0 0 100 100"
-          className="mz-splash-mark h-20 w-20"
-          /* The dash length the keyframes count down from. Measured off the path
-             below (four legs of ~48 and ~40 units) and rounded up, so a small
-             error only ever means the stroke starts a hair further along. */
-          style={{ ["--mz-splash-len" as string]: "190" }}
-        >
-          <path
-            d="M22 78 L22 30 L50 58 L78 30 L78 78"
-            fill="none"
-            stroke="var(--color-accent)"
-            strokeWidth="11"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
+      <div className="mz-splash-halo" />
+      <div className="relative flex flex-col items-center gap-4">
+        <div className="mz-splash-tile">
+          {/* pathLength=100 so the stylesheet's dash lengths are percentages of
+              the stroke rather than a length measured off this path. */}
+          <svg viewBox="0 0 100 100" className="mz-splash-mark h-20 w-20">
+            <path d={MARK} pathLength={100} strokeWidth="11" />
+            <path d={MARK} pathLength={100} strokeWidth="5" className="mz-splash-sheen" />
+          </svg>
+        </div>
         <div
           className="mz-fade-in mz-delay-120 text-xs font-semibold tracking-[0.2em]"
           style={{ color: "var(--color-text-muted)" }}

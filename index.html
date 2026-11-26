@@ -15,10 +15,19 @@
     <title>MultiZone</title>
     <!-- The window is created transparent (for the opt-in see-through window),
          so until the stylesheet arrives something has to paint it solid — or
-         every launch would open as a see-through frame. -->
+         every launch would open as a see-through frame. The backdrop gradient
+         too (cached with the palette, below), so the boot splash, which is drawn
+         on the backdrop, never starts on a plain colour; it lies under the
+         stylesheet's own backdrop layer afterwards. It mirrors that layer
+         (body::before in styles.css): the same --mz-glow, and with the drift on,
+         the same 130% size, so nothing moves when the real one takes over. -->
     <style>
-      html:not(.see-through) { background: var(--color-bg, #0b0d10); }
-      html.light:not(.see-through) { background: var(--color-bg, #fafafa); }
+      html:not(.see-through) { background-color: var(--color-bg, #0b0d10); }
+      html.light:not(.see-through) { background-color: var(--color-bg, #fafafa); }
+      :root { --mz-glow: 60%; }
+      html.light { --mz-glow: 55%; }
+      html:not(.see-through) { background-image: var(--mz-backdrop, none); background-attachment: fixed; }
+      html.backdrop-motion { background-size: 130% 130%; background-position: center; }
     </style>
     <script>
       /*

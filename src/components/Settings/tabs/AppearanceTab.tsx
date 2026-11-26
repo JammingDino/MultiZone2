@@ -1,8 +1,12 @@
-import { useEffect, useRef, useState } from "react";
-import { X, ChevronDown, ChevronRight } from "lucide-react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { X, ChevronDown, ChevronRight, Check } from "lucide-react";
 import { useApp } from "@/store/app";
 import type { BackgroundEffect, GlassStyle, ThemeColorKey } from "@/store/app";
 import { MAX_CUSTOM_CSS, THEME_COLOR_KEYS } from "@/store/app";
+import {
+  BACKDROPS, BASE_PALETTE, CUSTOM_GRADIENT, THEME_PRESETS, activePreset, backdropImage, presetPalette, presetPrefs,
+  type BackdropId, type ThemePreset, type WindowBlur,
+} from "@/lib/themes";
 import { HexColorField } from "@/components/common/ColorPicker";
 import { ToggleRow } from "@/components/common/Toggle";
 import { formatCount } from "@/lib/format";
@@ -33,16 +37,6 @@ function usePresetFontPreviews() {
   }, []);
 }
 
-/**
- * The palette each mode falls back to — a mirror of the `:root` / `html.light`
- * blocks in styles.css. Needed here because a colour the user hasn't overridden
- * still has to show its real value in the picker.
- */
-const BASE_PALETTE: Record<"dark" | "light", Record<ThemeColorKey, string>> = {
-  dark:  { bg: "#0b0d10", panel: "#14171c", panelHover: "#242a33", border: "#2d333d", text: "#e4e6eb", textMuted: "#8b929e" },
-  light: { bg: "#fafafa", panel: "#ffffff", panelHover: "#e9edf2", border: "#d8dde4", text: "#1f2329", textMuted: "#5b6573" },
-};
-
 const COLOR_LABELS: Record<ThemeColorKey, string> = {
   bg: "Background",
   panel: "Panels",
@@ -71,9 +65,15 @@ const BACKGROUND_EFFECTS: [BackgroundEffect, string][] = [
 ];
 
 const GLASS_STYLES: [GlassStyle, string, string][] = [
-  ["frosted", "Frosted", "Blurred and desaturated — the classic frosted pane"],
-  ["clear", "Clear", "No blur, so the background stays sharp through the glass"],
-  ["tinted", "Tinted", "Frosted, with your accent colour bled into the glass"],
+  ["frosted", "Frosted", "Blurs what is behind the panes"],
+  ["clear", "Clear", "No blur — the background stays sharp"],
+  ["tinted", "Tinted", "Frosted, with a touch of your accent colour"],
+];
+
+const WINDOW_BLURS: [WindowBlur, string][] = [
+  ["blur", "Blurred"],
+  ["mica", "Tinted"],
+  ["none", "Clear"],
 ];
 
 /** Effects whose "Density" slider means something. */
@@ -82,6 +82,11 @@ const DENSITY_EFFECTS: BackgroundEffect[] = [
   "matrix", "topography", "puzzle", "mountains", "fish",
 ];
 
+/**
+ * Appearance (0.20): a theme to start from, what sits behind the panes, a few
+ * switches, and the palette and custom CSS folded away under Advanced — the
+ * first screen is for picking a look, not for building one.
+ */
 export function AppearanceTab() {
   const theme = useApp((s) => s.theme);
   const setTheme = useApp((s) => s.setTheme);
@@ -101,6 +106,523 @@ export function AppearanceTab() {
     setAppSettings({ fontFamily: f });
   }
 
+  const active = activePreset(theme);
+  const glassStrength = theme.glassStrength ?? 0.5;
+  const windowOpacity = theme.windowOpacity ?? 0.85;
+  const nothingBehind = (theme.backdrop ?? "solid") === "solid" && theme.backgroundEffect === "none";
+
+  return (
+    <div className="flex flex-col gap-6">
+      <section>
+        <div className="mb-2 flex items-baseline justify-between gap-3">
+          <h3 className="text-sm font-medium">Theme</h3>
+          {!active && (
+            <span className="text-xs text-[var(--color-text-muted)]">Custom — pick one to start over</span>
+          )}
+        </div>
+        <div className="grid grid-cols-3 narrow:grid-cols-2 gap-3">
+          {THEME_PRESETS.map((p) => (
+            <ThemeCard
+              key={p.id}
+              preset={p}
+              active={active === p.id}
+              onPick={() => setTheme({ ...presetPrefs(p), followSystem: false })}
+            />
+          ))}
+        </div>
+      </section>
+
+      <section>
+        <h3 className="mb-1 text-sm font-medium">Background</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          Shows between the panes, and through them with glass on.
+        </p>
+        <BackdropPicker />
+        <div className="mt-4 grid grid-cols-2 narrow:grid-cols-1 gap-4">
+          <div>
+            <div className="mb-1 text-xs text-[var(--color-text-muted)]">Animation</div>
+            <SettingSelect
+              value={theme.backgroundEffect}
+              onChange={(v) => setTheme({ backgroundEffect: v as BackgroundEffect })}
+            >
+              {BACKGROUND_EFFECTS.map(([val, label]) => (
+                <option key={val} value={val}>{label}</option>
+              ))}
+            </SettingSelect>
+          </div>
+          {theme.backgroundEffect !== "none" && <EffectControls />}
+        </div>
+      </section>
+
+      <section className="flex flex-col gap-4">
+        <div>
+          <h3 className="mb-2 text-sm font-medium">Light or dark</h3>
+          <OptionCards
+            value={theme.followSystem ? "system" : theme.mode}
+            onChange={(v) => setTheme(v === "system" ? { followSystem: true } : { mode: v, followSystem: false })}
+            options={[
+              ["dark", "Dark"],
+              ["light", "Light"],
+              ["system", "Match system"],
+            ]}
+          />
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <ToggleRow
+            label="Glass"
+            description="Panes become frosted glass over the background"
+            checked={!!theme.glassEnabled}
+            onChange={(v) => setTheme({ glassEnabled: v })}
+          />
+          {theme.glassEnabled && (
+            <div className="ml-3 flex flex-col gap-3 rounded border border-[var(--color-border)] p-3">
+              <SliderRow
+                label="See-through"
+                value={glassStrength}
+                min={0.1} max={1} step={0.05}
+                display={`${Math.round(glassStrength * 100)}%`}
+                onChange={(v) => setTheme({ glassStrength: v })}
+              />
+              <OptionCards
+                value={theme.glassStyle ?? "frosted"}
+                onChange={(glassStyle) => setTheme({ glassStyle })}
+                options={GLASS_STYLES.map(([v, label]) => [v, label] as const)}
+              />
+              <p className="text-[11px] text-[var(--color-text-muted)]">
+                {nothingBehind
+                  ? "Glass shows what is behind the panes — pick a background above to see it."
+                  : GLASS_STYLES.find(([v]) => v === (theme.glassStyle ?? "frosted"))?.[2]}
+              </p>
+            </div>
+          )}
+
+          <ToggleRow
+            label="See-through window"
+            description="Let your desktop show through MultiZone. Text stays solid."
+            checked={!!theme.windowTransparent}
+            onChange={(v) => setTheme({ windowTransparent: v })}
+          />
+          {theme.windowTransparent && (
+            <div className="ml-3 flex flex-col gap-3 rounded border border-[var(--color-border)] p-3">
+              <SliderRow
+                label="Opacity"
+                value={windowOpacity}
+                min={0.3} max={1} step={0.05}
+                display={`${Math.round(windowOpacity * 100)}%`}
+                onChange={(v) => setTheme({ windowOpacity: v })}
+              />
+              <div>
+                <div className="mb-1.5 text-xs text-[var(--color-text-muted)]">What is behind the window</div>
+                <OptionCards
+                  value={theme.windowBlur ?? "blur"}
+                  onChange={(windowBlur) => setTheme({ windowBlur })}
+                  options={WINDOW_BLURS}
+                />
+              </div>
+              <p className="text-[11px] text-[var(--color-text-muted)]">
+                Blurred and Tinted are drawn by Windows; Tinted needs Windows 11 and shows your wallpaper's colour rather than the windows behind.
+              </p>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* Everything past the everyday choices above: one fold, closed. */}
+      <Advanced>
+        <section>
+          <h3 className="mb-2 text-sm font-medium">Accent colour</h3>
+          <div className="flex flex-wrap items-center gap-2">
+            {ACCENT_PRESETS.map((c) => (
+              <button
+                key={c}
+                onClick={() => setTheme({ accent: c })}
+                className={`h-7 w-7 rounded-full border-2 ${theme.accent.toLowerCase() === c.toLowerCase() ? "border-[var(--color-text)]" : "border-transparent"}`}
+                style={{ background: c }}
+                title={c}
+              />
+            ))}
+            <div className="ml-2 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+              Any colour
+              <HexColorField
+                value={theme.accent}
+                onChange={(accent) => setTheme({ accent })}
+                title="Custom accent colour"
+              />
+            </div>
+          </div>
+        </section>
+
+        <ToggleRow
+          label="Shadows"
+          description="Soft shadows under menus, dialogs and floating panes"
+          checked={!!theme.shadowsEnabled}
+          onChange={(v) => setTheme({ shadowsEnabled: v })}
+        />
+
+        <PaletteSection />
+
+        <section>
+          <h3 className="mb-2 text-sm font-medium">Typography</h3>
+          <div className="grid grid-cols-2 narrow:grid-cols-1 gap-4">
+            <div>
+              <div className="mb-1 text-xs text-[var(--color-text-muted)]">Font</div>
+              <select
+                value={FONT_PRESETS.includes(fontInput) ? fontInput : fontInput ? "__custom" : ""}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "__custom") return;
+                  applyFont(v);
+                }}
+                style={{ fontFamily: `"${fontInput || "Inter"}", var(--font-family)` }}
+                className="w-full rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 text-xs outline-none focus:border-[var(--color-accent)]"
+              >
+                <option value="" style={{ fontFamily: "Inter, sans-serif" }}>Default (Inter)</option>
+                {FONT_PRESETS.map((f) => (
+                  <option key={f} value={f} style={{ fontFamily: `"${f}"` }}>{f}</option>
+                ))}
+                {fontInput && !FONT_PRESETS.includes(fontInput) && (
+                  <option value="__custom" style={{ fontFamily: `"${fontInput}"` }}>{fontInput} (custom)</option>
+                )}
+              </select>
+              <div className="mt-2 flex gap-2">
+                <input
+                  value={fontInput}
+                  onChange={(e) => setFontInput(e.target.value)}
+                  onBlur={() => setAppSettings({ fontFamily: fontInput })}
+                  onKeyDown={(e) => { if (e.key === "Enter") setAppSettings({ fontFamily: fontInput }); }}
+                  placeholder="Any Google Font, e.g. Source Code Pro"
+                  className="min-w-0 flex-1 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 py-1.5 text-xs outline-none focus:border-[var(--color-accent)]"
+                />
+                {fontInput && (
+                  <button
+                    onClick={() => applyFont("")}
+                    className="shrink-0 rounded border border-[var(--color-border)] px-2 py-1 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="flex flex-col gap-3">
+              <SliderRow
+                label="Message text"
+                value={fontSize}
+                min={10} max={24} step={1}
+                display={`${fontSize}px`}
+                onChange={(v) => setAppSettings({ fontSize: v })}
+              />
+              <div className={linked ? "pointer-events-none opacity-50" : ""}>
+                <SliderRow
+                  label="Interface"
+                  value={uiFontSize}
+                  min={12} max={22} step={1}
+                  display={`${uiFontSize}px`}
+                  onChange={(v) => setAppSettings({ uiFontSize: v })}
+                />
+              </div>
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-[var(--color-text-muted)]">
+                <input
+                  type="checkbox"
+                  checked={linked}
+                  onChange={(e) => setAppSettings({ fontSizeLinked: e.target.checked })}
+                />
+                Scale the interface with message text
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <StreamingSection />
+
+        <section>
+          <h3 className="mb-3 text-sm font-medium">Zone layout</h3>
+          <OptionCards
+            value={appSettings.zoneLayout}
+            onChange={(zoneLayout) => setAppSettings({ zoneLayout })}
+            options={[
+              ["chronological", "Chronological", "One column, in the order the replies arrived."],
+              ["stacked", "Stacked", "One column, the chat's own zone first."],
+              ["columns", "Columns", "Side-by-side columns for direct comparison."],
+            ]}
+          />
+        </section>
+
+        <section>
+          <h3 className="mb-2 text-sm font-medium">Zone library page size</h3>
+          <OptionCards
+            align="center"
+            value={appSettings.zoneLibraryPageSize || 6}
+            onChange={(zoneLibraryPageSize) => setAppSettings({ zoneLibraryPageSize })}
+            options={[[6, "6"], [9, "9"], [12, "12"], [15, "15"], [30, "30"]]}
+          />
+        </section>
+
+        {/* Exporting a chat is a question of how the document looks — how much of
+            the run it draws and in which theme — so it lives here with the rest of
+            the appearance settings rather than under Chat. */}
+        <section>
+          <h3 className="mb-3 text-sm font-medium">Chat export</h3>
+          <OptionCards
+            layout="column"
+            value={appSettings.pdfExportDetail}
+            onChange={(pdfExportDetail) => setAppSettings({ pdfExportDetail })}
+            options={[
+              ["steps", "Every step",  "One card per tool call and reasoning block."],
+              ["rails", "Condensed",   "Each run of steps on one line, as the chat shows it. Plans, diagrams and files still drawn."],
+              ["text",  "Text only",   "The conversation and its attachments, nothing else."],
+            ]}
+          />
+          <p className="mb-2 mt-3 text-xs text-[var(--color-text-muted)]">
+            Theme the document is drawn in.
+          </p>
+          <OptionCards
+            value={appSettings.pdfExportTheme}
+            onChange={(pdfExportTheme) => setAppSettings({ pdfExportTheme })}
+            options={[
+              ["app",   "Follow app"],
+              ["light", "Light"],
+              ["dark",  "Dark"],
+            ]}
+          />
+          <p className="mt-3 text-xs text-[var(--color-text-muted)]">For one page: Margins “None”, Background graphics on.</p>
+
+          <div className="mt-4 flex flex-col gap-3">
+            <ToggleRow
+              label="Include sub-agent conversations"
+              description="Nested under the turns that spawned them."
+              checked={appSettings.exportSubchats}
+              onChange={(exportSubchats) => setAppSettings({ exportSubchats })}
+            />
+            <ToggleRow
+              label="Append the session log"
+              description="Every turn and tool, timed. PDF only."
+              checked={appSettings.pdfExportSessionLog}
+              onChange={(pdfExportSessionLog) => setAppSettings({ pdfExportSessionLog })}
+            />
+          </div>
+        </section>
+
+        <CustomCssSection />
+      </Advanced>
+    </div>
+  );
+}
+
+/**
+ * A built-in theme as a little window in its own colours: the backdrop, a
+ * sidebar and a chat pane, glass where the theme has it.
+ */
+function ThemeCard({ preset, active, onPick }: { preset: ThemePreset; active: boolean; onPick: () => void }) {
+  const c = presetPalette(preset);
+  const prefs = presetPrefs(preset);
+  const pane = (col: string) => (prefs.glassEnabled ? `color-mix(in srgb, ${col} 60%, transparent)` : col);
+  const paneStyle = (col: string): CSSProperties => ({
+    background: pane(col),
+    boxShadow: `0 0 0 1px ${prefs.glassEnabled ? `color-mix(in srgb, ${c.text} 14%, transparent)` : c.border}`,
+    backdropFilter: prefs.glassEnabled ? "blur(6px) saturate(1.5)" : undefined,
+  });
+  const line = (w: string, col: string) => <div className="h-[3px] rounded-full" style={{ width: w, background: col }} />;
+  return (
+    <button
+      onClick={onPick}
+      aria-pressed={active}
+      className={`flex flex-col gap-1.5 rounded-lg p-1.5 text-left transition-shadow ${
+        active ? "ring-2 ring-[var(--color-accent)]" : "ring-1 ring-[var(--color-border)] hover:ring-[var(--color-text-muted)]"
+      }`}
+    >
+      <div
+        className="relative h-[76px] w-full overflow-hidden rounded-md"
+        style={{
+          backgroundColor: c.bg,
+          backgroundImage: backdropImage(prefs),
+          "--color-accent": c.accent,
+          "--mz-glow": prefs.mode === "light" ? "55%" : "60%",
+        } as CSSProperties}
+      >
+        <div className="absolute inset-x-[5px] bottom-[5px] top-[13px] flex gap-[4px]">
+          <div className="flex w-[30%] flex-col gap-[5px] rounded-[4px] p-[6px]" style={paneStyle(c.panel)}>
+            {line("80%", c.textMuted)}
+            {line("60%", c.textMuted)}
+            {line("70%", c.textMuted)}
+          </div>
+          <div className="relative flex flex-1 flex-col gap-[5px] rounded-[4px] p-[6px]" style={paneStyle(c.bg)}>
+            {line("85%", c.text)}
+            {line("65%", c.text)}
+            {line("40%", c.textMuted)}
+            <div className="absolute bottom-[5px] right-[6px] h-[7px] w-[16px] rounded-full" style={{ background: c.accent }} />
+          </div>
+        </div>
+      </div>
+      <span className="flex items-center justify-between gap-1 px-0.5 text-xs">
+        <span className="truncate">{preset.name}</span>
+        {active && <Check size={12} className="shrink-0 text-[var(--color-accent)]" />}
+      </span>
+    </button>
+  );
+}
+
+/** The backdrop: plain, a built-in gradient, or two colours of your own. */
+function BackdropPicker() {
+  const theme = useApp((s) => s.theme);
+  const setTheme = useApp((s) => s.setTheme);
+  const current = theme.backdrop ?? "solid";
+  const from = theme.backdropFrom || CUSTOM_GRADIENT.from;
+  const to = theme.backdropTo || CUSTOM_GRADIENT.to;
+  const angle = theme.backdropAngle ?? CUSTOM_GRADIENT.angle;
+  const pick = (backdrop: BackdropId) =>
+    setTheme(backdrop === "custom" ? { backdrop, backdropFrom: from, backdropTo: to, backdropAngle: angle } : { backdrop });
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-4 narrow:grid-cols-2 gap-2">
+        {BACKDROPS.map((b) => (
+          <button
+            key={b.id}
+            onClick={() => pick(b.id)}
+            aria-pressed={current === b.id}
+            className={`flex flex-col gap-1 rounded-md p-1 text-left text-[11px] ${
+              current === b.id ? "ring-2 ring-[var(--color-accent)]" : "ring-1 ring-[var(--color-border)] hover:ring-[var(--color-text-muted)]"
+            }`}
+          >
+            <div
+              className="h-9 w-full rounded"
+              style={{
+                backgroundColor: "var(--color-bg)",
+                backgroundImage: backdropImage({ backdrop: b.id, backdropFrom: from, backdropTo: to, backdropAngle: angle }),
+              }}
+            />
+            <span className="truncate px-0.5">{b.label}</span>
+          </button>
+        ))}
+      </div>
+      {current === "custom" && (
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+          <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+            From
+            <HexColorField value={from} onChange={(backdropFrom) => setTheme({ backdropFrom })} title="Gradient start" />
+          </div>
+          <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+            To
+            <HexColorField value={to} onChange={(backdropTo) => setTheme({ backdropTo })} title="Gradient end" />
+          </div>
+          <div className="min-w-[200px] flex-1">
+            <SliderRow
+              label="Direction"
+              value={angle}
+              min={0} max={360} step={15}
+              display={`${angle}°`}
+              onChange={(backdropAngle) => setTheme({ backdropAngle })}
+            />
+          </div>
+        </div>
+      )}
+      {current !== "solid" && (
+        <ToggleRow
+          label="Slowly drift"
+          description="The gradient moves, very gently"
+          checked={!!theme.backdropMotion}
+          onChange={(backdropMotion) => setTheme({ backdropMotion })}
+        />
+      )}
+    </div>
+  );
+}
+
+/** The tuning for the animated layer, once one is chosen. */
+function EffectControls() {
+  const theme = useApp((s) => s.theme);
+  const setTheme = useApp((s) => s.setTheme);
+  const grid = theme.backgroundEffect === "grid";
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+        Colour
+        <button
+          onClick={() => setTheme({ effectColor: "accent" })}
+          className={`rounded border px-2.5 py-1 text-xs ${
+            theme.effectColor === "accent"
+              ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)] text-[var(--color-text)]"
+              : "border-[var(--color-border)] hover:border-[var(--color-accent)]"
+          }`}
+        >
+          Accent
+        </button>
+        <HexColorField
+          // Following the accent is a mode, not a colour, so the field sits
+          // empty there rather than showing an accent value that isn't stored.
+          value={theme.effectColor === "accent" ? null : (theme.effectColor || null)}
+          fallback={theme.accent}
+          onChange={(effectColor) => setTheme({ effectColor })}
+          title="Custom effect colour"
+        />
+      </div>
+      <SliderRow
+        label="Speed"
+        value={theme.effectSpeed}
+        min={0.1} max={3} step={0.1}
+        display={`${theme.effectSpeed.toFixed(1)}×`}
+        onChange={(v) => setTheme({ effectSpeed: v })}
+      />
+      {DENSITY_EFFECTS.includes(theme.backgroundEffect) && (
+        <SliderRow
+          label={grid ? "Scale" : "Amount"}
+          value={theme.effectDensity}
+          min={grid ? 15 : 10}
+          max={grid ? 150 : 200}
+          step={5}
+          display={grid ? `${theme.effectDensity}px` : String(theme.effectDensity)}
+          onChange={(v) => setTheme({ effectDensity: v })}
+        />
+      )}
+      <SliderRow
+        label="Strength"
+        value={theme.effectOpacity}
+        min={0.05} max={1} step={0.05}
+        display={`${Math.round(theme.effectOpacity * 100)}%`}
+        onChange={(v) => setTheme({ effectOpacity: v })}
+      />
+      <SliderRow
+        label="Colour variety"
+        value={theme.effectHue ?? 0}
+        min={0} max={180} step={5}
+        display={(theme.effectHue ?? 0) === 0 ? "Off" : `±${theme.effectHue}°`}
+        onChange={(v) => setTheme({ effectHue: v })}
+      />
+    </div>
+  );
+}
+
+/**
+ * Everything past the everyday choices — the accent, every colour, fonts,
+ * streaming, layout, export, custom CSS — folded away until asked for, so the
+ * tab opens on picking a look rather than on building one.
+ */
+function Advanced({ children }: { children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <section>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex items-center gap-1 text-sm font-medium hover:text-[var(--color-accent)]"
+      >
+        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        Advanced
+        <span className="ml-1 text-xs font-normal text-[var(--color-text-muted)]">
+          Accent, every colour, fonts, text streaming, layout, export, custom CSS
+        </span>
+      </button>
+      {open && <div className="mt-4 flex flex-col gap-6">{children}</div>}
+    </section>
+  );
+}
+
+/** The palette, colour by colour, for the mode on screen. */
+function PaletteSection() {
+  const theme = useApp((s) => s.theme);
+  const setTheme = useApp((s) => s.setTheme);
+
   // Colour editing always targets the mode currently on screen, so what you
   // change is what you see.
   const paletteKey = theme.mode === "light" ? "colorsLight" : "colorsDark";
@@ -115,363 +637,48 @@ export function AppearanceTab() {
   }
 
   return (
-    <div className="flex flex-col gap-5">
-      <section>
-        <h3 className="mb-2 text-sm font-medium">Color mode</h3>
-        <OptionCards
-          value={theme.mode}
-          onChange={(mode) => setTheme({ mode })}
-          options={[
-            ["dark",  "Dark"],
-            ["light", "Light"],
-          ]}
-        />
-      </section>
-
-      <section>
-        <h3 className="mb-2 text-sm font-medium">Accent color</h3>
-        <div className="flex flex-wrap items-center gap-2">
-          {ACCENT_PRESETS.map((c) => (
-            <button
-              key={c}
-              onClick={() => setTheme({ accent: c })}
-              className={`h-8 w-8 rounded-full border-2 ${theme.accent.toLowerCase() === c.toLowerCase() ? "border-[var(--color-text)]" : "border-transparent"}`}
-              style={{ background: c }}
-              title={c}
-            />
-          ))}
-          <div className="ml-2 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
-            Custom
-            <HexColorField
-              value={theme.accent}
-              onChange={(accent) => setTheme({ accent })}
-              title="Custom accent color"
-            />
-          </div>
-        </div>
-      </section>
-
-      <section>
-        <h3 className="mb-2 text-sm font-medium">
-          Colors · {theme.mode === "light" ? "Light" : "Dark"} mode
-        </h3>
-        {/* Two columns rather than three: each cell now carries an editable hex
-            alongside its swatch, and a colour you can read is worth more than a
-            grid one row shorter. */}
-        <div className="grid grid-cols-2 narrow:grid-cols-1 gap-x-8">
-          {(Object.keys(THEME_COLOR_KEYS) as ThemeColorKey[]).map((key) => {
-            const value = overrides[key] ?? base[key];
-            const custom = !!overrides[key];
-            return (
-              <div
-                key={key}
-                className="flex items-center gap-2 py-1"
+    <section>
+      <h3 className="mb-2 text-sm font-medium">
+        Colours · {theme.mode === "light" ? "Light" : "Dark"} mode
+      </h3>
+      {/* Two columns rather than three: each cell carries an editable hex
+          alongside its swatch, and a colour you can read is worth more
+          than a grid one row shorter. */}
+      <div className="grid grid-cols-2 narrow:grid-cols-1 gap-x-8">
+        {(Object.keys(THEME_COLOR_KEYS) as ThemeColorKey[]).map((key) => {
+          const value = overrides[key] ?? base[key];
+          const custom = !!overrides[key];
+          return (
+            <div key={key} className="flex items-center gap-2 py-1">
+              <span className="min-w-0 flex-1 truncate text-xs">{COLOR_LABELS[key]}</span>
+              <HexColorField
+                value={value}
+                onChange={(hex) => setColor(key, hex)}
+                title={`${COLOR_LABELS[key]} — ${custom ? "custom" : "default"}`}
+              />
+              <button
+                onClick={() => setColor(key, null)}
+                title="Reset to default"
+                disabled={!custom}
+                className="shrink-0 text-[var(--color-text-muted)] hover:text-[var(--color-text)] disabled:invisible"
               >
-                <span className="min-w-0 flex-1 truncate text-xs">{COLOR_LABELS[key]}</span>
-                <HexColorField
-                  value={value}
-                  onChange={(hex) => setColor(key, hex)}
-                  title={`${COLOR_LABELS[key]} — ${custom ? "custom" : "default"}`}
-                />
-                <button
-                  onClick={() => setColor(key, null)}
-                  title="Reset to default"
-                  disabled={!custom}
-                  className="shrink-0 text-[var(--color-text-muted)] hover:text-[var(--color-text)] disabled:invisible"
-                >
-                  <X size={11} />
-                </button>
-              </div>
-            );
-          })}
-        </div>
-        <div className="mt-1.5 flex items-center justify-end">
-          {Object.keys(overrides).length > 0 && (
-            <button
-              onClick={() => setTheme({ [paletteKey]: {} })}
-              className="text-[10px] text-[var(--color-text-muted)] underline hover:text-[var(--color-accent)]"
-            >
-              Reset all
-            </button>
-          )}
-        </div>
-      </section>
-
-      <section>
-        <h3 className="mb-2 text-sm font-medium">Typography</h3>
-        <div className="grid grid-cols-2 narrow:grid-cols-1 gap-4">
-          <div>
-            <div className="mb-1 text-xs text-[var(--color-text-muted)]">Font</div>
-            <select
-              value={FONT_PRESETS.includes(fontInput) ? fontInput : fontInput ? "__custom" : ""}
-              onChange={(e) => {
-                const v = e.target.value;
-                if (v === "__custom") return;
-                applyFont(v);
-              }}
-              style={{ fontFamily: `"${fontInput || "Inter"}", var(--font-family)` }}
-              className="w-full rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 text-xs outline-none focus:border-[var(--color-accent)]"
-            >
-              <option value="" style={{ fontFamily: "Inter, sans-serif" }}>Default (Inter)</option>
-              {FONT_PRESETS.map((f) => (
-                <option key={f} value={f} style={{ fontFamily: `"${f}"` }}>{f}</option>
-              ))}
-              {fontInput && !FONT_PRESETS.includes(fontInput) && (
-                <option value="__custom" style={{ fontFamily: `"${fontInput}"` }}>{fontInput} (custom)</option>
-              )}
-            </select>
-            <div className="mt-2 flex gap-2">
-              <input
-                value={fontInput}
-                onChange={(e) => setFontInput(e.target.value)}
-                onBlur={() => setAppSettings({ fontFamily: fontInput })}
-                onKeyDown={(e) => { if (e.key === "Enter") setAppSettings({ fontFamily: fontInput }); }}
-                placeholder="Any Google Font, e.g. Source Code Pro"
-                className="min-w-0 flex-1 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 py-1.5 text-xs outline-none focus:border-[var(--color-accent)]"
-              />
-              {fontInput && (
-                <button
-                  onClick={() => applyFont("")}
-                  className="shrink-0 rounded border border-[var(--color-border)] px-2 py-1 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
-                >
-                  Reset
-                </button>
-              )}
+                <X size={11} />
+              </button>
             </div>
-          </div>
-          <div className="flex flex-col gap-3">
-            <SliderRow
-              label="Message text"
-              value={fontSize}
-              min={10} max={24} step={1}
-              display={`${fontSize}px`}
-              onChange={(v) => setAppSettings({ fontSize: v })}
-            />
-            <div className={linked ? "pointer-events-none opacity-50" : ""}>
-              <SliderRow
-                label="Interface"
-                value={uiFontSize}
-                min={12} max={22} step={1}
-                display={`${uiFontSize}px`}
-                onChange={(v) => setAppSettings({ uiFontSize: v })}
-              />
-            </div>
-            <label className="flex cursor-pointer items-center gap-2 text-xs text-[var(--color-text-muted)]">
-              <input
-                type="checkbox"
-                checked={linked}
-                onChange={(e) => setAppSettings({ fontSizeLinked: e.target.checked })}
-              />
-              Scale the interface with message text
-            </label>
-          </div>
+          );
+        })}
+      </div>
+      {Object.keys(overrides).length > 0 && (
+        <div className="mt-1.5 flex justify-end">
+          <button
+            onClick={() => setTheme({ [paletteKey]: {} })}
+            className="text-[10px] text-[var(--color-text-muted)] underline hover:text-[var(--color-accent)]"
+          >
+            Reset all
+          </button>
         </div>
-      </section>
-
-      <StreamingSection />
-
-      <section>
-        <h3 className="mb-2 text-sm font-medium">Visual effects</h3>
-        <div className="flex flex-col gap-2">
-          <ToggleRow
-            label="Drop shadows"
-            description="Adds depth shadows to panels and cards"
-            checked={!!theme.shadowsEnabled}
-            onChange={(v) => setTheme({ shadowsEnabled: v })}
-          />
-          <ToggleRow
-            label="Glass / transparency"
-            description="Panels, menus and dialogs let the background show through"
-            checked={!!theme.glassEnabled}
-            onChange={(v) => setTheme({ glassEnabled: v })}
-          />
-          {theme.glassEnabled && (
-            <div className="ml-3 flex flex-col gap-3 rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
-              <div>
-                <div className="mb-1.5 text-xs text-[var(--color-text-muted)]">Style</div>
-                <div className="flex flex-wrap gap-1.5">
-                  {GLASS_STYLES.map(([val, label, hint]) => (
-                    <button
-                      key={val}
-                      title={hint}
-                      onClick={() => setTheme({ glassStyle: val })}
-                      className={`rounded border px-2.5 py-1 text-xs ${
-                        (theme.glassStyle ?? "frosted") === val
-                          ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]"
-                          : "border-[var(--color-border)] hover:border-[var(--color-accent)]"
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <SliderRow
-                label="Transparency"
-                value={theme.glassStrength ?? 0.5}
-                min={0.1} max={1} step={0.05}
-                display={`${Math.round((theme.glassStrength ?? 0.5) * 100)}%`}
-                onChange={(v) => setTheme({ glassStrength: v })}
-              />
-              {theme.backgroundEffect === "none" && (
-                <p className="text-[11px] text-[var(--color-text-muted)]">Pick a background effect to see it.</p>
-              )}
-            </div>
-          )}
-        </div>
-      </section>
-
-      <section>
-        <h3 className="mb-2 text-sm font-medium">Background effect</h3>
-        <div className="grid grid-cols-2 narrow:grid-cols-1 gap-4">
-          <div>
-            <div className="mb-1 text-xs text-[var(--color-text-muted)]">Effect</div>
-            <select
-              value={theme.backgroundEffect}
-              onChange={(e) => setTheme({ backgroundEffect: e.target.value as BackgroundEffect })}
-              className="w-full rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 text-xs outline-none focus:border-[var(--color-accent)]"
-            >
-              {BACKGROUND_EFFECTS.map(([val, label]) => (
-                <option key={val} value={val}>{label}</option>
-              ))}
-            </select>
-            {theme.backgroundEffect !== "none" && (
-              <div className="mt-3">
-                <div className="mb-1.5 text-xs text-[var(--color-text-muted)]">Color</div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setTheme({ effectColor: "accent" })}
-                    className={`rounded border px-2.5 py-1 text-xs ${
-                      theme.effectColor === "accent"
-                        ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]"
-                        : "border-[var(--color-border)] hover:border-[var(--color-accent)]"
-                    }`}
-                  >
-                    Accent
-                  </button>
-                  <HexColorField
-                    // Following the accent is a mode, not a colour, so the field
-                    // sits empty there rather than showing an accent value that
-                    // isn't what is stored.
-                    value={theme.effectColor === "accent" ? null : (theme.effectColor || null)}
-                    fallback={theme.accent}
-                    onChange={(effectColor) => setTheme({ effectColor })}
-                    title="Custom effect color"
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-          {theme.backgroundEffect !== "none" && (
-            <div className="flex flex-col gap-3">
-              <SliderRow
-                label="Speed"
-                value={theme.effectSpeed}
-                min={0.1} max={3} step={0.1}
-                display={`${theme.effectSpeed.toFixed(1)}×`}
-                onChange={(v) => setTheme({ effectSpeed: v })}
-              />
-              {DENSITY_EFFECTS.includes(theme.backgroundEffect) && (
-                <SliderRow
-                  label={theme.backgroundEffect === "grid" ? "Scale" : "Density"}
-                  value={theme.effectDensity}
-                  min={theme.backgroundEffect === "grid" ? 15 : 10}
-                  max={theme.backgroundEffect === "grid" ? 150 : 200}
-                  step={5}
-                  display={theme.backgroundEffect === "grid" ? `${theme.effectDensity}px` : String(theme.effectDensity)}
-                  onChange={(v) => setTheme({ effectDensity: v })}
-                />
-              )}
-              <SliderRow
-                label="Opacity"
-                value={theme.effectOpacity}
-                min={0.05} max={1} step={0.05}
-                display={`${Math.round(theme.effectOpacity * 100)}%`}
-                onChange={(v) => setTheme({ effectOpacity: v })}
-              />
-              <SliderRow
-                label="Hue variation"
-                value={theme.effectHue ?? 0}
-                min={0} max={180} step={5}
-                display={(theme.effectHue ?? 0) === 0 ? "Off" : `±${theme.effectHue}°`}
-                onChange={(v) => setTheme({ effectHue: v })}
-              />
-            </div>
-          )}
-        </div>
-      </section>
-
-      <CustomCssSection />
-
-      <section>
-        <h3 className="mb-3 text-sm font-medium">Zone layout</h3>
-        <OptionCards
-          value={appSettings.zoneLayout}
-          onChange={(zoneLayout) => setAppSettings({ zoneLayout })}
-          options={[
-            ["chronological", "Chronological", "One column, in the order the replies arrived."],
-            ["stacked", "Stacked", "One column, the chat's own zone first."],
-            ["columns", "Columns", "Side-by-side columns for direct comparison."],
-          ]}
-        />
-      </section>
-
-      <section>
-        <h3 className="mb-2 text-sm font-medium">Zone library page size</h3>
-        <OptionCards
-          align="center"
-          value={appSettings.zoneLibraryPageSize || 6}
-          onChange={(zoneLibraryPageSize) => setAppSettings({ zoneLibraryPageSize })}
-          options={[[6, "6"], [9, "9"], [12, "12"], [15, "15"], [30, "30"]]}
-        />
-      </section>
-
-      {/* Exporting a chat is a question of how the document looks — how much of
-          the run it draws and in which theme — so it lives here with the rest of
-          the appearance settings rather than under Chat. */}
-      <section>
-        <h3 className="mb-3 text-sm font-medium">Chat export</h3>
-        <OptionCards
-          layout="column"
-          value={appSettings.pdfExportDetail}
-          onChange={(pdfExportDetail) => setAppSettings({ pdfExportDetail })}
-          options={[
-            ["steps", "Every step",  "One card per tool call and reasoning block."],
-            ["rails", "Condensed",   "Each run of steps on one line, as the chat shows it. Plans, diagrams and files still drawn."],
-            ["text",  "Text only",   "The conversation and its attachments, nothing else."],
-          ]}
-        />
-        <p className="mb-2 mt-3 text-xs text-[var(--color-text-muted)]">
-          Theme the document is drawn in.
-        </p>
-        <OptionCards
-          value={appSettings.pdfExportTheme}
-          onChange={(pdfExportTheme) => setAppSettings({ pdfExportTheme })}
-          options={[
-            ["app",   "Follow app"],
-            ["light", "Light"],
-            ["dark",  "Dark"],
-          ]}
-        />
-        <p className="mt-3 text-xs text-[var(--color-text-muted)]">For one page: Margins “None”, Background graphics on.</p>
-
-        <div className="mt-4 flex flex-col gap-3">
-          <ToggleRow
-            label="Include sub-agent conversations"
-            description="Nested under the turns that spawned them."
-            checked={appSettings.exportSubchats}
-            onChange={(exportSubchats) => setAppSettings({ exportSubchats })}
-          />
-          <ToggleRow
-            label="Append the session log"
-            description="Every turn and tool, timed. PDF only."
-            checked={appSettings.pdfExportSessionLog}
-            onChange={(pdfExportSessionLog) => setAppSettings({ pdfExportSessionLog })}
-          />
-        </div>
-      </section>
-
-    </div>
+      )}
+    </section>
   );
 }
 

@@ -52,6 +52,11 @@ pub const BACKGROUND_EFFECTS: &[&str] = &[
 
 pub const GLASS_STYLES: &[&str] = &["frosted", "clear", "tinted"];
 
+/// Mirrors `BACKDROPS` in src/lib/themes.ts.
+pub const BACKDROPS: &[&str] = &["solid", "glow", "dusk", "lagoon", "meadow", "ember", "blush", "custom"];
+
+pub const WINDOW_BLURS: &[&str] = &["none", "blur", "mica"];
+
 /// Matches `MAX_CUSTOM_CSS` in the frontend store. Not a security boundary — the
 /// stylesheet is the user's own and runs in their own window either way — but a
 /// sheet this long is a mistake rather than a preference, and refusing it here
@@ -134,6 +139,24 @@ fn fields() -> Vec<Field> {
             doc: "frosted: blurred and desaturated · clear: unblurred · tinted: frosted with the accent bled in." },
         Field { name: "glassStrength", kind: Number { min: 0.1, max: 1.0 }, default: json!(0.5),
             doc: "How far through the glass you can see." },
+        Field { name: "followSystem", kind: Bool, default: json!(false),
+            doc: "Follow the system light/dark setting; mode is then rewritten to match it." },
+        Field { name: "backdrop", kind: Enum(BACKDROPS), default: json!("solid"),
+            doc: "What is painted behind the panes, showing in the gaps and through glass. solid: the background colour · custom: backdropFrom → backdropTo at backdropAngle · the rest are built-in gradients." },
+        Field { name: "backdropFrom", kind: Color, default: json!("#1d2b53"),
+            doc: "First colour of the custom backdrop gradient." },
+        Field { name: "backdropTo", kind: Color, default: json!("#5b2350"),
+            doc: "Second colour of the custom backdrop gradient." },
+        Field { name: "backdropAngle", kind: Number { min: 0.0, max: 360.0 }, default: json!(135),
+            doc: "Direction of the custom backdrop gradient, in degrees." },
+        Field { name: "backdropMotion", kind: Bool, default: json!(false),
+            doc: "A slow drift of the backdrop gradient." },
+        Field { name: "windowTransparent", kind: Bool, default: json!(false),
+            doc: "Let the desktop show through the window, at windowOpacity." },
+        Field { name: "windowOpacity", kind: Number { min: 0.3, max: 1.0 }, default: json!(0.85),
+            doc: "How solid a see-through window is." },
+        Field { name: "windowBlur", kind: Enum(WINDOW_BLURS), default: json!("blur"),
+            doc: "What Windows does to the desktop behind a see-through window: none, blur (Acrylic) or mica (Windows 11 wallpaper tint)." },
         Field { name: "customCssEnabled", kind: Bool, default: json!(false),
             doc: "Whether customCss is applied. Kept separate so a sheet can be switched off without being deleted." },
         Field { name: "customCss", kind: Css, default: json!(""),
@@ -316,7 +339,9 @@ mod tests {
             vec![
                 "mode", "accent", "colorsDark", "colorsLight", "backgroundEffect", "effectColor",
                 "effectSpeed", "effectDensity", "effectOpacity", "effectHue", "shadowsEnabled",
-                "glassEnabled", "glassStyle", "glassStrength",
+                "glassEnabled", "glassStyle", "glassStrength", "followSystem", "backdrop",
+                "backdropFrom", "backdropTo", "backdropAngle", "backdropMotion",
+                "windowTransparent", "windowOpacity", "windowBlur",
                 "customCssEnabled", "customCss",
             ],
         );

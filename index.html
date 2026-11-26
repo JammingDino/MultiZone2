@@ -13,6 +13,13 @@
     />
     <meta name="mobile-web-app-capable" content="yes" />
     <title>MultiZone</title>
+    <!-- The window is created transparent (for the opt-in see-through window),
+         so until the stylesheet arrives something has to paint it solid — or
+         every launch would open as a see-through frame. -->
+    <style>
+      html:not(.see-through) { background: var(--color-bg, #0b0d10); }
+      html.light:not(.see-through) { background: var(--color-bg, #fafafa); }
+    </style>
     <script>
       /*
        * Put back the appearance this install was last using, before the first

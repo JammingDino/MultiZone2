@@ -8,6 +8,7 @@ import type { SettingsBundle } from "@/lib/settingsBundle";
 import { clearAttention, finishedNotice, notifyWaiting } from "@/lib/notify";
 import { toolLabel } from "@/lib/stepSummary";
 import { shade } from "@/lib/color";
+import { isTranslucent, surfaceVars, windowAlpha, type BackdropId, type WindowBlur } from "@/lib/themes";
 import { normalizeApprovals } from "@/lib/approvals";
 import type { PendingAttachment } from "@/lib/attachFiles";
 import { errorText } from "@/lib/errors";
@@ -903,6 +904,29 @@ export interface ThemePrefs {
   glassEnabled?: boolean;
   glassStyle?: GlassStyle;
   glassStrength?: number;
+  /** Follow the system's light/dark setting (0.20). `mode` is still the mode in
+   *  force — it is rewritten when the system changes — so nothing that reads it
+   *  has to know about this. */
+  followSystem?: boolean;
+  /**
+   * What is painted behind the panes (0.20): it shows in the gaps between them
+   * and through glass. A built-in gradient, or `custom` with the three fields
+   * after it. See lib/themes.ts.
+   */
+  backdrop?: BackdropId;
+  backdropFrom?: string;
+  backdropTo?: string;
+  backdropAngle?: number;
+  /** A slow drift of the backdrop. */
+  backdropMotion?: boolean;
+  /**
+   * A see-through window (0.20): the backdrop and the panes let the desktop
+   * show through, at `windowOpacity`, and `windowBlur` asks Windows to blur
+   * (or tint, Mica) what is behind. Text stays solid.
+   */
+  windowTransparent?: boolean;
+  windowOpacity?: number;
+  windowBlur?: WindowBlur;
   /**
    * Per-mode overrides of the base palette (0.9.4). Kept separate for dark and
    * light so a blue background chosen for dark doesn't follow you into light,
@@ -957,9 +981,24 @@ const DEFAULT_THEME: ThemePrefs = {
   glassEnabled: false,
   glassStyle: "frosted",
   glassStrength: 0.5,
+  followSystem: false,
+  backdrop: "solid",
+  backdropMotion: false,
+  windowTransparent: false,
+  windowOpacity: 0.85,
+  windowBlur: "blur",
   customCss: "",
   customCssEnabled: false,
 };
+
+const systemDark = typeof window !== "undefined" ? window.matchMedia?.("(prefers-color-scheme: dark)") : undefined;
+
+/** The theme with `mode` brought in line with the system, when it follows it. */
+function withSystemMode(t: ThemePrefs): ThemePrefs {
+  if (!t.followSystem || !systemDark) return t;
+  const mode = systemDark.matches ? "dark" : "light";
+  return t.mode === mode ? t : { ...t, mode };
+}
 
 const LEGACY_FONT_SIZE: Record<string, number> = { normal: 14, large: 16, xl: 18 };
 
@@ -1105,14 +1144,20 @@ function applyThemeToDom(theme: ThemePrefs) {
   );
   html.classList.toggle("shadows", !!theme.shadowsEnabled);
 
-  // Glass: one class for "on", one for which style, and a strength variable the
-  // stylesheet derives blur and opacity from.
+  // Glass and the see-through window: classes for which is on, and the numbers
+  // they are drawn with (lib/themes.ts).
   const glass = !!theme.glassEnabled;
   html.classList.toggle("glass", glass);
   for (const s of ["frosted", "clear", "tinted"] as const) {
     html.classList.toggle(`glass-${s}`, glass && (theme.glassStyle ?? "frosted") === s);
   }
-  html.style.setProperty("--glass-strength", String(theme.glassStrength ?? 0.5));
+  html.classList.toggle("translucent", isTranslucent(theme));
+  html.classList.toggle("see-through", windowAlpha(theme) < 1);
+  const backdrop = (theme.backdrop ?? "solid") !== "solid";
+  html.classList.toggle("backdrop", backdrop);
+  html.classList.toggle("backdrop-motion", backdrop && !!theme.backdropMotion);
+  for (const [name, value] of Object.entries(surfaceVars(theme))) html.style.setProperty(name, value);
+  applyWindowBlur(theme);
 
   // Palette overrides for the mode being shown. Every key is cleared first, so
   // switching modes (or resetting a colour) drops back to the stylesheet value
@@ -1130,6 +1175,32 @@ function applyThemeToDom(theme: ThemePrefs) {
 
   applyCustomCss(theme);
   saveBootSnapshot();
+}
+
+/** The window effect last asked for, so a theme write that did not change it
+ *  does not cost a round trip to the window. */
+let appliedWindowBlur: WindowBlur | null = null;
+
+/**
+ * Ask Windows to blur (Acrylic) or tint (Mica) what is behind a see-through
+ * window. Only the parts the page leaves transparent show it, which is why
+ * this is off unless the window is see-through. Outside the desktop shell
+ * (a phone, a browser) there is no window to ask, and the failure is ignored.
+ */
+function applyWindowBlur(theme: ThemePrefs) {
+  const want: WindowBlur = windowAlpha(theme) < 1 ? (theme.windowBlur ?? "blur") : "none";
+  if (want === appliedWindowBlur) return;
+  const first = appliedWindowBlur === null;
+  appliedWindowBlur = want;
+  if (first && want === "none") return;
+  void import("@tauri-apps/api/window")
+    .then(({ getCurrentWindow, Effect }) => {
+      const w = getCurrentWindow();
+      return want === "none"
+        ? w.clearEffects()
+        : w.setEffects({ effects: [want === "mica" ? Effect.Mica : Effect.Acrylic] });
+    })
+    .catch((e) => console.warn("window effect not applied", e));
 }
 
 const CUSTOM_CSS_ELEMENT_ID = "multizone-custom-css";
@@ -2115,7 +2186,7 @@ export const useApp = create<AppStore>((set, get) => ({
     if (!get().themeLoaded) {
       throw new Error("the saved theme has not been read yet, so nothing was changed");
     }
-    const next = { ...get().theme, ...partial };
+    const next = withSystemMode({ ...get().theme, ...partial });
     set({ theme: next });
     applyThemeToDom(next);
     try {
@@ -2129,7 +2200,7 @@ export const useApp = create<AppStore>((set, get) => ({
       const raw = await api.getSetting("theme");
       if (raw) {
         const parsed = JSON.parse(raw) as ThemePrefs;
-        const merged = { ...DEFAULT_THEME, ...parsed };
+        const merged = withSystemMode({ ...DEFAULT_THEME, ...parsed });
         set({ theme: merged, themeLoaded: true });
         applyThemeToDom(merged);
         return;
@@ -2557,4 +2628,10 @@ export const useApp = create<AppStore>((set, get) => ({
 useApp.subscribe((state, prev) => {
   if (state.appSettings !== prev.appSettings) applyAppSettingsToDom(state.appSettings);
   if (state.theme !== prev.theme) applyThemeToDom(state.theme);
+});
+
+// The system switching between light and dark, for a theme that follows it.
+systemDark?.addEventListener("change", () => {
+  const s = useApp.getState();
+  if (s.themeLoaded && s.theme.followSystem) void s.setTheme({});
 });

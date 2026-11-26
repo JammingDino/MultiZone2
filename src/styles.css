@@ -52,12 +52,57 @@ body,
   padding: 0;
 }
 
-body {
+/* How strongly a built-in backdrop's glows show (lib/themes.ts): deep on dark,
+   pastel on light. */
+:root { --mz-glow: 60%; }
+html.light { --mz-glow: 55%; }
+
+/* The solid colour is the root's, not body's: body's own background paints
+   *over* the backdrop layer (body::before, z-index -1) whenever the root has
+   a background of its own, which index.html gives it before first paint. */
+html {
   background: var(--color-bg);
+}
+
+body {
   color: var(--color-text);
   font-family: var(--font-family, "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
   font-size: 14px;
   overflow: hidden;
+}
+
+/* The window's backdrop (0.20): the theme's background colour with an optional
+   gradient on top, behind everything — the panes sit on it as cards, so it
+   shows in the gaps between them and through glass. A layer of its own rather
+   than body's background so a see-through window can fade it without fading
+   the text. Its opacity is 1 unless the window is see-through. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-color: var(--color-bg);
+  background-image: var(--mz-backdrop, none);
+  opacity: var(--mz-window-alpha, 1);
+}
+html.see-through,
+html.see-through body {
+  background: transparent;
+}
+/* A slow drift, for backdrops that have something to move. Oversized so the
+   edges never come into view. */
+html.backdrop-motion body::before {
+  inset: -15%;
+  animation: mz-backdrop-drift 48s ease-in-out infinite alternate;
+}
+@keyframes mz-backdrop-drift {
+  0%   { transform: translate(0, 0) rotate(0deg) scale(1); }
+  50%  { transform: translate(-4%, 3%) rotate(4deg) scale(1.06); }
+  100% { transform: translate(3%, -2%) rotate(-3deg) scale(1.03); }
+}
+@media (prefers-reduced-motion: reduce) {
+  html.backdrop-motion body::before { animation: none; }
 }
 
 * {
@@ -674,118 +719,163 @@ input[type="color"]:hover { border-color: var(--color-accent); }
   [data-reveal] .mz-tok { animation: none; }
 }
 
-/* ===== Glass / transparency (optional) =====
+/* ===== Panes, glass and the see-through window (0.20) =====
  *
- * Off unless the user turns it on in Settings → Appearance. Two things happen:
- * surfaces painted with the panel/background colours become translucent, and
- * the pieces of chrome that float above everything else (sidebar, modals,
- * popovers, menus) blur what shows through them.
+ * The window is a backdrop (body::before, above) with the Trellis panes on it
+ * as cards. The workspace root paints nothing, so the backdrop — and the
+ * background effect drawn over it — shows in the gaps between the panes.
  *
- * Only the *floating* layers get `backdrop-filter`. Blurring every nested card
- * as well is expensive and reads as fog — a card inside a blurred modal already
- * sits on a blurred backdrop, so tinting it is enough.
+ * With glass or a see-through window on (`html.translucent`), the *pane* is
+ * the one glass layer: it alone is translucent and blurs what is behind it.
+ * What it holds paints nothing of its own, so every pane is exactly one
+ * translucent layer, whatever view is in it: a sidebar or a file viewer
+ * filling itself with a 50% panel colour on top read as milky beside a chat
+ * pane that did not. The glass this replaces also blurred the sidebar a
+ * second time inside its pane and
+ * stacked full-strength translucent fills three deep, with a grey film mixed
+ * in — which is what read as fog and mud. Menus and dialogs float over text
+ * rather than a soft backdrop, so they are their own, much more solid, glass.
  *
- * Selectors match the Tailwind arbitrary-value classes the app paints with, and
- * two guards keep them honest:
+ * (A pane's content lives in a separate Trellis `surface` laid over it, so
+ * "inside a pane" below means inside the panel or its surface.)
  *
- *  - The class has to start a token (`^=` or a leading space). A plain
- *    `*=` also matches `hover:bg-[var(--color-panel-hover)]`, which painted the
- *    hover background onto every button at rest — the whole UI looked hovered.
- *  - The `/` guard skips surfaces that already chose their own alpha
- *    (`bg-…/70`); those are deliberate scrims and shouldn't be doubled up.
+ * The numbers (--mz-pane-alpha, --mz-blur, …) are worked out in lib/themes.ts.
  */
+.trellis {
+  background: transparent;
+}
+
+html.translucent .trellis [data-trellis-part="panel"] {
+  background: color-mix(in srgb, var(--mz-pane-tint, var(--color-bg)) var(--mz-pane-alpha), transparent);
+}
+/* Trellis draws a view's content in a `surface` layered over its pane (a
+   sibling, not a child), filled with the pane colour. Over glass that fill
+   is a second, opaque, pane on top of the first — so the content was never
+   see-through at all. The pane underneath is the ground. */
+html.translucent .trellis [data-trellis-part="surface"] {
+  background: transparent;
+}
+html.glass-tinted {
+  --mz-pane-tint: color-mix(in srgb, var(--color-accent) 14%, var(--color-bg));
+}
+
+/* A hairline that catches the light along the top edge, instead of a solid
+   border drawn around frosted glass. */
 html.glass {
-  --glass-blur: calc(4px + var(--glass-strength, 0.5) * 22px);
-  /* Never fully transparent: text needs a ground. ~86% at the lightest
-     setting down to ~43% at the strongest. */
-  --glass-alpha: calc(88% - var(--glass-strength, 0.5) * 45%);
-  --glass-tint: var(--color-panel);
-  --glass-tint-base: var(--color-bg);
-  --glass-panel: color-mix(in srgb, var(--glass-tint) var(--glass-alpha), transparent);
-  --glass-base: color-mix(in srgb, var(--glass-tint-base) var(--glass-alpha), transparent);
-  --glass-hover: color-mix(in srgb, var(--color-panel-hover) calc(var(--glass-alpha) + 8%), transparent);
-  --glass-saturate: 1.35;
+  --mz-glass-edge:
+    0 0 0 1px color-mix(in srgb, var(--color-text) 12%, transparent),
+    inset 0 1px 0 color-mix(in srgb, white 8%, transparent);
+}
+html.glass .trellis [data-trellis-part="panel"] {
+  backdrop-filter: blur(var(--mz-blur)) saturate(var(--mz-saturate));
+  -webkit-backdrop-filter: blur(var(--mz-blur)) saturate(var(--mz-saturate));
+  box-shadow: var(--mz-glass-edge);
+}
+html.glass .trellis [data-trellis-part="panel"][data-floating] {
+  box-shadow: var(--mz-glass-edge), var(--trellis-shadow-float);
+}
+html.glass .trellis [data-trellis-part="panel"][data-lifted] {
+  box-shadow: var(--mz-glass-edge), var(--trellis-shadow-lifted);
 }
 
-/* Frosted: a milky film over a heavy blur. The film is what makes frosted read
-   as frosted — with a plain tint the blur alone is invisible over a background
-   that has no fine detail (a sparse effect, or none at all), which made this
-   indistinguishable from Clear. Mixing toward the *text* colour lightens the
-   film in dark mode and darkens it in light, which is the right direction for
-   both. */
-html.glass.glass-frosted {
-  --glass-blur: calc(8px + var(--glass-strength, 0.5) * 30px);
-  --glass-tint: color-mix(in srgb, var(--color-text) 8%, var(--color-panel));
-  --glass-tint-base: color-mix(in srgb, var(--color-text) 6%, var(--color-bg));
-  --glass-saturate: 1.2;
+/* The tab strip. Opaque, the selected tab joins the pane by sharing its fill;
+   over glass the fills would stack (pane + strip + tab) and never match, so
+   the strip is a faint veil and the selected tab a slightly stronger one. */
+html.translucent .trellis [data-trellis-part="tabbar"] {
+  background: color-mix(in srgb, var(--color-text) 3%, transparent);
+}
+html.translucent .trellis [data-trellis-part="tab"]:hover {
+  background: color-mix(in srgb, var(--color-text) 6%, transparent);
+}
+html.translucent .trellis [data-trellis-part="tab"][data-selected] {
+  background: color-mix(in srgb, var(--color-text) 9%, transparent);
+  box-shadow: none;
+}
+html.translucent .trellis [data-trellis-part="tab"][data-selected]::before,
+html.translucent .trellis [data-trellis-part="tab"][data-selected]::after {
+  display: none;
+}
+html.translucent .trellis :is([data-trellis-part="panel"], [data-trellis-part="tabbar"])[data-focused] [data-trellis-part="tab"][data-selected] {
+  background:
+    linear-gradient(var(--color-accent), var(--color-accent)) center top / 100% 2px no-repeat,
+    color-mix(in srgb, var(--color-text) 9%, transparent);
 }
 
-/* Clear: no blur, no film, and further through — the point is to see the
-   background sharply, with only enough tint to hold the text. */
-html.glass.glass-clear {
-  --glass-blur: 0px;
-  --glass-alpha: calc(80% - var(--glass-strength, 0.5) * 48%);
-  --glass-saturate: 1;
+/* The title bar is the window's frame, so it sits on the backdrop. Its colour
+   is an inline style in TitleBar.tsx, hence the !important. */
+html:is(.translucent, .backdrop) #root div[data-tauri-drag-region].h-9 {
+  background: transparent !important;
+  border-bottom-color: transparent !important;
 }
 
-/* Tinted: the accent bleeds into the glass. */
-html.glass.glass-tinted {
-  --glass-blur: calc(6px + var(--glass-strength, 0.5) * 26px);
-  --glass-tint: color-mix(in srgb, var(--color-accent) 14%, var(--color-panel));
-  --glass-tint-base: color-mix(in srgb, var(--color-accent) 10%, var(--color-bg));
-  --glass-saturate: 1.6;
+/* Surfaces the app paints itself (Tailwind `bg-[var(--color-…)]` classes).
+ * How solid they are depends on where they sit, through one inherited
+ * variable: none inside a pane (hover and selection keep a light tint, from
+ * the +15% below), solid enough to read on anywhere else
+ * — menus, dialogs, a phone's drawers.
+ *
+ * Selectors: the class has to start a token (`^=` or a leading space), or
+ * `hover:bg-[var(--color-panel-hover)]` matches and paints every button as
+ * hovered; `/…` alpha variants are skipped, being deliberate scrims. */
+html.translucent {
+  --mz-surface-alpha: var(--mz-float-alpha);
+}
+html.translucent .trellis :is([data-trellis-part="panel"], [data-trellis-part="surface"]) {
+  --mz-surface-alpha: 0%;
+}
+/* Anything laid over other content — menus, dialogs, and whatever is
+   positioned on top, like the composer floating over the messages — is
+   floating: a light tint there lets the text underneath read through. */
+html.translucent :is(.mz-overlay > *, [class*="shadow-lg"], [class*="shadow-xl"], [class*="shadow-2xl"], .absolute, .fixed, .sticky) {
+  --mz-surface-alpha: var(--mz-float-alpha);
+}
+html.translucent :is([class^="bg-[var(--color-bg)]"], [class*=" bg-[var(--color-bg)]"]):not([class*="bg-[var(--color-bg)]/"]) {
+  background-color: color-mix(in srgb, var(--color-bg) var(--mz-surface-alpha), transparent);
+}
+html.translucent :is([class^="bg-[var(--color-panel)]"], [class*=" bg-[var(--color-panel)]"]):not([class*="bg-[var(--color-panel)]/"]) {
+  background-color: color-mix(in srgb, var(--color-panel) var(--mz-surface-alpha), transparent);
+}
+html.translucent :is([class^="bg-[var(--color-panel-hover)]"], [class*=" bg-[var(--color-panel-hover)]"]):not([class*="bg-[var(--color-panel-hover)]/"]) {
+  background-color: color-mix(in srgb, var(--color-panel-hover) min(100%, var(--mz-surface-alpha) + 15%), transparent);
+}
+/* The hover state, restated: the rules above are unlayered, so they beat
+   Tailwind's `hover:` utilities and a surface would stop answering the
+   pointer. Same specificity, later, so this wins while hovered. */
+html.translucent :is([class*=" hover:bg-[var(--color-panel-hover)]"], [class^="hover:bg-[var(--color-panel-hover)]"], [class*=" hover:bg-[var(--color-panel)]"], [class^="hover:bg-[var(--color-panel)]"]):hover {
+  background-color: color-mix(in srgb, var(--color-panel-hover) min(100%, var(--mz-surface-alpha) + 15%), transparent);
 }
 
-html.glass :is([class^="bg-[var(--color-panel)]"], [class*=" bg-[var(--color-panel)]"]):not([class*="bg-[var(--color-panel)]/"]) {
-  background-color: var(--glass-panel);
+/* Menus and dialogs: blurred, so the text they cover does not read through. */
+html.translucent .trellis .trellis-menu {
+  background: color-mix(in srgb, var(--color-panel) var(--mz-float-alpha), transparent);
 }
-html.glass :is([class^="bg-[var(--color-bg)]"], [class*=" bg-[var(--color-bg)]"]):not([class*="bg-[var(--color-bg)]/"]) {
-  background-color: var(--glass-base);
-}
-html.glass :is([class^="bg-[var(--color-panel-hover)]"], [class*=" bg-[var(--color-panel-hover)]"]):not([class*="bg-[var(--color-panel-hover)]/"]) {
-  background-color: var(--glass-hover);
-}
-
-/* The hover state itself, restated: the rules above are specific enough to beat
-   Tailwind's `hover:` utilities, so without this a glass surface would stop
-   responding to the pointer entirely. Hover sits a notch more opaque than rest,
-   which is what makes it read as a highlight through glass. */
-html.glass :is([class*=" hover:bg-[var(--color-panel-hover)]"], [class^="hover:bg-[var(--color-panel-hover)]"]):hover,
-html.glass :is([class*=" hover:bg-[var(--color-panel)]"], [class^="hover:bg-[var(--color-panel)]"]):hover {
-  background-color: var(--glass-hover);
+html.glass :is(.mz-overlay > *, [class*="shadow-lg"], [class*="shadow-xl"], [class*="shadow-2xl"]):is([class*="bg-[var(--color-panel)]"], [class*="bg-[var(--color-bg)]"]),
+html.glass .trellis .trellis-menu {
+  backdrop-filter: blur(max(var(--mz-blur), 12px)) saturate(var(--mz-saturate));
+  -webkit-backdrop-filter: blur(max(var(--mz-blur), 12px)) saturate(var(--mz-saturate));
 }
 
-/* The floating layers, which are the ones that do the blurring. */
-html.glass aside,
-html.glass .mz-overlay > *,
-html.glass [class*="shadow-lg"],
-html.glass [class*="shadow-xl"],
-html.glass [class*="shadow-2xl"] {
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-}
-
-/* A modal backdrop that blurs instead of dimming — with a translucent dialog on
-   top, the flat 60% scrim was the only opaque thing left on screen. */
+/* A modal backdrop that blurs a little instead of only dimming. */
 html.glass .mz-overlay {
-  background-color: color-mix(in srgb, black calc(20% + var(--glass-strength, 0.5) * 20%), transparent);
-  backdrop-filter: blur(calc(var(--glass-blur) * 0.5));
-  -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 0.5));
+  background-color: color-mix(in srgb, black 35%, transparent);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
 
 /* Settings' shared text field keeps a near-solid ground: a translucent input on
    a translucent panel over an animated background is not a field you can read.
    Fields that draw no background of their own (the composer) are left alone —
    they read against whatever frame holds them. */
-html.glass .input {
+html.translucent .input {
   background-color: color-mix(in srgb, var(--color-panel) 88%, transparent);
 }
 
-/* Blur is a per-frame full-surface repaint; when the user has asked for less
-   motion, keep the translucency and drop the expensive part. */
+/* Blur over an animated background is a per-frame repaint of every pane; when
+   the user has asked for less motion, keep the glass and lighten the blur. */
 @media (prefers-reduced-motion: reduce) {
-  html.glass {
-    --glass-blur: calc(2px + var(--glass-strength, 0.5) * 6px);
+  html.glass .trellis [data-trellis-part="panel"] {
+    backdrop-filter: blur(6px) saturate(var(--mz-saturate));
+    -webkit-backdrop-filter: blur(6px) saturate(var(--mz-saturate));
   }
 }
 

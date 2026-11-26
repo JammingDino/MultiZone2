@@ -15,8 +15,9 @@ import { ZoneForm } from "./ZoneForm";
 import { InstalledZones, useZoneActions } from "./InstalledZones";
 import { CHROME_QUIET, PRIMARY_ACTION } from "@/lib/chrome";
 import { NavItem } from "@/components/common/NavRail";
+import { ClaudeImportPanel } from "@/components/Settings/ClaudeImportPanel";
 
-type View = "library" | "detail" | "editor";
+type View = "library" | "detail" | "editor" | "claude";
 
 function toolLabel(id: string): string {
   return ALL_TOOLS.find((t) => t.id === id)?.label ?? id;
@@ -369,6 +370,12 @@ export function ZoneLibrary({ rail }: { rail: (items: React.ReactNode) => React.
                 label="New zone"
                 onClick={() => openEditor(null)}
               />
+              <NavItem
+                active={view === "claude"}
+                icon={<Download size={14} />}
+                label="From Claude Code"
+                onClick={() => setView("claude")}
+              />
               <InstalledZones
                 compact
                 actions={zoneActions}
@@ -384,6 +391,8 @@ export function ZoneLibrary({ rail }: { rail: (items: React.ReactNode) => React.
               <div className="flex flex-1 items-center justify-center text-[var(--color-text-muted)]">
                 <Loader2 size={18} className="animate-spin" />
               </div>
+            ) : view === "claude" ? (
+              <ClaudeImportPanel onDone={showLibrary} onCancel={showLibrary} />
             ) : view === "editor" ? (
               <EditorView
                 zone={editorZone}

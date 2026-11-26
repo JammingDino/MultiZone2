@@ -226,6 +226,7 @@ export const GUI_ONLY: Record<string, string> = {
   resolve_pdf_read: "answers a request the backend made *of the window*: it hands back page text the webview rasterized, so there is nobody on the other end of it remotely",
   reveal_path: "shows a path in this machine's file manager",
   save_pdf_attachment: "same, for a PDF the window has rasterized",
+  scan_claude_code: "reads Claude Code's files in this machine's home folder for a one-off import, credentials included; a paired device has no reason to",
   start_dictation: "captures from this machine's microphone",
   stop_dictation: "ends a capture that only the window could have started",
   summarize_for_speech: "condenses an answer for the window's player",

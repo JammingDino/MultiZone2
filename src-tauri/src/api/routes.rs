@@ -504,6 +504,7 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
         "answers a request the backend made *of the window*: it hands back page text the webview rasterized, so there is nobody on the other end of it remotely",
     )),
     ("launch::take_pending_launch", GuiOnly("hands the desktop window the path this machine launched it on")),
+    ("claude_import::scan_claude_code", GuiOnly("reads Claude Code's files in this machine's home folder for a one-off import, credentials included; a paired device has no reason to")),
     ("files::open_path", GuiOnly("opens a path in this machine's shell — nothing a remote caller can observe")),
     ("files::reveal_path", GuiOnly("shows a path in this machine's file manager")),
     ("files::read_output_file", GuiOnly("feeds the in-window report preview; the file tools read files for callers")),

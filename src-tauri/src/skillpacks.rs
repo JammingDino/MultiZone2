@@ -295,7 +295,7 @@ fn read_head(path: &Path, max: usize) -> Option<String> {
 /// format uses, ignoring the harness-specific keys (`allowed-tools:`,
 /// `argument-hint:`, …) that mean nothing here. Mirrors `parseSkill` in
 /// src/lib/skillFile.ts.
-fn parse_frontmatter(raw: &str, fallback_name: &str) -> (String, String, String) {
+pub(crate) fn parse_frontmatter(raw: &str, fallback_name: &str) -> (String, String, String) {
     let text = raw.strip_prefix('\u{feff}').unwrap_or(raw);
     let rest = match text.strip_prefix("---\n").or_else(|| text.strip_prefix("---\r\n")) {
         Some(r) => r,

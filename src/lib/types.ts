@@ -1593,6 +1593,29 @@ export type ToolSafety = 0 | 1 | 2;
  * (`file_system`) can expose several functions (`read`, `edit`, …), and
  * a per-zone description override is keyed by function name.
  */
+/** What is set up for Claude Code on this machine (0.20.0) — `claude_import.rs`. */
+export interface ClaudeCodeSetup {
+  agents: {
+    name: string;
+    description: string;
+    prompt: string;
+    tools: string[];
+    readOnly: boolean;
+    model: string;
+    path: string;
+  }[];
+  mcpServers: {
+    name: string;
+    transport: string;
+    command: string | null;
+    url: string | null;
+    /** JSON objects; may hold credentials, so only their keys are ever shown. */
+    env: string | null;
+    headers: string | null;
+    scope: string;
+  }[];
+}
+
 /** A zone's built-in toolset in one pick (0.20.0) — Rust's `tools::presets`.
  *  Never touches MCP tools. `readOnly` goes on the zone's tool config. */
 export interface ToolPreset {

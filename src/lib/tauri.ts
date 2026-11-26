@@ -76,6 +76,7 @@ import type {
   Tag,
   ToolFunctionInfo,
   ToolPreset,
+  ClaudeCodeSetup,
   ToolUsage,
   VoiceInputDevice,
   Zone,
@@ -315,6 +316,7 @@ export const deleteTag = (id: string) => invoke<void>("delete_tag", { id });
  */
 export const listToolFunctions = () => invoke<ToolFunctionInfo[]>("list_tool_functions");
 export const listToolPresets = () => invoke<ToolPreset[]>("list_tool_presets");
+export const scanClaudeCode = () => invoke<ClaudeCodeSetup>("scan_claude_code");
 
 /** Per-zone tool call counters (0.9.3). Omit `zoneId` for every zone. */
 export const getToolUsage = (zoneId?: string) =>

@@ -8,6 +8,7 @@ import { PRIMARY_ACTION } from "@/lib/chrome";
 import { ErrorNote } from "@/components/common/ErrorNote";
 import { reportError } from "@/lib/reportError";
 import { SettingSelect } from "../controls";
+import { ClaudeImportPanel } from "@/components/Settings/ClaudeImportPanel";
 
 const DANGER_META: Record<number, { label: string; cls: string }> = {
   0: { label: "Safe",      cls: "border-green-600/40  bg-green-600/10  text-green-500" },
@@ -36,6 +37,7 @@ export function McpTab() {
   const refreshMcpServers = useApp((s) => s.refreshMcpServers);
   const [editing, setEditing] = useState<McpServerView | "new" | null>(null);
   const [browsing, setBrowsing] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [errorById, setErrorById] = useState<Record<string, string>>({});
   const [diagById, setDiagById] = useState<Record<string, McpDiagnosis>>({});
@@ -106,6 +108,10 @@ export function McpTab() {
     );
   }
 
+  if (importing) {
+    return <ClaudeImportPanel onDone={() => setImporting(false)} onCancel={() => setImporting(false)} />;
+  }
+
   if (browsing) {
     return (
       <ConnectorCatalogPanel
@@ -134,6 +140,12 @@ export function McpTab() {
           className="flex items-center gap-1.5 rounded border border-dashed border-[var(--color-border)] px-3 py-1.5 text-xs transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
         >
           <Plus size={12} /> Add manually
+        </button>
+        <button
+          onClick={() => setImporting(true)}
+          className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-3 py-1.5 text-xs transition hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+        >
+          <Download size={12} /> From Claude Code
         </button>
       </div>
 

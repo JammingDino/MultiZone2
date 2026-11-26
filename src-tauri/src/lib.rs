@@ -24,6 +24,8 @@ mod checks;
 #[cfg(desktop)]
 mod db;
 #[cfg(desktop)]
+mod claude_import;
+#[cfg(desktop)]
 mod diffs;
 #[cfg(desktop)]
 mod dropbridge;
@@ -466,6 +468,7 @@ pub fn run() {
             commands::workspace::stat_path,
             commands::workspace::path_context,
             launch::take_pending_launch,
+            claude_import::scan_claude_code,
             commands::workspace::list_dir,
             commands::workspace::read_workspace_file,
             commands::workspace::write_workspace_file,

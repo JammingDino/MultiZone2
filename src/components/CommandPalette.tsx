@@ -18,6 +18,10 @@ import { useBackDismiss } from "@/lib/useBackDismiss";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import * as api from "@/lib/tauri";
 import { useZoneModel } from "@/lib/useZoneModel";
+import { TABS } from "@/components/Workspace/WorkspacePanel";
+
+const NAMES: Record<string, string> = { chat: "This chat", terminals: "Terminals", context: "Context" };
+const WORKSPACE_TABS = TABS.map((t) => ({ ...t, name: NAMES[t.id] ?? t.label }));
 
 /**
  * Command palette (0.15.1).
@@ -132,6 +136,11 @@ export function CommandPalette() {
       { id: "act:projects", label: "Manage projects", group: "Actions", icon: <FolderKanban size={14} />, run: go(() => s.openProjectsPanel()) },
       { id: "act:sidebar", label: "Show / hide the sidebar", group: "Actions", icon: <PanelLeft size={14} />, run: go(s.toggleSidebar) },
       { id: "act:keys", label: "Keyboard shortcuts", group: "Actions", icon: <Keyboard size={14} />, run: go(s.openShortcutsHelp) },
+      // Brings a closed workspace tab back, or forward if it is behind another.
+      ...WORKSPACE_TABS.filter((t) => t.id !== "study").map((t) => ({
+        id: `act:show:${t.id}`, label: `Show ${t.name}`, detail: t.title, group: "Actions", icon: t.icon,
+        run: go(() => s.focusWorkspace(t.id)),
+      })),
     );
 
     // Chats, most-recent first. Sub-agents and branches are included — they are

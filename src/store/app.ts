@@ -2398,9 +2398,11 @@ export const useApp = create<AppStore>((set, get) => ({
   },
   resetPanels: () => {
     get().updateTabLayout((l) => {
-      const sections = allGroups(l).flatMap((g) => g.tabs).filter((t) => sectionOf(t) !== null);
+      // Closed default tabs come back too: reset is the way out of any layout.
+      const open = allGroups(l).flatMap((g) => g.tabs).filter((t) => sectionOf(t) !== null);
+      const sections = [...open, ...DEFAULT_SECTIONS.map(sectionTab).filter((t) => !open.includes(t))];
       const base = closeWhere(l, isPanelTab);
-      return dockPanel(dockPanel(base, [SIDEBAR_TAB], "left", 0.2), sections.length ? sections : DEFAULT_SECTIONS.map(sectionTab), "right", 0.26);
+      return dockPanel(dockPanel(base, [SIDEBAR_TAB], "left", 0.2), sections, "right", 0.26);
     });
   },
   setWorkspaceOpen: (open) => {

@@ -9,7 +9,7 @@ import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { iconFor } from "@/components/Workspace/FilesPanel";
 import {
-  HOME_TAB, SIDEBAR_TAB, allGroups, chatOf, closeWhere, dockPanel, focusGroup, focusedGroup, groupOf,
+  DEFAULT_SECTIONS, HOME_TAB, SIDEBAR_TAB, allGroups, chatOf, closeTab, closeWhere, dockPanel, sectionTab, focusGroup, focusedGroup, groupOf,
   isPanelTab, moveTab, sectionOf, studyOf, type DropZone, type Section, type TabLayout,
 } from "@/lib/tabLayout";
 import { fromDocument, toDocument } from "@/lib/trellisLayout";
@@ -303,10 +303,29 @@ function fileMenu(view: { id: string }): MenuEntry[] {
   ];
 }
 
+// A closed workspace tab comes back from here, ticked ones close: without it,
+// the only way back to one was closing the whole group and reopening it.
+function sectionMenu(): MenuEntry[] {
+  const s = useApp.getState();
+  const open = new Set(allGroups(s.tabLayout).flatMap((g) => g.tabs));
+  // Study only belongs to study projects; it is listed once it is open.
+  const shown = open.has(sectionTab("study")) ? [...DEFAULT_SECTIONS, "study" as const] : DEFAULT_SECTIONS;
+  return [
+    ...shown.map((section): MenuEntry => {
+      const tab = sectionTab(section);
+      return open.has(tab)
+        ? { label: SECTION_NAMES[section], checked: true, run: () => s.updateTabLayout((l) => closeTab(l, tab)) }
+        : { label: SECTION_NAMES[section], checked: false, run: () => s.focusWorkspace(section) };
+    }),
+    "separator",
+  ];
+}
+
 const MENUS: Partial<Record<string, MenuEntry[] | ((view: { id: string }) => MenuEntry[])>> = {
   sidebar: SIDEBAR_MENU,
   chat: chatMenu,
   file: fileMenu,
+  section: sectionMenu,
 };
 
 const DIRS: Record<string, "left" | "right" | "top" | "bottom"> = {

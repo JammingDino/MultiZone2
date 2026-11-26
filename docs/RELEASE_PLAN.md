@@ -406,10 +406,13 @@ Adding a provider in Claude Code is one step and then you work. Here it was the 
 
 - [x] Skill packs under the home folder's harness folders (`~/.claude/skills`, `~/.agents/skills`, …) are found without adding a folder in Settings — on this machine, 24 packs and ~2K tokens of catalog for a zone with `load_skill`; each still switchable off
 - [ ] The chat's project folder as a skill root — needs the catalog built per chat rather than once for the app, or one project's skills reach every chat
-- [ ] A zone can leave its model unset and follow the chat: the composer's pick, else the base zone's. Starter zones are seeded that way, so a new provider needs no new zones
-- [ ] Tool presets in the zone editor — *Read-only*, *Research*, *Code*, *Everything* — one click instead of a column of checkboxes. MCP servers and their tools stay a checklist under the presets; a preset never decides which MCP tools a zone gets
-- [ ] `spawn_subagent` takes a one-off spec instead of a zone — a preset or a tool list, optionally a model and instructions — narrowed to the tools the caller itself has, so a leader can make the helper it needs without anyone configuring one first
-- [ ] Import from Claude Code: `~/.claude/agents/*.md` (name, description, tools, model in frontmatter) become zones, and MCP servers from `~/.claude.json` and a project's `.mcp.json` become MCP entries, both shown before anything is written
+- [x] A zone can leave its model unset and follow the chat: the base zone's provider and model, else the first provider's default (`resolve_zone_model`, mirrored by `resolveZoneRun`). New zones and library installs are created that way, so a new provider needs no new zones; the editor's provider list starts with *Follow the chat* and shows what it resolves to. A zone whose provider was deleted now follows the chat instead of failing
+- [ ] Existing zones still pin their provider — a one-click "make these follow the chat" for an install that predates 0.20
+- [x] Tool presets in the zone editor — *Read-only*, *Research*, *Code*, *Everything* (`tools/presets.rs`, served by `list_tool_presets`). MCP tools stay a checklist; a preset never touches them, and a leader keeps its delegation tools. *Read-only* is a `read_only` flag on the tool config: plan mode's allowlist plus drawing, withheld from the request and refused in the executor
+- [x] `spawn_subagent` takes `agent: {name, preset | tools, instructions?, model?}` instead of a zone. The subchat keeps its caller's zone row and the spec (migration 054) is laid over it wherever the chat's zone resolves; tools are narrowed to the caller's, and a read-only caller only makes read-only helpers
+- [x] Import from Claude Code (Zone Library → *From Claude Code*, and Settings → MCP): `~/.claude/agents/*.md` become zones with mapped tools, and user- and project-scope MCP servers from `~/.claude.json` become MCP entries, shown and ticked before anything is written; env and header values are imported but only their keys shown
+- [ ] A project's own `.mcp.json` and `.claude/agents/` — the scan reads the home folder only
+- [ ] Seen in the app: add a second provider and use an existing installed zone on it with no edits; pick *Read-only* and watch a write get refused; a leader spawning a read-only helper; the import on this machine (4 user MCP servers, no agents)
 
 ### 0.20.1 — Commands anywhere in a prompt
 

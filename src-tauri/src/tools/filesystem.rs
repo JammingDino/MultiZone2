@@ -390,7 +390,10 @@ pub fn present_file_definitions(_project_dir: Option<&str>) -> Vec<Tool> {
                  file's contents into your reply. It opens in the workspace panel beside the chat: \
                  `.html` as a live page with its scripts and animations running, `.md` rendered, \
                  anything else as text in a small editor. The chat also gets a card that opens it \
-                 in its default app."
+                 in its default app. `show` picks where: `tab` (default) beside what is open, \
+                 `beside` in a pane of its own next to the chat, or `window` floating over \
+                 whatever the user is looking at — only for something that needs them now, such \
+                 as a decision to make or the result they are waiting on."
             ),
             parameters: json!({
                 "type": "object",
@@ -400,6 +403,11 @@ pub fn present_file_definitions(_project_dir: Option<&str>) -> Vec<Tool> {
                         "type": "string",
                         "enum": ["html", "md", "csv", "json", "txt"],
                         "description": "Override the presentation; inferred from the extension when omitted."
+                    },
+                    "show": {
+                        "type": "string",
+                        "enum": ["tab", "beside", "window"],
+                        "description": "Where it opens. Default `tab`."
                     }
                 },
                 "required": ["path"]
@@ -1271,6 +1279,12 @@ pub async fn present_file(args: &Value, project_dir: Option<&str>) -> AppResult<
                 .unwrap_or_default()
         });
     let format = if format == "htm" { "html".to_string() } else { format };
+    // Anything but the two other places is a tab: a model's guess at a value
+    // should still show the file.
+    let show = match args.get("show").and_then(|v| v.as_str()) {
+        Some(s @ ("beside" | "window")) => s,
+        _ => "tab",
+    };
 
     Ok(json!({
         "rendered": "present_file",
@@ -1278,6 +1292,7 @@ pub async fn present_file(args: &Value, project_dir: Option<&str>) -> AppResult<
         "path": p.to_string_lossy(),
         "filename": p.file_name().map(|f| f.to_string_lossy().to_string()),
         "format": format,
+        "show": show,
     })
     .to_string())
 }
@@ -2181,6 +2196,21 @@ mod tests {
     impl Drop for Sandbox {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[tokio::test]
+    async fn present_file_says_where_to_show_it() {
+        let sb = Sandbox::new("present");
+        sb.write("r.html", "<p>hi</p>");
+        let dir = sb.dir().unwrap().to_string();
+        for (asked, shown) in [(Some("window"), "window"), (Some("beside"), "beside"), (Some("popup"), "tab"), (None, "tab")] {
+            let mut args = json!({ "path": format!("{dir}/r.html") });
+            if let Some(a) = asked {
+                args["show"] = json!(a);
+            }
+            let out: Value = serde_json::from_str(&present_file(&args, Some(&dir)).await.unwrap()).unwrap();
+            assert_eq!(out["show"], shown, "asked for {asked:?}");
         }
     }
 

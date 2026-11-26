@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import {
   HOME_TAB, chatTab, initialLayout, openTab, closeTab, closeWhere, moveTab, navigate,
   groups, groupOf, isShowing, parseLayout,
-  openBeside, studySetTab, studyReviewTab, studyOf, isFileTab, isAuxTab,
+  openBeside, studySetTab, studyReviewTab, studyOf, isFileTab, isAuxTab, floatTab,
 } from "../src/lib/tabLayout.ts";
 
 const shape = (n) => (n.kind === "group" ? n.tabs : { [n.dir]: n.children.map(shape) });
@@ -146,4 +146,19 @@ test("a floating window counts as open, takes tabs, and closes like any group", 
   l = closeWhere(l, (t) => t === B || t === "/f");
   assert.equal(l.floating, undefined);
   assert.deepEqual(shape(l.root), { row: [[A], [C]] });
+});
+
+test("floating a tab lifts it out, opens it, or brings its window forward", () => {
+  let l = openTab(navigate(initialLayout(), A), "/r.html");
+  l = floatTab(l, "/r.html");
+  assert.deepEqual(shape(l.root), [A]);
+  assert.deepEqual(l.floating.map((f) => f.group.tabs), [["/r.html"]]);
+  assert.equal(l.focused, l.floating[0].group.id);
+  l = floatTab(l, "/new.md");
+  assert.equal(l.floating.length, 2);
+  const z = l.floating[1].z;
+  l = floatTab(l, "/r.html");
+  assert.equal(l.floating.length, 2);
+  assert.ok(l.floating[0].z > z);
+  assert.ok(parseLayout(JSON.parse(JSON.stringify(l))));
 });

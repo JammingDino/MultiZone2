@@ -12,7 +12,7 @@ import { normalizeApprovals } from "@/lib/approvals";
 import type { PendingAttachment } from "@/lib/attachFiles";
 import { errorText } from "@/lib/errors";
 import {
-  HOME_TAB, chatOf, chatTab, closeTab, closeWhere, focusedGroup, initialLayout, isAuxTab, navigate, openBeside, openTab,
+  HOME_TAB, chatOf, chatTab, closeTab, closeWhere, floatTab, focusedGroup, initialLayout, isAuxTab, navigate, openBeside, openTab,
   parseLayout, type TabLayout,
 } from "@/lib/tabLayout";
 
@@ -1397,13 +1397,21 @@ export const useApp = create<AppStore>((set, get) => ({
         if (ended) say(preview ? `${ended.title} · ${where}` : ended.title, ended.body);
       }
     }
-    // A file the model presents opens in the workspace panel's viewer (0.17.9)
-    // — but only for the chat on screen. A sub-agent presenting a report in
-    // another tab should not swap the file the user is reading.
-    if (event.type === "tool_call_result" && event.name === "present_file" && chatId === get().activeChatId) {
+    // A file the model presents opens as a tab (0.17.9) — but only for the
+    // chat on screen: a sub-agent presenting a report in another tab should
+    // not swap the file the user is reading. A file shown as a `window` is
+    // the exception (0.21.0): the model is saying it needs the user now, so it
+    // floats over whatever is on screen, from any chat.
+    if (event.type === "tool_call_result" && event.name === "present_file") {
       try {
-        const parsed = JSON.parse(event.result) as { ok?: boolean; path?: string };
-        if (parsed.ok && typeof parsed.path === "string") get().openWorkspaceFile(parsed.path);
+        const parsed = JSON.parse(event.result) as { ok?: boolean; path?: string; show?: string };
+        if (parsed.ok && typeof parsed.path === "string") {
+          const path = parsed.path;
+          if (parsed.show === "window") get().updateTabLayout((l) => floatTab(l, path));
+          else if (chatId !== get().activeChatId) { /* not on screen */ }
+          else if (parsed.show === "beside") get().updateTabLayout((l) => navigate(l, path, "right"));
+          else get().openWorkspaceFile(path);
+        }
       } catch {
         /* an error result is not a file */
       }

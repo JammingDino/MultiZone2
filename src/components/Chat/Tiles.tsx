@@ -156,7 +156,7 @@ export function Tiles({ renderTab }: { renderTab: (tab: string) => ReactNode }) 
         }}
       >
         {kinds.map((k) => (
-          <ViewType key={k} id={k} title={(v) => nameOf(v.id, useApp.getState())} icon={<TabIcon />} tabbar="auto">
+          <ViewType key={k} id={k} title={(v) => nameOf(v.id, useApp.getState())} icon={<TabIcon />}>
             <Tile render={renderTab} />
           </ViewType>
         ))}

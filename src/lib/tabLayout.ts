@@ -287,3 +287,24 @@ export function openBeside(layout: TabLayout, tab: string): TabLayout {
   }
   return navigate(layout, tab, "right");
 }
+
+/**
+ * Put a tab in a floating window over the tiles (0.21.0) — something that
+ * needs the user now. Already floating: brought forward. Open in a tiled
+ * group: lifted out of it. Not open: opened in the window.
+ */
+export function floatTab(layout: TabLayout, tab: string, rect: Rect = { x: 0.52, y: 0.08, w: 0.44, h: 0.62 }): TabLayout {
+  const floats = layout.floating ?? [];
+  const z = Math.max(0, ...floats.map((f) => f.z)) + 1;
+  const there = floats.find((f) => f.group.tabs.includes(tab));
+  if (there) {
+    return {
+      ...layout,
+      focused: there.group.id,
+      floating: floats.map((f) => (f === there ? { ...f, z, group: { ...f.group, active: tab } } : f)),
+    };
+  }
+  const rest = groupOf(layout, tab) ? without(layout, tab) : layout;
+  const g = group([tab]);
+  return { ...rest, focused: g.id, floating: [...(rest.floating ?? []), { group: g, rect, z, layer: "overlay" }] };
+}

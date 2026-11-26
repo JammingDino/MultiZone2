@@ -6,7 +6,7 @@ import * as api from "@/lib/tauri";
 import { MessageThread } from "./MessageThread";
 import { FileViewer } from "@/components/Workspace/FileViewer";
 import { Tiles } from "./Tiles";
-import { chatOf, chatTab, isFileTab, isShowing, isStudyTab } from "@/lib/tabLayout";
+import { chatOf, chatTab, floatTab, focusGroup, isFileTab, isShowing, isStudyTab, navigate } from "@/lib/tabLayout";
 import { StudyTab } from "@/components/Study/StudyTab";
 import { PaneChat } from "@/lib/paneChat";
 import { InputBar, type InputBarHandle } from "./InputBar";
@@ -84,6 +84,7 @@ export function ChatPanel() {
     let unlistenZone: (() => void) | undefined;
     let unlistenChats: (() => void) | undefined;
     let unlistenFileSync: (() => void) | undefined;
+    let unlistenShow: (() => void) | undefined;
     // Stream events arrive one per token, and applying each on arrival meant a
     // store write and a React pass per token — with two zones answering at once
     // the app spent its whole frame budget re-rendering and visibly stuttered.
@@ -140,6 +141,21 @@ export function ChatPanel() {
       if (cancelled) u();
       else unlistenChats = u;
     });
+    api.onShowChat(({ chatId, fromChatId, show }) => {
+      // A sub-agent the model wants watched (0.21.0). Beside only next to the
+      // chat that started it, if that is on screen; a window over anything.
+      const s = useApp.getState();
+      const keep = s.tabLayout.focused;
+      if (show === "beside" && !isShowing(s.tabLayout, chatTab(fromChatId))) return;
+      s.updateTabLayout((l) => {
+        const next = show === "window" ? floatTab(l, chatTab(chatId)) : navigate(l, chatTab(chatId), "right");
+        // The user's own chat keeps the composer and the workspace panel.
+        return focusGroup(next, keep);
+      });
+    }).then((u) => {
+      if (cancelled) u();
+      else unlistenShow = u;
+    });
     api.onChatFileSynced(({ chatId }) => {
       // An external edit to a mirrored `.md` was synced into the DB (0.7.2) —
       // refresh the sidebar (title) and reload this chat's messages.
@@ -161,6 +177,7 @@ export function ChatPanel() {
       unlistenZone?.();
       unlistenChats?.();
       unlistenFileSync?.();
+      unlistenShow?.();
     };
     // Deliberately empty — see actionsRef comment above.
     // eslint-disable-next-line react-hooks/exhaustive-deps

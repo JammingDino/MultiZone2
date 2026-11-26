@@ -169,6 +169,11 @@ fn spawn_definition() -> Tool {
                     "background": {
                         "type": "boolean",
                         "description": "Return the subchat id at once and run the subagent in the background instead of waiting for its reply. Default false."
+                    },
+                    "show": {
+                        "type": "string",
+                        "enum": ["none", "beside", "window"],
+                        "description": "Let the user watch the subagent work: 'beside' opens its chat in a pane next to yours, 'window' floats it over the screen. Default 'none' — it is still in the sidebar under this chat."
                     }
                 },
                 "required": ["initial_message"]
@@ -363,6 +368,10 @@ pub async fn spawn(
 
     // Tell any open GUI a new chat exists so the sidebar shows the subchat live.
     sink.notify_chats_changed();
+    // And open it, when asked, before it starts — the point is watching it work.
+    if let Some(show @ ("beside" | "window")) = args.get("show").and_then(|v| v.as_str()) {
+        sink.show_chat(&subchat_id, parent_chat_id, show);
+    }
 
     let parts = build_parts(&ctx.db, parent_chat_id, &initial_message, context_mode).await?;
 

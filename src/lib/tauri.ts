@@ -900,6 +900,10 @@ export function onSchedulesChanged(handler: () => void): Promise<UnlistenFn> {
 export function onChatsChanged(handler: () => void): Promise<UnlistenFn> {
   return listen("chats-changed", () => handler());
 }
+/** A model asked for a chat (a sub-agent it started) to be shown beside the one it came from, or in a window (0.21.0). */
+export function onShowChat(handler: (e: { chatId: string; fromChatId: string; show: "beside" | "window" }) => void): Promise<UnlistenFn> {
+  return listen<{ chatId: string; fromChatId: string; show: "beside" | "window" }>("show-chat", (e) => handler(e.payload));
+}
 /** Emitted after an external edit to a mirrored `.md` was synced into the DB (0.7.2). */
 export function onChatFileSynced(
   handler: (e: { chatId: string }) => void,

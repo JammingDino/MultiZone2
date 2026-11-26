@@ -444,6 +444,12 @@ impl StreamSink {
     pub fn notify_chats_changed(&self) {
         self.emit_event("chats-changed", serde_json::json!({}));
     }
+
+    /// Ask an open GUI to show a chat — a sub-agent the model wants the user
+    /// to watch (0.21.0). `show` is "beside" or "window". GUI-only; no SSE.
+    pub fn show_chat(&self, chat_id: &str, from_chat_id: &str, show: &str) {
+        self.emit_event("show-chat", serde_json::json!({ "chatId": chat_id, "fromChatId": from_chat_id, "show": show }));
+    }
 }
 
 #[tauri::command]

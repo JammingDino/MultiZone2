@@ -30,7 +30,20 @@ export function studyOf(tab: string): { kind: "set" | "review"; id: string } | n
   const m = /^study:(set|review):(.+)$/.exec(tab);
   return m ? { kind: m[1] as "set" | "review", id: m[2] } : null;
 }
-export const isFileTab = (tab: string) => tab !== HOME_TAB && !tab.startsWith("chat:") && !isStudyTab(tab);
+/**
+ * The app's own panels as tabs (0.21.0): the sidebar, and each section of the
+ * workspace panel. They dock, stack, float and close like any tab, but they
+ * belong to no chat — a pane holding only these is never where a chat or a
+ * file opens.
+ */
+export const SIDEBAR_TAB = "@sidebar";
+export type Section = "chat" | "plan" | "study" | "terminals" | "files" | "context";
+/** The sections the workspace opens with; Study joins when it is asked for. */
+export const DEFAULT_SECTIONS: Section[] = ["files", "plan", "chat", "terminals", "context"];
+export const sectionTab = (s: Section) => `@ws:${s}`;
+export const sectionOf = (tab: string): Section | null => (tab.startsWith("@ws:") ? (tab.slice(4) as Section) : null);
+export const isPanelTab = (tab: string) => tab === SIDEBAR_TAB || tab.startsWith("@ws:");
+export const isFileTab = (tab: string) => tab !== HOME_TAB && !tab.startsWith("chat:") && !isStudyTab(tab) && !isPanelTab(tab);
 /**
  * A tab that is not a chat but belongs to one — a file, a study set. Bringing
  * it forward keeps the chat it was opened from as the active one, so the
@@ -78,15 +91,18 @@ export function isShowing(layout: TabLayout | undefined, tab: string): boolean {
   return !!layout && allGroups(layout).some((g) => g.active === tab);
 }
 
+/** A group a chat or a file may open in: anything but a pane of panels. */
+const holdsContent = (g: TabGroup) => g.tabs.length === 0 || g.tabs.some((t) => !isPanelTab(t));
+
 export function focusedGroup(layout: TabLayout): TabGroup {
   const all = allGroups(layout);
-  return all.find((g) => g.id === layout.focused) ?? all[0];
+  return all.find((g) => g.id === layout.focused && holdsContent(g)) ?? all.find(holdsContent) ?? all[0];
 }
 
 /** The focused group if it is tiled, else the first tiled one: what a split splits. */
 function tiledFocus(layout: TabLayout): TabGroup {
   const tiled = groups(layout.root);
-  return tiled.find((g) => g.id === layout.focused) ?? tiled[0];
+  return tiled.find((g) => g.id === layout.focused && holdsContent(g)) ?? tiled.find(holdsContent) ?? tiled[0];
 }
 
 /**
@@ -126,7 +142,7 @@ function withGroups(layout: TabLayout, fn: (g: TabGroup) => TabNode | null, focu
   const next: TabLayout = { root, focused };
   if (floating.length) next.floating = floating;
   const all = allGroups(next);
-  if (!all.some((g) => g.id === focused)) next.focused = all[0].id;
+  if (!all.some((g) => g.id === focused)) next.focused = (all.find(holdsContent) ?? all[0]).id;
   return next;
 }
 
@@ -308,3 +324,83 @@ export function floatTab(layout: TabLayout, tab: string, rect: Rect = { x: 0.52,
   const g = group([tab]);
   return { ...rest, focused: g.id, floating: [...(rest.floating ?? []), { group: g, rect, z, layer: "overlay" }] };
 }
+
+/**
+ * Dock tabs as one new pane along the left or right edge of the whole window
+ * (0.21.0), taking `share` of its width — where the sidebar and the workspace
+ * open. Tabs already open somewhere stay where the user put them.
+ */
+export function dockPanel(layout: TabLayout, tabs: string[], edge: "left" | "right", share: number): TabLayout {
+  const add = tabs.filter((t) => !groupOf(layout, t));
+  if (add.length === 0) return layout;
+  const g = group(add);
+  const r = layout.root;
+  const [children, sizes]: [TabNode[], number[]] =
+    r.kind === "split" && r.dir === "row" ? [r.children, r.sizes.map((s) => s * (1 - share))] : [[r], [1 - share]];
+  const root: TabNode = {
+    kind: "split",
+    id: r.kind === "split" && r.dir === "row" ? r.id : uid(),
+    dir: "row",
+    children: edge === "left" ? [g, ...children] : [...children, g],
+    sizes: edge === "left" ? [share, ...sizes] : [...sizes, share],
+  };
+  return { ...layout, root };
+}
+
+/**
+ * Bring a tab forward in its group without moving focus to it — a workspace
+ * section asked for while the user is typing in a chat.
+ */
+export function reveal(layout: TabLayout, tab: string): TabLayout {
+  const home = groupOf(layout, tab);
+  return home ? withGroups(layout, (g) => (g.id === home.id ? { ...g, active: tab } : g)) : layout;
+}
+
+/**
+ * Show a workspace section (0.21.0): brought forward where it is; else added
+ * to the pane already holding sections; else the workspace docks on the right
+ * with its usual sections and this one in front.
+ */
+export function revealSection(layout: TabLayout, section: Section): TabLayout {
+  const tab = sectionTab(section);
+  if (groupOf(layout, tab)) return reveal(layout, tab);
+  const home = allGroups(layout).find((g) => g.tabs.some((t) => sectionOf(t)));
+  if (home) return withGroups(layout, (g) => (g.id === home.id ? { ...g, tabs: [...g.tabs, tab], active: tab } : g));
+  const tabs = [...DEFAULT_SECTIONS.map(sectionTab), ...(DEFAULT_SECTIONS.includes(section) ? [] : [tab])];
+  return reveal(dockPanel(layout, tabs, "right", 0.26), tab);
+}
+
+/**
+ * There is always somewhere to start a chat (0.21.0). With the sidebar and the
+ * workspace as panes, closing the last chat would otherwise leave only them;
+ * the new-chat screen takes the empty group, or a pane of its own beside the
+ * sidebar.
+ */
+export function ensureHome(layout: TabLayout): TabLayout {
+  const all = allGroups(layout);
+  if (all.some((g) => g.tabs.some((t) => !isPanelTab(t)))) return layout;
+  const empty = groups(layout.root).find((g) => g.tabs.length === 0);
+  if (empty) {
+    // Nothing open at all keeps the bare empty group — Trellis draws the
+    // new-chat screen for an empty window — unless panels share the window.
+    if (all.length === 1) return layout;
+    return withGroups(layout, (g) => (g.id === empty.id ? { ...g, tabs: [HOME_TAB], active: HOME_TAB } : g), empty.id);
+  }
+  const home = group([HOME_TAB]);
+  const r = layout.root;
+  if (r.kind === "split" && r.dir === "row") {
+    const at = r.children.findIndex((c) => c.kind === "group" && c.tabs.includes(SIDEBAR_TAB)) + 1;
+    const children = [...r.children];
+    children.splice(at, 0, home);
+    const sizes = r.sizes.map((s) => s * 0.4);
+    sizes.splice(at, 0, 0.6);
+    return { ...layout, root: { ...r, children, sizes }, focused: home.id };
+  }
+  const beside = r.kind === "group" && r.tabs.includes(SIDEBAR_TAB);
+  return {
+    ...layout,
+    root: { kind: "split", id: uid(), dir: "row", children: beside ? [r, home] : [home, r], sizes: beside ? [0.25, 0.75] : [0.7, 0.3] },
+    focused: home.id,
+  };
+}
+

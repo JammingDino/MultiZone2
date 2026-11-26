@@ -13,11 +13,37 @@ import type { PendingAttachment } from "@/lib/attachFiles";
 import { errorText } from "@/lib/errors";
 import {
   HOME_TAB, chatOf, chatTab, closeTab, closeWhere, floatTab, focusedGroup, initialLayout, isAuxTab, navigate, openBeside, openTab,
+  SIDEBAR_TAB, DEFAULT_SECTIONS, allGroups, dockPanel, ensureHome, isPanelTab, revealSection, sectionOf, sectionTab,
   parseLayout, type TabLayout,
 } from "@/lib/tabLayout";
 
 const TAB_LAYOUT_KEY = "ui.tabLayout";
+// The sidebar and the workspace became panes in the layout in 0.21.0. A
+// layout saved before that has neither, so they are docked once, open or not
+// as the old switches had them; after that the layout alone says.
+const PANELS_KEY = "ui.layoutPanels";
+function withPanels(l: TabLayout): TabLayout {
+  try {
+    if (localStorage.getItem(PANELS_KEY) === "1") return l;
+    localStorage.setItem(PANELS_KEY, "1");
+  } catch { /* storage off: dock them every launch */ }
+  if (allGroups(l).some((g) => g.tabs.some(isPanelTab))) return l;
+  if (readSidebarOpen()) l = dockPanel(l, [SIDEBAR_TAB], "left", 0.2);
+  if (readWorkspaceOpen()) l = dockPanel(l, DEFAULT_SECTIONS.map(sectionTab), "right", 0.26);
+  return l;
+}
+/** Whether the sidebar and the workspace are open: whether the layout holds them. */
+function panelFlags(l: TabLayout) {
+  const tabs = allGroups(l).flatMap((g) => g.tabs);
+  return { sidebarOpen: tabs.includes(SIDEBAR_TAB), workspaceOpen: tabs.some((t) => sectionOf(t) !== null) };
+}
 function readTabLayout(): TabLayout {
+  const stored = readStoredLayout();
+  const l = ensureHome(withPanels(stored));
+  if (l !== stored) writeTabLayout(l);
+  return l;
+}
+function readStoredLayout(): TabLayout {
   try {
     return parseLayout(JSON.parse(localStorage.getItem(TAB_LAYOUT_KEY) ?? "null")) ?? initialLayout();
   } catch {
@@ -61,9 +87,6 @@ function readSidebarOpen(): boolean {
     return true;
   }
 }
-function writeSidebarOpen(open: boolean) {
-  try { localStorage.setItem(SIDEBAR_KEY, String(open)); } catch { /* ignore */ }
-}
 
 // The workspace panel on the right (0.17.9) persists the same way.
 const WORKSPACE_KEY = "ui.workspaceOpen";
@@ -75,9 +98,8 @@ function readWorkspaceOpen(): boolean {
     return true;
   }
 }
-function writeWorkspaceOpen(open: boolean) {
-  try { localStorage.setItem(WORKSPACE_KEY, String(open)); } catch { /* ignore */ }
-}
+
+const INITIAL_LAYOUT = readTabLayout();
 
 /** The sections of the workspace panel, for "open the panel on this one". */
 export type WorkspaceSection = "chat" | "plan" | "study" | "terminals" | "files" | "context";
@@ -711,6 +733,8 @@ interface AppStore {
    * active chat — the one the workspace panel and shortcuts act on.
    */
   updateTabLayout: (fn: (l: TabLayout) => TabLayout) => void;
+  /** Dock the sidebar and the workspace sections back at the window's edges (0.21.0). */
+  resetPanels: () => void;
   /** Signal the active composer to take keyboard focus. */
   focusComposer: () => void;
   /**
@@ -1156,7 +1180,7 @@ export const useApp = create<AppStore>((set, get) => ({
   chatTagLinks: [],
   chatZonesByChat: {},
 
-  activeChatId: chatOf(focusedGroup(readTabLayout()).active),
+  activeChatId: chatOf(focusedGroup(INITIAL_LAYOUT).active),
   messagesByChat: {},
   streamingByChat: {},
   perspectiveStreamsByChat: {},
@@ -1193,10 +1217,9 @@ export const useApp = create<AppStore>((set, get) => ({
   replayChatId: null,
   defaultZoneId: null,
   shortcutsHelpOpen: false,
-  sidebarOpen: readSidebarOpen(),
-  workspaceOpen: readWorkspaceOpen(),
+  ...panelFlags(INITIAL_LAYOUT),
   workspaceFocus: null,
-  tabLayout: readTabLayout(),
+  tabLayout: INITIAL_LAYOUT,
   focusComposerNonce: 0,
   projectsPanelOpen: false,
   projectsPanelInitId: null,
@@ -2295,18 +2318,29 @@ export const useApp = create<AppStore>((set, get) => ({
   setSettingsTab: (tab) => set({ settingsTab: tab, zoneLibraryInitialEdit: null }),
   openShortcutsHelp: () => set({ shortcutsHelpOpen: true }),
   closeShortcutsHelp: () => set({ shortcutsHelpOpen: false }),
+  // The sidebar and the workspace are panes in the layout (0.21.0): opening
+  // one docks it where it opens by default, closing it closes its tabs.
   setSidebarOpen: (open) => {
-    writeSidebarOpen(open);
-    set({ sidebarOpen: open });
+    get().updateTabLayout((l) => (open ? dockPanel(l, [SIDEBAR_TAB], "left", 0.2) : closeWhere(l, (t) => t === SIDEBAR_TAB)));
+  },
+  resetPanels: () => {
+    get().updateTabLayout((l) => {
+      const sections = allGroups(l).flatMap((g) => g.tabs).filter((t) => sectionOf(t) !== null);
+      const base = closeWhere(l, isPanelTab);
+      return dockPanel(dockPanel(base, [SIDEBAR_TAB], "left", 0.2), sections.length ? sections : DEFAULT_SECTIONS.map(sectionTab), "right", 0.26);
+    });
   },
   setWorkspaceOpen: (open) => {
-    writeWorkspaceOpen(open);
-    set({ workspaceOpen: open });
+    get().updateTabLayout((l) =>
+      open
+        ? panelFlags(l).workspaceOpen ? l : dockPanel(l, DEFAULT_SECTIONS.map(sectionTab), "right", 0.26)
+        : closeWhere(l, (t) => sectionOf(t) !== null),
+    );
   },
   focusWorkspace: (section) => {
     if (section) {
-      writeWorkspaceOpen(true);
-      set({ workspaceOpen: true, workspaceFocus: section });
+      get().updateTabLayout((l) => revealSection(l, section));
+      set({ workspaceFocus: section });
     } else {
       set({ workspaceFocus: null });
     }
@@ -2336,21 +2370,18 @@ export const useApp = create<AppStore>((set, get) => ({
   },
   updateTabLayout: (fn) => {
     const cur = get().tabLayout;
-    const next = fn(cur);
+    const fresh = fn(cur);
     // A click that changes nothing (focusing the focused pane) writes nothing.
-    if (next === cur) return;
+    if (fresh === cur) return;
+    const next = ensureHome(fresh);
     writeTabLayout(next);
     // A file or study set in front keeps the chat it was opened from as the
     // active one.
     const front = focusedGroup(next).active;
     const chatId = isAuxTab(front) ? get().activeChatId : chatOf(front);
-    set({ tabLayout: next, ...(chatId !== get().activeChatId ? { activeChatId: chatId } : {}) });
+    set({ tabLayout: next, ...panelFlags(next), ...(chatId !== get().activeChatId ? { activeChatId: chatId } : {}) });
   },
-  toggleSidebar: () => {
-    const next = !get().sidebarOpen;
-    writeSidebarOpen(next);
-    set({ sidebarOpen: next });
-  },
+  toggleSidebar: () => get().setSidebarOpen(!get().sidebarOpen),
   focusComposer: () => set((s) => ({ focusComposerNonce: s.focusComposerNonce + 1 })),
   composerDraft: { text: "", nonce: 0, mode: "replace" },
   setComposerDraft: (text, mode = "replace") =>
@@ -2360,7 +2391,10 @@ export const useApp = create<AppStore>((set, get) => ({
   },
   commandPaletteOpen: false,
   focusChatSearchNonce: 0,
-  focusChatSearch: () => set((st) => ({ sidebarOpen: true, focusChatSearchNonce: st.focusChatSearchNonce + 1 })),
+  focusChatSearch: () => {
+    get().setSidebarOpen(true);
+    set((st) => ({ focusChatSearchNonce: st.focusChatSearchNonce + 1 }));
+  },
   openCommandPalette: () => set({ commandPaletteOpen: true }),
   closeCommandPalette: () => set({ commandPaletteOpen: false }),
   async setDefaultZone(id) {

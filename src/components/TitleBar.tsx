@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { PhysicalPosition } from "@tauri-apps/api/dpi";
-import { Minus, Square, X, Maximize2 } from "lucide-react";
+import { LayoutTemplate, Minus, PanelLeft, PanelRight, Square, X, Maximize2 } from "lucide-react";
 import { useApp } from "@/store/app";
 
 /**
@@ -246,6 +246,7 @@ export function TitleBar() {
         </span>
       </div>
       <div className="flex h-full items-stretch">
+        <LayoutButtons />
         <WinBtn title="Minimize" onClick={() => { appWindow.minimize().catch(() => {}); }}>
           <Minus size={12} />
         </WinBtn>
@@ -257,6 +258,33 @@ export function TitleBar() {
         </WinBtn>
       </div>
     </div>
+  );
+}
+
+/**
+ * The sidebar and the workspace are panes of the layout (0.21.0) and can be
+ * closed, moved or floated anywhere; these bring them back, and put them back
+ * where they started.
+ */
+function LayoutButtons() {
+  const sidebarOpen = useApp((s) => s.sidebarOpen);
+  const workspaceOpen = useApp((s) => s.workspaceOpen);
+  const setSidebarOpen = useApp((s) => s.setSidebarOpen);
+  const setWorkspaceOpen = useApp((s) => s.setWorkspaceOpen);
+  const resetPanels = useApp((s) => s.resetPanels);
+  const on = { color: "var(--color-text)" };
+  return (
+    <>
+      <WinBtn title="Put the sidebar and the workspace back at the window's edges" onClick={resetPanels}>
+        <LayoutTemplate size={12} />
+      </WinBtn>
+      <WinBtn title={sidebarOpen ? "Close the sidebar (Ctrl+B)" : "Open the sidebar (Ctrl+B)"} onClick={() => setSidebarOpen(!sidebarOpen)}>
+        <PanelLeft size={13} style={sidebarOpen ? on : undefined} />
+      </WinBtn>
+      <WinBtn title={workspaceOpen ? "Close the workspace" : "Open the workspace"} onClick={() => setWorkspaceOpen(!workspaceOpen)}>
+        <PanelRight size={13} style={workspaceOpen ? on : undefined} />
+      </WinBtn>
+    </>
   );
 }
 

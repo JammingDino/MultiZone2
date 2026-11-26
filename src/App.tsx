@@ -82,6 +82,7 @@ export default function App() {
   const refreshZones = useApp((s) => s.refreshZones);
   const refreshSkills = useApp((s) => s.refreshSkills);
   const shortcutsHelpOpen = useApp((s) => s.shortcutsHelpOpen);
+  const narrow = useIsNarrow();
   const closeShortcutsHelp = useApp((s) => s.closeShortcutsHelp);
 
   // Launch marks, off unless `localStorage.mzPerf = "1"` — see lib/perf.ts. The
@@ -253,11 +254,12 @@ export default function App() {
               The collapsed rail is left alone: it is 48px, it carries the
               expand control, and a drawer with no visible way to open it is
               worse than a thin strip. */}
-          <SidebarSlot />
+          {/* On a wide window the sidebar and the workspace sections are panes
+              of the layout ChatPanel draws (0.21.0), moved and docked like any
+              tab. On a phone they stay drawers over the chat. */}
+          {narrow && <SidebarSlot />}
           <ChatPanel />
-          {/* The work's state — plan, terminals, files, context — beside the
-              conversation rather than inside it (0.17.9). */}
-          <WorkspacePanel />
+          {narrow && <WorkspacePanel />}
           {showOnboarding && <Onboarding />}
           {shortcutsHelpOpen && <ShortcutsHelpModal onClose={closeShortcutsHelp} />}
           {/* Above the panels but inside the content area, so the title bar

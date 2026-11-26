@@ -14,7 +14,12 @@ import { CHROME_ACTIVE, CHROME_OUTLINED, CHROME_QUIET } from "@/lib/chrome";
 import { ResizeHandle, usePanelWidth } from "@/components/common/ResizeHandle";
 import { useIsNarrow } from "@/lib/useIsNarrow";
 
-export function Sidebar() {
+/**
+ * `docked`: drawn as a pane of the window's layout (0.21.0), which sizes it and
+ * moves it — so it fills its pane, has no handle of its own, and collapsing it
+ * closes the pane.
+ */
+export function Sidebar({ docked = false }: { docked?: boolean } = {}) {
   const {
     chats,
     zones,
@@ -199,7 +204,7 @@ export function Sidebar() {
     size.dragging ? "" : "transition-[width] duration-200 ease-in-out"
   }`;
 
-  if (!sidebarOpen) {
+  if (!sidebarOpen && !docked) {
     return (
       <aside className={asideClass} style={{ width: 48 }}>
         <div className="flex h-12 w-full shrink-0 items-center border-b border-[var(--color-border)] pl-[9px]">
@@ -273,8 +278,11 @@ export function Sidebar() {
   );
 
   return (
-    <aside className={asideClass} style={{ width: narrow ? 288 : size.width }}>
-      {!narrow && (
+    <aside
+      className={docked ? "relative flex h-full w-full flex-col overflow-hidden bg-[var(--color-panel)]" : asideClass}
+      style={docked ? undefined : { width: narrow ? 288 : size.width }}
+    >
+      {!narrow && !docked && (
         <ResizeHandle
           side="right"
           width={size.width}

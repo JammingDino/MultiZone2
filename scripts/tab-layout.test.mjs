@@ -8,6 +8,7 @@ import {
   HOME_TAB, chatTab, initialLayout, openTab, closeTab, closeWhere, moveTab, navigate,
   groups, groupOf, isShowing, parseLayout,
   openBeside, studySetTab, studyReviewTab, studyOf, isFileTab, isAuxTab, floatTab,
+  SIDEBAR_TAB, DEFAULT_SECTIONS, sectionTab, sectionOf, dockPanel, revealSection, ensureHome,
 } from "../src/lib/tabLayout.ts";
 
 const shape = (n) => (n.kind === "group" ? n.tabs : { [n.dir]: n.children.map(shape) });
@@ -161,4 +162,44 @@ test("floating a tab lifts it out, opens it, or brings its window forward", () =
   assert.equal(l.floating.length, 2);
   assert.ok(l.floating[0].z > z);
   assert.ok(parseLayout(JSON.parse(JSON.stringify(l))));
+});
+
+test("the sidebar and workspace dock at the edges, and chats never open inside them", () => {
+  let l = dockPanel(initialLayout(), [SIDEBAR_TAB], "left", 0.2);
+  l = dockPanel(l, DEFAULT_SECTIONS.map(sectionTab), "right", 0.26);
+  l = ensureHome(l);
+  assert.equal(shape(l.root).row.length, 3);
+  assert.deepEqual(shape(l.root).row[1], [HOME_TAB]);
+  assert.ok(Math.abs(l.root.sizes.reduce((a, b) => a + b) - 1) < 1e-9);
+  // Focus left on the sidebar's pane still opens chats and files in the middle.
+  l = { ...l, focused: groupOf(l, SIDEBAR_TAB).id };
+  l = navigate(l, A);
+  l = openTab(l, "/f.md");
+  assert.deepEqual(shape(l.root).row, [[SIDEBAR_TAB], [A, "/f.md"], DEFAULT_SECTIONS.map(sectionTab)]);
+  assert.ok(!isFileTab(SIDEBAR_TAB) && !isFileTab(sectionTab("files")));
+  // Docking what is already open does nothing.
+  assert.equal(dockPanel(l, [SIDEBAR_TAB], "left", 0.2), l);
+});
+
+test("closing the last chat leaves a new-chat pane beside the sidebar", () => {
+  let l = ensureHome(navigate(dockPanel(initialLayout(), [SIDEBAR_TAB], "left", 0.2), A));
+  l = ensureHome(closeTab(l, A));
+  assert.deepEqual(shape(l.root), { row: [[SIDEBAR_TAB], [HOME_TAB]] });
+  // A bare window is left bare: Trellis draws its own empty screen.
+  assert.deepEqual(shape(ensureHome(initialLayout()).root), []);
+});
+
+test("a section is revealed in place, joins the sections' pane, or docks the workspace", () => {
+  let l = navigate(initialLayout(), A);
+  const focused = l.focused;
+  l = revealSection(l, "plan");
+  assert.deepEqual(groupOf(l, sectionTab("plan")).tabs, DEFAULT_SECTIONS.map(sectionTab));
+  assert.equal(groupOf(l, sectionTab("plan")).active, sectionTab("plan"));
+  assert.equal(l.focused, focused);
+  l = revealSection(l, "study");
+  assert.equal(groupOf(l, sectionTab("study")).active, sectionTab("study"));
+  assert.equal(groupOf(l, sectionTab("study")).id, groupOf(l, sectionTab("plan")).id);
+  l = revealSection(l, "files");
+  assert.equal(groupOf(l, sectionTab("files")).active, sectionTab("files"));
+  assert.equal(sectionOf(sectionTab("context")), "context");
 });

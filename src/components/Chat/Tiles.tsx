@@ -1,11 +1,17 @@
 import "@danfessler/trellis/style.css";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { GraduationCap, MessageSquare, Plus, Repeat } from "lucide-react";
-import { ViewType, Workspace, useView, useViewTitle, type WorkspaceHandle } from "@danfessler/trellis-react";
+import { GraduationCap, MessageSquare, PanelLeft, Plus, Repeat } from "lucide-react";
+import { ViewType, Workspace, useView, useViewBadge, useViewTitle, type WorkspaceHandle } from "@danfessler/trellis-react";
+import { Sidebar } from "@/components/Sidebar/Sidebar";
+import { SectionBody, TABS as SECTIONS, usePlanFocus } from "@/components/Workspace/WorkspacePanel";
+import { useIsNarrow } from "@/lib/useIsNarrow";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { iconFor } from "@/components/Workspace/FilesPanel";
-import { HOME_TAB, chatOf, focusGroup, focusedGroup, groupOf, moveTab, studyOf, type DropZone, type TabLayout } from "@/lib/tabLayout";
+import {
+  HOME_TAB, SIDEBAR_TAB, allGroups, chatOf, closeWhere, dockPanel, focusGroup, focusedGroup, groupOf,
+  isPanelTab, moveTab, sectionOf, studyOf, type DropZone, type Section, type TabLayout,
+} from "@/lib/tabLayout";
 import { fromDocument, toDocument } from "@/lib/trellisLayout";
 
 type Phase = "move" | "drop" | "cancel";
@@ -63,9 +69,29 @@ function nameOf(tab: string, s: ReturnType<typeof useApp.getState>): string {
   const id = chatOf(tab);
   if (id) return s.chats.find((c) => c.id === id)?.title || "Untitled chat";
   if (tab === HOME_TAB) return "New chat";
+  if (tab === SIDEBAR_TAB) return "Chats";
+  const section = sectionOf(tab);
+  if (section) return SECTION_NAMES[section];
   const study = studyOf(tab);
   if (study) return s.studyTabTitles[tab] || (study.kind === "review" ? "Review" : "Study");
   return tab.slice(Math.max(tab.lastIndexOf("/"), tab.lastIndexOf("\\")) + 1);
+}
+
+const SECTION_NAMES: Record<Section, string> = {
+  files: "Files", plan: "Plan", chat: "This chat", terminals: "Terminals", context: "Context", study: "Study",
+};
+
+/**
+ * On a phone the sidebar and the workspace stay drawers over the chat — two
+ * panes beside it would leave it no width — so Trellis is not shown them, and
+ * what it reports back has them put back where they were docked.
+ */
+const withoutPanels = (l: TabLayout) => closeWhere(l, isPanelTab);
+function keepPanels(next: TabLayout, cur: TabLayout): TabLayout {
+  const had = allGroups(cur).flatMap((g) => g.tabs).filter(isPanelTab);
+  if (had.includes(SIDEBAR_TAB)) next = dockPanel(next, [SIDEBAR_TAB], "left", 0.2);
+  const sections = had.filter((t) => sectionOf(t));
+  return sections.length ? dockPanel(next, sections, "right", 0.26) : next;
 }
 
 // Trellis draws with the app's own colours, so a theme or accent change in
@@ -89,9 +115,10 @@ const TOKENS: Record<string, string> = {
 };
 
 /**
- * The main column (0.21.0): chats, files, study sets and the new-chat screen
- * as Trellis views — dragged between panels, split onto edges, floated out as
- * windows and docked back. The store's `TabLayout` stays the model the app's
+ * The window (0.21.0): chats, files, study sets, the new-chat screen, the
+ * sidebar and each workspace section as Trellis views — dragged between
+ * panels, split onto edges, stacked as tabs, floated out as windows and docked
+ * back. The store's `TabLayout` stays the model the app's
  * rules work on (lib/tabLayout.ts); this keeps Trellis and it in step. A
  * change made in the tiles comes back as a document; a change made anywhere
  * else (the sidebar, a shortcut, a tool) is handed to Trellis to draw.
@@ -100,27 +127,40 @@ export function Tiles({ renderTab }: { renderTab: (tab: string) => ReactNode }) 
   const layout = useApp((s) => s.tabLayout);
   const change = useApp((s) => s.updateTabLayout);
   const mode = useApp((s) => s.theme.mode);
+  const narrow = useIsNarrow();
+  const shown = narrow ? withoutPanels(layout) : layout;
+  const narrowRef = useRef(narrow);
+  narrowRef.current = narrow;
+  const activeChatId = useApp((s) => s.activeChatId);
+  // The phone's drawer runs its own (WorkspacePanel).
+  usePlanFocus(narrow ? null : activeChatId);
   const [ws, setWs] = useState<WorkspaceHandle | null>(null);
   const host = useRef<HTMLDivElement>(null);
   // The layout the tiles last reported, so it is not handed straight back.
   const fromTiles = useRef<TabLayout | null>(null);
-  const initial = useMemo(() => toDocument(useApp.getState().tabLayout), []);
+  const initial = useMemo(() => toDocument(shown), []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function take(next: TabLayout) {
+  function take(reported: TabLayout) {
     const cur = useApp.getState().tabLayout;
+    const next = narrowRef.current ? keepPanels(reported, cur) : reported;
     if (JSON.stringify(next) === JSON.stringify(cur)) return;
     fromTiles.current = next;
     change(() => next);
   }
 
   useEffect(() => {
-    if (!ws || layout === fromTiles.current) return;
-    const drawn = fromDocument(ws.getDocument(), layout.focused);
-    if (JSON.stringify(drawn) !== JSON.stringify(layout)) ws.setDocument(toDocument(layout));
+    if (!ws) return;
+    // Compared, not assumed: what Trellis shows can differ from the store's
+    // layout without the layout changing — a window widened past the phone
+    // breakpoint now has panes to show.
+    const drawn = fromDocument(ws.getDocument(), shown.focused);
+    if (JSON.stringify(drawn) !== JSON.stringify(shown)) ws.setDocument(toDocument(shown));
+    // A change the tiles made already has focus where the user put it.
+    if (layout === fromTiles.current) return;
     // The empty group (nothing open) is not a panel Trellis has.
-    const g = focusedGroup(layout);
+    const g = focusedGroup(shown);
     if (g.tabs.length && ws.getSnapshot().focusedPanel !== g.id) ws.focus(g.id);
-  }, [ws, layout]);
+  }, [ws, layout, narrow]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The backend keeps the last layout for GET /api/layout (0.21.0).
   useEffect(() => {
@@ -142,7 +182,7 @@ export function Tiles({ renderTab }: { renderTab: (tab: string) => ReactNode }) 
     return () => { tilesDrag = null; };
   }, [change]);
 
-  const kinds = ["chat", "home", "study", "file"] as const;
+  const kinds = ["chat", "home", "study", "file", "sidebar", "section"] as const;
   return (
     <div ref={host} className="relative min-h-0 flex-1 overflow-hidden">
       <Workspace
@@ -154,11 +194,13 @@ export function Tiles({ renderTab }: { renderTab: (tab: string) => ReactNode }) 
         panelMenu={(entries) => entries.filter((e) => e === "separator" || e.id !== "hide")}
         keymap={{ "navigation.stepOut": null }}
         tabs={{ inset: 0 }}
-        label="Chats and files"
+        label="Workspace"
         onDocumentChange={(doc) => take(fromDocument(doc, useApp.getState().tabLayout.focused))}
         onFocus={(viewId) => {
           const l = useApp.getState().tabLayout;
-          const g = viewId ? groupOf(l, viewId) : undefined;
+          // The sidebar and the sections take focus to be used, but a chat
+          // or a file still opens where the user last was.
+          const g = viewId && !isPanelTab(viewId) ? groupOf(l, viewId) : undefined;
           if (g) take(focusGroup(l, g.id));
         }}
       >
@@ -171,7 +213,7 @@ export function Tiles({ renderTab }: { renderTab: (tab: string) => ReactNode }) 
           <div className="flex h-full min-h-0 flex-col">{renderTab(HOME_TAB)}</div>
         </Workspace.Empty>
         {/* Only windows open: the new-chat screen behind them, not a blank column. */}
-        {layout.root.kind === "group" && layout.root.tabs.length === 0 && layout.floating?.length ? (
+        {shown.root.kind === "group" && shown.root.tabs.length === 0 && shown.floating?.length ? (
           <Workspace.Backdrop>
             <div className="flex h-full min-h-0 flex-col">{renderTab(HOME_TAB)}</div>
           </Workspace.Backdrop>
@@ -195,11 +237,38 @@ function Tile({ render }: { render: (tab: string) => ReactNode }) {
   const view = useView();
   const name = useApp((s) => nameOf(view.id, s));
   useViewTitle(name);
-  return <div className="flex h-full min-h-0 flex-col overflow-hidden">{render(view.id)}</div>;
+  const section = sectionOf(view.id);
+  return (
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      {view.id === SIDEBAR_TAB ? <Sidebar docked /> : section ? <SectionView section={section} /> : render(view.id)}
+    </div>
+  );
+}
+
+/** A workspace section as a pane of its own, about the chat in front. */
+function SectionView({ section }: { section: Section }) {
+  const chatId = useApp((s) => s.activeChatId);
+  const pendingPlan = useApp((s) => (chatId ? !!s.pendingPlanByChat[chatId] : false));
+  useViewBadge(section === "plan" && pendingPlan ? true : null);
+  if (!chatId) {
+    return (
+      <p className="p-3 text-[11px] text-[var(--color-text-muted)]">
+        Open a chat to see its {SECTION_NAMES[section].toLowerCase()}.
+      </p>
+    );
+  }
+  return (
+    <div className="flex min-h-0 flex-1 flex-col bg-[var(--color-panel)]">
+      <SectionBody chatId={chatId} section={section} />
+    </div>
+  );
 }
 
 function TabIcon() {
   const tab = useView().id;
+  if (tab === SIDEBAR_TAB) return <PanelLeft size={12} />;
+  const section = sectionOf(tab);
+  if (section) return <>{SECTIONS.find((s) => s.id === section)?.icon}</>;
   const study = studyOf(tab);
   const { Icon, color } = chatOf(tab)
     ? { Icon: MessageSquare, color: undefined }

@@ -107,7 +107,7 @@ export function WorkspacePanel() {
 
 const SLIDE_MS = 200;
 
-const TABS: { id: WorkspaceSection; label: string; title: string; icon: ReactNode }[] = [
+export const TABS: { id: WorkspaceSection; label: string; title: string; icon: ReactNode }[] = [
   { id: "chat", label: "Chat", title: "This chat: project, tags, zones", icon: <MessageSquare size={13} /> },
   { id: "plan", label: "Plan", title: "Plans and the task list", icon: <ClipboardList size={13} /> },
   // Only shown in a study project; see `PanelBody`.
@@ -117,18 +117,10 @@ const TABS: { id: WorkspaceSection; label: string; title: string; icon: ReactNod
   { id: "context", label: "Ctx", title: "What is in the context window", icon: <Gauge size={13} /> },
 ];
 
-function PanelBody({ chatId, onClose }: { chatId: string; onClose: () => void }) {
-  const isStreaming = useApp(
-    (s) => Boolean(s.streamingByChat[chatId]) || Object.keys(s.perspectiveStreamsByChat[chatId] ?? {}).length > 0,
-  );
-  const pendingPlan = useApp((s) => s.pendingPlanByChat[chatId] ?? null);
-  const plans = useApp((s) => s.planTreeByChat[chatId]);
-  const approvePlan = useApp((s) => s.approvePlan);
-  const rejectPlan = useApp((s) => s.rejectPlan);
+/** A newly filed plan is a decision waiting: bring the Plan section forward. */
+export function usePlanFocus(chatId: string | null) {
+  const pendingPlan = useApp((s) => (chatId ? s.pendingPlanByChat[chatId] ?? null : null));
   const focusWorkspace = useApp((s) => s.focusWorkspace);
-  const [planBusy, setPlanBusy] = useState(false);
-
-  // A newly filed plan is a decision waiting: switch to its tab.
   const seenPlan = useRef<string | null>(null);
   useEffect(() => {
     if (pendingPlan && pendingPlan.id !== seenPlan.current) {
@@ -136,21 +128,32 @@ function PanelBody({ chatId, onClose }: { chatId: string; onClose: () => void })
       focusWorkspace("plan");
     }
   }, [pendingPlan, focusWorkspace]);
+}
 
-  const livePlans = (plans ?? []).filter((p) => ["approved", "executing", "stopped"].includes(p.status));
+/** The chat's study project, when it is in one — the Study section's subject. */
+function useStudyProject(chatId: string) {
+  return useApp((s) => {
+    const pid = s.chats.find((c) => c.id === chatId)?.projectId;
+    return pid && s.projects.find((p) => p.id === pid)?.studyMode ? pid : null;
+  });
+}
+
+function PanelBody({ chatId, onClose }: { chatId: string; onClose: () => void }) {
+  const pendingPlan = useApp((s) => s.pendingPlanByChat[chatId] ?? null);
+  const focusWorkspace = useApp((s) => s.focusWorkspace);
+  usePlanFocus(chatId);
 
   // The five sections were a stack of collapsible bands, all in one scroller
   // (0.18). Every one started closed, so reaching the tree meant opening it
   // past three other headers — and once a file was open the tree had about a
   // quarter of the panel left. They are tabs now: one at a time, at full
-  // height. `focusWorkspace(id)` switches tab instead of scrolling.
+  // height. `focusWorkspace(id)` switches tab instead of scrolling. (On a
+  // wide window each section is a pane of its own since 0.21.0; this strip
+  // is the phone's drawer.)
   const [savedTab, setTab] = usePersistentChoice<WorkspaceSection>("workspace.tab", "files", TABS.map((t) => t.id));
   // The Study tab exists only for a chat in a study project. A remembered
   // "study" in any other chat falls back to Files rather than a blank panel.
-  const studyProjectId = useApp((s) => {
-    const pid = s.chats.find((c) => c.id === chatId)?.projectId;
-    return pid && s.projects.find((p) => p.id === pid)?.studyMode ? pid : null;
-  });
+  const studyProjectId = useStudyProject(chatId);
   const studyDue = useStudyDue(studyProjectId);
   const tabs = studyProjectId ? TABS : TABS.filter((t) => t.id !== "study");
   const tab: WorkspaceSection = savedTab === "study" && !studyProjectId ? "files" : savedTab;
@@ -198,60 +201,84 @@ function PanelBody({ chatId, onClose }: { chatId: string; onClose: () => void })
           </button>
         ))}
       </div>
+      <SectionBody chatId={chatId} section={tab} />
+    </>
+  );
+}
 
-      {/* One tab's worth of panel, and the whole panel's height to put it in.
-          Files takes the height directly (its tree is its own scroller); the
-          rest keep the scrolling column they were written for. */}
-      {tab === "files" ? (
-        <FilesPanel chatId={chatId} />
-      ) : (
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2.5 py-2.5 text-xs">
-          {tab === "chat" && <ChatSection chatId={chatId} />}
-          {tab === "plan" && (
-            <>
-              {pendingPlan ? (
-                <PlanReview
-                  plan={pendingPlan}
-                  busy={planBusy}
-                  onApprove={async (steps, edited) => {
-                    setPlanBusy(true);
-                    try {
-                      await approvePlan(chatId, pendingPlan.id, steps, edited);
-                      // Approval is a decision, not a message: the turn that
-                      // executes it starts here rather than waiting for the user
-                      // to also type "go". Sent as a system turn so the model is
-                      // told to proceed without the transcript claiming the user
-                      // typed the sentence.
-                      await api.sendMessage(chatId, systemTurnParts(PLAN_APPROVED));
-                    } finally {
-                      setPlanBusy(false);
-                    }
-                  }}
-                  onReject={async () => {
-                    setPlanBusy(true);
-                    try {
-                      await rejectPlan(chatId, pendingPlan.id);
-                    } finally {
-                      setPlanBusy(false);
-                    }
-                  }}
-                />
-              ) : null}
-              <div className={pendingPlan ? "mt-2" : ""}>
-                <TaskPanel chatId={chatId} streaming={isStreaming} full />
-              </div>
-              <ReviewQueue chatId={chatId} embedded />
-              {!pendingPlan && livePlans.length === 0 && (
-                <p className="text-[11px] text-[var(--color-text-muted)]">
-                  No plan in progress. Ask for one, or type <span className="font-mono">/plan</span>.
-                </p>
-              )}
-            </>
-          )}
-          {tab === "study" && studyProjectId && <StudyPanel projectId={studyProjectId} />}
-          {tab === "terminals" && <TerminalPanel chatId={chatId} embedded />}
-          {tab === "context" && <ContextPanel chatId={chatId} />}
-        </div>
+/**
+ * One section's worth of panel, and the whole height to put it in (0.21.0:
+ * shared by the phone's drawer and the docked panes). Files takes the height
+ * directly (its tree is its own scroller); the rest keep the scrolling column
+ * they were written for.
+ */
+export function SectionBody({ chatId, section }: { chatId: string; section: WorkspaceSection }) {
+  const studyProjectId = useStudyProject(chatId);
+  if (section === "files") return <FilesPanel chatId={chatId} />;
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2.5 py-2.5 text-xs">
+      {section === "chat" && <ChatSection chatId={chatId} />}
+      {section === "plan" && <PlanSection chatId={chatId} />}
+      {section === "study" &&
+        (studyProjectId ? (
+          <StudyPanel projectId={studyProjectId} />
+        ) : (
+          <p className="text-[11px] text-[var(--color-text-muted)]">This chat is not in a study project.</p>
+        ))}
+      {section === "terminals" && <TerminalPanel chatId={chatId} embedded />}
+      {section === "context" && <ContextPanel chatId={chatId} />}
+    </div>
+  );
+}
+
+function PlanSection({ chatId }: { chatId: string }) {
+  const isStreaming = useApp(
+    (s) => Boolean(s.streamingByChat[chatId]) || Object.keys(s.perspectiveStreamsByChat[chatId] ?? {}).length > 0,
+  );
+  const pendingPlan = useApp((s) => s.pendingPlanByChat[chatId] ?? null);
+  const plans = useApp((s) => s.planTreeByChat[chatId]);
+  const approvePlan = useApp((s) => s.approvePlan);
+  const rejectPlan = useApp((s) => s.rejectPlan);
+  const [planBusy, setPlanBusy] = useState(false);
+  const livePlans = (plans ?? []).filter((p) => ["approved", "executing", "stopped"].includes(p.status));
+  return (
+    <>
+      {pendingPlan ? (
+        <PlanReview
+          plan={pendingPlan}
+          busy={planBusy}
+          onApprove={async (steps, edited) => {
+            setPlanBusy(true);
+            try {
+              await approvePlan(chatId, pendingPlan.id, steps, edited);
+              // Approval is a decision, not a message: the turn that
+              // executes it starts here rather than waiting for the user
+              // to also type "go". Sent as a system turn so the model is
+              // told to proceed without the transcript claiming the user
+              // typed the sentence.
+              await api.sendMessage(chatId, systemTurnParts(PLAN_APPROVED));
+            } finally {
+              setPlanBusy(false);
+            }
+          }}
+          onReject={async () => {
+            setPlanBusy(true);
+            try {
+              await rejectPlan(chatId, pendingPlan.id);
+            } finally {
+              setPlanBusy(false);
+            }
+          }}
+        />
+      ) : null}
+      <div className={pendingPlan ? "mt-2" : ""}>
+        <TaskPanel chatId={chatId} streaming={isStreaming} full />
+      </div>
+      <ReviewQueue chatId={chatId} embedded />
+      {!pendingPlan && livePlans.length === 0 && (
+        <p className="text-[11px] text-[var(--color-text-muted)]">
+          No plan in progress. Ask for one, or type <span className="font-mono">/plan</span>.
+        </p>
       )}
     </>
   );

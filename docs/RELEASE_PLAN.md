@@ -443,10 +443,10 @@ The main column already tiles (0.18.2), on a layout tree of our own that stops a
 
 ### 0.21.0 — The workspace is a Trellis layout
 
-- [ ] `@danfessler/trellis` + `@danfessler/trellis-react`; chat, file, study set, terminal, sidebar, files and context as view types; `tabLayout.ts` retired; the layout persists
-- [ ] A Multizone run can open its sub-agents as live tiles — zoom out to watch the panel, in to read one
-- [ ] **Something that needs you, brought to you.** A tool the agent calls to put a view in the current window — floated over the chat or docked beside it — for a question, an approval, a report or a diff that needs the user, instead of a line scrolling past in the transcript
-- [ ] The layout is readable and writable over the API, so a zone can rearrange the app through `app_control`
+- [~] `@danfessler/trellis` + `@danfessler/trellis-react` — **the main column is Trellis** ([Tiles.tsx](../src/components/Chat/Tiles.tsx)): chats, files, study sets and the new-chat screen are views that drag between panels, split onto edges, maximize, and float out as windows and dock back; the layout persists, windows included. `tabLayout.ts` was *kept* rather than retired: its navigate/open/close rules and their tests are what every caller uses, so it stays the model and [trellisLayout.ts](../src/lib/trellisLayout.ts) converts both ways (round-trip tested), and TabTiles went instead. Hide is off the menu (no tray to restore from). Verified in the running app over CDP: open, Ctrl+click, float, dock, close, reload. **Left:** the sidebar, the workspace panel (files, context) and the terminal are still fixed columns, not views
+- [x] Sub-agents as live tiles — `spawn_subagent` takes `show: beside | window`, and the chat opens the moment it is created, so the user watches it work; beside only next to the chat that started it if that is on screen, and the user's chat keeps focus either way. The "zoom out to watch the panel" half (Trellis's free navigation) is not on
+- [x] **Something that needs you, brought to you.** `present_file` takes `show: tab | beside | window`; a window floats over whatever is on screen, from any chat, including one running in the background. Questions and approvals still arrive in their chat, not as a window
+- [x] The layout is readable and writable over the API — `GET`/`PUT /api/layout` and `POST /api/layout/show {tab, show}`, so `app_read`/`app_control` can see and rearrange the window. The window reports its layout and checks any it is sent
 
 ---
 

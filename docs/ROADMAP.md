@@ -43,7 +43,7 @@ Semantic versioning. Each release is tagged `vMAJOR.MINOR.PATCH`.
 | **0.18.x** | Runs nobody is watching — close to tray, scheduled runs, smart compaction, rolling context, a Stop that works before the first token; 0.18.2 added tiled chat tabs | Shipped |
 | **0.19.x** | Study mode — grounded answers, flashcards, quizzes, cheat sheets, spaced review — and a lighter app; 0.19.1 adds Claude Code and Codex subscriptions as providers; 0.19.3 lets a chat be handed folders by drag, paste or Explorer | 0.19.0–0.19.3 built — runtime testing open |
 | **0.20.x** | Nothing to set up — zones as roles that follow the chat's model, tool presets, one-off sub-agents, Claude Code's skills/agents/MCP imported; commands anywhere in a prompt; then control over the first request | In progress |
-| **0.21.x** | Everything is a panel — the whole window as a Trellis layout, sub-agents as live tiles, agents bring what needs you into the window | Planned |
+| **0.21.x** | Everything is a panel — the whole window as a Trellis layout, sub-agents as live tiles, agents bring what needs you into the window | 0.21.0 in progress — the main column is Trellis; sidebar, workspace panel and terminal are not views yet |
 | **1.0.0** | Hardening & Public Release | Planned |
 | **1.2.x** | Signed-in connectors — OAuth, keychain, per-scope consent | Planned |
 | **Post-1.0** | Code interface + edit engine, shared mode surface, scratchpad, moddable app surface, Diffusion LLM | Backlog |

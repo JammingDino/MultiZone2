@@ -9,8 +9,13 @@ import { SpendLimitNotice } from "./SpendLimitNotice";
 import { groupMessages } from "@/lib/grouping";
 import { systemTurnNotice } from "@/lib/systemTurn";
 import type { ContentPart } from "@/lib/types";
+import { afterRelease, afterScroll, afterUpIntent, showJump, type ScrollGeom } from "@/lib/stickToBottom";
 
-const PIN_THRESHOLD_PX = 60;
+const geomOf = (c: HTMLElement): ScrollGeom => ({
+  scrollTop: c.scrollTop,
+  scrollHeight: c.scrollHeight,
+  clientHeight: c.clientHeight,
+});
 
 // Stable fallbacks — reusing the same reference across renders keeps the
 // per-chat selectors below from reporting a "change" (and re-rendering the
@@ -38,16 +43,13 @@ export function MessageThread({ chatId, bottomInset = 0 }: {
   const innerRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
-  // "pinned" = user is at (or near) the bottom right now. While pinned, new
-  // content auto-scrolls; when they scroll up themselves it unpins and the
-  // jump-to-bottom button appears.
-  const [pinned, setPinned] = useState(true);
-  // Ref mirror so the layout-effect that follows new content can read the
-  // latest value without retriggering on it.
+  // "pinned" = the reader wants to follow the latest content. It is intent,
+  // not geometry — see `lib/stickToBottom.ts` for why. A ref, because the
+  // listeners below read it and nothing renders from it directly.
   const pinnedRef = useRef(true);
-  // Tracks programmatic scrolls so we don't treat our own scrollIntoView
-  // calls as "the user scrolled."
-  const programmaticScrollRef = useRef(false);
+  // The last geometry seen, so a scroll event can tell which way it moved.
+  const lastGeomRef = useRef<ScrollGeom>({ scrollTop: 0, scrollHeight: 0, clientHeight: 0 });
+  const [jumpShown, setJumpShown] = useState(false);
 
   const units = useMemo(
     () => groupMessages(messages, streaming, perspectiveStreams),
@@ -110,132 +112,126 @@ export function MessageThread({ chatId, bottomInset = 0 }: {
     }
   }, [autoSpeak, ttsConfigured, globalVoice, chatZone, streaming?.messageId, streaming?.content, streaming]);
 
-  // When switching chats, default to pinned and jump to the bottom.
-  useEffect(() => {
-    pinnedRef.current = true;
-    setPinned(true);
-    requestAnimationFrame(() => {
-      const c = containerRef.current;
-      if (c) c.scrollTop = c.scrollHeight;
-    });
-  }, [chatId]);
-
-  // The composer grows as a prompt gets longer, and the padding with it. Stay
-  // on the latest message if that is where the reader was.
-  useEffect(() => {
-    const c = containerRef.current;
-    if (c && pinnedRef.current) c.scrollTop = c.scrollHeight;
-  }, [bottomInset]);
-
-  // Track scroll position. Distinguish user scrolls from our own.
-  useEffect(() => {
+  // Re-measure: remember where the view is and whether to offer the button.
+  const sync = useCallback(() => {
     const c = containerRef.current;
     if (!c) return;
-    const handle = () => {
-      if (programmaticScrollRef.current) return;
-      const distance = c.scrollHeight - c.scrollTop - c.clientHeight;
-      const atBottom = distance < PIN_THRESHOLD_PX;
-      pinnedRef.current = atBottom;
-      setPinned(atBottom);
-    };
-    c.addEventListener("scroll", handle, { passive: true });
-    return () => c.removeEventListener("scroll", handle);
+    const g = geomOf(c);
+    lastGeomRef.current = g;
+    setJumpShown(showJump(pinnedRef.current, g));
   }, []);
 
-  // Any direct user intent to move the viewport unpins immediately, without
-  // waiting for a scroll event. This breaks the loop where ResizeObserver-driven
-  // auto-scroll fights the user's wheel/touch and feels laggy or "stuck".
-  useEffect(() => {
-    const c = containerRef.current;
-    if (!c) return;
-    const unpinIfUpward = () => {
-      pinnedRef.current = false;
-      setPinned(false);
-    };
-    const onWheel = (e: WheelEvent) => {
-      // Only unpin on upward scroll. Scrolling down while already at the
-      // bottom would briefly flash the "jump to latest" button before the
-      // scroll handler re-pins — so we leave pinning to the scroll handler.
-      if (e.deltaY < 0) unpinIfUpward();
-    };
-    const onTouchMove = () => unpinIfUpward();
-    const onKey = (e: KeyboardEvent) => {
-      // Only treat scroll-affecting keys when the chat container has focus
-      // (not while typing in the input bar).
-      if (document.activeElement !== c) return;
-      const scrollKeys = [
-        "ArrowUp",
-        "ArrowDown",
-        "PageUp",
-        "PageDown",
-        "Home",
-        "End",
-      ];
-      if (scrollKeys.includes(e.key)) unpinIfUpward();
-    };
-    c.addEventListener("wheel", onWheel, { passive: true });
-    c.addEventListener("touchmove", onTouchMove, { passive: true });
-    window.addEventListener("keydown", onKey);
-    return () => {
-      c.removeEventListener("wheel", onWheel);
-      c.removeEventListener("touchmove", onTouchMove);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, []);
-
-  // Watch the inner content for size changes (async-rendered Mermaid diagrams,
-  // images loading, KaTeX layout). When the container grows while the user is
-  // pinned to the bottom, keep them pinned instead of letting them drift up.
-  // Coalesce bursts of resize events into a single scrollTop write per frame
-  // to keep token-stream-driven layout shifts from saturating the main thread.
+  // Follow the bottom on any change of size, not on a list of store fields:
+  // tokens, a diagram or image finishing late, a block expanding, the composer
+  // (the thread's bottom padding) growing, the pane being resized, or shown
+  // again after being zoomed away (a 0-tall pane is left alone). The observer
+  // runs after layout and before paint, so the snap is never a frame late and
+  // is instant — a smooth scroll here would fight the growth and the reader.
   useEffect(() => {
     const c = containerRef.current;
     const inner = innerRef.current;
     if (!c || !inner) return;
-    let rafId = 0;
     const ro = new ResizeObserver(() => {
-      if (!pinnedRef.current) return;
-      if (rafId) return;
-      rafId = requestAnimationFrame(() => {
-        rafId = 0;
-        if (!pinnedRef.current) return;
-        programmaticScrollRef.current = true;
-        c.scrollTop = c.scrollHeight;
-        requestAnimationFrame(() => {
-          programmaticScrollRef.current = false;
-        });
-      });
+      if (pinnedRef.current && c.clientHeight > 0) c.scrollTop = c.scrollHeight;
+      sync();
     });
     ro.observe(inner);
-    return () => {
-      ro.disconnect();
-      if (rafId) cancelAnimationFrame(rafId);
-    };
-  }, []);
+    ro.observe(c);
+    return () => ro.disconnect();
+  }, [sync]);
 
-  // When content updates and we're pinned, snap to bottom. Use "auto"
-  // (instant) so rapid token streams don't fight each other with smooth
-  // animations.
+  // Only the reader's own upward gesture unpins. Scroll events can't say who
+  // moved the view (us, growth, scroll anchoring, a resize), so they only ever
+  // re-pin — see `lib/stickToBottom.ts`.
   useEffect(() => {
-    if (!pinnedRef.current) return;
     const c = containerRef.current;
     if (!c) return;
-    programmaticScrollRef.current = true;
-    c.scrollTop = c.scrollHeight;
-    // Release the programmatic flag after the browser has dispatched
-    // the resulting scroll event.
-    requestAnimationFrame(() => {
-      programmaticScrollRef.current = false;
-    });
-  }, [
-    messages.length,
-    streaming?.content,
-    streaming?.reasoning,
-    streaming?.phase,
-    streaming?.pendingTools.length,
-    streaming?.runningTool,
-    Object.keys(perspectiveStreams).length,
-  ]);
+    const upIntent = () => {
+      pinnedRef.current = afterUpIntent(pinnedRef.current, geomOf(c));
+      sync();
+    };
+    // A gesture over a code block or tool output that can still scroll up
+    // scrolls that, not the thread.
+    const nestedTakesIt = (t: EventTarget | null) => {
+      for (let el = t instanceof Element ? t : null; el && el !== c; el = el.parentElement) {
+        if (el.scrollTop > 0 && /auto|scroll/.test(getComputedStyle(el).overflowY)) return true;
+      }
+      return false;
+    };
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY < 0 && !e.ctrlKey && !nestedTakesIt(e.target)) upIntent();
+    };
+    let touchY = 0;
+    const onTouchStart = (e: TouchEvent) => {
+      touchY = e.touches[0]?.clientY ?? 0;
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      const y = e.touches[0]?.clientY ?? touchY;
+      // Finger moving down drags the content down: the view goes up.
+      if (y > touchY && !nestedTakesIt(e.target)) upIntent();
+      touchY = y;
+    };
+    // Keys scroll whichever scroller holds focus, or the one last clicked.
+    let clickedInside = false;
+    let grabbedScrollbar = false;
+    const onPointerDown = (e: PointerEvent) => {
+      clickedInside = c.contains(e.target as Node);
+      // The scrollbar belongs to the scroller itself, right of its client box.
+      if (e.target === c && e.offsetX >= c.clientWidth) {
+        grabbedScrollbar = true;
+        upIntent();
+      }
+    };
+    const onPointerUp = () => {
+      if (!grabbedScrollbar) return;
+      grabbedScrollbar = false;
+      pinnedRef.current = afterRelease(pinnedRef.current, geomOf(c));
+      sync();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      const up = e.key === "ArrowUp" || e.key === "PageUp" || e.key === "Home" || (e.key === " " && e.shiftKey);
+      if (!up || e.ctrlKey || e.altKey || e.metaKey) return;
+      const t = e.target as HTMLElement;
+      if (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
+      const a = document.activeElement;
+      if (c.contains(a) || ((!a || a === document.body) && clickedInside)) upIntent();
+    };
+    const onScroll = () => {
+      const g = geomOf(c);
+      pinnedRef.current = afterScroll(pinnedRef.current, lastGeomRef.current, g);
+      lastGeomRef.current = g;
+      setJumpShown(showJump(pinnedRef.current, g));
+    };
+    c.addEventListener("scroll", onScroll, { passive: true });
+    c.addEventListener("wheel", onWheel, { passive: true });
+    c.addEventListener("touchstart", onTouchStart, { passive: true });
+    c.addEventListener("touchmove", onTouchMove, { passive: true });
+    window.addEventListener("pointerdown", onPointerDown, true);
+    window.addEventListener("pointerup", onPointerUp, true);
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      c.removeEventListener("scroll", onScroll);
+      c.removeEventListener("wheel", onWheel);
+      c.removeEventListener("touchstart", onTouchStart);
+      c.removeEventListener("touchmove", onTouchMove);
+      window.removeEventListener("pointerdown", onPointerDown, true);
+      window.removeEventListener("pointerup", onPointerUp, true);
+      window.removeEventListener("keydown", onKey, true);
+    };
+  }, [sync]);
+
+  // Sending a message means "show me the reply": follow again. The thread is
+  // keyed by chat, so a chat switch remounts it pinned and the observer's
+  // first callback puts it at the bottom.
+  const last = messages[messages.length - 1];
+  const lastUserId = last?.role === "user" ? last.id : null;
+  useEffect(() => {
+    const c = containerRef.current;
+    if (!lastUserId || !c) return;
+    pinnedRef.current = true;
+    if (c.clientHeight > 0) c.scrollTop = c.scrollHeight;
+    sync();
+  }, [lastUserId, sync]);
 
   // Cross-chat search lands here (0.15.0): scroll the hit into view and flash
   // it, so arriving in a 200-message chat shows *where* the match was rather
@@ -254,13 +250,12 @@ export function MessageThread({ chatId, bottomInset = 0 }: {
       // no box to scroll to — its first child is the real one.
       const target = (el?.firstElementChild ?? el) as HTMLElement | null;
       if (target) {
-        programmaticScrollRef.current = true;
+        // Reading the hit is the point: stop following, or the next token
+        // would carry the reader straight back down.
+        pinnedRef.current = false;
         target.scrollIntoView({ block: "center", behavior: "smooth" });
         target.classList.add("mz-jump-flash");
         window.setTimeout(() => target.classList.remove("mz-jump-flash"), 1600);
-        window.setTimeout(() => {
-          programmaticScrollRef.current = false;
-        }, 600);
       }
       clearPendingJump();
     });
@@ -270,16 +265,11 @@ export function MessageThread({ chatId, bottomInset = 0 }: {
   const scrollToBottom = useCallback(() => {
     const c = containerRef.current;
     if (!c) return;
-    programmaticScrollRef.current = true;
-    c.scrollTo({ top: c.scrollHeight, behavior: "smooth" });
     pinnedRef.current = true;
-    setPinned(true);
-    // Smooth scroll fires many events; clear the flag after a bit so future
-    // user scrolls register normally.
-    window.setTimeout(() => {
-      programmaticScrollRef.current = false;
-    }, 400);
-  }, []);
+    setJumpShown(false);
+    // Instant while a reply streams: a smooth scroll chases a moving target.
+    c.scrollTo({ top: c.scrollHeight, behavior: streaming ? "auto" : "smooth" });
+  }, [streaming]);
 
   return (
     <div className="relative flex flex-1 flex-col overflow-hidden">
@@ -339,7 +329,7 @@ export function MessageThread({ chatId, bottomInset = 0 }: {
         </div>
       </div>
 
-      {!pinned && (
+      {jumpShown && (
         <button
           onClick={scrollToBottom}
           style={{ bottom: bottomInset + 16 }}

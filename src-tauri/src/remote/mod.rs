@@ -22,6 +22,7 @@
 
 pub mod devices;
 pub mod discovery;
+pub mod local;
 pub mod pairing;
 
 pub use devices::DeviceAuth;

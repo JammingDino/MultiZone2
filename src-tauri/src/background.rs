@@ -48,11 +48,14 @@ pub fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
 /// Mark the main window's webview hidden or shown. Cheap to repeat.
 pub fn set_hidden<R: Runtime>(app: &AppHandle<R>, hidden: bool) {
     // Showing is always applied, even when we think it already is: the cost of
-    // a stale flag the wrong way round is a blank window.
+    // a stale flag the wrong way round is a blank window. The flag is only
+    // recorded once there is a webview to apply it to: a window created hidden
+    // (browser mode, 0.21) reports itself hidden before its webview exists, and
+    // recording that would skip the call that later could have applied it.
+    let Some(webview) = app.get_webview_window("main") else { return };
     if HIDDEN.swap(hidden, Ordering::Relaxed) == hidden && hidden {
         return;
     }
-    let Some(webview) = app.get_webview_window("main") else { return };
     apply(&webview, hidden);
 }
 

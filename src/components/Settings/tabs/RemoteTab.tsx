@@ -4,6 +4,9 @@ import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { RemoteAccess } from "@/components/Settings/RemoteAccess";
 import { ErrorNote } from "@/components/common/ErrorNote";
+import { ToggleRow } from "@/components/common/Toggle";
+import { isLocalBrowser } from "@/lib/remote/transport";
+import { reportError } from "@/lib/reportError";
 
 /**
  * Its own tab as of 0.17.3.
@@ -74,8 +77,43 @@ export function RemoteTab() {
           <ErrorNote error={error} className="min-w-0" />
         </div>
       )}
+      <OpenIn />
       <RemoteAccess apply={apply} busy={busy} />
     </div>
+  );
+}
+
+/**
+ * Open in the browser (0.21). Its own loopback socket, separate from the API
+ * and the LAN switch below, so it never puts anything on the network.
+ */
+function OpenIn() {
+  const openIn = useApp((s) => s.appSettings.openIn);
+  const setAppSettings = useApp((s) => s.setAppSettings);
+  const inBrowser = isLocalBrowser();
+  return (
+    <section>
+      <h3 className="mb-1 text-sm font-medium">Open MultiZone in</h3>
+      <ToggleRow
+        label="Your browser"
+        description="Starts in the tray without the window and opens a tab in your default browser, signed in for this computer only. Takes effect the next time MultiZone starts. The tray icon can open the app window at any time."
+        checked={openIn === "browser"}
+        onChange={(v) => void setAppSettings({ openIn: v ? "browser" : "window" })}
+      />
+      {!inBrowser && (
+        <button
+          onClick={() => void api.browserLoginUrl().catch(reportError("Couldn't open the browser"))}
+          className="mz-tap mt-2 rounded border border-[var(--color-border)] px-3 py-1.5 text-xs"
+        >
+          Open in browser now
+        </button>
+      )}
+      {inBrowser && (
+        <p className="mt-2 text-[11px] text-[var(--color-text-muted)]">
+          Some things need the app window: unlocking locked chats, setting up local dictation, and the API and remote-access switches below.
+        </p>
+      )}
+    </section>
   );
 }
 

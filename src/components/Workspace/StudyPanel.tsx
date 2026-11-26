@@ -13,7 +13,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { isRemote } from "@/lib/remote/transport";
+import { isLocalBrowser, isRemote } from "@/lib/remote/transport";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import type { StudyCard, StudyGrade, StudyOverview, StudySet, StudySetDetail } from "@/lib/types";
@@ -194,7 +194,7 @@ export function StudyPanel({ projectId }: { projectId: string }) {
         )}
       </div>
 
-      {!isRemote() && (
+      {(!isRemote() || isLocalBrowser()) && (
         <div>
           <button
             type="button"

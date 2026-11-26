@@ -213,6 +213,7 @@ export const GUI_ONLY: Record<string, string> = {
   add_project_sources: "Takes paths on the desktop, chosen in its file dialog; a remote has no way to name one",
   api_bind_state: "the Settings panel's read of the same row `/api/health` reports; a caller asks the API itself",
   apply_api_settings: "rebinds the server the request arrived on — a caller could lock itself out of the app with no way back in",
+  browser_login_url: "mints a sign-in link for a browser tab on this machine; a caller that could ask for one could sign itself in as the user",
   cancel_dictation: "ends a capture that only the window could have started",
   cancel_local_stt_install: "stops a download started from Settings",
   chat_lock_status: "which chats this window has unlocked, and whether an app password exists; the API never serves a locked chat either way",

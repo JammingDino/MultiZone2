@@ -17,6 +17,7 @@ import { PairingScreen } from "@/components/Remote/PairingScreen";
 import { ConnectionBanner } from "@/components/Remote/ConnectionBanner";
 import { ApprovalQueue } from "@/components/Remote/ApprovalQueue";
 import { useRemote } from "@/lib/remote/useRemote";
+import { isLocalBrowser } from "@/lib/remote/transport";
 import { useIsNarrow } from "@/lib/useIsNarrow";
 import { useApp } from "./store/app";
 import { useGlobalShortcuts } from "./lib/useGlobalShortcuts";
@@ -222,6 +223,19 @@ export default function App() {
   // Nothing to show and nothing to load: this device holds no copy of anything,
   // which is the point. Rendered before the rest of the tree so the seeders and
   // the provider check never run against a backend that is not there.
+  // A browser tab the app opened on itself (0.21): nothing to draw until its
+  // one-time code is traded for a session, and nothing to do once the app that
+  // issued it has quit.
+  if (isLocalBrowser() && !remote.session) {
+    return (
+      <div className="flex h-full w-full items-center justify-center p-6 text-center text-sm text-[var(--color-text-muted)]">
+        {remote.browserEnded
+          ? "This tab's session ended when MultiZone closed or restarted. Open MultiZone again (or use its tray icon → Open in browser) for a new one."
+          : "Signing in…"}
+      </div>
+    );
+  }
+
   if (remote.needsPairing) {
     return (
       <div className="h-full w-full overflow-hidden text-[var(--color-text)]">

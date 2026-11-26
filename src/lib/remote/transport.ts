@@ -63,7 +63,149 @@ export interface RemoteSession {
   deviceName: string;
 }
 
-let session: RemoteSession | null = fromSaved();
+let session: RemoteSession | null = null;
+
+// ─── This machine's browser (0.21) ───────────────────────────────────────────
+//
+// "Open MultiZone in your browser" is this same transport pointed at a loopback
+// listener the desktop app starts for it (see `src-tauri/src/remote/local.rs`).
+// The tab is opened with a one-time code in the fragment, which is traded here
+// for a session token that lives only as long as the app process; the code is
+// wiped from the address bar before anything else runs.
+
+const LOCAL_KEY = "multizone.local.session";
+
+/**
+ * GUI-only commands the desktop serves to a browser on the same machine: they
+ * are GUI-only because a *remote* device cannot see a dialog or an Explorer
+ * window open on the desktop, and the person at this tab can. The server's
+ * `remote::local::invoke` is the gate; this only decides where to send them.
+ */
+const LOCAL_OK = new Set([
+  "dialog_open",
+  "dialog_save",
+  "open_path",
+  "reveal_path",
+  "read_output_file",
+  "report_layout",
+  "save_pdf_attachment",
+  "upload_attachment",
+  "get_attachment_images",
+  "write_export_file",
+  "add_project_sources",
+  "chat_lock_status",
+]);
+
+function loginParams(): URLSearchParams | null {
+  if (typeof location === "undefined") return null;
+  const params = new URLSearchParams(location.hash.slice(1));
+  return params.has("mzlogin") ? params : null;
+}
+
+function storedLocal(): { baseUrl: string; token: string } | null {
+  try {
+    const raw = localStorage.getItem(LOCAL_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A page outside the Tauri shell that the desktop signed in (or is signing in). */
+const localBrowser =
+  typeof window !== "undefined" &&
+  !("__TAURI_INTERNALS__" in window) &&
+  (loginParams() !== null || storedLocal() !== null);
+
+/** True when this page is a browser tab the desktop app opened on itself. */
+export function isLocalBrowser(): boolean {
+  return localBrowser;
+}
+
+let localEnded = false;
+
+/** The app quit or restarted since this tab signed in: its session is gone. */
+export function localSessionEnded(): boolean {
+  return localEnded;
+}
+
+async function signInLocal(): Promise<void> {
+  const params = loginParams();
+  if (params) {
+    // Only a dev build's UI lives on another origin (Vite's) and needs the
+    // API's address; a release build never takes one from a URL, or a crafted
+    // link could point the app at somebody else's server.
+    const api = params.get("api");
+    const baseUrl =
+      import.meta.env.DEV && api && /^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(api)
+        ? api
+        : location.origin;
+    history.replaceState(null, "", location.pathname + location.search);
+    try {
+      const res = await fetch(`${baseUrl}/api/local/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: params.get("mzlogin") }),
+      });
+      const body = await readBody(res);
+      if (!res.ok) throw new Error(errorMessage(body, res.status));
+      localStorage.setItem(LOCAL_KEY, JSON.stringify({ baseUrl, token: (body as { token: string }).token }));
+    } catch (e) {
+      console.error("browser sign-in failed", e);
+    }
+  }
+  const saved = storedLocal();
+  session = saved
+    ? { baseUrl: saved.baseUrl, token: saved.token, deviceId: "local", deviceName: "This computer" }
+    : null;
+  localEnded = session === null;
+  if (session) ensureEventStream();
+  announceConnection();
+}
+
+function endLocal() {
+  try {
+    localStorage.removeItem(LOCAL_KEY);
+  } catch {}
+  session = null;
+  localEnded = true;
+  announceConnection();
+}
+
+/**
+ * Enough of the shell's internals that `@tauri-apps/api` and its plugins load
+ * and fail politely in a plain browser, instead of throwing on first use the
+ * way `getCurrentWindow()` does without them. Commands go to the transport;
+ * the dialog plugin is answered by native dialogs on the desktop; every other
+ * plugin call (window chrome, notifications, the updater) is refused, and
+ * those callers already treat a refusal as "not available here".
+ */
+if (localBrowser) {
+  (window as any).__TAURI_INTERNALS__ = {
+    metadata: { currentWindow: { label: "main" }, currentWebview: { windowLabel: "main", label: "main" } },
+    plugins: { path: { sep: "\\", delimiter: ";" } },
+    transformCallback: () => 0,
+    unregisterCallback: () => {},
+    convertFileSrc: () => {
+      throw new Error("no local file URLs in the browser");
+    },
+    invoke: async (cmd: string, args: Record<string, any> = {}) => {
+      if (cmd === "plugin:dialog|open") return invoke("dialog_open", args.options ?? {});
+      if (cmd === "plugin:dialog|save") return invoke("dialog_save", args.options ?? {});
+      if (cmd === "plugin:app|version") return appVersion();
+      if (cmd.startsWith("plugin:")) throw new Error(`${cmd} is not available in the browser`);
+      return invoke(cmd, args);
+    },
+  };
+}
+
+async function appVersion(): Promise<string> {
+  if (localReady) await localReady;
+  const res = await fetch(`${session?.baseUrl ?? location.origin}/api/health`);
+  return ((await readBody(res)) as { version?: string } | undefined)?.version ?? "";
+}
+
+if (!localBrowser) session = fromSaved();
 
 /**
  * The active saved connection, as a session.
@@ -89,7 +231,9 @@ function fromSaved(): RemoteSession | null {
 
 /** True when this window is a remote for a desktop rather than the desktop. */
 export function isRemote(): boolean {
-  return session !== null;
+  // A local browser tab counts from the start, signed in yet or not: it has
+  // no shell of its own to fall back to.
+  return session !== null || localBrowser;
 }
 
 export function currentSession(): RemoteSession | null {
@@ -243,9 +387,29 @@ export async function renameThisDevice(name: string): Promise<void> {
  * `src/lib/tauri.ts` change two import lines and nothing else.
  */
 export async function invoke<T>(command: string, args: Record<string, any> = {}): Promise<T> {
-  if (!session) return tauriInvoke<T>(command, args);
+  if (localReady) await localReady;
+  if (!session) {
+    // The shim above sends commands back here, so falling through to the
+    // shell's `invoke` from a browser would go round in a circle.
+    if (localBrowser) throw new Error("This browser tab is no longer signed in to MultiZone.");
+    return tauriInvoke<T>(command, args);
+  }
+
+  if (localBrowser && LOCAL_OK.has(command)) {
+    const res = await fetch(`${session.baseUrl}/api/local/invoke`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${session.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ command, args }),
+    });
+    const parsed = await readBody(res);
+    if (!res.ok) throw new Error(errorMessage(parsed, res.status));
+    return (parsed as { value: T }).value;
+  }
 
   const guiOnly = GUI_ONLY[command];
+  if (guiOnly && localBrowser) {
+    throw new Error(`"${command}" is only available in the app window (open it from the tray icon) — ${guiOnly}.`);
+  }
   if (guiOnly) {
     // A better answer than a 404: the reason is already written down, and it is
     // always "this needs the machine the app is running on".
@@ -316,7 +480,7 @@ export function listen<T>(
   event: string,
   handler: (e: { payload: T }) => void,
 ): Promise<UnlistenFn> {
-  if (!session) return tauriListen<T>(event, handler);
+  if (!session && !localBrowser) return tauriListen<T>(event, handler);
 
   const set = handlers.get(event) ?? new Set<Handler>();
   set.add(handler as Handler);
@@ -422,8 +586,9 @@ async function runEventStream() {
         // Revoked on the desktop, or its database was replaced. Retrying
         // forever would show a spinner for a session that will never come back,
         // and the entry is dead — so drop it and let the user pick another
-        // computer or pair again.
-        if (session) forgetConnection(session.deviceId);
+        // computer or pair again. A browser tab's session ends with the app.
+        if (localBrowser) endLocal();
+        else if (session) forgetConnection(session.deviceId);
         session = null;
         streamStarted = false;
         return;
@@ -514,3 +679,7 @@ function sleep(ms: number) {
 }
 
 export type { UnlistenFn };
+
+// Last, so everything the sign-in touches (the event stream, the connection
+// watchers) is initialised before it runs.
+const localReady: Promise<void> | null = localBrowser ? signInLocal() : null;

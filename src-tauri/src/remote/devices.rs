@@ -49,12 +49,15 @@ pub enum DeviceAuth {
     Static,
     /// A paired device, identified.
     Device(Box<PairedDevice>),
+    /// A browser tab on this machine, signed in by the app itself (0.21) —
+    /// see `remote::local`. Only ever accepted on the loopback listener.
+    LocalBrowser,
 }
 
 impl DeviceAuth {
     pub fn device_id(&self) -> Option<&str> {
         match self {
-            DeviceAuth::Static => None,
+            DeviceAuth::Static | DeviceAuth::LocalBrowser => None,
             DeviceAuth::Device(d) => Some(&d.id),
         }
     }

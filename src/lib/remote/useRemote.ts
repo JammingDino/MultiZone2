@@ -16,6 +16,7 @@ import {
   connection,
   currentSession,
   isRemote,
+  localSessionEnded,
   onConnectionChange,
   type ConnectionState,
   type RemoteSession,
@@ -50,6 +51,8 @@ export interface RemoteState {
   shell: boolean;
   /** A phone that has not been paired: the pairing screen, and nothing else. */
   needsPairing: boolean;
+  /** A browser tab whose session ended with the app that opened it. */
+  browserEnded: boolean;
   connection: ConnectionState;
 }
 
@@ -71,6 +74,7 @@ export function useRemote(): RemoteState {
     session,
     shell,
     needsPairing: shell && !isRemote() && session === null,
+    browserEnded: session === null && localSessionEnded(),
     connection: state,
   };
 }

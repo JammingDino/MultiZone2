@@ -4,6 +4,7 @@ import { PhysicalPosition } from "@tauri-apps/api/dpi";
 import { Check, GripVertical, LayoutTemplate, Minus, Square, X, Maximize2 } from "lucide-react";
 import { useApp } from "@/store/app";
 import { Popover } from "@/components/common/Popover";
+import { isLocalBrowser } from "@/lib/remote/transport";
 
 /**
  * How long after a touch/pen press we treat an incoming `mousedown` as the
@@ -229,6 +230,8 @@ export function TitleBar() {
   const buttons = (
     <>
       <LayoutMenu open={menuOpen} setOpen={setMenuOpen} />
+      {/* A browser tab has the browser's own; these would do nothing. */}
+      {!isLocalBrowser() && <>
       <WinBtn title="Minimize" onClick={() => { appWindow.minimize().catch(() => {}); }}>
         <Minus size={12} />
       </WinBtn>
@@ -238,6 +241,7 @@ export function TitleBar() {
       <WinBtn title={closeToTray ? "Close to tray" : "Close"} onClick={() => { appWindow.close().catch(() => {}); }} danger>
         <X size={12} />
       </WinBtn>
+      </>}
     </>
   );
 

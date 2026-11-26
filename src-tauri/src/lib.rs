@@ -208,7 +208,13 @@ pub fn run() {
             if app.try_state::<AppState>().is_none() {
                 return;
             }
-            tray::show_main(app);
+            // Double-clicking the app again means "show me MultiZone", which
+            // in browser mode is a tab rather than the window.
+            if remote::local::browser_mode() {
+                remote::local::open_in_browser(app);
+            } else {
+                tray::show_main(app);
+            }
             // `multizone <path>` while already running opens a chat on it.
             launch::on_second_instance(app, &args, &cwd);
         }))
@@ -255,8 +261,21 @@ pub fn run() {
                 };
                 handle.manage(state);
                 tray::sync(&handle.state::<AppState>().db).await;
-                if let Err(e) = tray::init(&handle) {
-                    tracing::warn!("no tray icon, so closing the window quits: {e}");
+                let browser = remote::local::read_mode(&handle.state::<AppState>().db).await;
+                let tray_ok = match tray::init(&handle) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        tracing::warn!("no tray icon, so closing the window quits: {e}");
+                        false
+                    }
+                };
+                // The window is created hidden (tauri.conf.json) so that browser
+                // mode (0.21) never flashes it. Without a tray icon there would be
+                // no way back to the window, so then it shows regardless.
+                if browser && tray_ok {
+                    remote::local::open_in_browser(&handle);
+                } else {
+                    tray::show_main(&handle);
                 }
                 // Scheduled runs (0.18). Started after the state is managed,
                 // since a firing needs the database and the engine.
@@ -296,6 +315,16 @@ pub fn run() {
                 commands::mirror::resync().await;
             });
             Ok(())
+        })
+        // A window left hidden at launch (browser mode) is told so once its
+        // page is up; at setup the webview is not there yet to be told.
+        .on_page_load(|webview, payload| {
+            if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished)
+                && webview.label() == "main"
+                && !webview.window().is_visible().unwrap_or(true)
+            {
+                background::set_hidden(webview.app_handle(), true);
+            }
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -508,6 +537,7 @@ pub fn run() {
             commands::remote::open_pairing,
             commands::remote::arm_pairing,
             commands::remote::close_pairing,
+            commands::remote::browser_login_url,
             commands::messages::pending_approvals,
             commands::voice::list_voice_input_devices,
             commands::voice::start_dictation,

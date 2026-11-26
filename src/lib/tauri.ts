@@ -845,6 +845,8 @@ export const armPairing = () => invoke<PairingView>("arm_pairing");
  *  that cannot ask: a browser driven by hand, or a build older than 0.17.4. */
 export const openPairing = () => invoke<PairingView>("open_pairing");
 export const closePairing = () => invoke<PairingView>("close_pairing");
+/** A one-time sign-in link to this app in a browser tab (0.21); opened unless `open` is false. */
+export const browserLoginUrl = (open = true) => invoke<string>("browser_login_url", { open });
 
 /**
  * Every tool call waiting on a human.

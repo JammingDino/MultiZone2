@@ -57,6 +57,10 @@ pub(crate) struct ApiState {
     /// `GET /api/events` reads the same broadcast — and because the listeners
     /// feeding it are unregistered when the last handle drops.
     pub(crate) events: Arc<events::EventBridge>,
+    /// Set on the loopback listener that serves the UI to a browser (0.21),
+    /// and only there: it is what accepts browser sessions, mounts the routes
+    /// only that tab may use, and pins the Host header — see `remote::local`.
+    pub(crate) local_port: Option<u16>,
 }
 
 impl ApiState {
@@ -104,12 +108,51 @@ pub async fn start(
     token: String,
 ) -> crate::error::AppResult<ApiHandle> {
     let events = Arc::new(events::EventBridge::start(app.clone()));
-    let state = ApiState { db, http, active_streams, tool_approvals, app, token, events };
+    let state = ApiState { db, http, active_streams, tool_approvals, app, token, events, local_port: None };
     let router = build_router(state);
 
     let addr = SocketAddr::from((address, port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
+    let handle = serve(listener, router);
 
+    if address.is_loopback() {
+        tracing::info!("API server listening on http://{addr}");
+    } else {
+        tracing::warn!("API server listening on http://{addr} — reachable from the local network");
+    }
+    Ok(handle)
+}
+
+/// The browser-mode listener (0.21): always loopback, the preferred port if it
+/// is free and whatever the OS hands out if not — a port some other program
+/// already holds must not stop the app from opening. Its static token is a
+/// fresh random one nobody is told, so the only way in is a browser session.
+pub(crate) async fn start_local(
+    app: AppHandle,
+    db: SqlitePool,
+    http: reqwest::Client,
+    active_streams: Arc<RwLock<HashMap<String, Arc<AtomicBool>>>>,
+    tool_approvals: crate::commands::messages::ApprovalGate,
+    preferred: u16,
+) -> crate::error::AppResult<ApiHandle> {
+    let listener = match tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, preferred)).await {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::info!("browser mode: port {preferred} is taken ({e}), using another");
+            tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?
+        }
+    };
+    let port = listener.local_addr()?.port();
+    let events = Arc::new(events::EventBridge::start(app.clone()));
+    let state = ApiState {
+        db, http, active_streams, tool_approvals, app, token: new_id(), events, local_port: Some(port),
+    };
+    tracing::info!("browser UI listening on http://127.0.0.1:{port}");
+    Ok(serve(listener, build_router(state)))
+}
+
+fn serve(listener: tokio::net::TcpListener, router: Router) -> ApiHandle {
+    let port = listener.local_addr().map(|a| a.port()).unwrap_or(0);
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
     tokio::spawn(async move {
         // `into_make_service_with_connect_info` rather than the plain service:
@@ -126,13 +169,7 @@ pub async fn start(
             tracing::error!("api server error: {e}");
         }
     });
-
-    if address.is_loopback() {
-        tracing::info!("API server listening on http://{addr}");
-    } else {
-        tracing::warn!("API server listening on http://{addr} — reachable from the local network");
-    }
-    Ok(ApiHandle { port, shutdown: Some(shutdown_tx) })
+    ApiHandle { port, shutdown: Some(shutdown_tx) }
 }
 
 /// Call the API from inside the process, without a socket.
@@ -168,6 +205,7 @@ pub(crate) async fn call_in_process(
         events: Arc::new(events::EventBridge::start(app.clone())),
         app,
         token: token.clone(),
+        local_port: None,
     };
 
     let method = axum::http::Method::from_bytes(method.to_uppercase().as_bytes())
@@ -397,13 +435,26 @@ fn build_router(state: ApiState) -> Router {
         // The other half of the frontend's one seam: `listen`, as a stream.
         .route("/api/events", get(events::events))
         .route("/api/mirror", post(h::mirror_all))
-        .route("/api/mirror/import", post(h::import_markdown))
+        .route("/api/mirror/import", post(h::import_markdown));
+    // Mounted on the browser listener only, so neither `app_control` (which
+    // routes through this same function) nor a paired phone has the route.
+    let protected = match state.local_port {
+        Some(_) => protected.route("/api/local/invoke", post(crate::remote::local::invoke)),
+        None => protected,
+    };
+    let protected = protected
         // Inside auth (route layers wrap outward), so a stranger is told
         // "unauthorized" rather than which chats are locked.
         .route_layer(middleware::from_fn_with_state(state.db.clone(), chat_lock_mw))
         .route_layer(middleware::from_fn_with_state(state.clone(), auth_mw));
 
-    Router::new()
+    let mut public = Router::new();
+    if state.local_port.is_some() {
+        public = public
+            .route("/api/local/login", post(crate::remote::local::login))
+            .fallback(crate::remote::local::asset);
+    }
+    let router = public
         // Both discovery routes are unauthenticated on purpose: a caller trying
         // to work out why nothing answers must not have to authenticate to find
         // out that its token is the thing that is wrong.
@@ -418,8 +469,14 @@ fn build_router(state: ApiState) -> Router {
         .route("/api/pair/request", post(h::pair_request))
         .merge(protected)
         .layer(middleware::from_fn_with_state(state.clone(), notify_gui_mw))
-        .layer(CorsLayer::permissive())
-        .with_state(state)
+        .layer(CorsLayer::permissive());
+    // Outermost, so a rebound hostname is refused before anything — even the
+    // UI's own files — is served to it.
+    let router = match state.local_port {
+        Some(_) => router.layer(middleware::from_fn_with_state(state.clone(), crate::remote::local::host_check)),
+        None => router,
+    };
+    router.with_state(state)
 }
 
 /// Tell an open window that a request changed something.
@@ -495,6 +552,10 @@ async fn auth_mw(
     // case and is not worth a query.
     if token == st.token {
         req.extensions_mut().insert(crate::remote::DeviceAuth::Static);
+        return next.run(req).await;
+    }
+    if st.local_port.is_some() && crate::remote::local::session_valid(token) {
+        req.extensions_mut().insert(crate::remote::DeviceAuth::LocalBrowser);
         return next.run(req).await;
     }
 

@@ -252,7 +252,7 @@ pub const ROUTES: &[RouteDef] = &[
     r("GET", "/api/stats", "Row counts: chats, messages, zones, projects, tags"),
     r("GET", "/api/settings/:key", "Read one settings row"),
     r("PUT", "/api/settings/:key", "Write one settings row"),
-    r("PATCH", "/api/settings/:key", "Merge fields into a JSON settings row (e.g. {\"mode\":\"dark\"} on `theme`; on `app_settings`, {\"chatClickOpens\":\"tab\"|\"replace\"} sets whether clicking a chat opens a new tab, the default, or replaces the one on screen)"),
+    r("PATCH", "/api/settings/:key", "Merge fields into a JSON settings row (e.g. {\"mode\":\"dark\"} on `theme`; on `app_settings`, {\"chatClickOpens\":\"tab\"|\"replace\"} sets whether clicking a chat opens a new tab, the default, or replaces the one on screen; {\"openIn\":\"window\"|\"browser\"} sets whether MultiZone opens in its own window, the default, or starts hidden in the tray and opens a tab in the default browser — applies from the next launch)"),
     // Remote access (0.17.0)
     r("GET", "/api/remote", "Whether the app is reachable from the network, on which address, and whether it is being advertised"),
     r("GET", "/api/network-interfaces", "The addresses this machine could bind"),
@@ -574,6 +574,7 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("remote::open_pairing", Route("POST /api/pairing")),
     ("remote::arm_pairing", Route("POST /api/pairing/arm")),
     ("remote::close_pairing", Route("DELETE /api/pairing")),
+    ("remote::browser_login_url", GuiOnly("mints a sign-in link for a browser tab on this machine; a caller that could ask for one could sign itself in as the user")),
     ("messages::pending_approvals", Route("GET /api/approvals")),
 
 ];

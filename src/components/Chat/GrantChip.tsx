@@ -4,7 +4,7 @@ import { File as FileIcon, Folder, FolderPlus, Lock, X } from "lucide-react";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { reportError } from "@/lib/reportError";
-import { isRemote } from "@/lib/remote/transport";
+import { isLocalBrowser, isRemote } from "@/lib/remote/transport";
 import { findPaths } from "@/lib/pathText";
 import type { DropPathResult } from "@/lib/dropPaths";
 import type { ChatPath, ChatPathSource, PathContext } from "@/lib/types";
@@ -284,7 +284,7 @@ export function AddFolderButton({ onPick, className = "rounded p-1.5", size = 16
   className?: string;
   size?: number;
 }) {
-  if (isRemote()) return null;
+  if (isRemote() && !isLocalBrowser()) return null;
   return (
     <button
       onClick={() => { pickFolders().then((p) => { if (p.length) onPick(p); }).catch(reportError("Couldn't open the folder picker")); }}

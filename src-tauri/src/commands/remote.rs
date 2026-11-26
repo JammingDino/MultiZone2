@@ -310,3 +310,15 @@ mod tests {
         assert!(!link.contains("code"));
     }
 }
+
+/// A one-time sign-in link to this app in a browser tab (0.21), opened in the
+/// default browser unless `open` is false (then only returned — for Settings'
+/// "copy link" and for testing).
+#[tauri::command]
+pub async fn browser_login_url(app: AppHandle, open: Option<bool>) -> AppResult<String> {
+    let url = crate::remote::local::login_url(&app).await?;
+    if open.unwrap_or(true) {
+        opener::open_browser(&url).map_err(|e| AppError::Other(format!("could not open the browser: {e}")))?;
+    }
+    Ok(url)
+}

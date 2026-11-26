@@ -13,7 +13,7 @@
 
 import { CloudOff, Loader2, RefreshCw, Wifi } from "lucide-react";
 import { useEffect, useState } from "react";
-import { currentSession, disconnect, retryNow } from "@/lib/remote/transport";
+import { currentSession, disconnect, isLocalBrowser, retryNow } from "@/lib/remote/transport";
 import type { ConnectionState } from "@/lib/remote/transport";
 
 export function ConnectionBanner({ state }: { state: ConnectionState }) {
@@ -52,10 +52,11 @@ export function ConnectionBanner({ state }: { state: ConnectionState }) {
       <div className="min-w-[12rem] flex-1">
         {asleep ? (
           <>
-            <div>Can't reach your computer.</div>
+            <div>{isLocalBrowser() ? "MultiZone isn't answering." : "Can't reach your computer."}</div>
             <div className="text-xs text-[var(--color-text-muted)]">
-              It may be asleep or on a different network. Nothing is stored on this device, so
-              there is nothing to show until it is back — you stay paired either way.
+              {isLocalBrowser()
+                ? "It may have been closed. Start it again and it opens a new tab."
+                : "It may be asleep or on a different network. Nothing is stored on this device, so there is nothing to show until it is back — you stay paired either way."}
             </div>
           </>
         ) : (
@@ -76,12 +77,14 @@ export function ConnectionBanner({ state }: { state: ConnectionState }) {
           </button>
           {/* Disconnect, not sign out: every token is kept, and this drops back
               to the list of computers so switching to the laptop is one tap. */}
-          <button
-            onClick={() => disconnect()}
-            className="mz-tap rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs"
-          >
-            Switch
-          </button>
+          {!isLocalBrowser() && (
+            <button
+              onClick={() => disconnect()}
+              className="mz-tap rounded border border-[var(--color-border)] px-2.5 py-1.5 text-xs"
+            >
+              Switch
+            </button>
+          )}
         </div>
       )}
     </div>

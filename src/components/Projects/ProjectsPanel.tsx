@@ -4,7 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useApp } from "@/store/app";
 import { useShallow } from "zustand/react/shallow";
 import * as api from "@/lib/tauri";
-import { isRemote } from "@/lib/remote/transport";
+import { isLocalBrowser, isRemote } from "@/lib/remote/transport";
 import type { ApprovalPolicy, IndexSummary, KbDocument, KnowledgeStatus, Project, Tag, Zone } from "@/lib/types";
 import { EMPTY_APPROVALS, parseApprovals, serializeApprovals } from "@/lib/approvals";
 import { ApprovalsEditor } from "@/components/common/ApprovalsEditor";
@@ -296,7 +296,7 @@ function ProjectForm({
    * button was simply dead. A remote types the path instead, which is the one
    * thing it knows better than a picker pointed at the wrong filesystem.
    */
-  const remote = isRemote();
+  const remote = isRemote() && !isLocalBrowser();
 
   async function pickDirectory() {
     const selected = await open({ directory: true, multiple: false });

@@ -25,7 +25,7 @@ import {
   X,
 } from "lucide-react";
 import * as api from "@/lib/tauri";
-import { currentSession, disconnect, isRemote } from "@/lib/remote/transport";
+import { currentSession, disconnect, isLocalBrowser, isRemote } from "@/lib/remote/transport";
 import { useApp } from "@/store/app";
 import { Toggle, ToggleRow } from "@/components/common/Toggle";
 import type { PairedDevice, PairingView, RemoteStatus } from "@/lib/types";
@@ -135,7 +135,7 @@ export function RemoteAccess({ apply, busy }: RemoteAccessProps) {
 
   return (
     <>
-      {readOnly && <ThisConnection />}
+      {readOnly && !isLocalBrowser() && <ThisConnection />}
       <section>
         <h3 className="mb-1 text-sm font-medium">Remote access</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">Drive this app from another device on your network. Everything still runs here.</p>

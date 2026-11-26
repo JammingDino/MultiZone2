@@ -1144,6 +1144,12 @@ export interface AppSettings {
    * backend, which handles the close request.
    */
   closeToTray: boolean;
+  /**
+   * Where MultiZone opens at launch (0.21): its own window, or a tab in the
+   * default browser with the window hidden and the tray icon left. Read by the
+   * backend at startup, so a change applies on the next launch.
+   */
+  openIn: "window" | "browser";
   maxToolSteps: number;
   /**
    * Ceiling on the billed tokens one session — a chat plus every sub-agent
@@ -1550,6 +1556,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   streamAnimation: "fade",
   streamAnimationMs: 250,
   closeToTray: true,
+  openIn: "window",
   maxToolSteps: 30,
   maxSessionTokens: 0,
   rollingContextTokens: 0,

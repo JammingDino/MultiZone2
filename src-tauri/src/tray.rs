@@ -52,15 +52,17 @@ pub fn show_main(app: &AppHandle) {
 }
 
 pub fn init(app: &AppHandle) -> tauri::Result<()> {
-    let show = MenuItem::with_id(app, "show", "Show MultiZone", true, None::<&str>)?;
+    let show = MenuItem::with_id(app, "show", "Open app window", true, None::<&str>)?;
+    let browser = MenuItem::with_id(app, "browser", "Open in browser", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit MultiZone", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show, &quit])?;
+    let menu = Menu::with_items(app, &[&show, &browser, &quit])?;
     let mut builder = TrayIconBuilder::with_id("main")
         .tooltip("MultiZone")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, e| match e.id.as_ref() {
             "show" => show_main(app),
+            "browser" => crate::remote::local::open_in_browser(app),
             "quit" => app.exit(0),
             _ => {}
         })
@@ -71,7 +73,11 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
                 ..
             } = e
             {
-                show_main(tray.app_handle());
+                if crate::remote::local::browser_mode() {
+                    crate::remote::local::open_in_browser(tray.app_handle());
+                } else {
+                    show_main(tray.app_handle());
+                }
             }
         });
     if let Some(icon) = app.default_window_icon() {

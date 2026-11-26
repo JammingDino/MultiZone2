@@ -17,6 +17,7 @@ import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 import { useBackDismiss } from "@/lib/useBackDismiss";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import * as api from "@/lib/tauri";
+import { useZoneModel } from "@/lib/useZoneModel";
 
 /**
  * Command palette (0.15.1).
@@ -77,6 +78,7 @@ export function fuzzyScore(query: string, text: string): number | null {
 }
 
 export function CommandPalette() {
+  const zoneModel = useZoneModel();
   const open = useApp((s) => s.commandPaletteOpen);
   const close = useApp((s) => s.closeCommandPalette);
   const [query, setQuery] = useState("");
@@ -157,7 +159,7 @@ export function CommandPalette() {
       out.push({
         id: `zone:${z.id}`,
         label: `New chat in ${z.name}`,
-        detail: z.model,
+        detail: zoneModel(z),
         group: "Zones",
         icon: <ZoneIcon size={14} />,
         run: go(async () => {

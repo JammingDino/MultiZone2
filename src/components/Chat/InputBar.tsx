@@ -21,7 +21,7 @@ import {
   useAttachments,
 } from "@/components/Chat/Attachments";
 import { resolveVisionCapable } from "@/lib/vision";
-import { resolveBaseModel, resolveBaseProvider } from "@/lib/baseZone";
+import { resolveBaseModel, resolveBaseProvider, resolveZoneRun } from "@/lib/baseZone";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 import {
   AddFolderButton,
@@ -210,7 +210,8 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
     if (ovZone === null) return quickProviderId;
     const zid = ovZone === undefined ? chat?.zoneId ?? null : ovZone;
     if (zid === null) return quickProviderId;
-    return zones.find((z) => z.id === zid)?.providerId ?? null;
+    const z = zones.find((x) => x.id === zid);
+    return z ? resolveZoneRun(z, providers, zones, baseZoneId).provider?.id ?? null : null;
   })();
 
   // Effective model for the next send, honouring one-shot overrides. Used to
@@ -224,7 +225,8 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
     if (useQuick) return quickModel;
     const zid = ovZone === undefined ? chat?.zoneId ?? null : ovZone;
     if (zid === null) return quickModel;
-    return zones.find((z) => z.id === zid)?.model ?? null;
+    const z = zones.find((x) => x.id === zid);
+    return z ? resolveZoneRun(z, providers, zones, baseZoneId).model || null : null;
   })();
   // True when the chosen model can't see images, so any image/PDF attachment
   // will be sent as OCR-extracted text instead. Honors the per-model manual

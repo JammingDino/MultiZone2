@@ -9,7 +9,7 @@ import * as api from "@/lib/tauri";
 import type { LibraryEntry, Provider, Zone } from "@/lib/types";
 import { ALL_TOOLS } from "@/lib/types";
 import { getZoneIcon } from "@/lib/zoneIcons";
-import { resolveBaseModel, resolveBaseProvider } from "@/lib/baseZone";
+import { resolveBaseProvider } from "@/lib/baseZone";
 import { installEntry, installTeam, saveZoneToLibrary, importEntryFromJson } from "@/lib/zoneLibrary";
 import { ZoneForm } from "./ZoneForm";
 import { InstalledZones, useZoneActions } from "./InstalledZones";
@@ -94,10 +94,9 @@ export function ZoneLibrary({ rail }: { rail: (items: React.ReactNode) => React.
   const fileRef = useRef<HTMLInputElement>(null);
   const toastTimer = useRef<number | undefined>(undefined);
 
-  // Newly installed library zones inherit the base zone's provider + model —
-  // whatever the user already treats as their default assistant.
+  // Installed zones follow the chat's model (0.20.0), so all an install needs
+  // is some provider to run on.
   const quickProvider = resolveBaseProvider(providers, zones, baseZoneId);
-  const quickModel = resolveBaseModel(providers, zones, baseZoneId);
   const canInstall = !!quickProvider;
 
   function flash(msg: string) {
@@ -194,15 +193,9 @@ export function ZoneLibrary({ rail }: { rail: (items: React.ReactNode) => React.
     if (!quickProvider || busy) return;
     setBusy(true);
     try {
-      const { modelFallback } = await installEntry(
-        e, quickProvider.id, quickModel, zones.map((z) => z.name),
-      );
+      await installEntry(e, zones.map((z) => z.name));
       await refreshZones();
-      flash(
-        modelFallback
-          ? `Installed “${e.name}” using ${modelFallback.used} — ${quickProvider.name} doesn't offer ${modelFallback.wanted}`
-          : `Installed “${e.name}”`,
-      );
+      flash(`Installed “${e.name}”`);
     } catch (err) {
       console.error(err);
       flash(`Couldn't install “${e.name}”: ${(err as Error).message ?? err}`);
@@ -217,14 +210,9 @@ export function ZoneLibrary({ rail }: { rail: (items: React.ReactNode) => React.
     if (missing.length === 0) return;
     setBusy(true);
     try {
-      const res = await installTeam(
-        missing, quickProvider.id, quickModel, zones.map((z) => z.name),
-      );
+      const res = await installTeam(missing, zones.map((z) => z.name));
       await refreshZones();
       const parts = [`Installed ${res.installed.length} zone${res.installed.length === 1 ? "" : "s"} — “${team.name}”`];
-      if (res.fallbacks.length > 0) {
-        parts.push(`${res.fallbacks.length} fell back to ${quickModel}`);
-      }
       if (res.failures.length > 0) {
         parts.push(`${res.failures.length} failed: ${res.failures.map((f) => f.name).join(", ")}`);
         console.error("team install failures", res.failures);

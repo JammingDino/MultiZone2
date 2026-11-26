@@ -36,6 +36,7 @@ import { getZoneIcon } from "@/lib/zoneIcons";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { CHROME_QUIET } from "@/lib/chrome";
+import { useZoneModel } from "@/lib/useZoneModel";
 
 /** Renders a single text chunk, with its own streaming throttle. */
 function TextBlockView({
@@ -870,6 +871,7 @@ function ParticipantCard({
   /** This zone's live status/stats while it generates — rendered in its own column. */
   statusLine?: React.ReactNode;
 }) {
+  const zoneModel = useZoneModel();
   const turnCitations = useMemo(
     () => collectCitations(blocks, fileSources ?? []),
     [blocks, fileSources],
@@ -939,8 +941,8 @@ function ParticipantCard({
               <span className="font-medium" style={{ color: color ?? "var(--color-accent)" }}>
                 {zone?.name ?? fallbackName}
               </span>
-              {zone?.model && (
-                <span className="truncate text-[var(--color-text-muted)]">{zone.model}</span>
+              {zoneModel(zone) && (
+                <span className="truncate text-[var(--color-text-muted)]">{zoneModel(zone)}</span>
               )}
               {askedBy && (
                 <span className="shrink-0 text-[var(--color-text-muted)]">

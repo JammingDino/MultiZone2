@@ -1146,20 +1146,64 @@ async fn load_zone_and_provider(
     .fetch_optional(db)
     .await?
     .ok_or_else(|| AppError::NotFound(format!("zone {zone_id}")))?;
+    resolve_zone_model(db, zone).await
+}
 
-    let provider_id = zone
-        .provider_id
-        .clone()
-        .ok_or_else(|| AppError::Invalid("zone has no provider".into()))?;
-    let provider = sqlx::query_as::<_, Provider>(
-        "SELECT id, name, base_url, api_key, default_model, created_at FROM providers WHERE id = ?1",
-    )
-    .bind(&provider_id)
-    .fetch_optional(db)
-    .await?
-    .ok_or_else(|| AppError::NotFound(format!("provider {provider_id}")))?;
-
+/// Fill in what a zone leaves to the chat (0.20.0). A zone is a role first:
+/// with no provider it runs on the base zone's provider and model (else the
+/// first provider's default), so adding a provider needs no new zones. A zone
+/// that names a provider but no model runs that provider's default model.
+async fn resolve_zone_model(db: &SqlitePool, mut zone: Zone) -> AppResult<(Zone, Provider)> {
+    let provider = match zone.provider_id.clone().filter(|p| !p.trim().is_empty()) {
+        Some(pid) => sqlx::query_as::<_, Provider>(
+            "SELECT id, name, base_url, api_key, default_model, created_at FROM providers WHERE id = ?1",
+        )
+        .bind(&pid)
+        .fetch_optional(db)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("provider {pid}")))?,
+        None => {
+            let (provider, model) = inherited_provider_and_model(db, &zone.id).await?;
+            zone.model = model;
+            provider
+        }
+    };
+    if zone.model.trim().is_empty() {
+        zone.model = provider
+            .default_model
+            .clone()
+            .filter(|m| !m.trim().is_empty())
+            .ok_or_else(|| {
+                AppError::Invalid(format!("zone {} has no model and its provider no default model", zone.name))
+            })?;
+    }
+    zone.provider_id = Some(provider.id.clone());
     Ok((zone, provider))
+}
+
+/// The provider and model an inheriting zone runs on: the base zone's, when the
+/// base zone pins a provider (and is not the zone asking), else the first
+/// provider with its default model. The model may be empty; the caller fills it.
+async fn inherited_provider_and_model(db: &SqlitePool, asking_zone: &str) -> AppResult<(Provider, String)> {
+    if let Some(bid) = base_zone_id(db).await.filter(|b| b != asking_zone) {
+        let pinned: Option<(Option<String>, String)> =
+            sqlx::query_as("SELECT provider_id, model FROM zones WHERE id = ?1")
+                .bind(&bid)
+                .fetch_optional(db)
+                .await?;
+        if let Some((Some(pid), model)) = pinned {
+            let provider = sqlx::query_as::<_, Provider>(
+                "SELECT id, name, base_url, api_key, default_model, created_at FROM providers WHERE id = ?1",
+            )
+            .bind(&pid)
+            .fetch_optional(db)
+            .await?;
+            if let Some(p) = provider {
+                return Ok((p, model));
+            }
+        }
+    }
+    Ok((default_provider(db).await?, String::new()))
 }
 
 /// Synthetic zone id used for "quick"/simple chats that aren't bound to a zone.
@@ -3643,6 +3687,71 @@ pub(crate) async fn resolve_working_dir(db: &SqlitePool, chat_id: &str) -> AppRe
                 .filter(|s| !s.trim().is_empty())
                 .map(String::from)
         }))
+}
+
+#[cfg(test)]
+mod inherit_tests {
+    use super::*;
+
+    async fn pool() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        crate::db::MIGRATOR.run(&pool).await.unwrap();
+        for (id, model, at) in [("p1", "first-default", 1), ("p2", "second-default", 2)] {
+            sqlx::query("INSERT INTO providers (id, name, base_url, default_model, created_at) VALUES (?1, ?1, 'http://x', ?2, ?3)")
+                .bind(id).bind(model).bind(at).execute(&pool).await.unwrap();
+        }
+        pool
+    }
+
+    async fn zone(pool: &SqlitePool, id: &str, provider: Option<&str>, model: &str) {
+        sqlx::query("INSERT INTO zones (id, name, provider_id, model, created_at, updated_at) VALUES (?1, ?1, ?2, ?3, 0, 0)")
+            .bind(id).bind(provider).bind(model).execute(pool).await.unwrap();
+    }
+
+    async fn base(pool: &SqlitePool, id: &str) {
+        sqlx::query("INSERT INTO settings (key, value) VALUES ('app_settings', ?1)")
+            .bind(serde_json::json!({ "baseZoneId": id }).to_string())
+            .execute(pool).await.unwrap();
+    }
+
+    async fn runs_on(pool: &SqlitePool, id: &str) -> (String, String) {
+        let (z, p) = load_zone_and_provider(pool, id).await.unwrap();
+        assert_eq!(z.provider_id.as_deref(), Some(p.id.as_str()));
+        (p.id, z.model)
+    }
+
+    #[tokio::test]
+    async fn a_zone_with_no_provider_follows_the_base_zone() {
+        let pool = pool().await;
+        zone(&pool, "base", Some("p2"), "picked-model").await;
+        zone(&pool, "role", None, "").await;
+        base(&pool, "base").await;
+        assert_eq!(runs_on(&pool, "role").await, ("p2".into(), "picked-model".into()));
+    }
+
+    #[tokio::test]
+    async fn with_no_base_zone_it_runs_the_first_providers_default() {
+        let pool = pool().await;
+        zone(&pool, "role", None, "").await;
+        assert_eq!(runs_on(&pool, "role").await, ("p1".into(), "first-default".into()));
+    }
+
+    #[tokio::test]
+    async fn an_inheriting_base_zone_does_not_loop() {
+        let pool = pool().await;
+        zone(&pool, "base", None, "").await;
+        base(&pool, "base").await;
+        assert_eq!(runs_on(&pool, "base").await, ("p1".into(), "first-default".into()));
+    }
+
+    #[tokio::test]
+    async fn a_pinned_provider_with_no_model_uses_its_default() {
+        let pool = pool().await;
+        zone(&pool, "z", Some("p2"), "").await;
+        assert_eq!(runs_on(&pool, "z").await, ("p2".into(), "second-default".into()));
+        zone(&pool, "pinned", Some("p2"), "exact").await;
+        assert_eq!(runs_on(&pool, "pinned").await, ("p2".into(), "exact".into()));
+    }
 }
 
 #[cfg(test)]

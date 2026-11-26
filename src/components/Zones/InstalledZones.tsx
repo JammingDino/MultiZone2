@@ -8,6 +8,7 @@ import { getZoneIcon } from "@/lib/zoneIcons";
 import { exportZoneJson, zoneTeamName } from "@/lib/zoneLibrary";
 import { reportError } from "@/lib/reportError";
 import { NavGroup, navItemClass } from "@/components/common/NavRail";
+import { useZoneModel } from "@/lib/useZoneModel";
 
 /**
  * The list of installed zones, shared by every place that shows one — the
@@ -158,6 +159,7 @@ export function InstalledZones({
   /** Rail rows: a small swatch and the name, the height of a Settings tab. */
   compact?: boolean;
 }) {
+  const zoneModel = useZoneModel();
   const zones = useApp((s) => s.zones);
   const baseZoneId = useApp((s) => s.appSettings.baseZoneId);
   const defaultZoneId = useApp((s) => s.defaultZoneId);
@@ -218,7 +220,7 @@ export function InstalledZones({
                   key={z.id}
                   onClick={() => onOpen(z.id)}
                   onContextMenu={(e) => actions.openMenu(z, e)}
-                  title={`${z.name} · ${z.model}${z.id === baseZoneId ? " · base zone" : ""}`}
+                  title={`${z.name} · ${zoneModel(z)}${z.id === baseZoneId ? " · base zone" : ""}`}
                   className={navItemClass(activeZoneId === z.id)}
                 >
                   <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded" style={{ background: accent }}>
@@ -266,7 +268,7 @@ export function InstalledZones({
                     )}
                   </span>
                   <span className="block truncate text-[11px] text-[var(--color-text-muted)]">
-                    {z.model}
+                    {zoneModel(z)}
                     {z.id === baseZoneId && (
                       <span className="ml-1.5 rounded bg-[var(--color-panel-hover)] px-1 py-px text-[9.5px] uppercase tracking-wide">
                         base

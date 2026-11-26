@@ -4,6 +4,7 @@ import { useApp } from "@/store/app";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import { CHROME_ACTIVE, CHROME_QUIET, HEADER_CHEVRON, HEADER_ICON } from "@/lib/chrome";
 import { Popover } from "@/components/common/Popover";
+import { useZoneModel } from "@/lib/useZoneModel";
 
 type RoutingState =
   | { status: "routing" }
@@ -18,6 +19,7 @@ interface Props {
 }
 
 export function ZonePicker({ chatId, currentZoneId, smartRouting, routingState }: Props) {
+  const zoneModel = useZoneModel();
   const zones = useApp((s) => s.zones);
   const setChatZone = useApp((s) => s.setChatZone);
   const setChatSmart = useApp((s) => s.setChatSmart);
@@ -164,7 +166,7 @@ export function ZonePicker({ chatId, currentZoneId, smartRouting, routingState }
                     {z.name}
                     {z.isLeader && <Crown size={11} className="text-amber-500" />}
                   </div>
-                  <div className="text-xs text-[var(--color-text-muted)]">{z.model}</div>
+                  <div className="text-xs text-[var(--color-text-muted)]">{zoneModel(z)}</div>
                 </div>
                 {active && (
                   <Check size={12} className="text-[var(--color-accent)]" />

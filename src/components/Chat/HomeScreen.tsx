@@ -34,6 +34,7 @@ import { resolveMediaCapable } from "@/lib/media";
 import { resolveVisionCapable } from "@/lib/vision";
 import { resolveBaseModel, resolveBaseZone } from "@/lib/baseZone";
 import { claimSettingsDrop } from "@/lib/importSettings";
+import { useZoneModel } from "@/lib/useZoneModel";
 
 /**
  * What the landing view says hello with, by hour.
@@ -159,6 +160,7 @@ type Mode =
  * the user pick a specific zone instead.
  */
 export function HomeScreen() {
+  const zoneModel = useZoneModel();
   const zones = useApp((s) => s.zones);
   const providers = useApp((s) => s.providers);
   const projects = useApp((s) => s.projects);
@@ -871,7 +873,7 @@ export function HomeScreen() {
                             </span>
                             <div className="flex-1">
                               <div>{z.name}</div>
-                              <div className="text-xs text-[var(--color-text-muted)]">{z.model}</div>
+                              <div className="text-xs text-[var(--color-text-muted)]">{zoneModel(z)}</div>
                             </div>
                             {active && <Check size={12} className="text-[var(--color-accent)]" />}
                           </button>
@@ -1208,6 +1210,7 @@ function PerspectivePicker({
   globalMode: "sequential" | "parallel";
   onToggle: (zoneId: string) => void;
 }) {
+  const zoneModel = useZoneModel();
   // The primary zone can't also be a perspective of itself.
   const addable = zones.filter((z) => z.id !== primaryZoneId);
   const count = addable.filter((z) => selected.has(z.id)).length;
@@ -1262,7 +1265,7 @@ function PerspectivePicker({
                   </span>
                   <div className="flex-1 min-w-0">
                     <div className="truncate">{z.name}</div>
-                    <div className="truncate text-xs text-[var(--color-text-muted)]">{z.model}</div>
+                    <div className="truncate text-xs text-[var(--color-text-muted)]">{zoneModel(z)}</div>
                   </div>
                   {active && <Check size={12} className="shrink-0 text-[var(--color-accent)]" />}
                 </button>
@@ -1294,6 +1297,7 @@ function LeaderPicker({
   setOpen: (v: boolean | ((p: boolean) => boolean)) => void;
   onSelect: (zoneId: string) => void;
 }) {
+  const zoneModel = useZoneModel();
   const openBtnRef = useRef<HTMLButtonElement>(null);
 
   return (
@@ -1341,7 +1345,7 @@ function LeaderPicker({
                       <span className="truncate">{z.name}</span>
                       <Crown size={10} className="shrink-0 text-amber-500" />
                     </div>
-                    <div className="truncate text-xs text-[var(--color-text-muted)]">{z.model}</div>
+                    <div className="truncate text-xs text-[var(--color-text-muted)]">{zoneModel(z)}</div>
                   </div>
                   {active && <Check size={12} className="shrink-0 text-[var(--color-accent)]" />}
                 </button>
@@ -1371,6 +1375,7 @@ function SubagentPicker({
   setOpen: (v: boolean | ((p: boolean) => boolean)) => void;
   onToggle: (zoneId: string) => void;
 }) {
+  const zoneModel = useZoneModel();
   // The leader can't also be its own sub-agent.
   const addable = zones.filter((z) => z.id !== leaderZoneId);
   const count = addable.filter((z) => selected.has(z.id)).length;
@@ -1430,7 +1435,7 @@ function SubagentPicker({
                       <span className="truncate">{z.name}</span>
                       {z.isLeader && <Crown size={10} className="shrink-0 text-amber-500" />}
                     </div>
-                    <div className="truncate text-xs text-[var(--color-text-muted)]">{z.model}</div>
+                    <div className="truncate text-xs text-[var(--color-text-muted)]">{zoneModel(z)}</div>
                   </div>
                   {active && <Check size={12} className="shrink-0 text-[var(--color-accent)]" />}
                 </button>

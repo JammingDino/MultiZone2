@@ -4,8 +4,10 @@ import { useApp } from "@/store/app";
 import { ToggleRow } from "@/components/common/Toggle";
 import { resolveBaseProvider } from "@/lib/baseZone";
 import { ApprovalCategoryGrid, OptionCards, PrefixList, SettingSelect } from "../controls";
+import { useZoneModel } from "@/lib/useZoneModel";
 
 export function ChatTab() {
+  const zoneModel = useZoneModel();
   const appSettings = useApp((s) => s.appSettings);
   const setAppSettings = useApp((s) => s.setAppSettings);
   const zones = useApp((s) => s.zones);
@@ -32,7 +34,7 @@ export function ChatTab() {
           </option>
           {zones.map((z) => (
             <option key={z.id} value={z.id}>
-              {z.name} · {z.model}
+              {z.name} · {zoneModel(z)}
             </option>
           ))}
         </SettingSelect>

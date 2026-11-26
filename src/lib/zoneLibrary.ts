@@ -128,52 +128,21 @@ export function uniqueZoneName(name: string, existingNames: string[]): string {
   return `${name} ${Date.now()}`;
 }
 
-/** What `installEntry` did with the entry's saved model, so the UI can say so. */
-export interface InstallResult {
-  zone: Zone;
-  /** Set when the entry named a model the target provider doesn't offer. */
-  modelFallback: { wanted: string; used: string } | null;
-}
-
 /**
- * Install a library entry as a live zone, bound to the given provider + model.
+ * Install a library entry as a live zone that follows the chat's model (0.20.0).
  *
- * A zone's model and the provider serving it are one setting, not two. Entries
- * shared between installs carry a model name but no provider (ids don't travel),
- * so taking the saved model at face value would bind, say, `gpt-4o` to whichever
- * provider happens to be local — a zone that looks configured and fails at send
- * time. So an entry's model is only honoured when the target provider actually
- * lists it; otherwise the provider's own default wins and the caller is told.
- *
- * The model list is best-effort: if the provider can't be reached we trust the
- * entry rather than overriding a model the user may well have meant.
+ * A zone is a role: instructions, tools, approvals. The model is left to the
+ * chat — the composer's pick, else the base zone's — so a zone installed now
+ * keeps working when another provider is added, and nobody re-installs a team
+ * to move it to a new model. The editor can still pin one. An entry's saved
+ * model is not carried over: provider ids don't travel between installs, so it
+ * could only ever be a guess.
  */
-export async function installEntry(
-  entry: LibraryEntry,
-  providerId: string,
-  model: string,
-  existingNames: string[],
-): Promise<InstallResult> {
-  const wanted = entry.model?.trim() || "";
-  let resolved = wanted || model;
-  let modelFallback: InstallResult["modelFallback"] = null;
-
-  if (wanted && model && wanted !== model) {
-    try {
-      const available = await api.fetchModels(providerId);
-      if (available.length > 0 && !available.includes(wanted)) {
-        resolved = model;
-        modelFallback = { wanted, used: model };
-      }
-    } catch {
-      // Provider unreachable — keep the entry's model rather than guessing.
-    }
-  }
-
-  const zone = await api.upsertZone({
+export async function installEntry(entry: LibraryEntry, existingNames: string[]): Promise<Zone> {
+  return api.upsertZone({
     name: uniqueZoneName(entry.name, existingNames),
-    providerId,
-    model: resolved,
+    providerId: null,
+    model: "",
     systemPrompt: entry.systemPrompt,
     temperature: entry.temperature,
     maxTokens: entry.maxTokens,
@@ -187,8 +156,6 @@ export async function installEntry(
     icon: entry.icon,
     accentColor: entry.accentColor,
   });
-
-  return { zone, modelFallback };
 }
 
 /**
@@ -202,28 +169,20 @@ export async function installEntry(
  */
 export interface TeamInstallResult {
   installed: Zone[];
-  /** Members whose saved model the provider doesn't offer, and what was used. */
-  fallbacks: { name: string; wanted: string; used: string }[];
   failures: { name: string; error: string }[];
 }
 
-export async function installTeam(
-  entries: LibraryEntry[],
-  providerId: string,
-  model: string,
-  existingNames: string[],
-): Promise<TeamInstallResult> {
+export async function installTeam(entries: LibraryEntry[], existingNames: string[]): Promise<TeamInstallResult> {
   const ordered = [...entries].sort(
     (a, b) => Number(b.isLeader) - Number(a.isLeader) || a.name.localeCompare(b.name),
   );
   const names = [...existingNames];
-  const out: TeamInstallResult = { installed: [], fallbacks: [], failures: [] };
+  const out: TeamInstallResult = { installed: [], failures: [] };
   for (const entry of ordered) {
     try {
-      const { zone, modelFallback } = await installEntry(entry, providerId, model, names);
+      const zone = await installEntry(entry, names);
       names.push(zone.name);
       out.installed.push(zone);
-      if (modelFallback) out.fallbacks.push({ name: entry.name, ...modelFallback });
     } catch (e) {
       out.failures.push({ name: entry.name, error: (e as Error).message ?? String(e) });
     }

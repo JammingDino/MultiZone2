@@ -15,6 +15,7 @@ import { useIsNarrow } from "@/lib/useIsNarrow";
 import { useBackDismiss } from "@/lib/useBackDismiss";
 import { ErrorNote } from "@/components/common/ErrorNote";
 import { reportError } from "@/lib/reportError";
+import { useZoneModel } from "@/lib/useZoneModel";
 
 export function ProjectsPanel() {
   const { zones, projects, tags, closeProjectsPanel, refreshProjects, refreshTags } = useApp(
@@ -234,6 +235,7 @@ function ProjectForm({
   onSaved: (p: Project) => void;
   onDeleted: () => void;
 }) {
+  const zoneModel = useZoneModel();
   const [name, setName] = useState("");
   const [icon, setIcon] = useState<string | null>(null);
   const [accentColor, setAccentColor] = useState<string | null>(null);
@@ -400,7 +402,7 @@ function ProjectForm({
           <div className="mb-1 text-xs text-[var(--color-text-muted)]">Default zone for new chats</div>
           <select value={defaultZoneId ?? ""} onChange={(e) => setDefaultZoneId(e.target.value || null)} className="input">
             <option value="">— inherit global default —</option>
-            {zones.map((z: Zone) => <option key={z.id} value={z.id}>{z.name} · {z.model}</option>)}
+            {zones.map((z: Zone) => <option key={z.id} value={z.id}>{z.name} · {zoneModel(z)}</option>)}
           </select>
         </label>
 

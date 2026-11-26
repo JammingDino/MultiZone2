@@ -46,3 +46,27 @@ export function resolveBaseModel(
   if (zone?.model?.trim()) return zone.model.trim();
   return resolveBaseProvider(providers, zones, baseZoneId)?.defaultModel?.trim() ?? "";
 }
+
+/**
+ * What a zone actually runs on (0.20.0) — the same rule as Rust's
+ * `resolve_zone_model`. A zone with no provider follows the chat: the base
+ * zone's provider and model when the base zone pins one (and is not this
+ * zone), else the first provider's default. A zone that names a provider but
+ * no model runs that provider's default model.
+ */
+export function resolveZoneRun(
+  zone: Pick<Zone, "id" | "providerId" | "model">,
+  providers: Provider[],
+  zones: Zone[],
+  baseZoneId: string | null,
+): { provider: Provider | null; model: string; inherited: boolean } {
+  if (zone.providerId) {
+    const provider = providers.find((p) => p.id === zone.providerId) ?? null;
+    return { provider, model: zone.model.trim() || provider?.defaultModel?.trim() || "", inherited: false };
+  }
+  const base = baseZoneId && baseZoneId !== zone.id ? zones.find((z) => z.id === baseZoneId) : undefined;
+  const baseProvider = base?.providerId ? providers.find((p) => p.id === base.providerId) : undefined;
+  const provider = baseProvider ?? providers[0] ?? null;
+  const model = (baseProvider ? base!.model.trim() : "") || provider?.defaultModel?.trim() || "";
+  return { provider, model, inherited: true };
+}

@@ -13,6 +13,7 @@ import { ColorPicker } from "@/components/common/ColorPicker";
 import type { ApprovalCategory, ApprovalPolicy, Provider, ToolFunctionInfo, ToolUsage, Zone, ThinkingEffort, ThinkingControl, ThinkingProfile } from "@/lib/types";
 import { ALL_TOOLS, TOOL_CATEGORIES, mcpToolEnableId } from "@/lib/types";
 import { useApp } from "@/store/app";
+import { resolveZoneRun } from "@/lib/baseZone";
 import { DEFAULT_ZONES } from "@/lib/defaultZones";
 import { EMPTY_APPROVALS, parseApprovals, serializeApprovals } from "@/lib/approvals";
 import { ErrorNote } from "@/components/common/ErrorNote";
@@ -403,6 +404,10 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
   const refreshZones = useApp((s) => s.refreshZones);
   /** Every other zone, for the fallback picker (0.14.1). */
   const zones = useApp((s) => s.zones);
+  const baseZoneId = useApp((s) => s.appSettings.baseZoneId);
+  // What this zone will run on — the chat's model when no provider is picked.
+  const run = resolveZoneRun({ id: zone?.id ?? "", providerId, model }, providers, zones, baseZoneId);
+  const effModel = run.model;
   const [ceHeadless, setCeHeadless] = useState(false);
   const [ttsVoice, setTtsVoice] = useState("");
   // Thinking is on by default for new zones (0.9.4) — most current models
@@ -415,10 +420,10 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
   const [thinkingProfile, setThinkingProfile] = useState<ThinkingProfile | null>(null);
   const thinkingOverrides = useApp((s) => s.appSettings.thinkingOverrides);
   const setAppSettings = useApp((s) => s.setAppSettings);
-  const thinkingOverride = thinkingOverrides[model.trim()] ?? "";
+  const thinkingOverride = thinkingOverrides[effModel] ?? "";
   const [showThinkingParam, setShowThinkingParam] = useState(false);
   function setThinkingOverride(next: string) {
-    const m = model.trim();
+    const m = effModel;
     if (!m) return;
     const map = { ...thinkingOverrides };
     if (next) map[m] = next as ThinkingControl;
@@ -429,19 +434,19 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
     void setAppSettings({ thinkingOverrides: map });
   }
   useEffect(() => {
-    const m = model.trim();
+    const m = effModel;
     if (!m) {
       setThinkingProfile(null);
       return;
     }
     let live = true;
     const timer = setTimeout(() => {
-      api.thinkingProfile(providerId, m)
+      api.thinkingProfile(run.provider?.id ?? null, m)
         .then((p) => { if (live) setThinkingProfile(p); })
         .catch(() => { if (live) setThinkingProfile(null); });
     }, 250);
     return () => { live = false; clearTimeout(timer); };
-  }, [providerId, model, thinkingOverride]);
+  }, [run.provider?.id, effModel, thinkingOverride]);
   const [includeThinkingInContext, setIncludeThinkingInContext] = useState(false);
   const [isLeader, setIsLeader] = useState(false);
   const [fallbackZoneId, setFallbackZoneId] = useState<string | null>(null);
@@ -543,7 +548,8 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
       setAccentColor(zone.accentColor ?? null);
     } else {
       setName("");
-      setProviderId(providers[0]?.id ?? null);
+      // New zones follow the chat's model (0.20.0); pinning one is a choice.
+      setProviderId(null);
       setModel("");
       setSystemPrompt("");
       setTemperature(null);
@@ -638,7 +644,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
 
   /** Create a new zone. Editing an existing one saves itself — see below. */
   async function onCreate() {
-    if (!name.trim() || !model.trim()) return;
+    if (!name.trim()) return;
     setSaving(true);
     try {
       onSaved(await api.upsertZone(buildPayload()));
@@ -664,7 +670,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
    */
   useEffect(() => {
     if (!zone?.id) return;
-    if (!name.trim() || !model.trim()) return;
+    if (!name.trim()) return;
     const timer = setTimeout(async () => {
       setSaving(true);
       try {
@@ -759,7 +765,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
               onChange={(e) => setProviderId(e.target.value || null)}
               className="input"
             >
-              <option value="">— select —</option>
+              <option value="">Follow the chat</option>
               {providers.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
@@ -775,13 +781,22 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
               </span>
             }
           >
-            <ModelCombobox
-              value={model}
-              onChange={setModel}
-              options={models}
-              className="input"
-              placeholder={loadingModels ? "loading…" : "e.g. gpt-4o-mini"}
-            />
+            {providerId ? (
+              <ModelCombobox
+                value={model}
+                onChange={setModel}
+                options={models}
+                className="input"
+                placeholder={loadingModels ? "loading…" : run.model ? `${run.model} (provider default)` : "e.g. gpt-4o-mini"}
+              />
+            ) : (
+              <div
+                className="input truncate text-[var(--color-text-muted)]"
+                title="This zone runs on whatever model the chat uses: the composer's pick, else the base zone's. Pick a provider to pin one."
+              >
+                {run.model ? `${run.model} · ${run.provider?.name ?? ""}` : "No provider yet"}
+              </div>
+            )}
           </Field>
         </div>
 
@@ -789,13 +804,13 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
             reasoning, in one grid. The long-form rationale lives in tooltips. */}
         <div className="grid grid-cols-2 gap-3">
           <Field label="Image input">
-            <VisionOverrideSelect model={model} />
+            <VisionOverrideSelect model={effModel} />
           </Field>
           <Field label="Audio input">
-            <MediaOverrideSelect model={model} kind="audio" />
+            <MediaOverrideSelect model={effModel} kind="audio" />
           </Field>
           <Field label="Video input">
-            <MediaOverrideSelect model={model} kind="video" />
+            <MediaOverrideSelect model={effModel} kind="video" />
           </Field>
           <div className="mb-3">
             <div className="mb-1 flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
@@ -843,7 +858,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
             <select
               value={thinkingOverride}
               onChange={(e) => setThinkingOverride(e.target.value)}
-              disabled={!model.trim()}
+              disabled={!effModel}
               title="Which request parameter turns thinking on for this model. Auto guesses from the name and the models.dev catalogue, and tries the other shapes if the provider refuses one."
               className="mt-1.5 h-[30px] w-full rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-1.5 text-xs text-[var(--color-text)] disabled:opacity-50"
             >
@@ -861,7 +876,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
             {thinkingProfile && (
               <div className="mt-1 text-[10px] leading-snug text-[var(--color-text-muted)]">
                 <span className="font-medium">{thinkingProfile.family}:</span> {thinkingProfile.note}
-                {!thinkingOverride && !showThinkingParam && model.trim() && (
+                {!thinkingOverride && !showThinkingParam && effModel && (
                   <>
                     {" "}
                     <button
@@ -1476,7 +1491,7 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
         {!zone && (
           <button
             onClick={onCreate}
-            disabled={saving || !name.trim() || !model.trim()}
+            disabled={saving || !name.trim()}
             className="rounded px-3 py-1.5 text-xs text-white disabled:opacity-50"
             style={{ background: activeColor }}
           >

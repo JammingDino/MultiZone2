@@ -37,9 +37,19 @@ import { Lock, X } from "lucide-react";
  * a document tab in the main column (`openWorkspaceFile`), and this is a
  * navigator: the whole tab, all tree.
  */
+/**
+ * Folders to re-read, by normalised path, or every one in the tree. A module
+ * bus rather than a remount, so a refresh keeps which folders are open.
+ */
+type Refresh = Set<string> | "all";
+const refreshBus = new EventTarget();
+const refresh = (dirs: Refresh) => refreshBus.dispatchEvent(new CustomEvent("refresh", { detail: dirs }));
+// Separators and case vary between the root as stored and what the watcher
+// reports; a loose match only costs an extra listing.
+const norm = (p: string) => p.replace(/[\\/]+/g, "\\").replace(/\\$/, "").toLowerCase();
+
 export function FilesPanel({ chatId }: { chatId: string }) {
   const [root, setRoot] = useState<string | null | undefined>(undefined);
-  const [refreshKey, setRefreshKey] = useState(0);
   // The directory follows the chat's project, so moving the chat to another
   // project re-resolves it, as does changing the default directory.
   const projectId = useApp((s) => s.chats.find((c) => c.id === chatId)?.projectId ?? null);
@@ -64,8 +74,26 @@ export function FilesPanel({ chatId }: { chatId: string }) {
     return () => { live = false; };
   }, [chatId, projectId, defaultDir, grantKey]);
 
-  if (root === undefined) return null;
   const treeRoot = viewing ?? root;
+
+  // The tree follows the disk: the watcher names the folders that changed, and
+  // coming back to the window re-reads every open one, for the drives (network
+  // shares, some WSL mounts) where the watcher hears nothing.
+  useEffect(() => {
+    if (!treeRoot) return;
+    // Refused over the remote transport; the focus re-read still covers it.
+    api.watchDir(treeRoot).catch(() => {});
+    const off = api.onFilesChanged((dirs) => refresh(new Set(dirs.map(norm))));
+    const onFocus = () => refresh("all");
+    window.addEventListener("focus", onFocus);
+    return () => {
+      api.watchDir(null).catch(() => {});
+      off.then((f) => f());
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [treeRoot]);
+
+  if (root === undefined) return null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col text-xs">
@@ -119,7 +147,7 @@ export function FilesPanel({ chatId }: { chatId: string }) {
             <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-[var(--color-text-muted)]" title={treeRoot}>
               <RootLabel path={treeRoot} />
             </span>
-            <IconButton title="Re-read the tree" onClick={() => setRefreshKey((k) => k + 1)}>
+            <IconButton title="Re-read the tree" onClick={() => refresh("all")}>
               <RefreshCw size={11} />
             </IconButton>
             <IconButton title="Open in the file manager" onClick={() => api.openPath(treeRoot).catch(console.warn)}>
@@ -129,7 +157,7 @@ export function FilesPanel({ chatId }: { chatId: string }) {
           <div className="min-h-0 flex-1 overflow-auto overscroll-contain py-1">
             {/* Keyed by chat and root too: a `Dir` reads its folder once, so without
                 a remount switching chats kept showing the last chat's tree. */}
-            <Dir key={`${chatId}:${treeRoot}:${refreshKey}`} path={treeRoot} depth={0} open />
+            <Dir key={`${chatId}:${treeRoot}`} path={treeRoot} depth={0} open />
           </div>
         </>
       ) : (
@@ -173,13 +201,25 @@ function Dir({ path, depth, open }: { path: string; depth: number; open: boolean
 
   const load = useCallback(() => {
     api.listDir(path)
-      .then(setEntries)
+      .then((e) => { setEntries(e); setError(null); })
       .catch((e) => setError(String(e)));
   }, [path]);
 
   useEffect(() => {
     if (open && entries === null) load();
   }, [open, entries, load]);
+
+  useEffect(() => {
+    const on = (ev: Event) => {
+      const dirs = (ev as CustomEvent<Refresh>).detail;
+      if (dirs !== "all" && !dirs.has(norm(path))) return;
+      // A closed folder forgets its listing, so opening it reads it fresh.
+      if (open) load();
+      else setEntries(null);
+    };
+    refreshBus.addEventListener("refresh", on);
+    return () => refreshBus.removeEventListener("refresh", on);
+  }, [path, open, load]);
 
   if (!open) return null;
   const pad = { paddingLeft: `${depth * 14 + 26}px` };

@@ -426,6 +426,7 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("workspace::stat_path", Route("GET /api/fs/stat")),
     ("workspace::path_context", Route("GET /api/fs/context")),
     ("workspace::list_dir", Route("GET /api/fs/list")),
+    ("workspace::watch_dir", GuiOnly("the window watching the folder its explorer shows; the API lists with GET /api/fs/list")),
     ("workspace::read_workspace_file", Route("GET /api/fs/file")),
     ("workspace::write_workspace_file", Route("PUT /api/fs/file")),
     ("diagram::fix_diagram", Route("POST /api/chats/:id/fix-diagram")),

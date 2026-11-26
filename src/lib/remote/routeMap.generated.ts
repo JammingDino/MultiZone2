@@ -240,5 +240,6 @@ export const GUI_ONLY: Record<string, string> = {
   take_pending_launch: "hands the desktop window the path this machine launched it on",
   transcribe_audio_file: "transcribes a file chosen in a native file dialog",
   upload_attachment: "moves bytes the window already holds into app storage",
+  watch_dir: "the window watching the folder its explorer shows; the API lists with GET /api/fs/list",
   write_export_file: "writes to a path the user picked in a native save dialog",
 };

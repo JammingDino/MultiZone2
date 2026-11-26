@@ -6,8 +6,12 @@
 //! whole-tree walk: a project with `node_modules` in it is not something to
 //! read in one go.
 
+use notify::{RecommendedWatcher, RecursiveMode};
+use notify_debouncer_mini::{new_debouncer, DebounceEventResult, Debouncer};
 use serde::Serialize;
-use std::path::Path;
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::error::{AppError, AppResult};
@@ -122,6 +126,65 @@ pub async fn list_dir(path: String) -> AppResult<Vec<DirEntry>> {
             .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
     Ok(out)
+}
+
+// ─── Watching the explorer's root, so the tree follows the disk ───────────────────
+
+/// Folders whose churn the tree never needs to hear about: a build or an
+/// install rewrites thousands of files in them. The folder itself appearing is
+/// still reported; only what happens inside it is not.
+const QUIET_DIRS: &[&str] = &[".git", "node_modules", "target", "dist", "__pycache__", ".venv"];
+
+// ponytail: one watch for the one window; key it by window label if there are ever several.
+static EXPLORER_WATCH: std::sync::Mutex<Option<Debouncer<RecommendedWatcher>>> =
+    std::sync::Mutex::new(None);
+
+/// The folders whose listing changed, for a batch of changed paths: each
+/// path's parent, deduped, skipping any inside a quiet folder below `root`.
+fn changed_dirs(root: &Path, paths: impl IntoIterator<Item = PathBuf>) -> Vec<String> {
+    let mut out = BTreeSet::new();
+    for p in paths {
+        let Some(dir) = p.parent() else { continue };
+        let Ok(rel) = dir.strip_prefix(root) else { continue };
+        if rel.components().any(|c| QUIET_DIRS.contains(&c.as_os_str().to_string_lossy().as_ref())) {
+            continue;
+        }
+        out.insert(dir.to_string_lossy().into_owned());
+    }
+    out.into_iter().collect()
+}
+
+/// Watch the explorer's root recursively and emit `files-changed` with the
+/// folders whose listing changed. Replaces the last watch; `None` stops it.
+///
+/// Sync on purpose: sync commands run in the order they arrive, so the stop a
+/// closing tree sends cannot land after the watch the next one starts.
+#[tauri::command]
+pub fn watch_dir(app: AppHandle, root: Option<String>) -> AppResult<()> {
+    let Some(root) = root else {
+        *EXPLORER_WATCH.lock().unwrap() = None;
+        return Ok(());
+    };
+    let root = PathBuf::from(root);
+    if !root.is_dir() {
+        return Err(AppError::Invalid(format!("{} is not a directory", root.display())));
+    }
+    let base = root.clone();
+    let mut debouncer = new_debouncer(Duration::from_millis(300), move |res: DebounceEventResult| {
+        let Ok(events) = res else { return };
+        let dirs = changed_dirs(&base, events.into_iter().map(|e| e.path));
+        if !dirs.is_empty() {
+            let _ = app.emit("files-changed", serde_json::json!({ "dirs": dirs }));
+        }
+    })
+    .map_err(|e| AppError::Other(format!("watching {}: {e}", root.display())))?;
+    debouncer
+        .watcher()
+        .watch(&root, RecursiveMode::Recursive)
+        .map_err(|e| AppError::Other(format!("watching {}: {e}", root.display())))?;
+    // Swapped in only once it is watching, so a bad root leaves the last watch alone.
+    *EXPLORER_WATCH.lock().unwrap() = Some(debouncer);
+    Ok(())
 }
 
 /// What the panel's viewer gets for a file (0.17.9).
@@ -263,6 +326,30 @@ mod tests {
         let (content, binary) = decode_text(&png);
         assert!(binary, "a PNG header is not text");
         assert!(!content.is_empty(), "and the viewer still gets something to show");
+    }
+
+    /// A new `node_modules` shows up in its parent; what an install writes
+    /// inside it does not, and neither does anything outside the root.
+    #[test]
+    fn changed_dirs_reports_parents_deduped_and_skips_quiet_folders() {
+        let root = Path::new("proj");
+        let dirs = changed_dirs(
+            root,
+            [
+                root.join("a.txt"),
+                root.join("b.txt"),
+                root.join("node_modules"),
+                root.join("node_modules").join("x").join("y.js"),
+                root.join("src").join(".git").join("HEAD"),
+                root.join("src").join("main.rs"),
+                PathBuf::from("elsewhere").join("z.txt"),
+            ],
+        );
+        let expect: Vec<String> = [root.to_path_buf(), root.join("src")]
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(dirs, expect);
     }
 
     /// A latin-1 log with one stray byte is a file to read, not to refuse.

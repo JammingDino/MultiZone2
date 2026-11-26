@@ -1020,3 +1020,10 @@ export const transcribeAudioUpload = (
   withMetadata: boolean,
   language: string | null,
 ) => invoke<Transcription>("transcribe_audio_upload", { fileName, audioB64, withMetadata, language });
+
+/** Watch the explorer's root (or stop, with `null`); one watch per window. */
+export const watchDir = (root: string | null) => invoke<void>("watch_dir", { root });
+/** Folders under the watched root whose listing changed, deduped. */
+export function onFilesChanged(handler: (dirs: string[]) => void): Promise<UnlistenFn> {
+  return listen<{ dirs: string[] }>("files-changed", (e) => handler(e.payload.dirs));
+}

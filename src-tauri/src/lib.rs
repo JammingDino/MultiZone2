@@ -476,6 +476,7 @@ pub fn run() {
             launch::take_pending_launch,
             claude_import::scan_claude_code,
             commands::workspace::list_dir,
+            commands::workspace::watch_dir,
             commands::workspace::read_workspace_file,
             commands::workspace::write_workspace_file,
             commands::messages::respond_tool_approval,

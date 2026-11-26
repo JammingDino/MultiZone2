@@ -42,6 +42,8 @@ Semantic versioning. Each release is tagged `vMAJOR.MINOR.PATCH`.
 | **0.17.x** | The phone as a second window — LAN bind, pairing, device registry, the remote transport, the Android shell | Shipped |
 | **0.18.x** | Runs nobody is watching — close to tray, scheduled runs, smart compaction, rolling context, a Stop that works before the first token; 0.18.2 added tiled chat tabs | Shipped |
 | **0.19.x** | Study mode — grounded answers, flashcards, quizzes, cheat sheets, spaced review — and a lighter app; 0.19.1 adds Claude Code and Codex subscriptions as providers; 0.19.3 lets a chat be handed folders by drag, paste or Explorer | 0.19.0–0.19.3 built — runtime testing open |
+| **0.20.x** | Nothing to set up — zones as roles that follow the chat's model, tool presets, one-off sub-agents, Claude Code's skills/agents/MCP imported; commands anywhere in a prompt; then control over the first request | In progress |
+| **0.21.x** | Everything is a panel — the whole window as a Trellis layout, sub-agents as live tiles, agents bring what needs you into the window | Planned |
 | **1.0.0** | Hardening & Public Release | Planned |
 | **1.2.x** | Signed-in connectors — OAuth, keychain, per-scope consent | Planned |
 | **Post-1.0** | Code interface + edit engine, shared mode surface, scratchpad, moddable app surface, Diffusion LLM | Backlog |
@@ -205,6 +207,22 @@ Everything up to here assumed someone was at the window. Closing it ended the ru
 A project you learn from rather than work in. Its chats answer only from its own sources, cite every claim, and say when the sources don't cover the question; the refusal is the feature. The material becomes things to drill — flashcards on a spaced-repetition schedule, quizzes whose every answer is kept, cheat sheets the learner and the model both edit — and a project can be started from the composer, named, given a folder and loaded with sources by the model. Alongside it, a pass on what the app costs when nobody is looking: the webview stops drawing with the window in the tray, ambient effects are paced, and half the startup script now loads only when it is needed.
 
 **Done when:** a study project answers from its sources or says it can't, its review queue brings back what was missed, and an app left in the tray costs nothing but memory.
+
+---
+
+### 0.20.x — Nothing to set up
+
+Every other harness is one step from a new provider to working; here a provider meant new zones and a new round of tool checkboxes, because a zone stored its model. A zone becomes a role — instructions, tools, approvals — and the model follows the chat unless the zone pins one. Tool presets replace the checkbox column for built-in tools (MCP stays a checklist), a leader can spawn a one-off sub-agent from a preset instead of needing a zone for it, and what is already set up for Claude Code on the machine — skills, agents, MCP servers — is simply there. Then slash commands become words in a prompt rather than the whole of one, with a look of their own, alongside folders that show up inline. 0.20.2 gives the user control over the first request: every system-prompt section named, sized and switchable.
+
+**Done when:** a new provider can be added and used with every existing zone in one step; skills installed for Claude Code appear without configuration; a leader can delegate to a read-only helper it made itself; and `/skill do this, then /other` runs both.
+
+---
+
+### 0.21.x — Everything is a panel
+
+The window becomes one [Trellis](https://github.com/DanFessler/trellis) layout: chats, files, study sets, the terminal, the sidebar and the side panels are all views that can be dragged, split, floated, hidden and zoomed, and stay mounted while they move. A Multizone run can show its sub-agents as live tiles, and an agent can bring something that needs the user — a question, an approval, a report — into the window as a view of its own. Trellis is non-commercial-licensed, accepted while the project is open-source only.
+
+**Done when:** every pane in the window can be moved anywhere and the layout survives a restart; a Multizone run can be watched as tiles; and an agent's request for attention arrives as a panel, not a line in the transcript.
 
 ---
 

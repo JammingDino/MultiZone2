@@ -387,14 +387,58 @@ A folder dropped on a chat, a path pasted into it, one picked with "Add folder",
 - [ ] **Unverified: whether Explorer's address bar starts `multizone .` in the folder on screen.** If it does not, the address bar is documented as unsupported and the right-click verbs are the way in
 - Cut for now: a Settings toggle that removes the verbs without uninstalling
 
-### 0.19.x — Still to come
+### 0.19.x — Still to come (parked)
 
-From the backlog entry; each one a tool plus a renderer unless said otherwise.
+Parked when 0.20 started: these wait for the study backlog, not for a 0.19 patch. From the backlog entry; each one a tool plus a renderer unless said otherwise.
 - [ ] Mind map and study guide / briefing / FAQ / timeline as study tools — `render_graph` and Markdown already draw them; they need source-grounded prompts
 - [ ] Probe → Plan → Teach: a quiz that locates the edge of what the learner knows, a curriculum drawn as a graph, then paced teaching against it
 - [ ] Source coverage in progress: which sources have been studied and which have not
 - [ ] Hybrid retrieval for the knowledge base — keyword search beside embeddings, for "what does it say about *X*"; message search has FTS5, sources do not
 - [ ] The scratchpad (backlog) as study mode's drawing surface
+
+---
+
+## 0.20.x — Nothing to set up
+
+Adding a provider in Claude Code is one step and then you work. Here it was the start of an afternoon: a zone stores a provider, a model and a tool list, the starter zones were copied onto whichever provider existed at onboarding, so a second provider meant a second set of zones and a second round of tool checkboxes. And everything already set up for Claude Code on the same machine — skills, agents, MCP servers — had to be pointed at by hand or set up again. This release makes a zone a *role* (what it is for, what it may touch) and lets the model follow the chat.
+
+### 0.20.0 — Zones are roles, and Claude Code's setup is already here
+
+- [ ] Skill packs under the home folder's harness folders (`~/.claude/skills`, `~/.agents/skills`, …) and under the chat's project folder are found without adding a folder in Settings
+- [ ] A zone can leave its model unset and follow the chat: the composer's pick, else the base zone's. Starter zones are seeded that way, so a new provider needs no new zones
+- [ ] Tool presets in the zone editor — *Read-only*, *Research*, *Code*, *Everything* — one click instead of a column of checkboxes. MCP servers and their tools stay a checklist under the presets; a preset never decides which MCP tools a zone gets
+- [ ] `spawn_subagent` takes a one-off spec instead of a zone — a preset or a tool list, optionally a model and instructions — narrowed to the tools the caller itself has, so a leader can make the helper it needs without anyone configuring one first
+- [ ] Import from Claude Code: `~/.claude/agents/*.md` (name, description, tools, model in frontmatter) become zones, and MCP servers from `~/.claude.json` and a project's `.mcp.json` become MCP entries, both shown before anything is written
+
+### 0.20.1 — Commands anywhere in a prompt
+
+Claude Code runs a slash command only as the whole message. Here a command is a word in the prompt: `/review the parser, then /commit` is one message.
+- [ ] `/` opens the menu anywhere a word starts, not only in the first column — skills, skill packs, saved runs and MCP prompts in one list, with autocomplete
+- [ ] A chosen command has a look of its own in the composer — drawn by an overlay behind the textarea, so the composer stays a textarea (dictation, paste, undo unchanged)
+- [ ] On send, the commands run first and the prose goes with them: a skill is loaded for that turn, an MCP prompt or saved run expands in place
+- [ ] A folder handed to the chat shows in the prompt as a glowing inline path, as well as on the Access strip
+- [ ] The sent message shows its commands and folders the same way in the transcript
+
+### 0.20.2 — The first request is yours (soon)
+
+Raised while 0.20 was being planned. Watching the requests arrive at a local server (unsloth, LM Studio) shows a first request longer than it should be, with no say in what goes into it.
+- [ ] Every section of the system prompt named and sized (preamble, env, AGENTS.md, skills index, memory, tool notes, tool schemas), each one switchable off per zone, with app-wide defaults
+- [ ] The exact first request — system prompt and tool list as sent — viewable and copyable before anything is sent
+- [ ] A lean preset for small local models: the shortest prompt that still works with tools
+- [ ] Plan mode: find what makes it frustrating in use and fix that — *to be specified with the user*
+
+## 0.21.x — Everything is a panel
+
+The main column already tiles (0.18.2), on a layout tree of our own that stops at the column's edge: the sidebar, the workspace panel and the terminal are fixed. [Trellis](https://github.com/DanFessler/trellis) is that tree done properly — views that stay mounted while they are docked, floated, hidden or zoomed, and one JSON document for the whole layout.
+
+**License:** Trellis is free for non-commercial use only (`LicenseRef-Danfessler-NonCommercial-1.0`); commercial use needs a GitHub-Sponsors tier. Accepted while MultiZone is open-source and non-commercial; revisit before that changes. It is also young (0.3.0, 2026-09).
+
+### 0.21.0 — The workspace is a Trellis layout
+
+- [ ] `@danfessler/trellis` + `@danfessler/trellis-react`; chat, file, study set, terminal, sidebar, files and context as view types; `tabLayout.ts` retired; the layout persists
+- [ ] A Multizone run can open its sub-agents as live tiles — zoom out to watch the panel, in to read one
+- [ ] **Something that needs you, brought to you.** A tool the agent calls to put a view in the current window — floated over the chat or docked beside it — for a question, an approval, a report or a diff that needs the user, instead of a line scrolling past in the transcript
+- [ ] The layout is readable and writable over the API, so a zone can rearrange the app through `app_control`
 
 ---
 

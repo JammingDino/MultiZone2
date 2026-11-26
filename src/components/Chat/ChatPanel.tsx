@@ -6,7 +6,7 @@ import * as api from "@/lib/tauri";
 import { MessageThread } from "./MessageThread";
 import { FileViewer } from "@/components/Workspace/FileViewer";
 import { Tiles } from "./Tiles";
-import { chatOf, chatTab, closeTab, floatTab, focusGroup, isFileTab, isShowing, isStudyTab, navigate, parseLayout } from "@/lib/tabLayout";
+import { chatOf, chatTab, closeTab, floatTab, focusGroup, isFileTab, isShowing, isStudyTab, navigate, parseLayout, revealSection, sectionOf } from "@/lib/tabLayout";
 import { StudyTab } from "@/components/Study/StudyTab";
 import { PaneChat } from "@/lib/paneChat";
 import { InputBar, type InputBarHandle } from "./InputBar";
@@ -151,10 +151,13 @@ export function ChatPanel() {
       const s = useApp.getState();
       const keep = s.tabLayout.focused;
       if (fromChatId && show === "beside" && !isShowing(s.tabLayout, chatTab(fromChatId))) return;
+      const section = sectionOf(tab);
       s.updateTabLayout((l) => {
         const next =
           show === "close" ? closeTab(l, tab)
           : show === "window" ? floatTab(l, tab)
+          // A workspace tab goes back among the others, not into the chat's pane.
+          : section && show !== "beside" ? revealSection(l, section)
           : navigate(l, tab, show === "beside" ? "right" : "tab");
         return fromChatId ? focusGroup(next, keep) : next;
       });

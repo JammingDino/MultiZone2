@@ -162,6 +162,14 @@ export function Tiles({ renderTab }: { renderTab: (tab: string) => ReactNode }) 
     if (g.tabs.length && ws.getSnapshot().focusedPanel !== g.id) ws.focus(g.id);
   }, [ws, layout, narrow]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Moving around the panes from the keyboard (0.21.0).
+  useEffect(() => {
+    if (!ws) return;
+    const onKey = (e: KeyboardEvent) => paneKeys(e, ws);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [ws]);
+
   // The backend keeps the last layout for GET /api/layout (0.21.0).
   useEffect(() => {
     const t = window.setTimeout(() => void api.reportLayout(layout).catch(() => {}), 300);
@@ -205,7 +213,13 @@ export function Tiles({ renderTab }: { renderTab: (tab: string) => ReactNode }) 
         }}
       >
         {kinds.map((k) => (
-          <ViewType key={k} id={k} title={(v) => nameOf(v.id, useApp.getState())} icon={<TabIcon />}>
+          <ViewType
+            key={k}
+            id={k}
+            title={(v) => nameOf(v.id, useApp.getState())}
+            icon={<TabIcon />}
+            menu={k === "sidebar" ? SIDEBAR_MENU : undefined}
+          >
             <Tile render={renderTab} />
           </ViewType>
         ))}
@@ -230,6 +244,102 @@ export function Tiles({ renderTab }: { renderTab: (tab: string) => ReactNode }) 
       )}
     </div>
   );
+}
+
+// What the sidebar's own header used to hold, in its pane's menu (0.21.0).
+const SIDEBAR_MENU = [
+  {
+    label: "New chat",
+    shortcut: "Ctrl+N",
+    run: () => {
+      const s = useApp.getState();
+      s.triggerNewChat(null);
+      void s.setActiveChat(null);
+    },
+  },
+  { label: "Search chats", run: () => useApp.getState().focusChatSearch() },
+  { label: "New project", run: () => useApp.getState().openProjectsPanel("__new__") },
+  "separator" as const,
+];
+
+const DIRS: Record<string, "left" | "right" | "top" | "bottom"> = {
+  ArrowLeft: "left", ArrowRight: "right", ArrowUp: "top", ArrowDown: "bottom",
+};
+
+/**
+ * The panes from the keyboard (0.21.0):
+ *
+ * - Ctrl+Arrow moves to the pane on that side; Ctrl+Shift+Arrow moves the
+ *   pane itself past its neighbour on that side.
+ * - Ctrl+Enter zooms the pane in front to fill the window, and again to put
+ *   the others back; Ctrl+Escape zooms back out too, where Windows lets it
+ *   through (it is also the Start menu's).
+ *
+ * The keys keep their meaning where they already have one: an arrow in a
+ * text field that has text in it moves the caret by word, and a Ctrl+Enter
+ * the composer or an edit box used (to send or save) is theirs. Those
+ * handlers run first, so a used key arrives here marked as handled.
+ */
+function paneKeys(e: KeyboardEvent, ws: WorkspaceHandle) {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey || e.defaultPrevented) return;
+  if (e.key === "Enter" && !e.shiftKey) {
+    if (ws.navigation.toggle()) e.preventDefault();
+    return;
+  }
+  if (e.key === "Escape") {
+    if (ws.navigation.framed) {
+      e.preventDefault();
+      ws.navigation.overview();
+    }
+    return;
+  }
+  const dir = DIRS[e.key];
+  if (!dir) return;
+  const field = (e.target as HTMLElement | null)?.closest?.("input, textarea, [contenteditable='true']") as HTMLInputElement | null;
+  if (field && (field.value ?? field.textContent ?? "") !== "") return;
+  const from = ws.getSnapshot().focusedPanel;
+  const to = from ? neighbour(from, dir) : null;
+  if (!from || !to) return;
+  e.preventDefault();
+  if (e.shiftKey) {
+    ws.dock(from, { beside: to, edge: dir });
+    return;
+  }
+  ws.focus(to);
+  // Into the pane's text box, if it has one, so typing carries on there.
+  requestAnimationFrame(() => {
+    const selected = ws.views().find((v) => v.panelId === to && v.selected);
+    const surface = [...document.querySelectorAll<HTMLElement>('[data-trellis-part="surface"]')].find((el) => el.dataset.view === selected?.id);
+    surface?.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+  });
+}
+
+/** The nearest pane on one side of another, by the edges they face. */
+function neighbour(panelId: string, dir: "left" | "right" | "top" | "bottom"): string | null {
+  const rects = [...document.querySelectorAll<HTMLElement>('[data-trellis-part="panel"]')]
+    .map((el) => ({ id: el.dataset.panel ?? "", r: el.getBoundingClientRect() }))
+    .filter((p) => p.id && p.r.width > 0);
+  const from = rects.find((p) => p.id === panelId)?.r;
+  if (!from) return null;
+  const across = dir === "left" || dir === "right";
+  let best: { id: string; score: number } | null = null;
+  for (const { id, r } of rects) {
+    if (id === panelId) continue;
+    // How far it is in that direction, edge to edge; behind it does not count.
+    const gap =
+      dir === "left" ? from.left - r.right
+      : dir === "right" ? r.left - from.right
+      : dir === "top" ? from.top - r.bottom
+      : r.top - from.bottom;
+    if (gap < -4) continue;
+    // How far it is off the line, centre to centre.
+    const off = across
+      ? Math.abs((r.top + r.bottom) / 2 - (from.top + from.bottom) / 2)
+      : Math.abs((r.left + r.right) / 2 - (from.left + from.right) / 2);
+    const score = Math.max(gap, 0) + off * 2;
+    if (!best || score < best.score) best = { id, score };
+  }
+  return best?.id ?? null;
 }
 
 /** One view's content, with its tab's name kept current. */

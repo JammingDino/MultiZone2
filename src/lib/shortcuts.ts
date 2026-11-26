@@ -79,6 +79,16 @@ export const CONTEXTUAL_GROUPS: ShortcutGroup[] = [
     ],
   },
   {
+    title: "Panes",
+    items: [
+      { keys: [MOD, "←", "→", "↑", "↓"], description: "Move to the pane on that side (in a text field, only while it is empty)" },
+      { keys: [MOD, "Shift", "←", "→", "↑", "↓"], description: "Move the pane itself to that side" },
+      { keys: [MOD, "Enter"], description: "Zoom the pane to fill the window, and back (when the text box has no use for it)" },
+      { keys: [MOD, "Esc"], description: "Zoom back out (where Windows does not take it for the Start menu)" },
+      { keys: [MOD, "Shift", "Enter"], description: "Zoom the pane, and back" },
+    ],
+  },
+  {
     title: "Scrolling",
     items: [
       { keys: ["↑", "↓", "PgUp", "PgDn", "Home", "End"], description: "Scroll the chat (unpins auto-scroll while streaming)" },

@@ -292,15 +292,19 @@ export function Sidebar({ docked = false }: { docked?: boolean } = {}) {
           label="Resize sidebar"
         />
       )}
-      <div className="flex h-12 shrink-0 items-center justify-between border-b border-[var(--color-border)] pl-4 pr-2">
-        <div className="flex items-center gap-2 text-sm font-semibold">
-          <Layers size={16} className="text-[var(--color-accent)]" />
-          MultiZone
+      {/* Docked, the pane's tab names it and its menu closes it, and the
+          title bar already says MultiZone (0.21.0): no header of its own. */}
+      {!docked && (
+        <div className="flex h-12 shrink-0 items-center justify-between border-b border-[var(--color-border)] pl-4 pr-2">
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <Layers size={16} className="text-[var(--color-accent)]" />
+            MultiZone
+          </div>
+          <button onClick={() => setSidebarOpen(false)} className={`rounded-md p-1.5 ${CHROME_QUIET}`} title="Collapse sidebar">
+            <PanelLeftClose size={16} />
+          </button>
         </div>
-        <button onClick={() => setSidebarOpen(false)} className={`rounded-md p-1.5 ${CHROME_QUIET}`} title="Collapse sidebar">
-          <PanelLeftClose size={16} />
-        </button>
-      </div>
+      )}
 
       {/* New chat and Search: the same height, the same outline, one above the
           other — the rail's two buttons in the same order. */}

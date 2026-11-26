@@ -10,7 +10,7 @@ import { ModelCombobox } from "@/components/common/ModelCombobox";
 import { MediaOverrideSelect, VisionOverrideSelect } from "@/components/common/VisionOverrideSelect";
 import { IconPicker } from "@/components/common/IconPicker";
 import { ColorPicker } from "@/components/common/ColorPicker";
-import type { ApprovalCategory, ApprovalPolicy, Provider, ToolFunctionInfo, ToolUsage, Zone, ThinkingEffort, ThinkingControl, ThinkingProfile } from "@/lib/types";
+import type { ApprovalCategory, ApprovalPolicy, Provider, ToolFunctionInfo, ToolPreset, ToolUsage, Zone, ThinkingEffort, ThinkingControl, ThinkingProfile } from "@/lib/types";
 import { ALL_TOOLS, TOOL_CATEGORIES, mcpToolEnableId } from "@/lib/types";
 import { useApp } from "@/store/app";
 import { resolveZoneRun } from "@/lib/baseZone";
@@ -725,6 +725,32 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
   const everyToolEnabled = allToolIds.length > 0 && enabledCount === allToolIds.length;
   const someToolEnabled = enabledCount > 0;
 
+  // Tool presets (0.20.0). A preset replaces the built-in tools only — MCP
+  // tools are the user's own checklist — and a leader keeps its delegation.
+  const [presets, setPresets] = useState<ToolPreset[]>([]);
+  useEffect(() => {
+    api.listToolPresets().then(setPresets).catch(() => setPresets([]));
+  }, []);
+  const readOnly = (() => {
+    try { return JSON.parse(toolConfig || "{}").read_only === true; } catch { return false; }
+  })();
+  const keepAcrossPresets = (id: string) =>
+    id.startsWith("mcp__") || (isLeader && (id === "subchat" || id === "teamwork"));
+  const builtIns = tools.filter((id) => !keepAcrossPresets(id)).sort().join(",");
+  const activePreset = presets.find(
+    (p) => p.readOnly === readOnly && p.tools.filter((id) => !keepAcrossPresets(id)).sort().join(",") === builtIns,
+  )?.id;
+  function applyPreset(p: ToolPreset) {
+    setTools((prev) => [...new Set([...prev.filter(keepAcrossPresets), ...p.tools])]);
+    setToolConfig((tc) => {
+      let obj: Record<string, unknown> = {};
+      try { obj = JSON.parse(tc || "{}"); } catch { /* start clean */ }
+      if (p.readOnly) obj.read_only = true;
+      else delete obj.read_only;
+      return JSON.stringify(obj, null, 2);
+    });
+  }
+
   function applyTemplate(tpl: PromptTemplate) {
     setSystemPrompt(tpl.prompt);
     if (tpl.suggestedTools) {
@@ -964,6 +990,31 @@ export function ZoneForm({ zone, providers, onSaved, onDeleted }: Props) {
 
         <Section id="tools" label="Tools" refs={sectionRefs}>
           <div className="flex flex-col gap-1.5">
+            {presets.length > 0 && (
+              <div className="mb-1 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+                {presets.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => applyPreset(p)}
+                    title={p.description}
+                    className={`rounded border px-2 py-1.5 text-left text-xs transition ${
+                      activePreset === p.id
+                        ? "border-[var(--color-accent)] bg-[var(--color-panel-hover)]"
+                        : "border-[var(--color-border)] hover:border-[var(--color-accent)]"
+                    }`}
+                  >
+                    <span className="block font-medium">{p.label}</span>
+                    <span className="block text-[10px] leading-snug text-[var(--color-text-muted)]">{p.description}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {readOnly && (
+              <p className="text-[11px] text-[var(--color-text-muted)]">
+                Read-only: only tools that cannot change anything are offered, whatever is ticked below. MCP tools you tick still apply.
+              </p>
+            )}
             {/* Master toggle. Enabling writes out every id explicitly rather than
                 storing a wildcard, so a zone's toolset stays a fixed, reviewable
                 list and a tool added in a later release is never silently granted

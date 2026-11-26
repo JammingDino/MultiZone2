@@ -30,6 +30,7 @@ pub mod wsl;
 pub mod terminal;
 pub mod app_control;
 pub mod study;
+pub mod presets;
 
 use crate::commands::messages::{EngineCtx, StreamSink};
 use crate::error::AppResult;

@@ -429,6 +429,7 @@ pub fn run() {
             commands::files::open_path,
             commands::files::reveal_path,
             commands::messages::list_tool_functions,
+            commands::messages::list_tool_presets,
             commands::tool_usage::get_tool_usage,
             commands::tool_usage::reset_tool_usage,
             commands::checkpoints::list_checkpoints,

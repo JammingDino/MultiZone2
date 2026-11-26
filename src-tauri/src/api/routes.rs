@@ -235,6 +235,7 @@ pub const ROUTES: &[RouteDef] = &[
     // Tools, usage, settings, storage
     r("POST", "/api/transcribe", "Transcribe uploaded audio through the configured speech provider ({fileName, audioB64, withMetadata?, language?})"),
     r("GET", "/api/tools", "Every callable tool function, with its safety level"),
+    r("GET", "/api/tools/presets", "The tool presets a zone or a one-off sub-agent can take (built-in tools only)"),
     r("GET", "/api/tool-usage", "Per-zone tool call counters (?zoneId= for one zone)"),
     r("DELETE", "/api/tool-usage", "Reset the counters (?zoneId= for one zone)"),
     r("GET", "/api/usage", "Lifetime token spend"),
@@ -401,6 +402,7 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("messages::respond_tool_approval", Route("POST /api/chats/:id/approval")),
     ("messages::update_message", Route("PATCH /api/chats/:id/messages/:messageId")),
     ("messages::list_tool_functions", Route("GET /api/tools")),
+    ("messages::list_tool_presets", Route("GET /api/tools/presets")),
     ("pending::queue_chat_message", Route("POST /api/chats/:id/queue")),
     ("pending::cancel_pending_message", Route("DELETE /api/chats/:id/queue/:messageId -> removed")),
     ("terminals::list_terminals", Route("GET /api/chats/:id/terminals")),
@@ -1808,6 +1810,10 @@ pub async fn clear_project_kb(
 
 pub async fn list_tools(State(st): State<ApiState>) -> ApiResult<Response> {
     Ok(Json(commands::messages::list_tool_functions(app_state(&st)).await?).into_response())
+}
+
+pub async fn list_tool_presets() -> ApiResult<Response> {
+    Ok(Json(commands::messages::list_tool_presets().await?).into_response())
 }
 
 #[derive(Deserialize)]

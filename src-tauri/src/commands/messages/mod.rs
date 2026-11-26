@@ -2804,8 +2804,18 @@ async fn run_participant_turn(
             // through unchanged. Refusing here means the promise "nothing
             // changes while planning" holds even then, and the model reads why
             // rather than an unexplained failure.
-            if planning && !crate::plans::allowed_in_plan_mode(&tc.function.name) {
-                let refusal = crate::plans::refusal(&tc.function.name);
+            // A read-only zone's lock (0.20.0), the same shape: withheld from
+            // the request in `build_tools_for_zone`, refused here if named anyway.
+            let refused = if planning && !crate::plans::allowed_in_plan_mode(&tc.function.name) {
+                Some(crate::plans::refusal(&tc.function.name))
+            } else if crate::tools::presets::is_read_only(&zone.tool_config)
+                && !crate::tools::presets::read_only_allows(&tc.function.name)
+            {
+                Some(crate::tools::presets::read_only_refusal(&tc.function.name))
+            } else {
+                None
+            };
+            if let Some(refusal) = refused {
                 sink.emit_for(
                     chat_id,
                     persp,
@@ -3589,6 +3599,12 @@ pub struct ToolFunctionInfo {
     pub name: String,
     /// The shipped description — the default an override replaces.
     pub description: String,
+}
+
+/// The tool presets the zone editor and `spawn_subagent` offer (0.20.0).
+#[tauri::command]
+pub async fn list_tool_presets() -> AppResult<Vec<crate::tools::presets::ToolPreset>> {
+    Ok(crate::tools::presets::presets())
 }
 
 #[tauri::command]

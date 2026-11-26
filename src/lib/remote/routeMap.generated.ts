@@ -112,6 +112,7 @@ export const ROUTE_MAP: Record<string, RouteBinding> = {
   list_tags: { method: "GET", path: "/api/tags" },
   list_terminals: { method: "GET", path: "/api/chats/:id/terminals" },
   list_tool_functions: { method: "GET", path: "/api/tools" },
+  list_tool_presets: { method: "GET", path: "/api/tools/presets" },
   list_zones: { method: "GET", path: "/api/zones" },
   mirror_all_chats: { method: "POST", path: "/api/mirror", unwrap: "mirrored" },
   open_pairing: { method: "POST", path: "/api/pairing" },

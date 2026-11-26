@@ -1593,6 +1593,16 @@ export type ToolSafety = 0 | 1 | 2;
  * (`file_system`) can expose several functions (`read`, `edit`, …), and
  * a per-zone description override is keyed by function name.
  */
+/** A zone's built-in toolset in one pick (0.20.0) — Rust's `tools::presets`.
+ *  Never touches MCP tools. `readOnly` goes on the zone's tool config. */
+export interface ToolPreset {
+  id: string;
+  label: string;
+  description: string;
+  tools: string[];
+  readOnly: boolean;
+}
+
 export interface ToolFunctionInfo {
   /** The group id stored in a zone's `toolsEnabled`. */
   toolId: string;

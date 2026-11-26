@@ -1326,6 +1326,11 @@ pub(super) async fn build_tools_for_zone(db: &SqlitePool, zone: &Zone, ctx: &Too
     }
     // MCP tools enabled on this zone (qualified ids `mcp__<server>__<tool>`).
     tools.extend(crate::mcp::tool_defs_for_ids(db, &ids).await);
+    // A read-only zone (0.20.0) is offered only what cannot change anything;
+    // the executor refuses the rest if a model names one anyway.
+    if crate::tools::presets::is_read_only(&zone.tool_config) {
+        tools.retain(|t| crate::tools::presets::read_only_allows(&t.function.name));
+    }
 
     // Per-zone description overrides (0.9.3). A tool's description is the whole
     // of what the model knows about when and how to call it, and the wording

@@ -441,12 +441,25 @@ The main column already tiles (0.18.2), on a layout tree of our own that stops a
 
 **License:** Trellis is free for non-commercial use only (`LicenseRef-Danfessler-NonCommercial-1.0`); commercial use needs a GitHub-Sponsors tier. Accepted while MultiZone is open-source and non-commercial; revisit before that changes. It is also young (0.3.0, 2026-09).
 
+**Shipped early, in 0.20.0** (2026-11-26), together with 0.20.0 and 0.20.1 above: one release for the whole of `feat/0.20`. Unticked items carry over to 0.20.1+.
+
 ### 0.21.0 — The workspace is a Trellis layout
 
 - [~] `@danfessler/trellis` + `@danfessler/trellis-react` — **the main column is Trellis** ([Tiles.tsx](../src/components/Chat/Tiles.tsx)): chats, files, study sets and the new-chat screen are views that drag between panels, split onto edges, maximize, and float out as windows and dock back; the layout persists, windows included. `tabLayout.ts` was *kept* rather than retired: its navigate/open/close rules and their tests are what every caller uses, so it stays the model and [trellisLayout.ts](../src/lib/trellisLayout.ts) converts both ways (round-trip tested), and TabTiles went instead. Hide is off the menu (no tray to restore from). Verified in the running app over CDP: open, Ctrl+click, float, dock, close, reload. **Then the rest of the window:** the sidebar and each workspace section (Files, Plan, This chat, Terminals, Context, Study) are views too — docked left and right by default, movable, stackable and floatable like any tab; `sidebarOpen`/`workspaceOpen` are read from the layout so every toggle still works; the title bar has sidebar/workspace toggles and a reset-to-edges button. A phone-width window keeps them as drawers. **Left:** the title bar and the approval banner stay fixed; the phone layout is untested since the change
 - [x] Sub-agents as live tiles — `spawn_subagent` takes `show: beside | window`, and the chat opens the moment it is created, so the user watches it work; beside only next to the chat that started it if that is on screen, and the user's chat keeps focus either way. The "zoom out to watch the panel" half (Trellis's free navigation) is not on
 - [x] **Something that needs you, brought to you.** `present_file` takes `show: tab | beside | window`; a window floats over whatever is on screen, from any chat, including one running in the background. Questions and approvals still arrive in their chat, not as a window
 - [x] The layout is readable and writable over the API — `GET`/`PUT /api/layout` and `POST /api/layout/show {tab, show}`, so `app_read`/`app_control` can see and rearrange the window. The window reports its layout and checks any it is sent
+
+**Also in 0.20.0, raised while testing it:**
+- [x] Keyboard: Ctrl+Arrow between panes, Ctrl+Shift+Arrow moves one, Ctrl+Enter zooms; Ctrl+= / Ctrl+- / Ctrl+0 size panes; Ctrl+Tab, Ctrl+PgUp/PgDn, Ctrl+1–9 and Ctrl+W for tabs; F6 between panes; menus and the sidebar list usable by keyboard
+- [x] One header row per pane (its tabs): the chat's controls sit in its tab bar, the rest in pane menus; the title bar's layout buttons are one Layout menu; a closed workspace tab comes back from the pane menu or the palette
+- [x] Appearance for everyone: built-in themes, background gradients, glass that is one blurred layer per pane, blur and see-through sliders, an opt-in see-through window (Acrylic/Mica), title bar Shown / Auto-hide / Hidden, Advanced folded away. All of it settable by agents through `PATCH /api/theme`
+- [x] Your messages as Bubble or Editorial, and a `/skill` you send shown as a run (drawer or timeline step) with its status and files; the skill's hidden text no longer reads as a failed command
+- [x] Plan mode: `/plan` toggles it, a switch in the Plan panel, Settings → Runs → Plan mode (Automatic / Ask first, the default / Only when I ask), and plans asked for as 3–7 short steps
+- [x] The Files tree follows the disk (watcher + re-read on focus); the chat follows a streaming reply only until you scroll away
+- [x] Agents set up projects: `PATCH /api/projects/:id`, `/api/projects/schema`, project approvals and a token limit (migration 055)
+- [x] Lock a chat behind the app password or its own (PBKDF2, enforced in Rust and the API; agents may lock, never unlock; migration 056); one Export… item
+- [ ] Left for 0.20.1+: pane keys still act behind open dialogs; idle auto-relock; unlocking from the phone; a keyboard pass over Settings and the model pickers; the phone layout since the pane rewrite; the sidebar text blur the user saw (not reproduced)
 
 ---
 

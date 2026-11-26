@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Code2, Eye, FileText as FileTextIcon, Loader2, Minus, Plus, RefreshCw, Save } from "lucide-react";
-import { useViewBadge } from "@danfessler/trellis-react";
+import { useCloseGuard, useViewBadge } from "@danfessler/trellis-react";
 import * as api from "@/lib/tauri";
 import { formatBytes } from "@/lib/format";
 import { Markdown } from "@/components/Renderers/Markdown";
@@ -150,6 +150,8 @@ export function FileViewer({ path }: { path: string }) {
   }, [file, dirty, saving, path, draft]);
 
   useViewBadge(dirty || null);
+  // Ctrl+W is one slip away from Ctrl+S; closing must not drop an unsaved edit.
+  useCloseGuard(() => !dirty || window.confirm(`Close ${name} without saving?`));
 
   const paneRef = useCtrlWheelZoom(setZoom);
   const name = file?.name ?? path.slice(Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1);
@@ -702,7 +704,8 @@ function Editor({
       onSave();
       return;
     }
-    if (e.key === "Tab" && !e.shiftKey) {
+    // Ctrl+Tab is the pane's, to go to its next tab.
+    if (e.key === "Tab" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
       e.preventDefault();
       const el = e.currentTarget;
       const { selectionStart: start, selectionEnd: end } = el;

@@ -183,6 +183,12 @@ export function ChatList({ chats, activeId, onSelect, projectId, limit }: Props)
         onMouseDown={(e) => { if (e.button === 1) e.preventDefault(); }}
         onAuxClick={(e) => { if (e.button === 1) void setActiveChat(chat.id, "tab"); }}
         onContextMenu={(e) => openMenu(e, chat.id)}
+        // Arrows, Enter and the menu key are the list's (Sidebar's listKeys).
+        role="button"
+        tabIndex={-1}
+        data-row=""
+        aria-current={active || undefined}
+        onKeyDown={(e) => { if (e.key === "F2" && e.target === e.currentTarget) { e.preventDefault(); startRename(chat); } }}
         title={chat.initiatedByZoneId ? `Sub-agent${subchatZone ? ` · ${subchatZone.name}` : ""}` : undefined}
         className={`${SIDEBAR_ROW} select-none ${
           active
@@ -266,6 +272,8 @@ export function ChatList({ chats, activeId, onSelect, projectId, limit }: Props)
       {shown.map((chat) => renderChat(chat, 0))}
       {(hidden > 0 || (showAll && limit && roots.length > limit + 1)) && (
         <button
+          data-row=""
+          tabIndex={-1}
           onClick={() => setShowAll((v) => !v)}
           className={`${SIDEBAR_ROW} text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]`}
         >

@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -136,6 +137,21 @@ interface PopoverProps {
   children: ReactNode;
 }
 
+const FOCUSABLE = "button:not(:disabled), [href], input:not(:disabled), select, textarea, [tabindex]:not([tabindex='-1'])";
+
+/** Up and down the surface's controls, the way a menu goes. A text field keeps its arrows. */
+function moveFocus(e: React.KeyboardEvent<HTMLElement>) {
+  const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+  if (!step || e.altKey || e.ctrlKey || e.metaKey) return;
+  if ((e.target as HTMLElement).matches("input, textarea, select")) return;
+  const items = [...e.currentTarget.querySelectorAll<HTMLElement>(FOCUSABLE)];
+  if (!items.length) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const i = items.indexOf(e.target as HTMLElement);
+  items[(i + step + items.length) % items.length].focus();
+}
+
 export function Popover({
   open,
   onClose,
@@ -201,6 +217,23 @@ export function Popover({
     };
   }, [open, measure]);
 
+  // From the keyboard: the surface is portalled to the end of the page, so Tab
+  // from its trigger never reached it. It takes focus on its first control and
+  // hands it back to the trigger when it closes. Not when a text field opened
+  // it (a combobox, the composer): typing carries on there.
+  useEffect(() => {
+    if (!open) return;
+    const opener = document.activeElement as HTMLElement | null;
+    if (opener?.matches("input, textarea, [contenteditable='true']")) return;
+    const raf = requestAnimationFrame(() => surfaceRef.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus({ preventScroll: true }));
+    return () => {
+      cancelAnimationFrame(raf);
+      // Only if focus went with the surface — not if an item moved it on (a rename box).
+      const a = document.activeElement;
+      if ((!a || a === document.body) && opener?.isConnected) opener.focus({ preventScroll: true });
+    };
+  }, [open]);
+
   if (!open) return null;
 
   const anchorWidth = matchAnchorWidth
@@ -226,6 +259,7 @@ export function Popover({
         // portalled contents are not inside the trigger's subtree, so a plain
         // `contains` test reads a click on a menu row as a click outside.
         data-mz-popover=""
+        onKeyDown={moveFocus}
         className={`fixed overflow-y-auto overscroll-contain ${className}`}
         style={{
           zIndex: zIndex + 1,

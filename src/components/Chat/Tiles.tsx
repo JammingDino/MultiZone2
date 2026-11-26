@@ -12,7 +12,8 @@ import {
   DEFAULT_SECTIONS, HOME_TAB, SIDEBAR_TAB, allGroups, chatOf, closeTab, closeWhere, dockPanel, sectionTab, focusGroup, focusedGroup, groupOf,
   isPanelTab, moveTab, sectionOf, studyOf, type DropZone, type Section, type TabLayout,
 } from "@/lib/tabLayout";
-import { fromDocument, toDocument } from "@/lib/trellisLayout";
+import { evenPanels, fromDocument, resizePanel, toDocument } from "@/lib/trellisLayout";
+import type { Command, LayoutNode, PanelNode } from "@danfessler/trellis";
 
 type Phase = "move" | "drop" | "cancel";
 
@@ -203,7 +204,9 @@ export function Tiles({ renderTab, renderBar }: {
         tokens={TOKENS}
         defaultLayout={initial}
         // No Hide: the app has no tray to bring a hidden pane back from.
-        panelMenu={(entries) => entries.filter((e) => e === "separator" || e.id !== "hide")}
+        panelMenu={(entries) => entries
+          .filter((e) => e === "separator" || e.id !== "hide")
+          .map((e) => (e !== "separator" && e.id === "close" ? { ...e, shortcut: "Ctrl+W" } : e))}
         keymap={{ "navigation.stepOut": null }}
         tabs={{ inset: 0 }}
         label="Workspace"
@@ -333,6 +336,38 @@ const DIRS: Record<string, "left" | "right" | "top" | "bottom"> = {
 };
 
 /**
+ * Trellis's own commands on the keys a browser has them on. Run from the
+ * window rather than put in Trellis's keymap: that only hears keys while focus
+ * is inside the tiles (after a click on plain text it is on the page itself),
+ * it hears them before the composer does, and it matches a letter by where it
+ * sits — Ctrl+W there is Ctrl+Z, undo, on a French keyboard.
+ */
+function commandFor(e: KeyboardEvent): Command | null {
+  if (e.key === "F6" && !(e.ctrlKey || e.metaKey)) return e.shiftKey ? "panel.previous" : "panel.next";
+  if (!(e.ctrlKey || e.metaKey)) return null;
+  if (e.key === "Tab") return e.shiftKey ? "tab.previous" : "tab.next";
+  if (e.shiftKey) return null;
+  if (e.key === "PageDown") return "tab.next";
+  if (e.key === "PageUp") return "tab.previous";
+  if (e.key.toLowerCase() === "w") return "view.close";
+  return null;
+}
+
+/** A step of Ctrl+= / Ctrl+-, as a share of the split the pane is in. */
+const RESIZE_STEP = 0.05;
+
+function panelIn(n: LayoutNode | null | undefined, id: string): PanelNode | undefined {
+  if (!n) return undefined;
+  if (n.kind === "panel") return n.id === id ? n : undefined;
+  if (n.kind === "stage") return panelIn(n.child, id);
+  for (const c of n.children) {
+    const p = panelIn(c, id);
+    if (p) return p;
+  }
+  return undefined;
+}
+
+/**
  * The panes from the keyboard (0.21.0):
  *
  * - Ctrl+Arrow moves to the pane on that side; Ctrl+Shift+Arrow moves the
@@ -340,6 +375,11 @@ const DIRS: Record<string, "left" | "right" | "top" | "bottom"> = {
  * - Ctrl+Enter zooms the pane in front to fill the window, and again to put
  *   the others back; Ctrl+Escape zooms back out too, where Windows lets it
  *   through (it is also the Start menu's).
+ * - Ctrl+= (or +) and Ctrl+- make the pane in front bigger and smaller,
+ *   Ctrl+0 evens the panes out — the keys a browser zooms with, and the
+ *   webview's own zoom keys are off (Tauri's default), so they are free.
+ * - Ctrl+Tab, Ctrl+PageDown and back go through the pane's tabs, Ctrl+1–8
+ *   pick one and Ctrl+9 the last, Ctrl+W closes it, F6 goes to the next pane.
  *
  * The keys keep their meaning where they already have one: an arrow in a
  * text field that has text in it moves the caret by word, and a Ctrl+Enter
@@ -347,7 +387,35 @@ const DIRS: Record<string, "left" | "right" | "top" | "bottom"> = {
  * handlers run first, so a used key arrives here marked as handled.
  */
 function paneKeys(e: KeyboardEvent, ws: WorkspaceHandle) {
-  if (!(e.ctrlKey || e.metaKey) || e.altKey || e.defaultPrevented) return;
+  if (e.altKey || e.defaultPrevented) return;
+  const command = commandFor(e);
+  if (command) {
+    e.preventDefault();
+    ws.run(command);
+    return;
+  }
+  if (!(e.ctrlKey || e.metaKey)) return;
+  const focused = ws.getSnapshot().focusedPanel;
+  const doc = ws.getDocument();
+  const nth = !e.shiftKey && /^Digit([1-9])$/.exec(e.code);
+  if (nth && focused) {
+    const views = (panelIn(doc.root, focused) ?? doc.floating.find((f) => f.panel.id === focused)?.panel)?.views ?? [];
+    const view = nth[1] === "9" ? views[views.length - 1] : views[Number(nth[1]) - 1];
+    if (view) {
+      e.preventDefault();
+      ws.focus(view);
+    }
+    return;
+  }
+  const grow = e.key === "=" || e.key === "+" ? 1 : e.key === "-" ? -1 : e.key === "0" || e.code === "Digit0" ? 0 : null;
+  if (grow !== null) {
+    e.preventDefault();
+    // Zoomed in, the pane has the window and nothing beside it to trade with.
+    if (!focused || ws.navigation.framed) return;
+    const root = grow ? resizePanel(doc.root, focused, grow * RESIZE_STEP) : evenPanels(doc.root);
+    if (root !== doc.root) ws.setDocument({ ...doc, root });
+    return;
+  }
   if (e.key === "Enter" && !e.shiftKey) {
     if (ws.navigation.toggle()) e.preventDefault();
     return;

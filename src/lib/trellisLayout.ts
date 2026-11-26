@@ -1,5 +1,5 @@
-import type { LayoutDocument, LayoutNode, PanelNode } from "@danfessler/trellis";
-import { HOME_TAB, SIDEBAR_TAB, chatOf, initialLayout, isStudyTab, sectionOf, type TabGroup, type TabLayout, type TabNode } from "./tabLayout.ts";
+import type { LayoutDocument, LayoutNode, PanelNode, SplitNode } from "@danfessler/trellis";
+import { HOME_TAB, SIDEBAR_TAB, chatOf, initialLayout, isPanelTab, isStudyTab, sectionOf, type TabGroup, type TabLayout, type TabNode } from "./tabLayout.ts";
 
 /**
  * The main column's layout as Trellis draws it (0.21.0), and back.
@@ -72,3 +72,66 @@ export function fromDocument(doc: LayoutDocument, focused: string): TabLayout {
 }
 
 const tabsGroups = (n: TabNode): string[] => (n.kind === "group" ? [n.id] : n.children.flatMap(tabsGroups));
+
+/** The smallest share of its split a pane is resized down to from the keyboard. */
+const MIN_SHARE = 0.1;
+
+const normalised = (w: number[]) => {
+  const total = w.reduce((a, b) => a + b, 0) || 1;
+  return w.map((x) => x / total);
+};
+
+function swap(n: LayoutNode, s: SplitNode): LayoutNode {
+  if (n.id === s.id) return s;
+  if (n.kind === "split") return { ...n, children: n.children.map((c) => swap(c, s)) };
+  if (n.kind === "stage" && n.child) return { ...n, child: swap(n.child, s) as SplitNode | PanelNode };
+  return n;
+}
+
+/**
+ * Grow (delta > 0) or shrink a docked panel from the keyboard (0.21.0), by
+ * `delta` of the innermost row it is in — width is what a pane is usually
+ * short of — or of the innermost column when it is in no row. Its siblings
+ * give or take in proportion, so their balance with each other stays.
+ */
+export function resizePanel(root: LayoutNode | null, panelId: string, delta: number): LayoutNode | null {
+  const path: { split: SplitNode; i: number }[] = [];
+  const find = (n: LayoutNode): boolean => {
+    if (n.kind === "panel") return n.id === panelId;
+    if (n.kind === "stage") return !!n.child && find(n.child);
+    return n.children.some((c, i) => {
+      path.push({ split: n, i });
+      if (find(c)) return true;
+      path.pop();
+      return false;
+    });
+  };
+  if (!root || !find(root)) return root;
+  const at = [...path].reverse().find((p) => p.split.axis === "x") ?? path[path.length - 1];
+  if (!at) return root;
+  const { split, i } = at;
+  const w = normalised(split.weights);
+  const own = Math.min(Math.max(w[i] + delta, MIN_SHARE), 1 - MIN_SHARE * (w.length - 1));
+  if (Math.abs(own - w[i]) < 1e-6 || w[i] >= 1) return root;
+  const weights = w.map((x, j) => (j === i ? own : (x / (1 - w[i])) * (1 - own)));
+  return swap(root, { ...split, weights });
+}
+
+/**
+ * Even the panes out (0.21.0): in every split, what holds chats and files
+ * shares what is left equally. The sidebar and the workspace sections keep
+ * their widths — a third of the window each would not be an even layout but
+ * a broken one.
+ */
+export function evenPanels(root: LayoutNode | null): LayoutNode | null {
+  const even = (n: LayoutNode): LayoutNode => {
+    if (n.kind === "panel") return n;
+    if (n.kind === "stage") return n.child ? { ...n, child: even(n.child) as SplitNode | PanelNode } : n;
+    const w = normalised(n.weights);
+    const fixed = n.children.map((c) => c.kind === "panel" && c.views.length > 0 && c.views.every(isPanelTab));
+    const count = fixed.filter((f) => !f).length;
+    const free = 1 - w.reduce((a, x, i) => a + (fixed[i] ? x : 0), 0);
+    return { ...n, children: n.children.map(even), weights: w.map((x, i) => (fixed[i] || !count ? x : free / count)) };
+  };
+  return root && even(root);
+}

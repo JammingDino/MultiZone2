@@ -227,6 +227,14 @@ summary:focus-visible {
   border-radius: 4px;
 }
 
+/* Inside a menu or a list row's own box: a ring outside it would be clipped
+   by the scrolling surface, or run into the row next to it. */
+[data-mz-popover] :is(button, [role="button"], [tabindex]):focus-visible,
+[data-row]:not([aria-disabled="true"]):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
 /* Disabled state: dim and remove the pointer affordance. */
 button:disabled,
 [role="button"][aria-disabled="true"] {

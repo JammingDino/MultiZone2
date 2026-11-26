@@ -324,7 +324,18 @@ export function Sidebar({ docked = false }: { docked?: boolean } = {}) {
 
       {/* Chat list with project folders. Hidden outright while a search is
           running — the results took its place rather than filtering it. */}
-      <div className={`flex-1 overflow-y-auto px-2 pb-2 ${searching ? "hidden" : ""}`}>
+      <div
+        className={`flex-1 overflow-y-auto px-2 pb-2 ${searching ? "hidden" : ""}`}
+        // One Tab stop for the whole list, landing on the open chat.
+        tabIndex={0}
+        aria-label="Projects and chats"
+        onFocus={(e) => {
+          if (e.target !== e.currentTarget || e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+          const rows = e.currentTarget.querySelectorAll<HTMLElement>("[data-row]");
+          (e.currentTarget.querySelector<HTMLElement>("[data-row][aria-current]") ?? rows[0])?.focus();
+        }}
+        onKeyDown={listKeys}
+      >
         <SectionLabel
           label="Projects"
           action={
@@ -474,6 +485,9 @@ function ProjectFolderHeader({
   return (
     <div
       role="button"
+      tabIndex={-1}
+      data-row=""
+      aria-expanded={isOpen}
       onClick={onToggle}
       onContextMenu={onContextMenu}
       className={`${SIDEBAR_ROW} font-medium text-[var(--color-text)] hover:bg-[var(--color-panel-hover)]`}
@@ -485,12 +499,12 @@ function ProjectFolderHeader({
         {project.name}
       </span>
       {chatCount > 0 && (
-        <span className="shrink-0 text-[11px] font-normal text-[var(--color-text-muted)] group-hover:hidden">{chatCount}</span>
+        <span className="shrink-0 text-[11px] font-normal text-[var(--color-text-muted)] group-hover:hidden group-focus-within:hidden">{chatCount}</span>
       )}
       <button
         onClick={(e) => { e.stopPropagation(); onNewChat(); }}
         title="New chat in this project"
-        className={`hidden shrink-0 rounded p-0.5 group-hover:block ${CHROME_QUIET}`}
+        className={`hidden shrink-0 rounded p-0.5 group-hover:block group-focus-within:block ${CHROME_QUIET}`}
       >
         <Plus size={13} />
       </button>
@@ -499,6 +513,37 @@ function ProjectFolderHeader({
       </span>
     </div>
   );
+}
+
+/**
+ * The chat list from the keyboard: up and down the rows (projects, chats,
+ * "show more"), Enter or Space to open one, Right and Left to open and close
+ * a project, the menu key or Shift+F10 for its right-click menu.
+ */
+function listKeys(e: React.KeyboardEvent<HTMLElement>) {
+  const target = e.target as HTMLElement;
+  const row = target.closest<HTMLElement>("[data-row]");
+  if (!row || e.altKey || e.ctrlKey || e.metaKey || target.matches("input, textarea")) return;
+  const rows = [...e.currentTarget.querySelectorAll<HTMLElement>("[data-row]")];
+  const go = (i: number) => {
+    e.preventDefault();
+    rows[Math.max(0, Math.min(rows.length - 1, i))]?.focus();
+  };
+  const i = rows.indexOf(row);
+  const expanded = row.getAttribute("aria-expanded");
+  if (e.key === "ArrowDown") return go(i + 1);
+  if (e.key === "ArrowUp") return go(i - 1);
+  if (e.key === "Home") return go(0);
+  if (e.key === "End") return go(rows.length - 1);
+  if (target !== row) return;
+  if (e.key === "Enter" || e.key === " " || (e.key === "ArrowRight" && expanded === "false") || (e.key === "ArrowLeft" && expanded === "true")) {
+    e.preventDefault();
+    row.click();
+  } else if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) {
+    e.preventDefault();
+    const r = row.getBoundingClientRect();
+    row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.left + 24, clientY: r.bottom }));
+  }
 }
 
 /** A quiet heading over a part of the list, with an optional action on the right. */

@@ -95,6 +95,8 @@ mod tray;
 #[cfg(desktop)]
 mod tts_api;
 #[cfg(desktop)]
+mod startup_failure;
+#[cfg(desktop)]
 mod updater_token;
 
 #[cfg(desktop)]
@@ -201,6 +203,11 @@ pub fn run() {
         // First, so a second launch is handed over before it initialises
         // anything of its own.
         .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+            // A failed start has hidden its window on purpose (see
+            // `startup_failure`); showing it would show a UI with no state.
+            if app.try_state::<AppState>().is_none() {
+                return;
+            }
             tray::show_main(app);
             // `multizone <path>` while already running opens a chat on it.
             launch::on_second_instance(app, &args, &cwd);
@@ -240,24 +247,11 @@ pub fn run() {
                 // the user a window that opens and instantly closes, with the
                 // reason buried in %TEMP%. Surface it instead — this is how the
                 // cross-machine `VersionMismatch` crash stayed invisible for so
-                // long. Reported before the process exits, not swallowed.
+                // long. Reported before the process exits, not swallowed, and
+                // with a way out — see `startup_failure`. Nothing below runs.
                 let state = match AppState::init(&handle).await {
                     Ok(state) => state,
-                    Err(e) => {
-                        tracing::error!("failed to init app state: {e}");
-                        use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
-                        handle
-                            .dialog()
-                            .message(format!(
-                                "MultiZone could not start.\n\n{e}\n\n\
-                                 Details were written to:\n{}",
-                                std::env::temp_dir().join("multizone.log").display()
-                            ))
-                            .kind(MessageDialogKind::Error)
-                            .title("MultiZone — startup failed")
-                            .blocking_show();
-                        std::process::exit(1);
-                    }
+                    Err(e) => return startup_failure::handle(&handle, e),
                 };
                 handle.manage(state);
                 tray::sync(&handle.state::<AppState>().db).await;

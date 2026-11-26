@@ -41,7 +41,12 @@ export const isAuxTab = (tab: string) => !!tab && tab !== HOME_TAB && !tab.start
 export type TabGroup = { kind: "group"; id: string; tabs: string[]; active: string };
 export type TabSplit = { kind: "split"; id: string; dir: "row" | "col"; children: TabNode[]; sizes: number[] };
 export type TabNode = TabGroup | TabSplit;
-export type TabLayout = { root: TabNode; focused: string };
+/**
+ * A group lifted out of the tiles into a window of its own (0.21.0). `rect` is
+ * in fractions of the column; `z` orders overlapping windows.
+ */
+export type TabFloat = { group: TabGroup; rect: Rect; z: number; layer: "stage" | "overlay" };
+export type TabLayout = { root: TabNode; focused: string; floating?: TabFloat[] };
 export type DropZone = "center" | "left" | "right" | "top" | "bottom";
 export type Rect = { x: number; y: number; w: number; h: number };
 
@@ -59,23 +64,29 @@ export function groups(node: TabNode): TabGroup[] {
   return node.kind === "group" ? [node] : node.children.flatMap(groups);
 }
 
+/** Every group, tiled or floating. */
+export function allGroups(layout: TabLayout): TabGroup[] {
+  return [...groups(layout.root), ...(layout.floating ?? []).map((f) => f.group)];
+}
+
 export function groupOf(layout: TabLayout, tab: string): TabGroup | undefined {
-  return groups(layout.root).find((g) => g.tabs.includes(tab));
+  return allGroups(layout).find((g) => g.tabs.includes(tab));
 }
 
 /** Whether a tab is the one showing in its group — on screen, not just open. */
 export function isShowing(layout: TabLayout | undefined, tab: string): boolean {
-  return !!layout && groups(layout.root).some((g) => g.active === tab);
-}
-
-/** One tab, or none: no strip, and the column looks as it did before tabs. */
-export function isBare(layout: TabLayout): boolean {
-  return layout.root.kind === "group" && layout.root.tabs.length <= 1;
+  return !!layout && allGroups(layout).some((g) => g.active === tab);
 }
 
 export function focusedGroup(layout: TabLayout): TabGroup {
-  const all = groups(layout.root);
+  const all = allGroups(layout);
   return all.find((g) => g.id === layout.focused) ?? all[0];
+}
+
+/** The focused group if it is tiled, else the first tiled one: what a split splits. */
+function tiledFocus(layout: TabLayout): TabGroup {
+  const tiled = groups(layout.root);
+  return tiled.find((g) => g.id === layout.focused) ?? tiled[0];
 }
 
 /**
@@ -105,10 +116,18 @@ function rewrite(node: TabNode, fn: (g: TabGroup) => TabNode | null): TabNode | 
 }
 
 function withGroups(layout: TabLayout, fn: (g: TabGroup) => TabNode | null, focused = layout.focused): TabLayout {
-  const root = rewrite(layout.root, fn);
-  if (!root) return initialLayout();
-  const all = groups(root);
-  return { root, focused: all.some((g) => g.id === focused) ? focused : all[0].id };
+  const root = rewrite(layout.root, fn) ?? initialLayout().root;
+  // A floating window holds one group; nothing here splits one (splits go to
+  // `tiledFocus`), so a split back is not expected and keeps the window as it was.
+  const floating = (layout.floating ?? []).flatMap((f) => {
+    const r = fn(f.group);
+    return r === null ? [] : [{ ...f, group: r.kind === "group" ? r : f.group }];
+  });
+  const next: TabLayout = { root, focused };
+  if (floating.length) next.floating = floating;
+  const all = allGroups(next);
+  if (!all.some((g) => g.id === focused)) next.focused = all[0].id;
+  return next;
 }
 
 export function activate(layout: TabLayout, groupId: string, tab: string): TabLayout {
@@ -151,9 +170,8 @@ export function closeTab(layout: TabLayout, tab: string): TabLayout {
 
 /** Close every tab `drop` picks — the chats that were deleted. */
 export function closeWhere(layout: TabLayout, drop: (tab: string) => boolean): TabLayout {
-  return groups(layout.root).some((g) => g.tabs.some(drop))
-    ? groups(layout.root).flatMap((g) => g.tabs).filter(drop).reduce(without, layout)
-    : layout;
+  const all = allGroups(layout);
+  return all.some((g) => g.tabs.some(drop)) ? all.flatMap((g) => g.tabs).filter(drop).reduce(without, layout) : layout;
 }
 
 /**
@@ -170,11 +188,12 @@ export function navigate(layout: TabLayout, tab: string, where: "here" | "tab" |
   if (home) return activate(layout, home.id, tab);
   const g = focusedGroup(layout);
   if (where === "right") {
-    if (g.tabs.length === 0) return openTab(layout, tab);
+    const t = tiledFocus(layout);
+    if (t.tabs.length === 0) return withGroups(layout, (x) => (x.id === t.id ? { ...x, tabs: [tab], active: tab } : x), t.id);
     const fresh = group([tab]);
     return withGroups(
       layout,
-      (x) => (x.id === g.id ? { kind: "split", id: uid(), dir: "row", children: [x, fresh], sizes: [0.5, 0.5] } : x),
+      (x) => (x.id === t.id ? { kind: "split", id: uid(), dir: "row", children: [x, fresh], sizes: [0.5, 0.5] } : x),
       fresh.id,
     );
   }
@@ -197,8 +216,14 @@ export function parseLayout(raw: unknown): TabLayout | null {
       : n?.kind === "split" && (n.dir === "row" || n.dir === "col") && Array.isArray(n.children) && n.children.length > 1 &&
         Array.isArray(n.sizes) && n.sizes.length === n.children.length && n.sizes.every((x: unknown) => typeof x === "number" && x > 0) &&
         n.children.every(node);
+  const num = (x: unknown) => typeof x === "number" && Number.isFinite(x);
+  const float = (f: any): boolean =>
+    f?.group?.kind === "group" && node(f.group) && num(f.z) && (f.layer === "stage" || f.layer === "overlay") &&
+    num(f.rect?.x) && num(f.rect?.y) && num(f.rect?.w) && num(f.rect?.h);
   const l = raw as TabLayout;
-  return l && typeof l.focused === "string" && node(l.root) ? l : null;
+  return l && typeof l.focused === "string" && node(l.root) && (l.floating === undefined || (Array.isArray(l.floating) && l.floating.every(float)))
+    ? l
+    : null;
 }
 
 /**
@@ -209,10 +234,11 @@ export function parseLayout(raw: unknown): TabLayout | null {
  */
 export function moveTab(layout: TabLayout, tab: string, targetId: string, zone: DropZone, index?: number): TabLayout {
   const src = groupOf(layout, tab);
-  const target = groups(layout.root).find((g) => g.id === targetId);
+  const target = allGroups(layout).find((g) => g.id === targetId);
   if (!target) return layout;
-  // An empty group (the new-chat screen, nothing open) has no edge to split.
-  if (target.tabs.length === 0) zone = "center";
+  // An empty group (the new-chat screen, nothing open) has no edge to split,
+  // and a floating window is one group.
+  if (target.tabs.length === 0 || !groups(layout.root).includes(target)) zone = "center";
 
   if (zone === "center") {
     const from = target.tabs.indexOf(tab);
@@ -255,43 +281,9 @@ export function moveTab(layout: TabLayout, tab: string, targetId: string, zone: 
 export function openBeside(layout: TabLayout, tab: string): TabLayout {
   const home = groupOf(layout, tab);
   if (home) return activate(layout, home.id, tab);
-  const study = groups(layout.root).find((g) => g.tabs.some(isStudyTab));
+  const study = allGroups(layout).find((g) => g.tabs.some(isStudyTab));
   if (study) {
     return withGroups(layout, (g) => (g.id === study.id ? { ...g, tabs: [...g.tabs, tab], active: tab } : g), study.id);
   }
   return navigate(layout, tab, "right");
-}
-
-export function resizeSplit(layout: TabLayout, splitId: string, sizes: number[]): TabLayout {
-  const walk = (n: TabNode): TabNode =>
-    n.kind === "group" ? n : n.id === splitId ? { ...n, sizes } : { ...n, children: n.children.map(walk) };
-  return { ...layout, root: walk(layout.root) };
-}
-
-export type Divider = { splitId: string; index: number; dir: "row" | "col"; at: number; span: Rect; sizes: number[] };
-
-/**
- * Where everything goes, as fractions of the column: a rectangle per group,
- * and a divider between each pair of neighbours in a split. The view draws
- * these flat rather than as nested boxes, so a split never remounts what is
- * already on screen — the transcript keeps its scroll and its draft.
- */
-export function measure(node: TabNode, r: Rect = { x: 0, y: 0, w: 1, h: 1 }) {
-  const rects: Record<string, Rect> = {};
-  const dividers: Divider[] = [];
-  const walk = (n: TabNode, r: Rect) => {
-    if (n.kind === "group") { rects[n.id] = r; return; }
-    let off = 0;
-    n.children.forEach((c, i) => {
-      const s = n.sizes[i];
-      const cr = n.dir === "row" ? { ...r, x: r.x + off * r.w, w: s * r.w } : { ...r, y: r.y + off * r.h, h: s * r.h };
-      walk(c, cr);
-      off += s;
-      if (i < n.children.length - 1) {
-        dividers.push({ splitId: n.id, index: i, dir: n.dir, at: n.dir === "row" ? r.x + off * r.w : r.y + off * r.h, span: r, sizes: n.sizes });
-      }
-    });
-  };
-  walk(node, r);
-  return { rects, dividers };
 }

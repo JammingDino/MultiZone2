@@ -5,7 +5,7 @@ import { useShallow } from "zustand/react/shallow";
 import * as api from "@/lib/tauri";
 import { MessageThread } from "./MessageThread";
 import { FileViewer } from "@/components/Workspace/FileViewer";
-import { TabTiles } from "./TabTiles";
+import { Tiles } from "./Tiles";
 import { chatOf, chatTab, isFileTab, isShowing, isStudyTab } from "@/lib/tabLayout";
 import { StudyTab } from "@/components/Study/StudyTab";
 import { PaneChat } from "@/lib/paneChat";
@@ -170,7 +170,7 @@ export function ChatPanel() {
     <main className="relative flex h-full min-w-0 flex-1 flex-col">
       {/* Chats, files, study sets and the new-chat screen, as tabs that tile the column
           (0.18.3) — as many as you like, side by side or stacked. */}
-      <TabTiles
+      <Tiles
         renderTab={(tab) => {
           const id = chatOf(tab);
           if (id) return <ChatPane chatId={id} />;

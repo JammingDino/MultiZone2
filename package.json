@@ -21,6 +21,8 @@
     "android:build": "tauri android build --debug --target aarch64"
   },
   "dependencies": {
+    "@danfessler/trellis": "^0.3.0",
+    "@danfessler/trellis-react": "^0.3.0",
     "@tauri-apps/api": "^2.1.1",
     "@tauri-apps/plugin-dialog": "^2.0.1",
     "@tauri-apps/plugin-fs": "^2.0.3",

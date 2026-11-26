@@ -8,7 +8,7 @@ import { usePersistentSet } from "@/lib/uiState";
 import { Popover, pointRect } from "@/components/common/Popover";
 import { useChatExport } from "@/lib/useChatExport";
 import { reportError } from "@/lib/reportError";
-import { dragIntoTiles } from "@/components/Chat/TabTiles";
+import { dragIntoTiles } from "@/components/Chat/Tiles";
 import { chatTab } from "@/lib/tabLayout";
 
 interface Props {

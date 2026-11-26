@@ -6,7 +6,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   HOME_TAB, chatTab, initialLayout, openTab, closeTab, closeWhere, moveTab, navigate,
-  groups, groupOf, measure, isShowing, isBare, parseLayout,
+  groups, groupOf, isShowing, parseLayout,
   openBeside, studySetTab, studyReviewTab, studyOf, isFileTab, isAuxTab,
 } from "../src/lib/tabLayout.ts";
 
@@ -16,7 +16,6 @@ const A = chatTab("a"), B = chatTab("b"), C = chatTab("c");
 test("navigating replaces the chat on screen, keeps a file, and never duplicates", () => {
   let l = navigate(initialLayout(), A);
   assert.deepEqual(shape(l.root), [A]);
-  assert.ok(isBare(l));
   l = navigate(l, B);
   assert.deepEqual(shape(l.root), [B]);
   l = navigate(l, A, "tab");
@@ -48,9 +47,6 @@ test("an edge drop splits, and a same-direction drop makes a sibling, not nestin
   assert.ok(Math.abs(l.root.sizes.reduce((a, b) => a + b) - 1) < 1e-9);
   l = moveTab(l, "/b", groupOf(l, "/a").id, "bottom");
   assert.deepEqual(shape(l.root), { row: [[A], { col: [["/a"], ["/b"]] }] });
-  const { rects, dividers } = measure(l.root);
-  assert.equal(Object.keys(rects).length, 3);
-  assert.equal(dividers.length, 2);
 });
 
 test("emptying a group collapses its split; closing everything leaves the home screen", () => {
@@ -132,4 +128,22 @@ test("study tab ids", () => {
   assert.equal(studyOf("/home/study:set:x"), null);
   assert.ok(!isFileTab(studySetTab("x")) && isFileTab("/f") && !isFileTab(HOME_TAB));
   assert.ok(isAuxTab(studySetTab("x")) && isAuxTab("/f") && !isAuxTab(A) && !isAuxTab(HOME_TAB));
+});
+
+test("a floating window counts as open, takes tabs, and closes like any group", () => {
+  const base = navigate(initialLayout(), A);
+  const float = { group: { kind: "group", id: "f1", tabs: [B], active: B }, rect: { x: 0.5, y: 0.5, w: 0.4, h: 0.4 }, z: 1, layer: "overlay" };
+  let l = { ...base, floating: [float], focused: "f1" };
+  assert.ok(parseLayout(JSON.parse(JSON.stringify(l))));
+  assert.ok(isShowing(l, B));
+  assert.equal(groupOf(navigate(l, B), B).id, "f1");
+  l = openTab(l, "/f");
+  assert.deepEqual(l.floating[0].group.tabs, [B, "/f"]);
+  // A split goes beside the tiled pane, never inside the window.
+  l = navigate(l, C, "right");
+  assert.deepEqual(shape(l.root), { row: [[A], [C]] });
+  assert.equal(l.floating.length, 1);
+  l = closeWhere(l, (t) => t === B || t === "/f");
+  assert.equal(l.floating, undefined);
+  assert.deepEqual(shape(l.root), { row: [[A], [C]] });
 });

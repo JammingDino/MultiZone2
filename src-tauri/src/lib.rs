@@ -406,6 +406,8 @@ pub fn run() {
             commands::knowledge::clear_global_knowledge,
             commands::skills::list_skills,
             commands::skills::list_skill_packs,
+            commands::skills::list_skill_commands,
+            commands::skills::invoke_skill,
             commands::skills::skill_packs_root,
             commands::skills::upsert_skill,
             commands::skills::set_skill_enabled,

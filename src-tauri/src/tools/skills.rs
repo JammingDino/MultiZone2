@@ -349,7 +349,7 @@ pub async fn run(args: &Value, db: &SqlitePool) -> AppResult<String> {
 /// Every skill offered to agents: DB rows first, then folder packs whose name
 /// isn't already taken. The third element marks a skill that has more files to
 /// read past its entry instructions.
-async fn catalog_entries(db: &SqlitePool) -> Vec<(String, String, bool)> {
+pub(crate) async fn catalog_entries(db: &SqlitePool) -> Vec<(String, String, bool)> {
     let rows: Vec<(String, Option<String>)> =
         sqlx::query_as("SELECT name, description FROM skills WHERE enabled = 1 ORDER BY name")
             .fetch_all(db)

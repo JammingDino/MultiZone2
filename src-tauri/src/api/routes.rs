@@ -196,6 +196,8 @@ pub const ROUTES: &[RouteDef] = &[
     r("DELETE", "/api/skills/:id", "Delete a skill"),
     r("POST", "/api/skills/:id/enabled", "Enable or disable a skill"),
     r("GET", "/api/skill-packs", "Folder-backed skill packs found on disk"),
+    r("GET", "/api/skills/commands", "Every enabled skill a prompt can invoke as /name"),
+    r("POST", "/api/skills/invoke", "What /name in a prompt hands the model: the load_skill result for it ({name})"),
     r("GET", "/api/skill-packs/root", "The managed folder installers should write to"),
     r("GET", "/api/memories", "All memory entries across every scope"),
     r("POST", "/api/memories", "Create or update a memory entry"),
@@ -441,6 +443,8 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("skills::delete_skill", Route("DELETE /api/skills/:id")),
     ("skills::set_skill_enabled", Route("POST /api/skills/:id/enabled")),
     ("skills::list_skill_packs", Route("GET /api/skill-packs")),
+    ("skills::list_skill_commands", Route("GET /api/skills/commands")),
+    ("skills::invoke_skill", Route("POST /api/skills/invoke")),
     ("skills::skill_packs_root", Route("GET /api/skill-packs/root -> root")),
     ("memory::list_memories", Route("GET /api/memories")),
     ("memory::upsert_memory", Route("POST /api/memories")),
@@ -1534,6 +1538,15 @@ pub async fn discard_staged(
 
 pub async fn list_skills(State(st): State<ApiState>) -> ApiResult<Response> {
     Ok(Json(commands::skills::list_skills(app_state(&st)).await?).into_response())
+}
+
+pub async fn list_skill_commands(State(st): State<ApiState>) -> ApiResult<Response> {
+    Ok(Json(commands::skills::list_skill_commands(app_state(&st)).await?).into_response())
+}
+
+pub async fn invoke_skill(State(st): State<ApiState>, Json(body): Json<Value>) -> ApiResult<Response> {
+    let name = body.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+    Ok(Json(commands::skills::invoke_skill(app_state(&st), name).await?).into_response())
 }
 
 pub async fn upsert_skill(

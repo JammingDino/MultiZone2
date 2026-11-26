@@ -31,6 +31,26 @@ pub async fn list_skill_packs(state: State<'_, AppState>) -> AppResult<Vec<crate
         .unwrap_or_default())
 }
 
+/// Every enabled skill a prompt can invoke as `/name` (0.20.1): name and
+/// description, DB skills and packs alike. Cheap — no file walk — because the
+/// composer asks for it whenever its menu opens.
+#[tauri::command]
+pub async fn list_skill_commands(state: State<'_, AppState>) -> AppResult<Vec<serde_json::Value>> {
+    Ok(crate::tools::skills::catalog_entries(&state.db)
+        .await
+        .into_iter()
+        .map(|(name, description, _)| serde_json::json!({ "name": name, "description": description }))
+        .collect())
+}
+
+/// What `/name` in a prompt hands the model (0.20.1): exactly what `load_skill`
+/// would return for it, so a skill invoked by the user and one the model loads
+/// itself read the same. `status` is `loaded` when the name is a skill.
+#[tauri::command]
+pub async fn invoke_skill(state: State<'_, AppState>, name: String) -> AppResult<String> {
+    crate::tools::skills::run(&serde_json::json!({ "name": name }), &state.db).await
+}
+
 /// The managed skills folder — where the app tells the user to install packs.
 #[tauri::command]
 pub async fn skill_packs_root() -> AppResult<String> {

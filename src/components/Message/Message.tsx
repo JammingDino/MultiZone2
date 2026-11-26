@@ -37,6 +37,29 @@ import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { CHROME_QUIET } from "@/lib/chrome";
 import { useZoneModel } from "@/lib/useZoneModel";
+import { useSkillCommands } from "@/components/Chat/PromptHighlight";
+import { segments } from "@/lib/promptTokens";
+
+/** Path-shaped words in a sent prompt: `C:\…` or `\\server\…`, up to the next space. */
+const PATH_WORD = /(?:[A-Za-z]:[\\/]|\\\\)[^\s"']+/g;
+
+/** A sent prompt with its `/commands` and folders drawn as in the composer (0.20.1). */
+function SentPrompt({ text }: { text: string }) {
+  const { names } = useSkillCommands();
+  return (
+    <>
+      {segments(text, names, text.match(PATH_WORD) ?? []).map((s, i) =>
+        s.kind === "command" ? (
+          <span key={i} className="rounded bg-white/20 px-1 font-medium">{s.text}</span>
+        ) : s.kind === "path" ? (
+          <code key={i} className="mz-sent-path">{s.text}</code>
+        ) : (
+          <span key={i}>{s.text}</span>
+        ),
+      )}
+    </>
+  );
+}
 
 /** Renders a single text chunk, with its own streaming throttle. */
 function TextBlockView({
@@ -298,7 +321,7 @@ function UserMessageImpl({ message }: { message: Message }) {
           )}
           {text && (
             <div className="rounded-2xl rounded-tr-sm bg-[var(--color-accent)] px-3 py-2 text-sm text-white">
-              <div className="whitespace-pre-wrap break-words">{text}</div>
+              <div className="whitespace-pre-wrap break-words"><SentPrompt text={text} /></div>
             </div>
           )}
         </div>

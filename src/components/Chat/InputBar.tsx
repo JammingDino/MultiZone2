@@ -11,7 +11,9 @@ import { useDictation, MicButton, DictationMeter } from "@/components/Chat/useDi
 import { resolveMediaCapable } from "@/lib/media";
 import type { InputPart, PendingMode } from "@/lib/types";
 import { attachmentToParts, type PendingAttachment } from "@/lib/attachFiles";
-import { SlashMenu, slashQuery } from "./SlashMenu";
+import { SlashMenu } from "./SlashMenu";
+import { PromptHighlight, hasTokens, skillParts, useSkillCommands } from "./PromptHighlight";
+import { commandsIn, replaceRange, slashAt } from "@/lib/promptTokens";
 import {
   appendTranscript,
   AttachError,
@@ -30,6 +32,7 @@ import {
   grantAll,
   makeProjectFrom,
   takeQueuedOutcome,
+  useChatPaths,
   usePasteOffers,
   type OfferAction,
   type PathOffer,
@@ -91,7 +94,36 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
   }, [composerDraft]);
 
   const [slashDismissed, setSlashDismissed] = useState(false);
-  const slash = slashDismissed ? null : slashQuery(text);
+  // Commands are words anywhere in the prompt (0.20.1): the menu follows the
+  // caret's `/word`, and the overlay draws commands and granted folders.
+  const [caret, setCaret] = useState(0);
+  const slashWord = slashDismissed ? null : slashAt(text, caret);
+  const slash = slashWord?.query ?? null;
+  const skillCommands = useSkillCommands();
+  const { paths: grantedPaths } = useChatPaths(chatId);
+  const grantedList = grantedPaths.map((p) => p.path);
+  const highlighted = hasTokens(text, skillCommands.names, grantedList);
+  const overlayRef = useRef<HTMLDivElement>(null);
+  // A folder granted while this composer is open — dropped, picked, pasted —
+  // goes into the prompt at the caret, so what was handed over is in the words.
+  const grantsSince = useRef(Date.now());
+  const insertedPaths = useRef(new Set<string>());
+  useEffect(() => { grantsSince.current = Date.now(); insertedPaths.current.clear(); }, [chatId]);
+  useEffect(() => {
+    const fresh = grantedPaths.filter(
+      (p) => !p.inherited && p.createdAt >= grantsSince.current - 2000 && !insertedPaths.current.has(p.path),
+    );
+    if (fresh.length === 0) return;
+    fresh.forEach((p) => insertedPaths.current.add(p.path));
+    setText((cur) => {
+      const add = fresh.map((p) => p.path).filter((p) => !cur.includes(p));
+      if (add.length === 0) return cur;
+      const at = Math.min(taRef.current?.selectionStart ?? cur.length, cur.length);
+      const before = cur.slice(0, at);
+      const lead = before && !/\s$/.test(before) ? " " : "";
+      return `${before}${lead}${add.join(" ")} ${cur.slice(at)}`;
+    });
+  }, [grantedPaths]);
   const [sending, setSending] = useState(false);
   const refreshChats = useApp((s) => s.refreshChats);
   const sendKey = useApp((s) => s.appSettings.sendKey);
@@ -366,6 +398,9 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
       if (joined) {
         parts.push({ type: "text", text: joined });
       }
+      // Each `/skill` in the prompt hands the model that skill's instructions,
+      // unseen in the transcript, where the word itself stays (0.20.1).
+      parts.push(...(await skillParts(commandsIn(sourceText, skillCommands.names))));
 
       for (const att of pending) {
         parts.push(...attachmentToParts(att));
@@ -585,20 +620,42 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
             <SlashMenu
               query={slash}
               onPick={(t) => {
-                setText(t);
+                if (!slashWord) return;
+                const next = replaceRange(text, slashWord.start, slashWord.end, t);
+                setText(next.text);
+                setCaret(next.caret);
                 setSlashDismissed(true);
-                taRef.current?.focus();
+                requestAnimationFrame(() => {
+                  taRef.current?.focus();
+                  taRef.current?.setSelectionRange(next.caret, next.caret);
+                });
               }}
               onClose={() => setSlashDismissed(true)}
+            />
+          )}
+          <div className="relative">
+          {highlighted && (
+            <PromptHighlight
+              ref={overlayRef}
+              text={text}
+              commands={skillCommands.names}
+              paths={grantedList}
+              className="px-1 py-1 text-sm leading-relaxed"
             />
           )}
           <textarea
             value={text}
             onChange={(e) => {
               setText(e.target.value);
-              // Re-arm as soon as the composer is back to a bare slash, so
-              // dismissing once does not disable the menu for the session.
-              if (slashQuery(e.target.value) === null) setSlashDismissed(false);
+              const c = e.target.selectionStart ?? e.target.value.length;
+              setCaret(c);
+              // Re-arm once the caret leaves a `/word`, so dismissing once does
+              // not disable the menu for the session.
+              if (slashAt(e.target.value, c) === null) setSlashDismissed(false);
+            }}
+            onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
+            onScroll={(e) => {
+              if (overlayRef.current) overlayRef.current.scrollTop = e.currentTarget.scrollTop;
             }}
             onPaste={onPaste}
             onKeyDown={(e) => {
@@ -616,10 +673,13 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
             placeholder={
               disabled ? "Configure a zone for this chat first" : "Send a message…"
             }
-            className="block w-full resize-none overflow-y-auto bg-transparent px-1 py-1 text-sm leading-relaxed outline-none"
-            style={{ maxHeight: expanded ? "70vh" : "40vh", minHeight: expanded ? "40vh" : 24 }}
+            className={`relative block w-full resize-none overflow-y-auto bg-transparent px-1 py-1 text-sm leading-relaxed outline-none ${
+              highlighted ? "text-transparent caret-[var(--color-text)]" : ""
+            }`}
+            style={{ maxHeight: expanded ? "70vh" : "40vh", minHeight: expanded ? "40vh" : 24, scrollbarGutter: "stable" }}
             disabled={disabled}
           />
+          </div>
           <div className="mt-1 flex items-center gap-0.5">
           <button
             onClick={() => fileRef.current?.click()}

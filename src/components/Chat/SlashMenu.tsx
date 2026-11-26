@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Terminal, FileText, Loader2 } from "lucide-react";
+import { Terminal, FileText, Loader2, Sparkles } from "lucide-react";
+import { useSkillCommands } from "./PromptHighlight";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import type { McpPrompt, McpResource } from "@/lib/types";
@@ -21,34 +22,25 @@ import { reportError } from "@/lib/reportError";
  */
 
 type Entry =
+  | { kind: "skill"; name: string; description: string }
   | { kind: "prompt"; serverId: string; serverName: string; prompt: McpPrompt }
   | { kind: "resource"; serverId: string; serverName: string; resource: McpResource };
 
 function entryKey(e: Entry): string {
+  if (e.kind === "skill") return `s:${e.name}`;
   return e.kind === "prompt"
     ? `p:${e.serverId}:${e.prompt.name}`
     : `r:${e.serverId}:${e.resource.uri}`;
 }
 
 function entryLabel(e: Entry): string {
+  if (e.kind === "skill") return e.name;
   return e.kind === "prompt" ? e.prompt.name : e.resource.name;
 }
 
 function entryDetail(e: Entry): string | null {
+  if (e.kind === "skill") return e.description || null;
   return e.kind === "prompt" ? e.prompt.description : e.resource.description;
-}
-
-/**
- * The slash query, or null when the composer is not asking for one.
- *
- * Only a `/` in the first column counts. A path halfway through a sentence is
- * not a command, and this app's conversations are full of them.
- */
-export function slashQuery(text: string): string | null {
-  if (!text.startsWith("/")) return null;
-  const rest = text.slice(1);
-  // A space means the command was already chosen and this is prose now.
-  return rest.includes(" ") || rest.includes("\n") ? null : rest;
 }
 
 export function SlashMenu({
@@ -61,6 +53,9 @@ export function SlashMenu({
   onClose: () => void;
 }) {
   const servers = useApp((s) => s.mcpServers);
+  // Skills first (0.20.1): picking one puts `/name` in the prompt, and it runs
+  // when the message is sent. MCP prompts and resources expand where they are.
+  const skills = useSkillCommands().list;
   const [entries, setEntries] = useState<Entry[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [cursor, setCursor] = useState(0);
@@ -100,7 +95,10 @@ export function SlashMenu({
   }, [enabledIds]);
 
   const results = useMemo(() => {
-    const all = entries ?? [];
+    const all: Entry[] = [
+      ...skills.map((k): Entry => ({ kind: "skill", name: k.name, description: k.description })),
+      ...(entries ?? []),
+    ];
     const q = query.toLowerCase();
     if (!q) return all.slice(0, 30);
     return all
@@ -109,11 +107,15 @@ export function SlashMenu({
         return hay.includes(q);
       })
       .slice(0, 30);
-  }, [entries, query]);
+  }, [entries, skills, query]);
 
   useEffect(() => setCursor(0), [query]);
 
   async function choose(e: Entry) {
+    if (e.kind === "skill") {
+      onPick(`/${e.name} `);
+      return;
+    }
     try {
       const text =
         e.kind === "prompt"
@@ -151,11 +153,11 @@ export function SlashMenu({
     return () => window.removeEventListener("keydown", onKey, true);
   });
 
-  if (!busy && results.length === 0) return null;
+  if (results.length === 0 && (!busy || skills.length > 0)) return null;
 
   return (
     <div className="absolute bottom-full left-0 z-50 mb-2 max-h-64 w-full max-w-md overflow-y-auto rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg">
-      {busy && entries === null ? (
+      {busy && entries === null && results.length === 0 ? (
         <p className="flex items-center gap-2 px-3 py-2 text-xs text-[var(--color-text-muted)]">
           <Loader2 size={12} className="animate-spin" /> Asking your MCP servers…
         </p>
@@ -170,13 +172,13 @@ export function SlashMenu({
             }`}
           >
             <span className="mt-0.5 shrink-0 text-[var(--color-text-muted)]">
-              {e.kind === "prompt" ? <Terminal size={13} /> : <FileText size={13} />}
+              {e.kind === "skill" ? <Sparkles size={13} /> : e.kind === "prompt" ? <Terminal size={13} /> : <FileText size={13} />}
             </span>
             <span className="min-w-0 flex-1">
               <span className="flex items-baseline gap-1.5">
                 <span className="truncate text-sm">{entryLabel(e)}</span>
                 <span className="shrink-0 text-[10px] text-[var(--color-text-muted)]">
-                  {e.serverName}
+                  {e.kind === "skill" ? "skill" : e.serverName}
                 </span>
               </span>
               {entryDetail(e) && (

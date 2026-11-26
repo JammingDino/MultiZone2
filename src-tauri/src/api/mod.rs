@@ -330,6 +330,8 @@ fn build_router(state: ApiState) -> Router {
         .route("/api/skills/:id", axum::routing::delete(h::delete_skill))
         .route("/api/skills/:id/enabled", post(h::set_skill_enabled))
         .route("/api/skill-packs", get(h::list_skill_packs))
+        .route("/api/skills/commands", get(h::list_skill_commands))
+        .route("/api/skills/invoke", post(h::invoke_skill))
         .route("/api/skill-packs/root", get(h::skill_packs_root))
         .route("/api/memories", get(h::list_memories).post(h::upsert_memory))
         .route("/api/memories/:id", axum::routing::delete(h::delete_memory))

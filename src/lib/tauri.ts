@@ -420,6 +420,10 @@ export const deleteSkill = (id: string) => invoke<void>("delete_skill", { id });
 // the tree; the app only discovers it and remembers which ones are switched on.
 export const listSkillPacks = () => invoke<SkillPack[]>("list_skill_packs");
 export const skillPacksRoot = () => invoke<string>("skill_packs_root");
+/** Enabled skills a prompt can invoke as `/name` (0.20.1). */
+export const listSkillCommands = () => invoke<{ name: string; description: string }[]>("list_skill_commands");
+/** The `load_skill` result for `name`, as a JSON string; `status: "loaded"` when it is one. */
+export const invokeSkill = (name: string) => invoke<string>("invoke_skill", { name });
 
 // MCP (Model Context Protocol) servers + tools
 export const listMcpServers = () => invoke<McpServerView[]>("list_mcp_servers");

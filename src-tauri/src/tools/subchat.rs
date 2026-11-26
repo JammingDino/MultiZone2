@@ -143,7 +143,19 @@ fn spawn_definition() -> Tool {
                 "properties": {
                     "zone_id": {
                         "type": "string",
-                        "description": "The zone to assign as the subagent — its id or its exact (case-insensitive) name. Call list_zones if unsure."
+                        "description": "The zone to assign as the subagent — its id or its exact (case-insensitive) name. Call list_zones if unsure. Give this or `agent`."
+                    },
+                    "agent": {
+                        "type": "object",
+                        "description": "Instead of a zone: a one-off helper made for this task. It only gets tools you have yourself.",
+                        "properties": {
+                            "name": { "type": "string", "description": "Short name shown for it, e.g. \"Explorer\"." },
+                            "preset": { "type": "string", "enum": ["read_only", "research", "code", "everything"], "description": "Its toolset. read_only cannot change anything: the right choice for looking things up or reviewing." },
+                            "tools": { "type": "array", "items": { "type": "string" }, "description": "Exact tool ids instead of a preset." },
+                            "instructions": { "type": "string", "description": "Its system prompt: who it is and how to report back." },
+                            "model": { "type": "string", "description": "A different model on the same provider, e.g. a cheaper one for simple lookups. Default: yours." }
+                        },
+                        "required": ["name"]
                     },
                     "initial_message": {
                         "type": "string",
@@ -159,7 +171,7 @@ fn spawn_definition() -> Tool {
                         "description": "Return the subchat id at once and run the subagent in the background instead of waiting for its reply. Default false."
                     }
                 },
-                "required": ["zone_id", "initial_message"]
+                "required": ["initial_message"]
             }),
         },
     }
@@ -271,8 +283,9 @@ pub async fn spawn(
 ) -> AppResult<String> {
     let zone_query = str_arg(args, "zone_id");
     let initial_message = str_arg(args, "initial_message");
-    if zone_query.is_empty() || initial_message.is_empty() {
-        return Ok(err("spawn_subagent requires 'zone_id' and 'initial_message'"));
+    let agent = args.get("agent").filter(|a| a.is_object());
+    if initial_message.is_empty() || zone_query.is_empty() == agent.is_none() {
+        return Ok(err("spawn_subagent requires 'initial_message' and exactly one of 'zone_id' or 'agent'"));
     }
     let context_mode = args
         .get("context_mode")
@@ -280,11 +293,28 @@ pub async fn spawn(
         .unwrap_or("task_only");
     let background = bool_arg(args, "background");
 
-    let (target_zone_id, target_zone_name) = match resolve_zone(&ctx.db, &zone_query).await? {
-        Some(z) => z,
-        None => return Ok(err(&format!(
-            "no zone matching '{zone_query}'. Call list_zones to see available zones."
-        ))),
+    // A one-off helper runs on its caller's zone row with a spec laid over it
+    // (see `apply_agent_spec`), narrowed to the tools the caller has now.
+    let spec = match agent {
+        Some(a) => match agent_spec(&ctx.db, parent_chat_id, a).await? {
+            Ok(spec) => Some(spec),
+            Err(message) => return Ok(err(&message)),
+        },
+        None => None,
+    };
+    let (target_zone_id, target_zone_name) = match &spec {
+        Some(spec) => match caller_zone_id {
+            Some(z) if zone_exists(&ctx.db, z).await? => {
+                (z.to_string(), spec["name"].as_str().unwrap_or("Helper").to_string())
+            }
+            _ => return Ok(err("a one-off agent needs a calling zone; name a zone with zone_id instead")),
+        },
+        None => match resolve_zone(&ctx.db, &zone_query).await? {
+            Some(z) => z,
+            None => return Ok(err(&format!(
+                "no zone matching '{zone_query}'. Call list_zones to see available zones."
+            ))),
+        },
     };
 
     // Enforce the configured subchat nesting depth to prevent runaway recursion.
@@ -317,8 +347,8 @@ pub async fn spawn(
     let now = now_ts();
     let title = format!("↳ {target_zone_name}");
     sqlx::query(
-        "INSERT INTO chats (id, title, zone_id, project_id, parent_chat_id, initiated_by_zone_id, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
+        "INSERT INTO chats (id, title, zone_id, project_id, parent_chat_id, initiated_by_zone_id, created_at, updated_at, agent_spec)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?8)",
     )
     .bind(&subchat_id)
     .bind(&title)
@@ -327,6 +357,7 @@ pub async fn spawn(
     .bind(parent_chat_id)
     .bind(owner_zone_id)
     .bind(now)
+    .bind(spec.as_ref().map(|s| s.to_string()))
     .execute(&ctx.db)
     .await?;
 
@@ -720,6 +751,86 @@ pub fn in_flight_summary(parent_chat_id: &str) -> Option<String> {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/// Build a one-off agent's spec from the `agent` argument: its tools are the
+/// preset's (or the given list), kept only where the caller has them itself, so
+/// a helper never reaches further than whoever made it. `Err` is a message for
+/// the model.
+async fn agent_spec(db: &SqlitePool, parent_chat_id: &str, agent: &Value) -> AppResult<Result<Value, String>> {
+    let name = agent.get("name").and_then(Value::as_str).map(str::trim).unwrap_or("");
+    if name.is_empty() {
+        return Ok(Err("agent.name is required".into()));
+    }
+    let (wanted, read_only): (Vec<String>, bool) = match agent.get("preset").and_then(Value::as_str) {
+        Some(id) => match crate::tools::presets::find(id) {
+            Some(p) => (p.tools.iter().map(|t| t.to_string()).collect(), p.read_only),
+            None => return Ok(Err(format!("no tool preset '{id}': use read_only, research, code or everything"))),
+        },
+        None => (
+            agent
+                .get("tools")
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter_map(Value::as_str).map(String::from).collect())
+                .unwrap_or_default(),
+            false,
+        ),
+    };
+    let (caller, _) = crate::commands::messages::effective_zone_and_provider(db, parent_chat_id).await?;
+    let mine: Vec<String> = serde_json::from_str(&caller.tools_enabled).unwrap_or_default();
+    let tools: Vec<String> = wanted.into_iter().filter(|t| mine.contains(t)).collect();
+    Ok(Ok(json!({
+        "name": name,
+        "tools": tools,
+        // A read-only caller makes read-only helpers, whatever preset it asks for.
+        "read_only": read_only || crate::tools::presets::is_read_only(&caller.tool_config),
+        "instructions": agent.get("instructions").and_then(Value::as_str).unwrap_or(""),
+        "model": agent.get("model").and_then(Value::as_str).unwrap_or(""),
+    })))
+}
+
+/// Lay a one-off agent's spec over the zone its chat resolved to (0.20.0): its
+/// name, its instructions in place of the caller's prompt, its tools, and
+/// optionally its model. A chat with no spec is left alone.
+pub async fn apply_agent_spec(db: &SqlitePool, chat_id: &str, zone: &mut crate::db::models::Zone) {
+    let raw: Option<String> = sqlx::query_scalar("SELECT agent_spec FROM chats WHERE id = ?1")
+        .bind(chat_id)
+        .fetch_optional(db)
+        .await
+        .ok()
+        .flatten()
+        .flatten();
+    if let Some(spec) = raw.and_then(|r| serde_json::from_str::<Value>(&r).ok()) {
+        overlay_spec(&spec, zone);
+    }
+}
+
+fn overlay_spec(spec: &Value, zone: &mut crate::db::models::Zone) {
+    let text = |k: &str| spec.get(k).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty());
+    if let Some(name) = text("name") {
+        zone.name = name.to_string();
+    }
+    zone.system_prompt = Some(text("instructions").map(String::from).unwrap_or_else(|| {
+        "You are a helper another agent started for one task. Do it with the tools you have, \
+         then report what you found or did, plainly and completely: your reply is all it will see."
+            .to_string()
+    }));
+    if let Some(model) = text("model") {
+        zone.model = model.to_string();
+    }
+    zone.tools_enabled = spec.get("tools").map(Value::to_string).unwrap_or_else(|| "[]".into());
+    let mut config: Value = serde_json::from_str(&zone.tool_config).unwrap_or_else(|_| json!({}));
+    if let Some(obj) = config.as_object_mut() {
+        // The caller's description rewrites were written for the caller's job.
+        obj.remove("tool_descriptions");
+        if spec.get("read_only").and_then(Value::as_bool) == Some(true) {
+            obj.insert("read_only".into(), json!(true));
+        } else {
+            obj.remove("read_only");
+        }
+    }
+    zone.tool_config = config.to_string();
+    zone.is_leader = false;
+}
+
 fn str_arg(args: &Value, key: &str) -> String {
     args.get(key).and_then(|v| v.as_str()).unwrap_or("").trim().to_string()
 }
@@ -922,6 +1033,66 @@ fn extract_text(content: &str) -> String {
             .collect::<Vec<_>>()
             .join("\n\n"),
         _ => content.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod agent_tests {
+    use super::*;
+
+    async fn pool_with_caller(tools: &str, tool_config: &str) -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        crate::db::MIGRATOR.run(&pool).await.unwrap();
+        sqlx::query("INSERT INTO providers (id, name, base_url, default_model, created_at) VALUES ('p', 'p', 'http://x', 'm', 0)")
+            .execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO zones (id, name, provider_id, model, system_prompt, tools_enabled, tool_config, is_leader, created_at, updated_at)
+                     VALUES ('lead', 'Leader', 'p', 'm', 'You lead.', ?1, ?2, 1, 0, 0)")
+            .bind(tools).bind(tool_config).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO chats (id, title, zone_id, created_at, updated_at) VALUES ('parent', 't', 'lead', 0, 0)")
+            .execute(&pool).await.unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn a_helper_gets_only_tools_its_caller_has() {
+        let pool = pool_with_caller(r#"["file_system","grep_never_a_tool","subchat","smart_search"]"#, "{}").await;
+        let spec = agent_spec(&pool, "parent", &json!({ "name": "Explorer", "preset": "read_only" }))
+            .await.unwrap().unwrap();
+        assert_eq!(spec["tools"], json!(["file_system", "smart_search"]));
+        assert_eq!(spec["read_only"], json!(true));
+    }
+
+    #[tokio::test]
+    async fn a_read_only_caller_only_makes_read_only_helpers() {
+        let pool = pool_with_caller(r#"["file_system","shell_exec"]"#, r#"{"read_only":true}"#).await;
+        let spec = agent_spec(&pool, "parent", &json!({ "name": "Coder", "preset": "code" }))
+            .await.unwrap().unwrap();
+        assert_eq!(spec["read_only"], json!(true));
+    }
+
+    #[tokio::test]
+    async fn the_spec_replaces_the_callers_role() {
+        let pool = pool_with_caller(r#"["file_system"]"#, r#"{"tool_descriptions":{"read":"x"}}"#).await;
+        let spec = json!({ "name": "Reviewer", "tools": ["file_system"], "read_only": true, "instructions": "Review it.", "model": "small" });
+        sqlx::query("INSERT INTO chats (id, title, zone_id, parent_chat_id, agent_spec, created_at, updated_at) VALUES ('sub', 't', 'lead', 'parent', ?1, 0, 0)")
+            .bind(spec.to_string()).execute(&pool).await.unwrap();
+        let (zone, _) = crate::commands::messages::effective_zone_and_provider(&pool, "sub").await.unwrap();
+        assert_eq!(zone.name, "Reviewer");
+        assert_eq!(zone.system_prompt.as_deref(), Some("Review it."));
+        assert_eq!(zone.model, "small");
+        assert!(!zone.is_leader);
+        assert!(crate::tools::presets::is_read_only(&zone.tool_config));
+        assert!(!zone.tool_config.contains("tool_descriptions"));
+        // The parent is untouched.
+        let (lead, _) = crate::commands::messages::effective_zone_and_provider(&pool, "parent").await.unwrap();
+        assert_eq!(lead.name, "Leader");
+    }
+
+    #[tokio::test]
+    async fn an_unknown_preset_is_explained() {
+        let pool = pool_with_caller("[]", "{}").await;
+        let out = agent_spec(&pool, "parent", &json!({ "name": "X", "preset": "wizard" })).await.unwrap();
+        assert!(out.unwrap_err().contains("read_only"));
     }
 }
 

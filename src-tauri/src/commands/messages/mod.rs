@@ -1301,19 +1301,24 @@ pub async fn effective_zone_and_provider(
     .await?
     .flatten();
 
-    match zone_id {
-        Some(zid) => load_zone_and_provider(db, &zid).await,
-        None => {
-            if let Some(zid) = base_zone_id(db).await {
-                if let Ok(zp) = load_zone_and_provider(db, &zid).await {
-                    return Ok(zp);
+    let (mut zone, provider) = match zone_id {
+        Some(zid) => load_zone_and_provider(db, &zid).await?,
+        None => match base_zone_id(db).await {
+            Some(zid) => match load_zone_and_provider(db, &zid).await {
+                Ok(zp) => zp,
+                Err(_) => {
+                    let p = default_provider(db).await?;
+                    (simple_zone(&p)?, p)
                 }
+            },
+            None => {
+                let p = default_provider(db).await?;
+                (simple_zone(&p)?, p)
             }
-            let provider = default_provider(db).await?;
-            let zone = simple_zone(&provider)?;
-            Ok((zone, provider))
-        }
-    }
+        },
+    };
+    crate::tools::subchat::apply_agent_spec(db, chat_id, &mut zone).await;
+    Ok((zone, provider))
 }
 
 /// The zone and provider a chat with no zone would use: the base zone if one
@@ -1410,6 +1415,8 @@ async fn zone_for_mode(
             }
         },
     };
+    // A one-off sub-agent's spec (0.20.0) rides on its chat, not its zone.
+    crate::tools::subchat::apply_agent_spec(db, chat_id, &mut zone).await;
     if let Some(m) = model_override {
         zone.model = m.to_string();
     }

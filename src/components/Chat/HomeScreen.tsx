@@ -36,6 +36,7 @@ import { resolveBaseModel, resolveBaseZone } from "@/lib/baseZone";
 import { claimSettingsDrop } from "@/lib/importSettings";
 import { useZoneModel } from "@/lib/useZoneModel";
 import { SlashMenu } from "./SlashMenu";
+import { SkillQueue } from "./SkillRuns";
 import { PromptHighlight, insertAtCaret, skillParts, usePromptTokens } from "./PromptHighlight";
 import { commandsIn } from "@/lib/promptTokens";
 
@@ -725,6 +726,7 @@ export function HomeScreen() {
               </button>
             </div>
           )}
+          <SkillQueue names={commandsIn(text, tokens.skillNames)} loading={sending} />
           <div className="relative">
           {tokens.slash !== null && (
             <SlashMenu query={tokens.slash} onPick={tokens.pick} onClose={tokens.dismiss} />

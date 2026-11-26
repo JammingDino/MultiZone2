@@ -12,6 +12,7 @@ import { resolveMediaCapable } from "@/lib/media";
 import type { InputPart, PendingMode } from "@/lib/types";
 import { attachmentToParts, type PendingAttachment } from "@/lib/attachFiles";
 import { SlashMenu } from "./SlashMenu";
+import { SkillQueue } from "./SkillRuns";
 import { PromptHighlight, insertAtCaret, skillParts, usePromptTokens } from "./PromptHighlight";
 import { commandsIn, withoutCommand } from "@/lib/promptTokens";
 import {
@@ -639,8 +640,9 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
         )}
         {/* Two rows (0.18.1): the prompt the full width of the box, so a long one
             reads as a page rather than a strip beside four buttons, and the
-            controls in a quiet row underneath it. */}
-        <div className="relative rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] px-2.5 pb-1.5 pt-2 focus-within:border-[var(--color-accent)]">
+            controls in a quiet row underneath it. Its fill, edge and focus ring
+            are `.mz-composer` in styles.css, worked out per theme and glass. */}
+        <div className="mz-composer relative border px-2.5 pb-1.5 pt-2">
           {/* MCP prompts and resources (0.15.3). Opens on a `/` in the first
               column only — a path mid-sentence is not a command. */}
           {slash !== null && (
@@ -651,6 +653,7 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
               builtins={[{ name: "plan", description: planMode ? "Leave plan mode" : "Enter plan mode" }]}
             />
           )}
+          <SkillQueue names={commandsIn(text, tokens.skillNames)} loading={sending} />
           <div className="relative">
           {tokens.highlighted && (
             <PromptHighlight

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { PhysicalPosition } from "@tauri-apps/api/dpi";
-import { Check, LayoutTemplate, Minus, Square, X, Maximize2 } from "lucide-react";
+import { Check, GripVertical, LayoutTemplate, Minus, Square, X, Maximize2 } from "lucide-react";
 import { useApp } from "@/store/app";
 import { Popover } from "@/components/common/Popover";
 
@@ -202,6 +202,9 @@ export function TitleBar() {
   const [maximized, setMaximized] = useState(false);
   const accent = useApp((s) => s.theme.accent);
   const closeToTray = useApp((s) => s.appSettings.closeToTray);
+  const mode = useApp((s) => s.theme.titleBar ?? "shown");
+  // Lifted out of the layout menu so an open menu can hold a hidden bar open.
+  const [menuOpen, setMenuOpen] = useState(false);
   // Create the window handle once and keep it stable across renders
   const appWindow = useRef(getCurrentWindow()).current;
 
@@ -223,16 +226,27 @@ export function TitleBar() {
     return () => { unlisten?.(); };
   }, []);
 
-  return (
+  const buttons = (
+    <>
+      <LayoutMenu open={menuOpen} setOpen={setMenuOpen} />
+      <WinBtn title="Minimize" onClick={() => { appWindow.minimize().catch(() => {}); }}>
+        <Minus size={12} />
+      </WinBtn>
+      <WinBtn title={maximized ? "Restore" : "Maximize"} onClick={toggleMaximize}>
+        {maximized ? <Square size={11} /> : <Maximize2 size={11} />}
+      </WinBtn>
+      <WinBtn title={closeToTray ? "Close to tray" : "Close"} onClick={() => { appWindow.close().catch(() => {}); }} danger>
+        <X size={12} />
+      </WinBtn>
+    </>
+  );
+
+  const bar = (
     <div
       data-tauri-drag-region
+      data-overlay={mode === "autohide" ? "" : undefined}
       {...dragProps}
-      className="flex h-9 w-full shrink-0 items-center select-none"
-      style={{
-        ...dragProps.style,
-        background: "var(--color-panel)",
-        borderBottom: "1px solid var(--color-border)",
-      }}
+      className={`mz-titlebar flex h-9 w-full shrink-0 items-center select-none ${mode === "autohide" ? "mz-chrome-reveal" : ""}`}
     >
       <div className="h-full w-1 shrink-0" style={{ background: accent }} />
       <div
@@ -246,18 +260,32 @@ export function TitleBar() {
           <span>Zone</span>
         </span>
       </div>
-      <div className="flex h-full items-stretch">
-        <LayoutMenu />
-        <WinBtn title="Minimize" onClick={() => { appWindow.minimize().catch(() => {}); }}>
-          <Minus size={12} />
-        </WinBtn>
-        <WinBtn title={maximized ? "Restore" : "Maximize"} onClick={toggleMaximize}>
-          {maximized ? <Square size={11} /> : <Maximize2 size={11} />}
-        </WinBtn>
-        <WinBtn title={closeToTray ? "Close to tray" : "Close"} onClick={() => { appWindow.close().catch(() => {}); }} danger>
-          <X size={12} />
-        </WinBtn>
-      </div>
+      <div className="flex h-full items-stretch">{buttons}</div>
+    </div>
+  );
+
+  if (mode === "shown") return bar;
+
+  // Auto-hide and hidden (0.20): over the panes, revealed from the top edge —
+  // see "Title bar: auto-hide and hidden" in styles.css. The buttons stay in
+  // the tab order, so the keyboard reaches them too: focusing one reveals it.
+  return (
+    <div className="mz-chrome" data-pinned={menuOpen ? "" : undefined}>
+      <div data-tauri-drag-region {...dragProps} className="mz-chrome-edge" title="Drag to move · double-click to maximize" />
+      {mode === "autohide" ? bar : (
+        <div className="mz-chrome-cluster mz-chrome-reveal select-none">
+          {/* Nothing else is left to hold the window by. */}
+          <div
+            data-tauri-drag-region
+            {...dragProps}
+            className="flex w-7 cursor-grab items-center justify-center text-[var(--color-text-muted)]"
+            title="Drag to move · double-click to maximize"
+          >
+            <GripVertical size={12} className="pointer-events-none" />
+          </div>
+          {buttons}
+        </div>
+      )}
     </div>
   );
 }
@@ -267,10 +295,9 @@ export function TitleBar() {
  * closed, moved or floated anywhere; this brings them back, and puts them back
  * where they started. One button, not three, beside the window's own.
  */
-function LayoutMenu() {
+function LayoutMenu({ open, setOpen }: { open: boolean; setOpen: (v: boolean) => void }) {
   const sidebarOpen = useApp((s) => s.sidebarOpen);
   const workspaceOpen = useApp((s) => s.workspaceOpen);
-  const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLDivElement>(null);
   const s = useApp.getState();
   const items: { label: string; on?: boolean; hint?: string; run: () => void }[] = [
@@ -280,7 +307,7 @@ function LayoutMenu() {
   ];
   return (
     <div ref={anchor} className="flex h-full">
-      <WinBtn title="Layout: sidebar, workspace, reset" onClick={() => setOpen((v) => !v)}>
+      <WinBtn title="Layout: sidebar, workspace, reset" onClick={() => setOpen(!open)}>
         <LayoutTemplate size={12} />
       </WinBtn>
       <Popover
@@ -327,12 +354,11 @@ function WinBtn({
         background: bg,
         color,
         border: "none",
-        outline: "none",
         filter: "none",
         // No double-tap-to-zoom delay before the tap counts as a click.
         touchAction: "manipulation",
       }}
-      className="flex h-full w-10 items-center justify-center transition-colors"
+      className="flex h-full w-10 items-center justify-center transition-colors outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--color-accent)]"
     >
       {children}
     </button>

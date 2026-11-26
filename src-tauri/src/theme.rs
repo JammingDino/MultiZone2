@@ -57,6 +57,11 @@ pub const BACKDROPS: &[&str] = &["solid", "glow", "dusk", "lagoon", "meadow", "e
 
 pub const WINDOW_BLURS: &[&str] = &["none", "blur", "mica"];
 
+pub const TITLE_BARS: &[&str] = &["shown", "autohide", "hidden"];
+
+/// Mirrors `ThemePrefs.messageStyle` in the frontend store.
+pub const MESSAGE_STYLES: &[&str] = &["bubble", "editorial"];
+
 /// Matches `MAX_CUSTOM_CSS` in the frontend store. Not a security boundary — the
 /// stylesheet is the user's own and runs in their own window either way — but a
 /// sheet this long is a mistake rather than a preference, and refusing it here
@@ -133,12 +138,16 @@ fn fields() -> Vec<Field> {
             doc: "Degrees of hue spread around the effect colour; 0 paints everything one flat tone." },
         Field { name: "shadowsEnabled", kind: Bool, default: json!(true),
             doc: "Depth shadows on panels and cards." },
+        Field { name: "messageStyle", kind: Enum(MESSAGE_STYLES), default: json!("bubble"),
+            doc: "How the user's own messages look. bubble: a deep accent bubble on the right, with the skills it ran in a drawer under it · editorial: large prose with a label row, commands as keycaps and each skill as a timeline step. The composer's command tokens and the / menu follow it." },
         Field { name: "glassEnabled", kind: Bool, default: json!(false),
             doc: "Panels, menus and dialogs let the background through. Worth little with backgroundEffect \"none\" — there is nothing behind them to see." },
         Field { name: "glassStyle", kind: Enum(GLASS_STYLES), default: json!("frosted"),
             doc: "frosted: blurred and desaturated · clear: unblurred · tinted: frosted with the accent bled in." },
-        Field { name: "glassStrength", kind: Number { min: 0.1, max: 1.0 }, default: json!(0.5),
-            doc: "How far through the glass you can see." },
+        Field { name: "glassStrength", kind: Number { min: 0.1, max: 1.5 }, default: json!(0.5),
+            doc: "How far through the glass you can see. Up to 1 the panes stay a readable ground (about a third solid at 1); above 1 they thin to a faint film (about 7% at 1.5) so the background shows almost as if there were no pane." },
+        Field { name: "glassBlur", kind: Number { min: 0.0, max: 2.0 }, default: json!(1),
+            doc: "Blur behind the panes, as a multiple of the glass style's own (frosted and tinted blur more as glassStrength rises). 0 = no blur, the background shows crisp through the panes; 2 = twice as soft. glassStyle \"clear\" is never blurred. Menus and dialogs keep their own blur so text under them does not read through." },
         Field { name: "followSystem", kind: Bool, default: json!(false),
             doc: "Follow the system light/dark setting; mode is then rewritten to match it." },
         Field { name: "backdrop", kind: Enum(BACKDROPS), default: json!("solid"),
@@ -157,6 +166,8 @@ fn fields() -> Vec<Field> {
             doc: "How solid a see-through window is." },
         Field { name: "windowBlur", kind: Enum(WINDOW_BLURS), default: json!("blur"),
             doc: "What Windows does to the desktop behind a see-through window: none, blur (Acrylic) or mica (Windows 11 wallpaper tint)." },
+        Field { name: "titleBar", kind: Enum(TITLE_BARS), default: json!("shown"),
+            doc: "The window's title bar. shown: always there · autohide: collapsed to a strip along the top edge, slides in when the pointer reaches the top (or a title-bar control has keyboard focus) · hidden: no bar; the window buttons appear in a small cluster at the top-right when the pointer reaches the top edge, and the window is dragged from that edge or the cluster's grip." },
         Field { name: "customCssEnabled", kind: Bool, default: json!(false),
             doc: "Whether customCss is applied. Kept separate so a sheet can be switched off without being deleted." },
         Field { name: "customCss", kind: Css, default: json!(""),
@@ -339,9 +350,10 @@ mod tests {
             vec![
                 "mode", "accent", "colorsDark", "colorsLight", "backgroundEffect", "effectColor",
                 "effectSpeed", "effectDensity", "effectOpacity", "effectHue", "shadowsEnabled",
-                "glassEnabled", "glassStyle", "glassStrength", "followSystem", "backdrop",
+                "messageStyle", "glassEnabled", "glassStyle", "glassStrength", "glassBlur", "followSystem",
+                "backdrop",
                 "backdropFrom", "backdropTo", "backdropAngle", "backdropMotion",
-                "windowTransparent", "windowOpacity", "windowBlur",
+                "windowTransparent", "windowOpacity", "windowBlur", "titleBar",
                 "customCssEnabled", "customCss",
             ],
         );
@@ -354,6 +366,8 @@ mod tests {
         assert!(validate_patch(&patch(r#"{"effectColor":"accent"}"#)).is_ok());
         assert!(validate_patch(&patch(r##"{"colorsDark":{"panelHover":"#242a33"}}"##)).is_ok());
         assert!(validate_patch(&patch(r#"{"colorsLight":{}}"#)).is_ok());
+        assert!(validate_patch(&patch(r#"{"glassBlur":0,"glassStrength":1.5}"#)).is_ok());
+        assert!(validate_patch(&patch(r#"{"titleBar":"autohide"}"#)).is_ok());
         assert!(validate_patch(
             &patch(r#"{"customCss":".sidebar{width:220px}","customCssEnabled":true}"#)
         )
@@ -376,7 +390,10 @@ mod tests {
             (r#"{"colorsDark":{"panel":"blue"}}"#, "not a hex colour"),
             (r##"{"colorsDark":"#fff"}"##, "must be an object"),
             (r#"{"shadowsEnabled":"yes"}"#, "true or false"),
+            (r#"{"messageStyle":"compact"}"#, "one of: bubble, editorial"),
             (r#"{"customCss":42}"#, "must be a string"),
+            (r#"{"glassBlur":3}"#, "outside 0–2"),
+            (r#"{"titleBar":"auto"}"#, "one of: shown, autohide, hidden"),
         ];
         for (raw, expected) in cases {
             let err = validate_patch(&patch(raw)).expect_err(raw);

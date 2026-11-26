@@ -809,11 +809,12 @@ html.translucent .trellis :is([data-trellis-part="panel"], [data-trellis-part="t
     color-mix(in srgb, var(--color-text) 9%, transparent);
 }
 
-/* The title bar is the window's frame, so it sits on the backdrop. Its colour
-   is an inline style in TitleBar.tsx, hence the !important. */
-html:is(.translucent, .backdrop) #root div[data-tauri-drag-region].h-9 {
-  background: transparent !important;
-  border-bottom-color: transparent !important;
+/* The title bar is the window's frame, so it sits on the backdrop. Not when
+   it slides in over the panes (auto-hide): there it keeps the ground given
+   it under "Title bar: auto-hide and hidden". */
+html:is(.translucent, .backdrop) .mz-titlebar:not([data-overlay]) {
+  background: transparent;
+  border-bottom-color: transparent;
 }
 
 /* Surfaces the app paints itself (Tailwind `bg-[var(--color-…)]` classes).
@@ -853,12 +854,10 @@ html.translucent :is([class*=" hover:bg-[var(--color-panel-hover)]"], [class^="h
   background-color: color-mix(in srgb, var(--color-panel-hover) min(100%, var(--mz-surface-alpha) + 15%), transparent);
 }
 
-/* Menus and dialogs: blurred, so the text they cover does not read through. */
-html.translucent .trellis .trellis-menu {
-  background: color-mix(in srgb, var(--color-panel) var(--mz-float-alpha), transparent);
-}
-html.glass :is(.mz-overlay > *, [class*="shadow-lg"], [class*="shadow-xl"], [class*="shadow-2xl"]):is([class*="bg-[var(--color-panel)]"], [class*="bg-[var(--color-bg)]"]),
-html.glass .trellis .trellis-menu {
+/* Dialogs and other floating cards: blurred, so the text they cover does not
+   read through — with a floor, so turning the panes' blur off (glassBlur 0)
+   does not leave them unreadable. Menus are solid instead (see "Menus"). */
+html.glass :is(.mz-overlay > *, [class*="shadow-lg"], [class*="shadow-xl"], [class*="shadow-2xl"]):is([class*="bg-[var(--color-panel)]"], [class*="bg-[var(--color-bg)]"]):not([data-mz-popover]) {
   backdrop-filter: blur(max(var(--mz-blur), 12px)) saturate(var(--mz-saturate));
   -webkit-backdrop-filter: blur(max(var(--mz-blur), 12px)) saturate(var(--mz-saturate));
 }
@@ -882,8 +881,8 @@ html.translucent .input {
    the user has asked for less motion, keep the glass and lighten the blur. */
 @media (prefers-reduced-motion: reduce) {
   html.glass .trellis [data-trellis-part="panel"] {
-    backdrop-filter: blur(6px) saturate(var(--mz-saturate));
-    -webkit-backdrop-filter: blur(6px) saturate(var(--mz-saturate));
+    backdrop-filter: blur(min(var(--mz-blur), 6px)) saturate(var(--mz-saturate));
+    -webkit-backdrop-filter: blur(min(var(--mz-blur), 6px)) saturate(var(--mz-saturate));
   }
 }
 
@@ -896,6 +895,134 @@ html.shadows [class*="shadow-lg"] {
 }
 html.shadows [class*="shadow-xl"] {
   box-shadow: 0 16px 40px rgba(0,0,0,0.55);
+}
+
+/* ===== Menus =====
+ * Every dropdown, picker and right-click menu (Popover.tsx marks its surface
+ * `data-mz-popover`) and Trellis's own pane menus share one surface, solid
+ * under every theme. A menu is read row by row over whatever it covers —
+ * usually more rows of text — and glass let that list show through, so the
+ * chat list read as part of the chat's context menu. Opaque panel colour,
+ * hairline border, one radius, one shadow. */
+:root {
+  --mz-menu-shadow: 0 2px 6px rgb(0 0 0 / 0.25), 0 14px 34px -8px rgb(0 0 0 / 0.55);
+}
+html.light {
+  --mz-menu-shadow: 0 1px 3px rgb(15 20 30 / 0.08), 0 12px 30px -8px rgb(15 20 30 / 0.22);
+}
+html [data-mz-popover] {
+  border-radius: 8px;
+}
+/* Through the translucent-surface rules above: the surface and whatever sits
+   inside it (a search field, a hovered row) paint at full strength. */
+html.translucent [data-mz-popover] {
+  --mz-surface-alpha: 100%;
+}
+html.shadows [data-mz-popover] {
+  box-shadow: var(--mz-menu-shadow);
+}
+html .trellis .trellis-menu {
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px var(--color-border), var(--mz-menu-shadow);
+}
+html:not(.shadows) .trellis .trellis-menu {
+  box-shadow: 0 0 0 1px var(--color-border);
+}
+/* ===== The composer =====
+ * The prompt box is the one field in the window that is always there, so it
+ * gets a deliberate surface of its own in every combination rather than
+ * whatever the translucent-surface rules made of a panel-coloured div (opaque
+ * where it floated over the thread, invisible where it did not). The accent
+ * ring on focus is the same everywhere. */
+html .mz-composer {
+  background: var(--color-panel);
+  border-color: var(--color-border);
+  border-radius: 10px;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+html .mz-composer textarea::placeholder {
+  color: var(--color-text-muted);
+  opacity: 1;
+}
+/* A see-through window without glass: as solid as menus (float alpha is 100%
+   there), with the softer edge glass uses. */
+html.translucent .mz-composer {
+  background: color-mix(in srgb, var(--color-panel) var(--mz-float-alpha), transparent);
+  border-color: color-mix(in srgb, var(--color-text) 14%, transparent);
+}
+/* Glass: a lighter pane of the same glass, blurred enough (never under 12px)
+   that a thread scrolling beneath it does not read through. */
+html.glass .mz-composer {
+  background: color-mix(in srgb, var(--color-panel) 50%, transparent);
+  backdrop-filter: blur(max(var(--mz-blur), 12px)) saturate(var(--mz-saturate));
+  -webkit-backdrop-filter: blur(max(var(--mz-blur), 12px)) saturate(var(--mz-saturate));
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 7%, transparent);
+}
+html .mz-composer:focus-within {
+  border-color: color-mix(in srgb, var(--color-accent) 75%, var(--color-border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 20%, transparent);
+}
+
+/* ===== Title bar: auto-hide and hidden (TitleBar.tsx) =====
+ * Both hang off the top edge, over the panes rather than above them: a strip
+ * as tall as the gap above the panes (a drag handle in its own right) is what
+ * the pointer finds, and hovering it — or anything it revealed, or tabbing to
+ * a window button, or an open title-bar menu — slides the rest in. Leaving
+ * waits a moment so a pointer that overshoots does not make it flicker. */
+.mz-chrome {
+  position: absolute;
+  inset: 0 0 auto 0;
+  z-index: 40;
+  pointer-events: none;
+}
+.mz-chrome > * {
+  pointer-events: auto;
+}
+.mz-chrome-edge {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 6px;
+}
+.mz-chrome-reveal {
+  transform: translateY(calc(-100% - 8px));
+  opacity: 0;
+  transition: transform 160ms ease, opacity 160ms ease;
+  transition-delay: 400ms;
+}
+.mz-chrome:is(:hover, :focus-within, [data-pinned]) .mz-chrome-reveal {
+  transform: none;
+  opacity: 1;
+  transition-delay: 0ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mz-chrome-reveal { transition-property: opacity; }
+}
+
+.mz-titlebar {
+  background: var(--color-panel);
+  border-bottom: 1px solid var(--color-border);
+}
+/* Over the panes it is a floating surface, solid like a menu. */
+html .mz-titlebar[data-overlay] {
+  border-bottom-color: var(--color-border);
+}
+html.shadows .mz-titlebar[data-overlay] {
+  box-shadow: var(--mz-menu-shadow);
+}
+/* The hidden mode's cluster of window buttons, top right. */
+.mz-chrome-cluster {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  height: 30px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-panel);
+}
+html.shadows .mz-chrome-cluster {
+  box-shadow: var(--mz-menu-shadow);
 }
 
 /* ===== Indeterminate progress ===== */
@@ -1161,46 +1288,6 @@ body,
 }
 
 
-/* Commands and folders as words in a prompt (0.20.1). Drawn by the overlay
-   behind the composer's textarea, so nothing here may change a glyph's width:
-   no padding, border or font change. The chip's padding is a box-shadow. */
-.mz-prompt-command {
-  color: var(--color-accent);
-  font-weight: inherit;
-  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 16%, transparent);
-  border-radius: 4px;
-}
-.mz-prompt-path {
-  color: #f0b45a;
-  background: color-mix(in srgb, #f0b45a 14%, transparent);
-  box-shadow:
-    0 0 0 2px color-mix(in srgb, #f0b45a 14%, transparent),
-    0 0 10px 1px color-mix(in srgb, #f0b45a 45%, transparent);
-  border-radius: 4px;
-  animation: mz-path-glow 2.4s ease-in-out infinite;
-}
-@keyframes mz-path-glow {
-  50% {
-    box-shadow:
-      0 0 0 2px color-mix(in srgb, #f0b45a 14%, transparent),
-      0 0 16px 3px color-mix(in srgb, #f0b45a 60%, transparent);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .mz-prompt-path { animation: none; }
-}
-/* The same folder in a sent message, where padding is free. */
-.mz-sent-path {
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 0.92em;
-  color: #ffd79a;
-  background: rgb(0 0 0 / 0.28);
-  border-radius: 4px;
-  padding: 0 0.35em;
-  box-shadow: 0 0 10px 1px rgb(240 180 90 / 0.45);
-}
-
 /* Pane tabs (0.21.0, owner: layout). Trellis keeps room for the close button
    on every tab, so in a narrow pane each label was cut to a letter. A tab
    behind the selected one keeps no room for it; on hover its X lies over the
@@ -1224,3 +1311,336 @@ body,
   color: var(--trellis-text-muted);
   background: var(--trellis-tab-hover);
 }
+
+/* ── Your messages, commands and skill runs (0.21.0, owner: prompt style) ──
+   Two looks, picked by ThemePrefs.messageStyle: "bubble", the default (a deep
+   accent bubble, a run drawer under it), and "editorial" (html.mz-editorial:
+   large prose, keycap commands, timeline-step runs). The composer's tokens and
+   the / menu follow the same choice.
+
+   .mz-prompt-* are drawn on the overlay behind the composer's textarea
+   (PromptHighlight.tsx), so those rules may change only colour, background,
+   box-shadow, underline and text-shadow. Padding, border, font or weight
+   would change a glyph's width and the caret would drift off the text. */
+:root {
+  --mz-folder: #f0b45a; /* the amber, for fills and glows */
+  --mz-folder-ink: #f0b45a; /* amber as text */
+  --mz-skill: #b39dff;
+  --mz-ok: #3fc58f;
+  --mz-bad: #f47174;
+  --mz-ink: var(--color-accent-hover); /* small accent text */
+  --mz-mono: var(--font-mono, ui-monospace, "Cascadia Code", Consolas, monospace);
+  /* The bubble's gradient, darkened from the accent so the theme drives it. */
+  --mz-deep: color-mix(in srgb, var(--color-accent) 65%, #0a1a5c);
+  --mz-deep2: color-mix(in srgb, var(--color-accent) 55%, #4b2bd6);
+}
+@supports (color: oklch(from red l c h)) {
+  :root {
+    /* Lightness capped so white on it clears AA (4.5:1) for any accent. The
+       mix above does for blue, but a yellow accent lands near 3:1. */
+    --mz-deep: oklch(from var(--color-accent) min(l, 0.46) min(c, 0.2) h);
+    --mz-deep2: oklch(from var(--color-accent) min(l, 0.5) min(c, 0.22) calc(h + 30));
+  }
+}
+html.light {
+  --mz-folder-ink: #9a5b00; /* #f0b45a is 1.8:1 on white; this is 5.4:1 */
+  --mz-skill: #6440d8;
+  --mz-ok: #12805a;
+  --mz-bad: #c0392b;
+}
+
+/* Composer tokens (the overlay rule above applies). */
+.mz-prompt-command {
+  color: #fff;
+  background: var(--mz-deep);
+  box-shadow: 0 0 0 2px var(--mz-deep);
+  border-radius: 4px;
+}
+.mz-prompt-path {
+  color: #2a1800;
+  background: var(--mz-folder);
+  box-shadow: 0 0 0 2px var(--mz-folder), 0 0 14px 2px color-mix(in srgb, var(--mz-folder) 55%, transparent);
+  border-radius: 4px;
+}
+html.mz-editorial .mz-prompt-command {
+  color: var(--color-text);
+  background: var(--color-panel-hover);
+  border-radius: 3px;
+  box-shadow: 0 0 0 2px var(--color-panel-hover), 0 0 0 3px var(--color-border-strong), 0 2px 0 3px var(--color-border-strong);
+}
+html.mz-editorial .mz-prompt-path {
+  color: var(--mz-folder-ink);
+  background: color-mix(in srgb, var(--mz-folder) 10%, transparent);
+  box-shadow: none;
+  text-decoration: underline dashed color-mix(in srgb, var(--mz-folder) 75%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+}
+
+/* What will run on send, above the composer's text. */
+.mz-queue {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px 6px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+.mz-queue-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px 1px 6px;
+  border-radius: 999px;
+  font: 600 11px/18px var(--mz-mono);
+  color: #fff;
+  background: linear-gradient(135deg, var(--mz-deep), var(--mz-deep2));
+}
+html.mz-editorial .mz-queue {
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--color-border);
+  font-family: var(--mz-mono);
+}
+html.mz-editorial .mz-queue-chip {
+  padding: 0;
+  background: none;
+  color: var(--mz-skill);
+}
+
+/* The / menu, bubble style: the selected row wears the bubble's gradient. */
+.mz-slash {
+  padding: 5px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-panel);
+  box-shadow: 0 18px 40px -14px rgb(0 0 0 / 0.45), 0 2px 6px rgb(0 0 0 / 0.2);
+}
+.mz-slash-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 8px;
+  text-align: left;
+}
+.mz-slash-row > svg { flex: none; color: var(--color-text-muted); }
+.mz-slash-row .nm { flex: none; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 12.5px var(--mz-mono); }
+.mz-slash-row .ds { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--color-text-muted); }
+.mz-slash-row .src { flex: none; font-size: 10px; color: var(--color-text-muted); }
+.mz-slash-row .enter { flex: none; padding: 0 5px; border-radius: 4px; font: 10px var(--mz-mono); background: rgb(255 255 255 / 0.2); }
+.mz-slash-row[data-selected] {
+  color: #fff;
+  background: linear-gradient(135deg, var(--mz-deep), var(--mz-deep2));
+}
+.mz-slash-row[data-selected] > svg,
+.mz-slash-row[data-selected] .ds,
+.mz-slash-row[data-selected] .src { color: rgb(255 255 255 / 0.85); }
+
+/* The / menu, editorial style: a command palette. */
+.mz-palette {
+  overflow: hidden;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 8px;
+  background: var(--color-panel);
+  box-shadow: 0 18px 40px -14px rgb(0 0 0 / 0.45), 0 2px 6px rgb(0 0 0 / 0.2);
+}
+.mz-palette-q {
+  display: flex;
+  justify-content: space-between;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--color-border);
+  font: 12px var(--mz-mono);
+}
+.mz-palette-q span { font: 11px var(--font-sans, inherit); color: var(--color-text-muted); }
+.mz-palette-row {
+  display: grid;
+  grid-template-columns: 10px auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 12px;
+  text-align: left;
+  font: 12.5px var(--mz-mono);
+}
+.mz-palette-row[data-selected] { background: var(--color-panel-hover); }
+.mz-palette-row .car { color: transparent; }
+.mz-palette-row[data-selected] .car { color: var(--mz-skill); }
+.mz-palette-row mark { background: none; color: var(--mz-skill); font-weight: 700; }
+.mz-palette-row .ds { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11.5px var(--font-sans, inherit); color: var(--color-text-muted); }
+.mz-palette-row .kind { font: 600 9.5px var(--font-sans, inherit); letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-text-muted); }
+.mz-palette-foot {
+  display: flex;
+  gap: 14px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--color-border);
+  font-size: 10.5px;
+  color: var(--color-text-muted);
+}
+.mz-palette-foot kbd {
+  margin-right: 3px;
+  padding: 0 4px;
+  border: 1px solid var(--color-border-strong);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  font: 10px var(--mz-mono);
+  color: var(--color-text);
+  background: var(--color-bg);
+}
+
+/* Bubble: your message, its tokens and its run drawer. */
+.mz-user-avatar { background: linear-gradient(135deg, var(--mz-deep), var(--mz-deep2)); }
+.mz-user-stack { display: flex; flex-direction: column; align-items: flex-end; min-width: 0; max-width: 100%; }
+/* With a drawer the bubble is at least as wide as one, so a one-word message
+   does not sit on a drawer that sticks out past it. In cqw of the thread
+   (.mz-thread), since a % of this shrink-to-fit column resolves to nothing. */
+.mz-user-stack.has-runs { align-items: stretch; min-width: min(20rem, 70cqw); }
+.mz-user-bubble {
+  position: relative;
+  z-index: 1;
+  padding: 0.55rem 0.9rem;
+  border-radius: 18px 6px 18px 18px;
+  font-size: 0.875rem;
+  line-height: 1.65;
+  color: #fff;
+  background: linear-gradient(135deg, var(--mz-deep), var(--mz-deep2));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.18),
+    0 14px 30px -14px color-mix(in srgb, var(--mz-deep2) 85%, transparent),
+    0 2px 4px rgb(0 0 0 / 0.18);
+}
+.mz-sent-command {
+  padding: 2px 7px;
+  border-radius: 6px;
+  font: 600 0.84em var(--mz-mono);
+  white-space: nowrap;
+  color: var(--mz-deep);
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+}
+.mz-sent-path {
+  padding: 2px 7px;
+  border-radius: 6px;
+  font: 0.84em var(--mz-mono);
+  white-space: nowrap;
+  color: #ffd79a;
+  background: rgb(0 0 0 / 0.24);
+  box-shadow: inset 0 0 0 1px rgb(255 215 154 / 0.4), 0 0 12px rgb(240 180 90 / 0.35);
+}
+.mz-sent-command svg,
+.mz-sent-path svg { display: inline; margin-right: 3px; vertical-align: -1px; }
+.mz-run-drawer {
+  /* Takes the stack's width rather than setting it: a long description is cut
+     short instead of widening the bubble above it. */
+  contain: inline-size;
+  position: relative;
+  margin: -12px 12px 0;
+  padding-top: 12px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--mz-deep2) 45%, var(--color-border));
+  border-top: none;
+  border-radius: 0 0 12px 12px;
+  background: var(--color-panel);
+  box-shadow: 0 12px 24px -14px rgb(0 0 0 / 0.45);
+}
+.mz-run + .mz-run { border-top: 1px solid var(--color-border); }
+.mz-run-head {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto 14px;
+  align-items: center;
+  gap: 2px 10px;
+  width: 100%;
+  padding: 8px 12px;
+  text-align: left;
+}
+.mz-run-tile {
+  grid-row: span 2;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  color: #fff;
+  background: linear-gradient(135deg, var(--mz-deep), var(--mz-deep2));
+}
+.mz-run-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 12.5px var(--mz-mono); }
+.mz-run-name small { margin-right: 6px; font: 600 9.5px var(--font-sans, inherit); letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-text-muted); }
+.mz-run-desc { grid-column: 2 / 5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--color-text-muted); }
+.mz-run-chev { display: inline-grid; place-items: center; color: var(--color-text-muted); }
+.mz-run-status { display: inline-flex; flex: none; align-items: center; gap: 4px; white-space: nowrap; font-size: 11px; font-weight: 500; color: var(--mz-ok); }
+.mz-run[data-bad] .mz-run-tile { color: var(--mz-bad); background: color-mix(in srgb, var(--mz-bad) 18%, var(--color-panel-hover)); }
+[data-bad] .mz-run-status { color: var(--mz-bad); }
+.mz-run-detail { display: flex; flex-direction: column; gap: 6px; padding: 0 12px 9px 46px; font-size: 11.5px; color: var(--color-text-muted); }
+.mz-run-detail q { font-style: italic; quotes: none; color: var(--color-text); }
+.mz-run-files { display: flex; flex-wrap: wrap; gap: 5px; }
+.mz-run-files code { padding: 1px 6px; border-radius: 4px; font: 10.5px var(--mz-mono); color: var(--color-text); background: var(--color-panel-hover); }
+
+/* Editorial: a label row, the prompt as the turn's headline, keycap commands,
+   code-style paths, and each skill a step on a rail into the reply. */
+.mz-user-editorial { display: flex; flex-direction: column; gap: 10px; }
+.mz-user-editorial :is(.mz-user-prose, .mz-run-rail) { align-self: stretch; }
+.mz-user-rule { display: flex; align-items: center; gap: 10px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--color-text-muted); }
+.mz-user-rule .you { color: var(--mz-ink); }
+.mz-user-rule .ln { flex: 1; height: 1px; background: linear-gradient(90deg, var(--color-border-strong), var(--color-border) 60%, transparent); }
+.mz-user-prose { white-space: pre-wrap; overflow-wrap: anywhere; text-wrap: pretty; font-size: 1.125rem; font-weight: 450; line-height: 1.55; letter-spacing: -0.012em; }
+/* A pasted spec or log at headline size would fill the screen. */
+.mz-user-prose.is-long { font-size: 0.875rem; font-weight: 400; letter-spacing: 0; }
+.mz-kbd {
+  padding: 3px 7px;
+  border: 1px solid var(--color-border-strong);
+  border-bottom-width: 2.5px;
+  border-radius: 6px;
+  vertical-align: 0.14em;
+  white-space: nowrap;
+  font: 600 0.7em var(--mz-mono);
+  letter-spacing: 0;
+  color: var(--color-text);
+  background: var(--color-panel);
+}
+.mz-kbd .sl { color: var(--mz-skill); }
+.mz-user-prose .mz-sent-path {
+  padding: 3px 7px;
+  border-radius: 5px;
+  vertical-align: 0.14em;
+  white-space: normal;
+  font: 0.72em var(--mz-mono);
+  letter-spacing: 0;
+  color: var(--mz-folder-ink);
+  background: color-mix(in srgb, var(--mz-folder) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mz-folder) 32%, transparent);
+}
+.mz-user-prose.is-long :is(.mz-kbd, .mz-sent-path) { font-size: 0.9em; }
+.mz-run-rail { position: relative; display: flex; flex-direction: column; gap: 6px; }
+.mz-run-rail::before {
+  content: "";
+  position: absolute;
+  top: 6px;
+  bottom: -10px;
+  left: 13px;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(var(--color-border-strong), transparent);
+}
+.mz-step { position: relative; display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: start; gap: 12px; }
+.mz-step-node {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: var(--mz-skill);
+  background: var(--color-bg);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--mz-skill) 60%, transparent);
+}
+.mz-step-card { min-width: 0; overflow: hidden; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-panel); }
+.mz-step-head { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; padding: 6px 10px; text-align: left; font-size: 12px; }
+.mz-step-head .k { flex: none; color: var(--color-text-muted); }
+.mz-step-head .nm { flex: none; font: 600 12.5px var(--mz-mono); color: var(--mz-skill); }
+.mz-step-head .ds { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-muted); }
+.mz-step[data-bad] .mz-step-node { color: var(--mz-bad); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--mz-bad) 60%, transparent); }
+.mz-step[data-bad] .nm { color: var(--mz-bad); }
+.mz-step .mz-run-detail { padding: 7px 10px 8px; border-top: 1px solid var(--color-border); }
+/* ── end: your messages ── */

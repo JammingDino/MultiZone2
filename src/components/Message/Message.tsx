@@ -4,7 +4,7 @@ import type { ContentPart, Message, InputPart } from "@/lib/types";
 import { Markdown } from "@/components/Renderers/Markdown";
 import { StreamingMarkdown } from "@/components/Renderers/StreamingMarkdown";
 import { useThrottledStreaming } from "@/lib/useThrottledStreaming";
-import { AudioLines, User, X, FileType, ZoomIn } from "lucide-react";
+import { AudioLines, User, X, FileType, ZoomIn, Sparkles, Folder } from "lucide-react";
 import { StepBlock } from "./StepBlock";
 import { ActivityRail } from "./ActivityRail";
 import { PerspectiveStatusLine, PrimaryStatusLine } from "./StatusLine";
@@ -38,21 +38,40 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { CHROME_QUIET } from "@/lib/chrome";
 import { useZoneModel } from "@/lib/useZoneModel";
 import { useSkillCommands } from "@/components/Chat/PromptHighlight";
+import { SkillRuns, useSkillRuns } from "@/components/Chat/SkillRuns";
 import { segments } from "@/lib/promptTokens";
 
 /** Path-shaped words in a sent prompt: `C:\…` or `\\server\…`, up to the next space. */
 const PATH_WORD = /(?:[A-Za-z]:[\\/]|\\\\)[^\s"']+/g;
 
-/** A sent prompt with its `/commands` and folders drawn as in the composer (0.20.1). */
-function SentPrompt({ text }: { text: string }) {
+/** A long path's last two folders, for a bubble where the whole path would wrap it. */
+function pathTail(p: string): string {
+  const sep = p.includes("\\") ? "\\" : "/";
+  const segs = p.split(/[\\/]/).filter(Boolean);
+  return segs.length > 3 ? `…${sep}${segs.slice(-2).join(sep)}` : p;
+}
+
+/**
+ * A sent prompt with its `/commands` and folders drawn as tokens (0.20.1):
+ * chips in the bubble, keycaps and code paths in the editorial style. `ran`
+ * adds the skills the message loaded, so a skill uninstalled since still shows.
+ */
+function SentPrompt({ text, ran, editorial }: { text: string; ran: string[]; editorial: boolean }) {
   const { names } = useSkillCommands();
+  const known = ran.length ? new Set([...names, ...ran.map((n) => n.toLowerCase())]) : names;
   return (
     <>
-      {segments(text, names, text.match(PATH_WORD) ?? []).map((s, i) =>
+      {segments(text, known, text.match(PATH_WORD) ?? []).map((s, i) =>
         s.kind === "command" ? (
-          <span key={i} className="rounded bg-white/20 px-1 font-medium">{s.text}</span>
+          editorial ? (
+            <kbd key={i} className="mz-kbd"><span className="sl">/</span>{s.text.slice(1)}</kbd>
+          ) : (
+            <span key={i} className="mz-sent-command"><Sparkles size={10} />{s.text}</span>
+          )
         ) : s.kind === "path" ? (
-          <code key={i} className="mz-sent-path">{s.text}</code>
+          <code key={i} className="mz-sent-path" title={s.text}>
+            <Folder size={11} />{editorial ? s.text : pathTail(s.text)}
+          </code>
         ) : (
           <span key={i}>{s.text}</span>
         ),
@@ -147,6 +166,9 @@ function UserMessageImpl({ message }: { message: Message }) {
   // carry that isn't one — passed through an edit untouched, since it is context
   // the turn had and nothing on screen can stand in for it.
   const { attachments: fileAttachments, unclaimedHidden } = splitAttachments(parts);
+  // The skills this turn ran ride in the unclaimed hidden parts (0.21.0).
+  const runs = useSkillRuns(text, unclaimedHidden);
+  const editorial = useApp((s) => s.theme.messageStyle === "editorial");
 
   const [editing, setEditing] = useState(false);
   const [preview, setPreview] = useState<MessagePreview | null>(null);
@@ -261,10 +283,19 @@ function UserMessageImpl({ message }: { message: Message }) {
     <div className="msg-row">
       {/* Mirror of the assistant turn: the bubble ends where the composer ends
           and the avatar hangs off to the right of it. */}
-      <div className="mz-user-row flex justify-end gap-3">
-        <div className="flex max-w-[80%] flex-col items-end gap-2">
+      {/* Editorial (0.21.0): no bubble and no avatar. A label row, then the
+          prompt as the turn's headline, full width on the reply's left edge. */}
+      <div className={editorial ? "mz-user-editorial" : "mz-user-row flex justify-end gap-3"}>
+        {editorial && (
+          <div className="mz-user-rule">
+            <span className="you">{subchatZone?.name ?? "You"}</span>
+            <span className="ln" />
+            <span>{new Date(message.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+          </div>
+        )}
+        <div className={`flex flex-col gap-2 ${editorial ? "items-start" : "max-w-[80%] items-end"}`}>
           {images.length > 0 && (
-            <div className="flex flex-wrap justify-end gap-2">
+            <div className={`flex flex-wrap gap-2 ${editorial ? "" : "justify-end"}`}>
               {images.map((img, i) => (
                 <button
                   key={i}
@@ -292,7 +323,7 @@ function UserMessageImpl({ message }: { message: Message }) {
             ),
           )}
           {fileAttachments.length > 0 && (
-            <div className="flex flex-wrap justify-end gap-1.5">
+            <div className={`flex flex-wrap gap-1.5 ${editorial ? "" : "justify-end"}`}>
               {fileAttachments.map((f, i) => (
                 <button
                   key={i}
@@ -319,19 +350,32 @@ function UserMessageImpl({ message }: { message: Message }) {
               ))}
             </div>
           )}
-          {text && (
-            <div className="rounded-2xl rounded-tr-sm bg-[var(--color-accent)] px-3 py-2 text-sm text-white">
-              <div className="whitespace-pre-wrap break-words"><SentPrompt text={text} /></div>
+          {text && editorial && (
+            <div className={`mz-user-prose ${text.length > 400 ? "is-long" : ""}`}>
+              <SentPrompt text={text} ran={runs.map((r) => r.name)} editorial />
             </div>
           )}
+          {text && !editorial && (
+            <div className={`mz-user-stack ${runs.length ? "has-runs" : ""}`}>
+              <div className="mz-user-bubble">
+                <div className="whitespace-pre-wrap break-words">
+                  <SentPrompt text={text} ran={runs.map((r) => r.name)} editorial={false} />
+                </div>
+              </div>
+              <SkillRuns runs={runs} editorial={false} />
+            </div>
+          )}
+          {editorial && <SkillRuns runs={runs} editorial />}
         </div>
-        <div
-          className="mt-1 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded shadow-sm"
-          style={{ background: senderBg }}
-          title={subchatZone ? subchatZone.name : undefined}
-        >
-          <SenderIcon size={14} color="white" />
-        </div>
+        {!editorial && (
+          <div
+            className="mz-user-avatar mt-1 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded shadow-sm"
+            style={subchatZone ? { background: senderBg } : undefined}
+            title={subchatZone ? subchatZone.name : undefined}
+          >
+            <SenderIcon size={14} color="white" />
+          </div>
+        )}
       </div>
       <div className="msg-actions">
         <MessageActions

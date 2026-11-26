@@ -58,6 +58,7 @@ export function SlashMenu({
   builtins?: { name: string; description: string }[];
 }) {
   const servers = useApp((s) => s.mcpServers);
+  const editorial = useApp((s) => s.theme.messageStyle === "editorial");
   // Skills first (0.20.1): picking one puts `/name` in the prompt, and it runs
   // when the message is sent. MCP prompts and resources expand where they are.
   const skills = useSkillCommands().list;
@@ -164,41 +165,73 @@ export function SlashMenu({
 
   if (results.length === 0 && (!busy || skills.length > 0)) return null;
 
+  const asking = busy && entries === null && results.length === 0 && (
+    <p className="flex items-center gap-2 px-3 py-2 text-xs text-[var(--color-text-muted)]">
+      <Loader2 size={12} className="animate-spin" /> Asking your MCP servers…
+    </p>
+  );
+  const kindOf = (e: Entry) => (e.kind === "builtin" ? "command" : e.kind === "skill" ? "skill" : e.serverName);
+  // Built-ins and skills go in as `/name`; MCP entries expand where they are.
+  const slashed = (e: Entry) => e.kind === "builtin" || e.kind === "skill";
+  const row = (e: Entry, i: number, className: string, children: React.ReactNode) => (
+    <button
+      key={entryKey(e)}
+      onMouseMove={() => setCursor(i)}
+      onClick={() => void choose(e)}
+      data-selected={i === cursor || undefined}
+      className={className}
+    >
+      {children}
+    </button>
+  );
+
+  // Editorial (0.21.0): a command palette — the query and its match count on
+  // top, mono rows with the match marked, and the keys in a footer.
+  if (editorial) {
+    return (
+      <div className="mz-palette absolute bottom-full left-0 z-50 mb-2 flex max-h-72 w-full max-w-md flex-col">
+        <div className="mz-palette-q">
+          /{query}
+          <span>{results.length} {results.length === 1 ? "match" : "matches"}</span>
+        </div>
+        <div className="min-h-0 overflow-y-auto">
+          {asking || results.map((e, i) => row(e, i, "mz-palette-row", (
+            <>
+              <span className="car" aria-hidden>›</span>
+              <span className="nm"><Marked text={entryLabel(e)} query={query} /></span>
+              <span className="ds">{entryDetail(e)}</span>
+              <span className="kind">{kindOf(e)}</span>
+            </>
+          )))}
+        </div>
+        <div className="mz-palette-foot">
+          <span><kbd>↑</kbd><kbd>↓</kbd>move</span>
+          <span><kbd>tab</kbd>complete</span>
+          <span><kbd>esc</kbd>close</span>
+        </div>
+      </div>
+    );
+  }
+
+  // Bubble: the selected row takes the message bubble's gradient.
   return (
-    <div className="absolute bottom-full left-0 z-50 mb-2 max-h-64 w-full max-w-md overflow-y-auto rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg">
-      {busy && entries === null && results.length === 0 ? (
-        <p className="flex items-center gap-2 px-3 py-2 text-xs text-[var(--color-text-muted)]">
-          <Loader2 size={12} className="animate-spin" /> Asking your MCP servers…
-        </p>
-      ) : (
-        results.map((e, i) => (
-          <button
-            key={entryKey(e)}
-            onMouseMove={() => setCursor(i)}
-            onClick={() => void choose(e)}
-            className={`flex w-full items-start gap-2 px-3 py-1.5 text-left transition ${
-              i === cursor ? "bg-[var(--color-panel-hover)]" : ""
-            }`}
-          >
-            <span className="mt-0.5 shrink-0 text-[var(--color-text-muted)]">
-              {e.kind === "builtin" ? <ClipboardList size={13} /> : e.kind === "skill" ? <Sparkles size={13} /> : e.kind === "prompt" ? <Terminal size={13} /> : <FileText size={13} />}
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="flex items-baseline gap-1.5">
-                <span className="truncate text-sm">{entryLabel(e)}</span>
-                <span className="shrink-0 text-[10px] text-[var(--color-text-muted)]">
-                  {e.kind === "builtin" ? "command" : e.kind === "skill" ? "skill" : e.serverName}
-                </span>
-              </span>
-              {entryDetail(e) && (
-                <span className="block truncate text-[11px] text-[var(--color-text-muted)]">
-                  {entryDetail(e)}
-                </span>
-              )}
-            </span>
-          </button>
-        ))
-      )}
+    <div className="mz-slash absolute bottom-full left-0 z-50 mb-2 max-h-64 w-full max-w-md overflow-y-auto">
+      {asking || results.map((e, i) => row(e, i, "mz-slash-row", (
+        <>
+          {e.kind === "builtin" ? <ClipboardList size={13} /> : e.kind === "skill" ? <Sparkles size={13} /> : e.kind === "prompt" ? <Terminal size={13} /> : <FileText size={13} />}
+          <span className="nm">{slashed(e) ? "/" : ""}{entryLabel(e)}</span>
+          <span className="ds">{entryDetail(e)}</span>
+          {!slashed(e) && <span className="src">{e.serverName}</span>}
+          {i === cursor && <kbd className="enter" aria-hidden>↵</kbd>}
+        </>
+      )))}
     </div>
   );
+}
+
+/** The label with the first case-insensitive match of the query marked. */
+function Marked({ text, query }: { text: string; query: string }) {
+  const at = query ? text.toLowerCase().indexOf(query.toLowerCase()) : -1;
+  if (at < 0) return <>{text}</>;
+  return <>{text.slice(0, at)}<mark>{text.slice(at, at + query.length)}</mark>{text.slice(at + query.length)}</>;
 }

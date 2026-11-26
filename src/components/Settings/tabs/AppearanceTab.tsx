@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { X, ChevronDown, ChevronRight, Check } from "lucide-react";
 import { useApp } from "@/store/app";
-import type { BackgroundEffect, GlassStyle, ThemeColorKey } from "@/store/app";
+import type { BackgroundEffect, GlassStyle, ThemeColorKey, TitleBarMode } from "@/store/app";
 import { MAX_CUSTOM_CSS, THEME_COLOR_KEYS } from "@/store/app";
 import {
-  BACKDROPS, BASE_PALETTE, CUSTOM_GRADIENT, THEME_PRESETS, activePreset, backdropImage, presetPalette, presetPrefs,
+  BACKDROPS, BASE_PALETTE, CUSTOM_GRADIENT, GLASS_STRENGTH_MAX, THEME_PRESETS, activePreset, backdropImage, paneAlpha,
+  paneBlur, presetPalette, presetPrefs,
   type BackdropId, type ThemePreset, type WindowBlur,
 } from "@/lib/themes";
 import { HexColorField } from "@/components/common/ColorPicker";
@@ -76,6 +77,18 @@ const WINDOW_BLURS: [WindowBlur, string][] = [
   ["none", "Clear"],
 ];
 
+const TITLE_BARS: [TitleBarMode, string][] = [
+  ["shown", "Shown"],
+  ["autohide", "Auto-hide"],
+  ["hidden", "Hidden"],
+];
+
+const TITLE_BAR_HINTS: Record<TitleBarMode, string> = {
+  shown: "Always there, above the panes.",
+  autohide: "Slides in when the pointer reaches the top edge of the window, or when you Tab to its buttons.",
+  hidden: "Point at the top edge for the window buttons, top right. Drag the window by that edge or the grip beside them.",
+};
+
 /** Effects whose "Density" slider means something. */
 const DENSITY_EFFECTS: BackgroundEffect[] = [
   "particles", "orbs", "stars", "shooting", "grid", "waves", "fireflies", "boids",
@@ -133,6 +146,18 @@ export function AppearanceTab() {
       </section>
 
       <section>
+        <h3 className="mb-2 text-sm font-medium">Your messages</h3>
+        <OptionCards
+          value={theme.messageStyle ?? "bubble"}
+          onChange={(messageStyle) => setTheme({ messageStyle })}
+          options={[
+            ["bubble", "Bubble", "A bold bubble on the right, with the skills it ran in a drawer under it"],
+            ["editorial", "Editorial", "Large text with commands as keycaps, and each skill a step into the reply"],
+          ]}
+        />
+      </section>
+
+      <section>
         <h3 className="mb-1 text-sm font-medium">Background</h3>
         <p className="mb-3 text-xs text-[var(--color-text-muted)]">
           Shows between the panes, and through them with glass on.
@@ -177,11 +202,13 @@ export function AppearanceTab() {
           />
           {theme.glassEnabled && (
             <div className="ml-3 flex flex-col gap-3 rounded border border-[var(--color-border)] p-3">
+              {/* Shown as how much of the background comes through, which is
+                  what the slider changes; the stored strength runs to 1.5. */}
               <SliderRow
                 label="See-through"
                 value={glassStrength}
-                min={0.1} max={1} step={0.05}
-                display={`${Math.round(glassStrength * 100)}%`}
+                min={0.1} max={GLASS_STRENGTH_MAX} step={0.05}
+                display={`${Math.round((1 - paneAlpha(theme)) * 100)}%`}
                 onChange={(v) => setTheme({ glassStrength: v })}
               />
               <OptionCards
@@ -189,6 +216,15 @@ export function AppearanceTab() {
                 onChange={(glassStyle) => setTheme({ glassStyle })}
                 options={GLASS_STYLES.map(([v, label]) => [v, label] as const)}
               />
+              {theme.glassStyle !== "clear" && (
+                <SliderRow
+                  label="Blur behind panes"
+                  value={theme.glassBlur ?? 1}
+                  min={0} max={2} step={0.05}
+                  display={paneBlur(theme) ? `${paneBlur(theme)}px` : "None"}
+                  onChange={(v) => setTheme({ glassBlur: v })}
+                />
+              )}
               <p className="text-[11px] text-[var(--color-text-muted)]">
                 {nothingBehind
                   ? "Glass shows what is behind the panes — pick a background above to see it."
@@ -225,6 +261,18 @@ export function AppearanceTab() {
               </p>
             </div>
           )}
+        </div>
+
+        <div>
+          <h3 className="mb-2 text-sm font-medium">Title bar</h3>
+          <OptionCards
+            value={theme.titleBar ?? "shown"}
+            onChange={(titleBar) => setTheme({ titleBar })}
+            options={TITLE_BARS}
+          />
+          <p className="mt-2 text-[11px] text-[var(--color-text-muted)]">
+            {TITLE_BAR_HINTS[theme.titleBar ?? "shown"]}
+          </p>
         </div>
       </section>
 

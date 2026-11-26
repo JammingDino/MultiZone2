@@ -880,6 +880,8 @@ export type BackgroundEffect =
  */
 export type GlassStyle = "frosted" | "clear" | "tinted";
 
+export type TitleBarMode = "shown" | "autohide" | "hidden";
+
 export interface ThemePrefs {
   mode: "dark" | "light";
   accent: string;
@@ -904,6 +906,9 @@ export interface ThemePrefs {
   glassEnabled?: boolean;
   glassStyle?: GlassStyle;
   glassStrength?: number;
+  /** Blur behind the panes as a multiple of the style's own (0–2, default 1);
+   *  0 lets the background show crisp through them. See paneBlur in lib/themes.ts. */
+  glassBlur?: number;
   /** Follow the system's light/dark setting (0.20). `mode` is still the mode in
    *  force — it is rewritten when the system changes — so nothing that reads it
    *  has to know about this. */
@@ -928,6 +933,12 @@ export interface ThemePrefs {
   windowOpacity?: number;
   windowBlur?: WindowBlur;
   /**
+   * The title bar (0.20): shown, collapsed to a hover strip along the top edge
+   * until the pointer (or keyboard focus) reaches it, or gone, with the window
+   * buttons in a small cluster that the top edge reveals. See TitleBar.tsx.
+   */
+  titleBar?: TitleBarMode;
+  /**
    * Per-mode overrides of the base palette (0.9.4). Kept separate for dark and
    * light so a blue background chosen for dark doesn't follow you into light,
    * where it would be unreadable. Any key left out falls back to the stylesheet.
@@ -946,6 +957,13 @@ export interface ThemePrefs {
    */
   customCss?: string;
   customCssEnabled?: boolean;
+  /**
+   * How your own messages are drawn (0.21.0): `bubble` (the default) is a
+   * deep accent bubble with its skills in a drawer under it; `editorial` sets
+   * the prompt as large prose with its skills as timeline steps. The composer's
+   * command tokens and the `/` menu follow it.
+   */
+  messageStyle?: "bubble" | "editorial";
 }
 
 /**
@@ -981,12 +999,14 @@ const DEFAULT_THEME: ThemePrefs = {
   glassEnabled: false,
   glassStyle: "frosted",
   glassStrength: 0.5,
+  glassBlur: 1,
   followSystem: false,
   backdrop: "solid",
   backdropMotion: false,
   windowTransparent: false,
   windowOpacity: 0.85,
   windowBlur: "blur",
+  titleBar: "shown",
   customCss: "",
   customCssEnabled: false,
 };
@@ -1143,6 +1163,9 @@ function applyThemeToDom(theme: ThemePrefs) {
     shade(theme.accent, theme.mode === "light" ? -0.14 : 0.14),
   );
   html.classList.toggle("shadows", !!theme.shadowsEnabled);
+  // The composer's tokens are pure CSS (PromptHighlight), so they follow the
+  // message style through a class rather than each overlay reading the store.
+  html.classList.toggle("mz-editorial", theme.messageStyle === "editorial");
 
   // Glass and the see-through window: classes for which is on, and the numbers
   // they are drawn with (lib/themes.ts).

@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useRef, useState, type RefObject } from "react";
 import * as api from "@/lib/tauri";
 import { replaceRange, segments, slashAt } from "@/lib/promptTokens";
+import { skillPartText } from "@/lib/skillRuns";
 
 /**
  * Everything a composer needs for commands and folders as words (0.20.1): the
@@ -142,13 +143,7 @@ export async function skillParts(names: string[]): Promise<{ type: "hidden_text"
     try {
       const r = JSON.parse(await api.invokeSkill(name));
       if (r.status !== "loaded") continue;
-      const files = Array.isArray(r.files) && r.files.length
-        ? `\n\nThis skill has more files, read with load_skill {"name": "${r.name}", "file": …} as its instructions direct: ${r.files.join(", ")}`
-        : "";
-      out.push({
-        type: "hidden_text",
-        text: `The user invoked /${r.name} in their message. Apply this skill to it — its instructions:\n\n${r.instructions}${files}`,
-      });
+      out.push({ type: "hidden_text", text: skillPartText(r.name, r.instructions, Array.isArray(r.files) ? r.files : []) });
     } catch {
       // Unreachable or not a skill: the word goes as typed.
     }

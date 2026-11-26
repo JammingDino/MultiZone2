@@ -69,13 +69,35 @@ export function windowAlpha(t: ThemePrefs): number {
   return t.windowTransparent ? clamp(t.windowOpacity ?? 0.85, 0.3, 1) : 1;
 }
 
+/** glassStrength's range. Up to 1 it is what it always was (panes down to
+ *  ~35% solid); past 1 the panes thin out to a faint film (~7% at 1.5), for
+ *  someone who wants to look at the background rather than through a pane. */
+export const GLASS_STRENGTH_MAX = 1.5;
+
+/** How solid a glass pane is (1 = opaque), before a see-through window scales it. */
+export function paneAlpha(t: ThemePrefs): number {
+  if (!t.glassEnabled) return 1;
+  const s = clamp(t.glassStrength ?? 0.5, 0.1, GLASS_STRENGTH_MAX);
+  return t.glassStyle === "clear" ? 0.82 - 0.5 * s : 0.9 - 0.55 * s;
+}
+
+/**
+ * The blur behind the panes, in px. Frosted and tinted blur more as the glass
+ * gets stronger (capped at strength 1); `glassBlur` scales that, 0 meaning the
+ * background shows crisp through the panes. Clear glass is never blurred.
+ */
+export function paneBlur(t: ThemePrefs): number {
+  if (!t.glassEnabled || t.glassStyle === "clear") return 0;
+  const s = clamp(t.glassStrength ?? 0.5, 0.1, 1);
+  return Math.round((10 + 18 * s) * clamp(t.glassBlur ?? 1, 0, 2));
+}
+
 /**
  * The CSS variables the glass and see-through window are drawn from. Worked
  * out here rather than in `calc()` chains in the stylesheet, so each number is
  * one place, testable, and the stylesheet only says where it goes.
  *
- * - pane: how solid a pane is. Glass runs from ~85% (subtle) to ~35% (strong);
- *   never lower, because text needs a ground. A see-through window scales it.
+ * - pane: how solid a pane is (paneAlpha). A see-through window scales it.
  * - float: menus and dialogs. They sit over text rather than a soft backdrop,
  *   so they stay much more solid than the panes.
  */
@@ -84,12 +106,11 @@ export function surfaceVars(t: ThemePrefs): Record<string, string> {
   const glass = !!t.glassEnabled;
   const style = t.glassStyle ?? "frosted";
   const w = windowAlpha(t);
-  const pane = glass ? (style === "clear" ? 0.82 - 0.5 * s : 0.9 - 0.55 * s) : 1;
   return {
     "--mz-window-alpha": String(Math.round(w * 100) / 100),
-    "--mz-pane-alpha": pct(pane * w),
+    "--mz-pane-alpha": pct(paneAlpha(t) * w),
     "--mz-float-alpha": pct(glass ? 0.97 - 0.14 * s : 1),
-    "--mz-blur": glass && style !== "clear" ? `${Math.round(10 + 18 * s)}px` : "0px",
+    "--mz-blur": `${paneBlur(t)}px`,
     "--mz-saturate": glass ? (style === "clear" ? "1" : style === "tinted" ? "1.7" : "1.5") : "1",
     "--mz-backdrop": backdropImage(t),
   };

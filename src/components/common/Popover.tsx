@@ -177,10 +177,13 @@ export function Popover({
     if (!anchor) return;
     // Height is read from `scrollHeight` — what the content wants — rather than
     // the box we already capped, so a re-measure doesn't ratchet a long list
-    // down a little further every time.
+    // down a little further every time. Plus the border: `scrollHeight` leaves
+    // it out and `maxHeight` includes it, so without it every bordered menu came
+    // out 2px short and grew a scrollbar it did not need.
+    const border = surface.offsetHeight - surface.clientHeight;
     const next = placeMenu(
       anchor,
-      { width: surface.offsetWidth, height: surface.scrollHeight },
+      { width: surface.offsetWidth, height: surface.scrollHeight + border },
       { width: window.innerWidth, height: window.innerHeight },
       { side, align, matchAnchorWidth },
     );

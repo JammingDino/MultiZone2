@@ -30,11 +30,14 @@ let shown = false;
 export function BootSplash() {
   const [state, setState] = useState<"in" | "out" | "gone">(() => (shown ? "gone" : "in"));
 
+  // `shown` is set when the splash leaves, not when the timers start: StrictMode
+  // runs this effect, its cleanup, then the effect again, and a guard set on the
+  // first run skipped the second — leaving no timer, and the splash up until a
+  // click.
   useEffect(() => {
     if (shown) return;
-    shown = true;
     const toFade = window.setTimeout(() => setState("out"), HOLD_MS);
-    const toGone = window.setTimeout(() => setState("gone"), HOLD_MS + FADE_MS);
+    const toGone = window.setTimeout(() => { shown = true; setState("gone"); }, HOLD_MS + FADE_MS);
     return () => {
       window.clearTimeout(toFade);
       window.clearTimeout(toGone);
@@ -45,7 +48,7 @@ export function BootSplash() {
   // are here and the cover is in their way.
   useEffect(() => {
     if (state === "gone") return;
-    const skip = () => setState("gone");
+    const skip = () => { shown = true; setState("gone"); };
     window.addEventListener("pointerdown", skip);
     window.addEventListener("keydown", skip);
     return () => {

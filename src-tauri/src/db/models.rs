@@ -123,6 +123,11 @@ pub struct Chat {
     /// Rolling context limit in tokens (0.18). `None` inherits the global
     /// default, `Some(0)` is off. See `tools::rolling`.
     pub rolling_context_tokens: Option<i64>,
+    /// Chat lock (0.20): `None`, `"chat"` (its own password) or `"app"` (the
+    /// app password). Only the kind — the hash is never part of this row. A
+    /// branch or sub-agent chat is also covered by its parent's lock; see
+    /// `chat_lock`.
+    pub lock_kind: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }

@@ -834,6 +834,9 @@ pub async fn run_regenerate_entry(
     sink: &StreamSink,
     chat_id: &str,
 ) -> AppResult<()> {
+    // Every turn reads the transcript into a model, so a locked chat runs none
+    // until the user opens it — whoever asks (window, API, scheduler).
+    crate::chat_lock::ensure_open(&ctx.db, chat_id).await?;
     let cancel = Arc::new(AtomicBool::new(false));
     ctx.active_streams
         .write()
@@ -885,6 +888,7 @@ pub async fn run_regenerate_participant_entry(
     chat_id: &str,
     zone_id: Option<String>,
 ) -> AppResult<()> {
+    crate::chat_lock::ensure_open(&ctx.db, chat_id).await?;
     let cancel = Arc::new(AtomicBool::new(false));
     ctx.active_streams
         .write()
@@ -943,6 +947,7 @@ pub async fn run_send_entry(
     mut parts: Vec<InputPart>,
     ov: TurnOverride,
 ) -> AppResult<()> {
+    crate::chat_lock::ensure_open(&ctx.db, chat_id).await?;
     // The one-shot zone/model override belongs to the message it was set for.
     // A queued follow-up is a plain user turn against the chat's own zone.
     let mut ov = ov;

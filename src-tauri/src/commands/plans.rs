@@ -163,5 +163,6 @@ pub async fn list_session_events(
     chat_id: String,
     limit: Option<i64>,
 ) -> AppResult<Vec<crate::events::SessionEvent>> {
+    crate::chat_lock::ensure_open(&state.db, &chat_id).await?;
     crate::events::list(&state.db, &chat_id, limit).await
 }

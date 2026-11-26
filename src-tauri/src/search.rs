@@ -77,8 +77,13 @@ pub async fn search_messages(db: &SqlitePool, query: &str) -> Result<Vec<SearchH
     // The join to `messages` is load-bearing rather than decoration: it is what
     // makes an index entry that outlived its message — a cascade delete whose
     // trigger did not fire — invisible, instead of a hit on a chat that is gone.
-    sqlx::query_as::<_, SearchHit>(
+    //
+    // Locked chats (and their branches and sub-agents) are left out here, in
+    // the query, so they never take a place under the LIMIT; a search box must
+    // not be a way to read a locked chat a snippet at a time.
+    sqlx::query_as::<_, SearchHit>(&format!(
         r#"
+        {}
         SELECT m.id             AS message_id,
                m.chat_id        AS chat_id,
                c.title          AS chat_title,
@@ -90,10 +95,12 @@ pub async fn search_messages(db: &SqlitePool, query: &str) -> Result<Vec<SearchH
           JOIN messages m ON m.rowid = messages_fts.rowid
           JOIN chats    c ON c.id    = m.chat_id
          WHERE messages_fts MATCH ?1
+           AND m.chat_id NOT IN (SELECT id FROM locked)
          ORDER BY bm25(messages_fts), m.created_at DESC
          LIMIT ?2
         "#,
-    )
+        crate::chat_lock::LOCKED_CTE
+    ))
     .bind(&match_query)
     .bind(LIMIT)
     .fetch_all(db)

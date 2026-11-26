@@ -237,6 +237,7 @@ fn build_router(state: ApiState) -> Router {
         .route("/api/runs/:id", axum::routing::delete(h::delete_saved_run))
         .route("/api/runs/:id/render", post(h::render_saved_run))
         .route("/api/chats/:id", axum::routing::delete(h::delete_chat))
+        .route("/api/chats/:id/lock", post(h::lock_chat))
         .route("/api/chats/:id/messages", get(get_messages).post(send_message))
         .route("/api/chats/:id/messages/:messageId", axum::routing::patch(h::update_message))
         .route("/api/chats/:id/messages/from", axum::routing::delete(h::delete_messages_from))
@@ -396,6 +397,9 @@ fn build_router(state: ApiState) -> Router {
         .route("/api/events", get(events::events))
         .route("/api/mirror", post(h::mirror_all))
         .route("/api/mirror/import", post(h::import_markdown))
+        // Inside auth (route layers wrap outward), so a stranger is told
+        // "unauthorized" rather than which chats are locked.
+        .route_layer(middleware::from_fn_with_state(state.db.clone(), chat_lock_mw))
         .route_layer(middleware::from_fn_with_state(state.clone(), auth_mw));
 
     Router::new()
@@ -502,6 +506,41 @@ async fn auth_mw(
     req.extensions_mut()
         .insert(crate::remote::DeviceAuth::Device(Box::new(device)));
     next.run(req).await
+}
+
+/// A locked chat is never served over the API (0.20) — not to a script, a
+/// phone, or a model's `app_read` — even while it is open in the window: the
+/// unlock is the window's, for the person at it.
+///
+/// One layer over every `/api/chats/:id/…` route rather than a check in each
+/// handler, so a route added next release is covered the day it lands. Exempt:
+/// `/lock` itself, and `DELETE /api/chats/:id` (no sub-path), since deleting
+/// stays possible when a password is forgotten.
+async fn chat_lock_mw(
+    State(db): State<SqlitePool>,
+    req: axum::extract::Request,
+    next: Next,
+) -> Response {
+    if let Some(id) = lock_checked_chat(req.uri().path()) {
+        match crate::chat_lock::lock_root(&db, id).await {
+            Ok(None) => {}
+            Ok(Some(_)) => {
+                return (
+                    StatusCode::LOCKED,
+                    Json(json!({ "error": crate::chat_lock::LOCKED_MESSAGE })),
+                )
+                    .into_response()
+            }
+            Err(e) => return ApiError(e.into()).into_response(),
+        }
+    }
+    next.run(req).await
+}
+
+/// The chat a path reads or acts inside, when the lock applies to it.
+fn lock_checked_chat(path: &str) -> Option<&str> {
+    let (id, rest) = path.strip_prefix("/api/chats/")?.split_once('/')?;
+    (!id.is_empty() && !rest.is_empty() && rest != "lock").then_some(id)
 }
 
 fn unauthorized() -> Response {
@@ -637,6 +676,8 @@ async fn list_chats(State(st): State<ApiState>) -> ApiResult<Json<Vec<Chat>>> {
     .fetch_all(&st.db)
     .await
     .map_err(AppError::from)?;
+    let mut rows = rows;
+    crate::chat_lock::redact(&st.db, &mut rows, false).await?;
     Ok(Json(rows))
 }
 
@@ -933,4 +974,60 @@ async fn regenerate(
     let stream = UnboundedReceiverStream::new(rx)
         .map(|line| Ok::<Event, Infallible>(Event::default().data(line)));
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()).into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{chat_lock_mw, lock_checked_chat};
+    use axum::{body::Body, http::Request, middleware, routing::get, Router};
+    use tower::ServiceExt;
+
+    /// The layer itself, in front of a stand-in route: a locked chat's
+    /// messages answer 423 whoever asks, an unlocked chat's are served, and
+    /// opening the lock in the window does not open it to the API.
+    #[tokio::test]
+    async fn the_api_refuses_a_locked_chat_even_while_it_is_open_in_the_window() {
+        let db = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        crate::db::MIGRATOR.run(&db).await.unwrap();
+        for (id, kind) in [("open", None), ("shut", Some("app"))] {
+            sqlx::query("INSERT INTO chats (id, title, lock_kind, created_at, updated_at) VALUES (?1, ?1, ?2, 0, 0)")
+                .bind(id)
+                .bind(kind)
+                .execute(&db)
+                .await
+                .unwrap();
+        }
+        let app = Router::new()
+            .route("/api/chats/:id/messages", get(|| async { "transcript" }))
+            .route_layer(middleware::from_fn_with_state(db.clone(), chat_lock_mw));
+        let status = |path: &'static str| {
+            let app = app.clone();
+            async move {
+                app.oneshot(Request::get(path).body(Body::empty()).unwrap()).await.unwrap().status().as_u16()
+            }
+        };
+        assert_eq!(status("/api/chats/open/messages").await, 200);
+        assert_eq!(status("/api/chats/shut/messages").await, 423);
+        crate::chat_lock::tests_support::open_session("shut");
+        assert_eq!(status("/api/chats/shut/messages").await, 423);
+    }
+
+    /// Every route inside a chat is behind its lock — messages, events, export
+    /// material, sends — except locking itself and deleting the chat.
+    #[test]
+    fn every_route_inside_a_chat_is_lock_checked() {
+        for p in [
+            "/api/chats/c1/messages",
+            "/api/chats/c1/events",
+            "/api/chats/c1/subchats",
+            "/api/chats/c1/plans/pending",
+            "/api/chats/c1/generate-title",
+            "/api/chats/c1/some-route-added-later",
+        ] {
+            assert_eq!(lock_checked_chat(p), Some("c1"), "{p}");
+        }
+        for p in ["/api/chats/c1/lock", "/api/chats/c1", "/api/chats", "/api/search", "/api/chats/"] {
+            assert_eq!(lock_checked_chat(p), None, "{p}");
+        }
+    }
 }

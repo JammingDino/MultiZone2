@@ -629,6 +629,15 @@ async fn dispatch_inner(
         return Ok(crate::study::refusal(name));
     }
 
+    // A subchat id from the model can name any chat's sub-agent, not only this
+    // chat's own; one under another chat's lock is out of reach (0.20).
+    if matches!(name, "read_subchat" | "send_subchat_message") {
+        let target = args.get("subchat_id").and_then(|v| v.as_str()).unwrap_or("");
+        if let Err(e) = crate::chat_lock::ensure_reachable(db, Some(chat_id), target).await {
+            return Ok(serde_json::json!({ "error": e.to_string() }).to_string());
+        }
+    }
+
     match name {
         "get_current_datetime" => datetime::run(args).await,
         // The retired `web_search` / `extract_url` names still route here: they

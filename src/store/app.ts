@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { DEFAULT_APP_SETTINGS, type AppSettings, type Chat, type Checkpoint, type RestoreReport, type RewindReport, type RewindStatus, type ChatTagEntry, type ChatTagLink, type ChatZone, type McpServerView, type Memory, type Message, type PendingMessage, type PendingMode, type Plan, type PlanStep, type Project, type GeneratedIcon, type Provider, type Skill, type SkillPack, type Tag, type Zone } from "@/lib/types";
 import * as api from "@/lib/tauri";
+import { isLockedNow, useChatLocks } from "@/lib/chatLock";
 // Dictation goes through its own seam: the microphone is on this device, and
 // on a phone that means the WebView rather than the machine running the app.
 import * as dictation from "@/lib/dictation";
@@ -1428,6 +1429,9 @@ export const useApp = create<AppStore>((set, get) => ({
     get().refreshChats().catch(console.error);
   },
   async loadMessages(chatId) {
+    // A locked chat's pane is its unlock screen, and Rust would refuse the read
+    // anyway; skipping it keeps opening one from throwing (0.20).
+    if (isLockedNow(get().chats, chatId, useChatLocks.getState().unlocked)) return;
     const messages = await api.getMessages(chatId);
     set((s) => ({ messagesByChat: { ...s.messagesByChat, [chatId]: messages } }));
     // Opening a chat is also when its revertible turns are read.

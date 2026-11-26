@@ -3358,6 +3358,7 @@ dependencies = [
  "eventsource-stream",
  "futures-util",
  "globset",
+ "hmac",
  "hound",
  "http",
  "if-addrs",

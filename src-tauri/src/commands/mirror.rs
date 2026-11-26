@@ -220,6 +220,11 @@ async fn mirror_chat(db: &SqlitePool, chat_id: &str) -> AppResult<()> {
     if chat.initiated_by_zone_id.is_some() {
         return Ok(());
     }
+    // The mirror is plain text in a folder the user may sync elsewhere; a
+    // locked chat stays out of it (locking removes its file, see `chat_lock`).
+    if crate::chat_lock::lock_root(db, chat_id).await?.is_some() {
+        return Ok(());
+    }
 
     let messages = sqlx::query_as::<_, Message>(&format!(
         "SELECT {MSG_COLS} FROM messages WHERE chat_id = ?1 AND zone_id IS NULL ORDER BY created_at ASC"

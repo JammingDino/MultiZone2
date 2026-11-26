@@ -61,6 +61,8 @@ mod schedule;
 #[cfg(desktop)]
 mod search;
 #[cfg(desktop)]
+mod chat_lock;
+#[cfg(desktop)]
 mod study;
 #[cfg(desktop)]
 mod review;
@@ -379,6 +381,12 @@ pub fn run() {
             commands::chats::delete_messages_from,
             commands::chats::delete_participant_messages,
             commands::chats::get_messages,
+            chat_lock::chat_lock_status,
+            chat_lock::lock_chat,
+            chat_lock::unlock_chat,
+            chat_lock::relock_chat,
+            chat_lock::remove_chat_lock,
+            chat_lock::set_app_lock_password,
             commands::chats::generate_title,
             commands::chats::compact_chat,
             commands::chats::set_chat_rolling_context,

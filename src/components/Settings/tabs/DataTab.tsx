@@ -15,6 +15,8 @@ import { formatBytes, formatCount, formatTokens } from "@/lib/format";
 import { errorText } from "@/lib/errors";
 import { reportError } from "@/lib/reportError";
 import { CheckLine, NumberField, PickList } from "../controls";
+import { useChatLocks } from "@/lib/chatLock";
+import { PRIMARY_ACTION } from "@/lib/chrome";
 
 export function DataTab() {
   const [stats, setStats] = useState<DbStats | null>(null);
@@ -123,6 +125,8 @@ export function DataTab() {
           <PrivacyStatementLink className="self-start" />
         </div>
       </section>
+
+      <ChatLocksSection />
 
       <UpdateSection />
 
@@ -599,6 +603,63 @@ function SettingsTransferSection() {
           Import settings…
         </button>
         {msg && <span className="text-xs text-[var(--color-text-muted)]">{msg}</span>}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * The app password for locked chats (0.20). Set, changed and removed here and
+ * only here — never over the API, so no agent can set one. Rust refuses a
+ * removal while chats still use it, since they would then have no password.
+ */
+function ChatLocksSection() {
+  const appPasswordSet = useChatLocks((s) => s.appPasswordSet);
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
+  const field = "w-full rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs outline-none focus:border-[var(--color-accent)]";
+
+  async function save(remove: boolean) {
+    setNote(null);
+    try {
+      await api.setAppLockPassword(appPasswordSet ? current : null, remove ? null : next);
+      useChatLocks.setState({ appPasswordSet: !remove });
+      setNote({ ok: true, text: remove ? "App password removed." : appPasswordSet ? "App password changed." : "App password set." });
+      setCurrent(""); setNext(""); setConfirm("");
+    } catch (e) {
+      setNote({ ok: false, text: errorText(e) });
+    }
+  }
+
+  const canSave = next.length > 0 && next === confirm && (!appPasswordSet || current.length > 0);
+  return (
+    <section>
+      <h3 className="mb-1 text-sm font-medium">Chat locks</h3>
+      <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+        Lock a chat from its right-click menu in the sidebar. The app password opens every chat locked
+        with it, and any chat with its own password too — the way back into one whose password is
+        forgotten. A lock is not encryption: chats stay unencrypted in the database. Agents can lock a
+        chat, never unlock one or set a password.
+      </p>
+      <div className="flex max-w-sm flex-col gap-2">
+        {appPasswordSet && (
+          <input type="password" value={current} onChange={(e) => setCurrent(e.target.value)} placeholder="Current app password" aria-label="Current app password" className={field} />
+        )}
+        <input type="password" value={next} onChange={(e) => setNext(e.target.value)} placeholder={appPasswordSet ? "New app password" : "App password"} aria-label="New app password" className={field} />
+        <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Type it again" aria-label="Confirm app password" className={field} />
+        <div className="flex gap-2">
+          <button disabled={!canSave} onClick={() => save(false)} className={`rounded px-3 py-1 text-xs ${PRIMARY_ACTION}`}>
+            {appPasswordSet ? "Change app password" : "Set app password"}
+          </button>
+          {appPasswordSet && (
+            <button disabled={!current} onClick={() => save(true)} className="rounded border border-[var(--color-border)] px-3 py-1 text-xs hover:border-[var(--color-danger)] hover:text-[var(--color-danger)] disabled:opacity-50">
+              Remove
+            </button>
+          )}
+        </div>
+        {note && <div className={`text-xs ${note.ok ? "text-[var(--color-text-muted)]" : "text-[var(--color-danger)]"}`}>{note.text}</div>}
       </div>
     </section>
   );

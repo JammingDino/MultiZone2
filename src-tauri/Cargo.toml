@@ -72,6 +72,9 @@ sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "chrono"
 # databases whose stored checksums differ from ours only by line endings — see
 # `db::repair_line_ending_checksums`. Already in the tree via sqlx.
 sha2 = "0.10"
+# Chat-lock password hashing (0.20): PBKDF2 is a loop over HMAC-SHA256, written
+# out in `chat_lock` over this and `sha2`. Already in the tree via sqlx.
+hmac = "0.12"
 
 uuid = { version = "1.11", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
@@ -183,5 +186,13 @@ custom-protocol = ["tauri/custom-protocol"]
 # trades a little runtime performance and disk for a much shorter edit → build
 # loop. Deliberately NOT setting `lto`: it shrinks the binary but adds minutes to
 # every build, which is the opposite of what we want here.
+# A password hash is 600k rounds of SHA-256 by design; unoptimised, that is
+# seconds per unlock in a dev build. Optimising the two crates keeps it at the
+# fraction of a second a release build takes.
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.dev.package.hmac]
+opt-level = 3
+
 [profile.release]
 incremental = true

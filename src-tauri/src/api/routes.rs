@@ -116,6 +116,7 @@ pub const ROUTES: &[RouteDef] = &[
     r("POST", "/api/runs/:id/render", "Fill a run's template. Body: { \"values\"? }"),
     r("POST", "/api/chats", "Create a chat"),
     r("DELETE", "/api/chats/:id", "Delete a chat"),
+    r("POST", "/api/chats/:id/lock", "Lock a chat behind the app password, or re-lock it now if already locked (no body). Locking is all the API does: unlocking, removing a lock and setting passwords are the user's, in the window. Every other /api/chats/:id/… route answers 423 for a locked chat"),
     r("GET", "/api/chats/:id/messages", "Every message in a chat"),
     r("POST", "/api/chats/:id/messages", "Send a message ({text|parts}, optional overrideZoneId/overrideModel for this turn only); streams SSE unless ?wait=true"),
     r("PATCH", "/api/chats/:id/messages/:messageId", "Replace a message's text in place"),
@@ -364,6 +365,13 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     ("study::answer_study_question", Route("POST /api/study/questions/:id/answer")),
     ("chats::create_chat", Route("POST /api/chats")),
     ("chats::delete_chat", Route("DELETE /api/chats/:id")),
+    // Chat locks (0.20): an agent may lock, never open. See `chat_lock`.
+    ("chat_lock::lock_chat", Route("POST /api/chats/:id/lock")),
+    ("chat_lock::relock_chat", Route("POST /api/chats/:id/lock")),
+    ("chat_lock::chat_lock_status", GuiOnly("which chats this window has unlocked, and whether an app password exists; the API never serves a locked chat either way")),
+    ("chat_lock::unlock_chat", GuiOnly("opening a locked chat is the person at the window typing its password; a caller that could do it remotely is the thing the lock keeps out")),
+    ("chat_lock::remove_chat_lock", GuiOnly("removing a lock is the user's decision, with the password, in the window — never an agent's")),
+    ("chat_lock::set_app_lock_password", GuiOnly("setting or changing a password is the user's; an agent that could set one could open every chat it covers")),
     ("chats::get_messages", Route("GET /api/chats/:id/messages")),
     ("chats::rename_chat", Route("POST /api/chats/:id/title")),
     ("chats::generate_title", Route("POST /api/chats/:id/generate-title -> title")),
@@ -765,6 +773,26 @@ pub async fn rename_chat(
     Json(body): Json<Value>,
 ) -> ApiResult<StatusCode> {
     commands::chats::rename_chat(app_state(&st), id, required(&body, "title")?).await?;
+    Ok(NO_CONTENT)
+}
+
+/// Lock with the app password (or re-lock now). A password in the body is
+/// refused rather than ignored: setting a per-chat one is the user's, in the
+/// window, and silently locking with a different password than asked would
+/// leave a chat its owner cannot open.
+pub async fn lock_chat(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+    body: Option<Json<Value>>,
+) -> ApiResult<StatusCode> {
+    if body.as_ref().is_some_and(|b| b.get("password").is_some()) {
+        return Err(crate::error::AppError::Invalid(
+            "the API locks with the app password only; a per-chat password is set in the window".into(),
+        )
+        .into());
+    }
+    crate::chat_lock::lock_with_app_password(&st.db, &id).await?;
+    let _ = st.app.emit("chats-changed", json!({}));
     Ok(NO_CONTENT)
 }
 

@@ -311,6 +311,8 @@ async fn fire_inner(app: &AppHandle, run: &ScheduledRun) -> AppResult<String> {
         Local::now().format("%Y-%m-%d %H:%M"),
     );
     if let Some(watch) = &run.watch_chat_id {
+        // Unattended, so a locked chat is never read into this run (0.20).
+        crate::chat_lock::ensure_reachable(&state.db, None, watch).await?;
         let transcript = crate::tools::subchat::transcript(&state.db, watch).await.unwrap_or_default();
         // The tail: a progress report is about where the work is now.
         let skip = transcript.chars().count().saturating_sub(16_000);

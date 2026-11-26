@@ -107,6 +107,12 @@ export interface Chat {
    * `rollingContextTokens` default. `0` is off for this chat.
    */
   rollingContextTokens: number | null;
+  /**
+   * Chat lock (0.20): its own password (`chat`), the app password (`app`), or
+   * none. Only the kind ever reaches the window. A branch or sub-agent chat is
+   * also covered by its parent's lock — see `lockRoot` in `chatLock.ts`.
+   */
+  lockKind?: "chat" | "app" | null;
   createdAt: number;
   updatedAt: number;
 }

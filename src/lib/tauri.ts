@@ -513,6 +513,22 @@ export const deleteMessagesFrom = (chatId: string, messageId: string) =>
   invoke<void>("delete_messages_from", { chatId, messageId });
 export const getMessages = (chatId: string) =>
   invoke<Message[]>("get_messages", { chatId });
+
+// Chat locks (0.20). Hashing and checking happen in Rust; the window only ever
+// sends a password and hears yes or no.
+export const chatLockStatus = () =>
+  invoke<{ appPasswordSet: boolean; unlocked: string[] }>("chat_lock_status");
+/** With `password`, a per-chat lock; without, the app password. */
+export const lockChat = (chatId: string, password?: string) =>
+  invoke<void>("lock_chat", { chatId, password: password ?? null });
+export const unlockChat = (chatId: string, password: string) =>
+  invoke<boolean>("unlock_chat", { chatId, password });
+export const relockChat = (chatId: string) => invoke<void>("relock_chat", { chatId });
+export const removeChatLock = (chatId: string, password: string) =>
+  invoke<boolean>("remove_chat_lock", { chatId, password });
+/** Set (`current` null), change, or remove (`next` null) the app password. */
+export const setAppLockPassword = (current: string | null, next: string | null) =>
+  invoke<void>("set_app_lock_password", { current, new: next });
 /** Replace a message's text content in place and flag it as user-edited. */
 export const updateMessage = (chatId: string, messageId: string, text: string) =>
   invoke<Message>("update_message", { chatId, messageId, text });

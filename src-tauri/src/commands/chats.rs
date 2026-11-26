@@ -12,7 +12,7 @@ use tauri::{AppHandle, Emitter, State};
 /// `commands::messages` — `query_as::<Chat>` fails to decode if the list and the
 /// struct drift, so there must only ever be one of these.
 pub const CHAT_COLS: &str =
-    "id, title, zone_id, project_id, project_context_enabled, knowledge_enabled, perspective_mode, smart_routing, parent_chat_id, branched_from_message_id, initiated_by_zone_id, context_summary, context_summary_through, plan_mode, spend_limit, rolling_context_tokens, created_at, updated_at";
+    "id, title, zone_id, project_id, project_context_enabled, knowledge_enabled, perspective_mode, smart_routing, parent_chat_id, branched_from_message_id, initiated_by_zone_id, context_summary, context_summary_through, plan_mode, spend_limit, rolling_context_tokens, lock_kind, created_at, updated_at";
 
 /// The global default for whether new chats start with knowledge enabled, read
 /// from the `knowledgeDefaultEnabled` field of the `app_settings` JSON blob.
@@ -35,6 +35,8 @@ pub async fn list_chats(state: State<'_, AppState>) -> AppResult<Vec<Chat>> {
     ))
     .fetch_all(&state.db)
     .await?;
+    let mut rows = rows;
+    crate::chat_lock::redact(&state.db, &mut rows, true).await?;
     Ok(rows)
 }
 
@@ -892,6 +894,7 @@ pub async fn get_messages(
     state: State<'_, AppState>,
     chat_id: String,
 ) -> AppResult<Vec<Message>> {
+    crate::chat_lock::ensure_open(&state.db, &chat_id).await?;
     let rows = sqlx::query_as::<_, Message>(
         "SELECT id, chat_id, role, content, tool_calls, tool_call_id, reasoning, zone_id, active_zone_id, edited, created_at, consult_id
          FROM messages WHERE chat_id = ?1 ORDER BY created_at ASC",
@@ -912,6 +915,8 @@ pub async fn generate_title(
     whole_conversation: Option<bool>,
 ) -> AppResult<String> {
     let whole_conversation = whole_conversation.unwrap_or(false);
+    // Titling sends the conversation to a model.
+    crate::chat_lock::ensure_open(&state.db, &chat_id).await?;
     sqlx::query_as::<_, Chat>(&format!(
         "SELECT {CHAT_COLS} FROM chats WHERE id = ?1"
     ))

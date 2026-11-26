@@ -95,6 +95,10 @@ fn control_definition() -> Tool {
 /// - Answering a tool approval is the model granting itself permission. The
 ///   approval prompt is the boundary between "the model asked" and "the user
 ///   agreed", and a model that can answer one has removed it.
+/// - Opening a chat lock is the same boundary for a chat (0.20). A model may
+///   lock a chat (`POST /api/chats/:id/lock`) but never unlock one, remove a
+///   lock or set a password. The API has no such routes today; these names are
+///   refused anyway, so one added later is not reachable by a model by default.
 fn refusal(path: &str) -> Option<&'static str> {
     let p = path.split('?').next().unwrap_or(path);
     let last = p.rsplit('/').next().unwrap_or("");
@@ -106,6 +110,9 @@ fn refusal(path: &str) -> Option<&'static str> {
         "approval" => {
             Some("a tool approval is the user's answer to give, not the model's")
         }
+        "unlock" | "remove-lock" | "lock-password" | "app-password" => Some(
+            "a chat lock is opened only by the user, with its password, in the window;              agents may lock a chat but never unlock it, remove a lock or set a password",
+        ),
         _ => None,
     }
 }
@@ -206,6 +213,12 @@ mod tests {
         assert!(refusal("/api/chats/abc/messages?wait=true").is_some());
         assert!(refusal("/api/chats/abc/regenerate").is_some());
         assert!(refusal("/api/chats/abc/approval").is_some());
+        // Chat locks: opening, removing and passwords are the user's.
+        assert!(refusal("/api/chats/abc/unlock").is_some());
+        assert!(refusal("/api/chats/abc/remove-lock?x=1").is_some());
+        assert!(refusal("/api/settings/app-password").is_some());
+        // Locking itself is allowed.
+        assert!(refusal("/api/chats/abc/lock").is_none());
         // Everything else is the API's business, not this file's.
         assert!(refusal("/api/settings/theme").is_none());
         assert!(refusal("/api/zones").is_none());

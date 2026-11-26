@@ -4,6 +4,7 @@ import { useApp } from "@/store/app";
 import { useShallow } from "zustand/react/shallow";
 import * as api from "@/lib/tauri";
 import { MessageThread } from "./MessageThread";
+import { LockGate, refreshLockStatus } from "./LockGate";
 import { FileViewer } from "@/components/Workspace/FileViewer";
 import { Tiles } from "./Tiles";
 import { chatOf, chatTab, closeTab, floatTab, focusGroup, isFileTab, isShowing, isStudyTab, navigate, parseLayout, revealSection, sectionOf } from "@/lib/tabLayout";
@@ -135,10 +136,13 @@ export function ChatPanel() {
       if (cancelled) u();
       else unlistenZone = u;
     });
+    refreshLockStatus();
     api.onChatsChanged(() => {
       // A subchat was spawned (or the chat list otherwise changed) — refresh so
       // the sidebar shows it nested under its parent live.
       actionsRef.current.refreshChats();
+      // Or a chat was locked over the API, which closes it here too.
+      refreshLockStatus();
     }).then((u) => {
       if (cancelled) u();
       else unlistenChats = u;
@@ -211,7 +215,8 @@ export function ChatPanel() {
         }}
         renderTab={(tab) => {
           const id = chatOf(tab);
-          if (id) return <ChatPane chatId={id} />;
+          // A locked chat's pane is its unlock screen until it is opened (0.20).
+          if (id) return <LockGate chatId={id}><ChatPane chatId={id} /></LockGate>;
           if (isStudyTab(tab)) return <StudyTab tab={tab} />;
           if (isFileTab(tab) && tab) return <FileViewer key={tab} path={tab} />;
           return (

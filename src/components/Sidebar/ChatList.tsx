@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import type { Chat, ChatTagLink } from "@/lib/types";
-import { Pencil, Trash2, Sparkles, Loader2, FolderInput, FolderMinus, ChevronRight, ShieldAlert, History, FileText, FileType, Columns2, SquarePlus } from "lucide-react";
+import { Pencil, Trash2, Sparkles, Loader2, FolderInput, FolderMinus, ChevronRight, ShieldAlert, History, FileText, FileType, Columns2, SquarePlus, Download, Lock, LockOpen, LockKeyholeOpen } from "lucide-react";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
 import { useShallow } from "zustand/react/shallow";
@@ -10,6 +10,8 @@ import { useChatExport } from "@/lib/useChatExport";
 import { reportError } from "@/lib/reportError";
 import { dragIntoTiles } from "@/components/Chat/Tiles";
 import { chatTab } from "@/lib/tabLayout";
+import { lockRoot, useChatLocks } from "@/lib/chatLock";
+import { LockDialog, RemoveLockDialog, closeLock } from "@/components/Chat/LockGate";
 
 interface Props {
   chats: Chat[];
@@ -63,6 +65,13 @@ export function ChatList({ chats, activeId, onSelect, projectId, limit }: Props)
   const pendingApprovalByChat = useApp((s) => s.pendingApprovalByChat);
   const chatTagLinks = useApp((s) => s.chatTagLinks);
   const [movingTo, setMovingTo] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  // The lock dialogs outlive the menu that opened them.
+  const [lockDialog, setLockDialog] = useState<{ chatId: string; remove: boolean } | null>(null);
+  // Every chat, not just this section's: a lock is inherited from a parent
+  // that may sit in another project.
+  const allChats = useApp((s) => s.chats);
+  const unlockedLocks = useChatLocks((s) => s.unlocked);
   // Folded branch groups persist across sessions (keyed by parent chat id).
   const collapsedBranches = usePersistentSet("collapsedBranches");
   const moveRef = useRef<HTMLDivElement>(null);
@@ -106,6 +115,7 @@ export function ChatList({ chats, activeId, onSelect, projectId, limit }: Props)
   function openMenu(e: React.MouseEvent, chatId: string) {
     e.preventDefault();
     setMovingTo(false);
+    setExporting(false);
     setMenu({ chatId, x: e.clientX, y: e.clientY });
   }
 
@@ -168,6 +178,8 @@ export function ChatList({ chats, activeId, onSelect, projectId, limit }: Props)
       ? zones.find((z) => z.id === chat.initiatedByZoneId)
       : null;
     const tagLinks = tagsByChatId[chat.id] ?? [];
+    const lockedBy = lockRoot(allChats, chat.id);
+    const lockOpen = lockedBy !== null && unlockedLocks.includes(lockedBy);
     const row = (
       <div
         // Ctrl/⌘-click or middle-click opens the chat in a new tab, beside
@@ -215,6 +227,11 @@ export function ChatList({ chats, activeId, onSelect, projectId, limit }: Props)
           </span>
         )}
         {isRegenerating && <Loader2 size={12} className="shrink-0 animate-spin text-[var(--color-accent)]" />}
+        {lockedBy && (
+          <span className="shrink-0 text-[var(--color-text-muted)]" title={lockOpen ? "Unlocked until you lock it or restart" : "Locked"}>
+            {lockOpen ? <LockOpen size={12} /> : <Lock size={12} />}
+          </span>
+        )}
         {/* Tags as dots, inline, so every row is the same height. */}
         {!editing && tagLinks.length > 0 && (
           <span className="flex shrink-0 gap-0.5" title={tagLinks.map((t) => t.name).join(", ")}>
@@ -264,6 +281,9 @@ export function ChatList({ chats, activeId, onSelect, projectId, limit }: Props)
     );
   };
 
+  const menuLockRoot = menu ? lockRoot(allChats, menu.chatId) : null;
+  const menuLockedNow = menuLockRoot !== null && !unlockedLocks.includes(menuLockRoot);
+
   const shown = limit && !showAll && roots.length > limit + 1 ? roots.slice(0, limit) : roots;
   const hidden = roots.length - shown.length;
 
@@ -280,6 +300,10 @@ export function ChatList({ chats, activeId, onSelect, projectId, limit }: Props)
           {hidden > 0 ? `Show ${hidden} more` : "Show less"}
         </button>
       )}
+
+      {lockDialog && (lockDialog.remove
+        ? <RemoveLockDialog chatId={lockDialog.chatId} onClose={() => setLockDialog(null)} />
+        : <LockDialog chatId={lockDialog.chatId} onClose={() => setLockDialog(null)} />)}
 
       {menu && (
         <ContextMenu
@@ -305,47 +329,75 @@ export function ChatList({ chats, activeId, onSelect, projectId, limit }: Props)
                 if (chat) startRename(chat);
               },
             },
-            {
-              label: "Regenerate title",
-              icon: <Sparkles size={14} />,
-              onClick: () => onRegenerate(menu.chatId),
-            },
+            // Content actions are left off a chat that is locked right now:
+            // Rust would refuse them, and the menu should not offer a dead end.
+            ...(!menuLockedNow
+              ? [{
+                  label: "Regenerate title",
+                  icon: <Sparkles size={14} />,
+                  onClick: () => onRegenerate(menu.chatId),
+                }]
+              : []),
             ...(moveItems.length > 0
               ? [{
                   label: movingTo ? "Move to:" : "Move to project…",
                   icon: projectId ? <FolderMinus size={14} /> : <FolderInput size={14} />,
-                  onClick: () => setMovingTo((v) => !v),
+                  onClick: () => { setExporting(false); setMovingTo((v) => !v); },
                   submenu: movingTo ? moveItems.map((item) => ({
                     label: item.label,
                     onClick: () => onMoveToProject(menu.chatId, item.id),
                   })) : undefined,
                 }]
               : []),
-            {
-              label: "View replay session",
-              icon: <History size={14} />,
-              onClick: () => {
-                const id = menu.chatId;
-                setMenu(null);
-                openReplay(id);
-              },
-            },
-            {
-              label: "Export as Markdown",
-              icon: <FileText size={14} />,
-              onClick: () => {
-                setMenu(null);
-                void exportAs("md");
-              },
-            },
-            {
-              label: "Export as PDF",
-              icon: <FileType size={14} />,
-              onClick: () => {
-                setMenu(null);
-                void exportAs("pdf");
-              },
-            },
+            ...(!menuLockedNow
+              ? [
+                  {
+                    label: "View replay session",
+                    icon: <History size={14} />,
+                    onClick: () => {
+                      const id = menu.chatId;
+                      setMenu(null);
+                      openReplay(id);
+                    },
+                  },
+                  {
+                    // One entry for every format, opened in place like "Move to".
+                    label: exporting ? "Export as:" : "Export…",
+                    icon: <Download size={14} />,
+                    onClick: () => { setMovingTo(false); setExporting((v) => !v); },
+                    submenu: exporting
+                      ? [
+                          { label: "Markdown", icon: <FileText size={13} />, onClick: () => { setMenu(null); void exportAs("md"); } },
+                          { label: "PDF", icon: <FileType size={13} />, onClick: () => { setMenu(null); void exportAs("pdf"); } },
+                        ]
+                      : undefined,
+                  },
+                ]
+              : []),
+            // A chat under its parent's lock is locked and opened with it, so
+            // only the chat that holds the lock offers these.
+            ...(menuLockRoot === null
+              ? [{
+                  label: "Lock chat…",
+                  icon: <Lock size={14} />,
+                  onClick: () => { setLockDialog({ chatId: menu.chatId, remove: false }); setMenu(null); },
+                }]
+              : menuLockRoot === menu.chatId
+                ? [
+                    ...(!menuLockedNow
+                      ? [{
+                          label: "Lock now",
+                          icon: <Lock size={14} />,
+                          onClick: () => { const id = menu.chatId; setMenu(null); void closeLock(id).catch(reportError("Couldn't lock the chat")); },
+                        }]
+                      : []),
+                    {
+                      label: "Remove lock…",
+                      icon: <LockKeyholeOpen size={14} />,
+                      onClick: () => { setLockDialog({ chatId: menu.chatId, remove: true }); setMenu(null); },
+                    },
+                  ]
+                : []),
             {
               label: "Delete",
               icon: <Trash2 size={14} />,
@@ -375,7 +427,7 @@ function ContextMenu({
     icon?: React.ReactNode;
     onClick: () => void;
     danger?: boolean;
-    submenu?: { label: string; onClick: () => void }[];
+    submenu?: { label: string; icon?: React.ReactNode; onClick: () => void }[];
   }[];
   moveRef: React.RefObject<HTMLDivElement | null>;
 }) {
@@ -405,6 +457,7 @@ function ContextMenu({
                     onClick={sub.onClick}
                     className="flex w-full items-center gap-2 px-5 py-1.5 text-left text-sm text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
                   >
+                    {sub.icon}
                     {sub.label}
                   </button>
                 ))}

@@ -28,6 +28,25 @@ export function ProvidersTab() {
   // to. Shown here so the Providers list still says which one that is.
   const baseProvider = resolveBaseProvider(providers, zones, baseZoneId);
 
+  // Zones made before 0.20 pin the provider they were installed on. Moving
+  // them to "follow the chat" is the one-step version of re-pointing each by
+  // hand when a provider is added. The base zone keeps its pin: it is what the
+  // rest follow.
+  const refreshZones = useApp((s) => s.refreshZones);
+  const pinned = zones.filter((z) => z.providerId && z.id !== baseZoneId);
+  const [confirmFollow, setConfirmFollow] = useState(false);
+  const [following, setFollowing] = useState(false);
+  async function followTheChat() {
+    setFollowing(true);
+    try {
+      for (const z of pinned) await api.upsertZone({ ...z, providerId: null, model: "" });
+      await refreshZones();
+    } finally {
+      setFollowing(false);
+      setConfirmFollow(false);
+    }
+  }
+
   // A list of a dozen endpoints is a list you scroll rather than read, and the
   // editor used to open above it — so clicking the ninth provider scrolled the
   // one you wanted off the top. Rows are one line each and open in place, and a
@@ -53,6 +72,22 @@ export function ProvidersTab() {
           <Plus size={12} /> Add provider
         </button>
       </div>
+
+      {providers.length > 1 && pinned.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded border border-[var(--color-border)] px-3 py-2 text-xs">
+          <span className="text-[var(--color-text-muted)]">
+            {pinned.length} zone{pinned.length === 1 ? " pins" : "s pin"} a provider, so {pinned.length === 1 ? "it ignores" : "they ignore"} the model a chat picks.
+          </span>
+          <button
+            onClick={() => (confirmFollow ? void followTheChat() : setConfirmFollow(true))}
+            disabled={following}
+            title="Each zone then runs on the base zone's model unless a chat picks another. The base zone keeps its own."
+            className="ml-auto rounded border border-[var(--color-border)] px-2 py-1 hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-50"
+          >
+            {confirmFollow ? `Unpin ${pinned.length} — sure?` : "Make them follow the chat"}
+          </button>
+        </div>
+      )}
 
       {providers.length > 5 && (
         <div className="relative mb-2">

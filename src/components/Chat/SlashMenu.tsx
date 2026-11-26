@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Terminal, FileText, Loader2, Sparkles } from "lucide-react";
+import { Terminal, FileText, Loader2, Sparkles, ClipboardList } from "lucide-react";
 import { useSkillCommands } from "./PromptHighlight";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
@@ -22,11 +22,13 @@ import { reportError } from "@/lib/reportError";
  */
 
 type Entry =
+  | { kind: "builtin"; name: string; description: string }
   | { kind: "skill"; name: string; description: string }
   | { kind: "prompt"; serverId: string; serverName: string; prompt: McpPrompt }
   | { kind: "resource"; serverId: string; serverName: string; resource: McpResource };
 
 function entryKey(e: Entry): string {
+  if (e.kind === "builtin") return `b:${e.name}`;
   if (e.kind === "skill") return `s:${e.name}`;
   return e.kind === "prompt"
     ? `p:${e.serverId}:${e.prompt.name}`
@@ -34,12 +36,12 @@ function entryKey(e: Entry): string {
 }
 
 function entryLabel(e: Entry): string {
-  if (e.kind === "skill") return e.name;
+  if (e.kind === "builtin" || e.kind === "skill") return e.name;
   return e.kind === "prompt" ? e.prompt.name : e.resource.name;
 }
 
 function entryDetail(e: Entry): string | null {
-  if (e.kind === "skill") return e.description || null;
+  if (e.kind === "builtin" || e.kind === "skill") return e.description || null;
   return e.kind === "prompt" ? e.prompt.description : e.resource.description;
 }
 
@@ -47,10 +49,13 @@ export function SlashMenu({
   query,
   onPick,
   onClose,
+  builtins = [],
 }: {
   query: string;
   onPick: (text: string) => void;
   onClose: () => void;
+  /** The app's own commands (`/plan`), listed before the skills. */
+  builtins?: { name: string; description: string }[];
 }) {
   const servers = useApp((s) => s.mcpServers);
   // Skills first (0.20.1): picking one puts `/name` in the prompt, and it runs
@@ -96,7 +101,11 @@ export function SlashMenu({
 
   const results = useMemo(() => {
     const all: Entry[] = [
-      ...skills.map((k): Entry => ({ kind: "skill", name: k.name, description: k.description })),
+      ...builtins.map((b): Entry => ({ kind: "builtin", ...b })),
+      // A skill that shares a built-in's name is shadowed by it.
+      ...skills
+        .filter((k) => !builtins.some((b) => b.name === k.name.toLowerCase()))
+        .map((k): Entry => ({ kind: "skill", name: k.name, description: k.description })),
       ...(entries ?? []),
     ];
     const q = query.toLowerCase();
@@ -107,12 +116,12 @@ export function SlashMenu({
         return hay.includes(q);
       })
       .slice(0, 30);
-  }, [entries, skills, query]);
+  }, [entries, skills, query, builtins]);
 
   useEffect(() => setCursor(0), [query]);
 
   async function choose(e: Entry) {
-    if (e.kind === "skill") {
+    if (e.kind === "builtin" || e.kind === "skill") {
       onPick(`/${e.name} `);
       return;
     }
@@ -172,13 +181,13 @@ export function SlashMenu({
             }`}
           >
             <span className="mt-0.5 shrink-0 text-[var(--color-text-muted)]">
-              {e.kind === "skill" ? <Sparkles size={13} /> : e.kind === "prompt" ? <Terminal size={13} /> : <FileText size={13} />}
+              {e.kind === "builtin" ? <ClipboardList size={13} /> : e.kind === "skill" ? <Sparkles size={13} /> : e.kind === "prompt" ? <Terminal size={13} /> : <FileText size={13} />}
             </span>
             <span className="min-w-0 flex-1">
               <span className="flex items-baseline gap-1.5">
                 <span className="truncate text-sm">{entryLabel(e)}</span>
                 <span className="shrink-0 text-[10px] text-[var(--color-text-muted)]">
-                  {e.kind === "skill" ? "skill" : e.serverName}
+                  {e.kind === "builtin" ? "command" : e.kind === "skill" ? "skill" : e.serverName}
                 </span>
               </span>
               {entryDetail(e) && (

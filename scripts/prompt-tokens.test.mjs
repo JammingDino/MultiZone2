@@ -2,7 +2,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { slashAt, segments, commandsIn, replaceRange } from "../src/lib/promptTokens.ts";
+import { slashAt, segments, commandsIn, replaceRange, withoutCommand } from "../src/lib/promptTokens.ts";
 
 const known = new Set(["review", "commit", "impeccable"]);
 
@@ -38,6 +38,15 @@ test("unknown names, mid-word slashes and trailing punctuation stay prose", () =
   assert.deepEqual(segments("/nope and a/review and /review.", known), [
     { kind: "text", text: "/nope and a/review and /review." },
   ]);
+});
+
+test("an acting command comes out of the prompt with its space, and nothing else does", () => {
+  assert.equal(withoutCommand("/plan", "plan"), "");
+  assert.equal(withoutCommand("/Plan refactor the parser", "plan"), "refactor the parser");
+  assert.equal(withoutCommand("fix this /plan please", "plan"), "fix this please");
+  assert.equal(withoutCommand("do it\n/plan", "plan"), "do it");
+  assert.equal(withoutCommand("see /planning and a/plan", "plan"), "see /planning and a/plan");
+  assert.equal(withoutCommand("/plan why does\n    code()  fail", "plan"), "why does\n    code()  fail");
 });
 
 test("commandsIn lists each invoked command once, in order, any case", () => {

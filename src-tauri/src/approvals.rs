@@ -154,6 +154,10 @@ pub struct Policy {
     shell_deny: Vec<String>,
     edit_allow: Vec<String>,
     edit_deny: Vec<String>,
+    /// Whether the model may enter plan mode by itself. Decided here rather
+    /// than by the State category so "Ask first" holds even where the user
+    /// auto-approves everything else.
+    plan_entry: crate::plans::PlanEntry,
 }
 
 /// The JSON shape stored both in `app_settings.approvals` and in a zone's
@@ -230,6 +234,7 @@ impl Policy {
             shell_deny: [global.shell_deny, zone.shell_deny].concat(),
             edit_allow: [global.edit_allow, zone.edit_allow].concat(),
             edit_deny: [global.edit_deny, zone.edit_deny].concat(),
+            plan_entry: crate::plans::PlanEntry::from_settings(&settings),
         }
     }
 
@@ -244,6 +249,25 @@ impl Policy {
         project_dir: Option<&str>,
     ) -> Decision {
         let category = category_for(tool);
+
+        if tool == "enter_plan_mode" {
+            use crate::plans::PlanEntry;
+            match self.plan_entry {
+                PlanEntry::Ask => return Decision::Ask,
+                // Not offered in this mode, so only a model naming it anyway
+                // gets here.
+                PlanEntry::Manual => {
+                    return Decision::Deny {
+                        reason: "Refused: the user enters plan mode themselves in this app \
+                                 (`/plan`). Carry on with the request, or suggest they type \
+                                 /plan if it needs a plan first."
+                            .into(),
+                        rule: "planEntry",
+                    }
+                }
+                PlanEntry::Auto => {}
+            }
+        }
 
         // The shell lists come first: they are the most specific thing the user
         // has said, and a deny is an answer rather than a question.
@@ -582,7 +606,34 @@ mod tests {
             shell_deny: deny.iter().map(|s| s.to_string()).collect(),
             edit_allow: Vec::new(),
             edit_deny: Vec::new(),
+            plan_entry: crate::plans::PlanEntry::Auto,
         }
+    }
+
+    /// "Ask first" prompts even when every category is auto-approved, and
+    /// "Only when I ask" refuses a model that names the tool anyway.
+    #[test]
+    fn the_plan_entry_setting_decides_enter_plan_mode() {
+        use crate::plans::PlanEntry;
+        let mut p = policy(&[("state", true)], &[], &[]);
+        assert_eq!(p.decide("enter_plan_mode", "{}", 0, None), Decision::Auto);
+        p.plan_entry = PlanEntry::Ask;
+        assert_eq!(p.decide("enter_plan_mode", "{}", 0, None), Decision::Ask);
+        assert_eq!(p.decide("update_plan", "{}", 0, None), Decision::Auto, "only entering is gated");
+        p.plan_entry = PlanEntry::Manual;
+        assert!(matches!(
+            p.decide("enter_plan_mode", "{}", 0, None),
+            Decision::Deny { rule: "planEntry", .. }
+        ));
+    }
+
+    #[test]
+    fn plan_entry_defaults_to_ask() {
+        use crate::plans::PlanEntry;
+        assert_eq!(PlanEntry::from_settings(&json!({})), PlanEntry::Ask);
+        assert_eq!(PlanEntry::from_settings(&json!({ "planEntry": "auto" })), PlanEntry::Auto);
+        assert_eq!(PlanEntry::from_settings(&json!({ "planEntry": "manual" })), PlanEntry::Manual);
+        assert_eq!(PlanEntry::from_settings(&json!({ "planEntry": "bogus" })), PlanEntry::Ask);
     }
 
     /// The same, with the path lists set instead of the shell ones.

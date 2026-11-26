@@ -1323,6 +1323,14 @@ export interface AppSettings {
    */
   planOfferFull: boolean;
   /**
+   * How the model may enter plan mode by itself (`plans::PlanEntry`). The user
+   * always can, with `/plan` or the Plan panel's switch.
+   * "auto"   — like any other tool
+   * "ask"    — through the approval prompt (default)
+   * "manual" — never; the model is not offered the tool
+   */
+  planEntry: "auto" | "ask" | "manual";
+  /**
    * Tokens of repository map injected at session start (0.14.5), or 0 for none.
    *
    * The map is every source file's definitions, ranked by a PageRank over which
@@ -1537,6 +1545,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   reviewQueue: false,
   projectInstructions: true,
   planOfferFull: true,
+  planEntry: "ask",
   repoMapTokens: 1000,
   checkpointMaxMb: 512,
   visionOverrides: {},

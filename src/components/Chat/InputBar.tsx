@@ -13,7 +13,7 @@ import type { InputPart, PendingMode } from "@/lib/types";
 import { attachmentToParts, type PendingAttachment } from "@/lib/attachFiles";
 import { SlashMenu } from "./SlashMenu";
 import { PromptHighlight, insertAtCaret, skillParts, usePromptTokens } from "./PromptHighlight";
-import { commandsIn } from "@/lib/promptTokens";
+import { commandsIn, withoutCommand } from "@/lib/promptTokens";
 import {
   appendTranscript,
   AttachError,
@@ -42,6 +42,10 @@ import {
  *  hands `useSyncExternalStore` a new snapshot on every read, which re-renders
  *  forever — one stable reference is what makes "nothing queued" a no-op. */
 const EMPTY: never[] = [];
+
+/** The composer's own commands. `/plan` toggles plan mode instead of being sent. */
+const BUILTINS = ["plan"];
+const PLAN_SET = new Set(BUILTINS);
 
 /** Sentinel zone id meaning "Quick chat (no zone)" for a one-shot override. */
 const SIMPLE_ZONE_ID = "__simple__";
@@ -98,7 +102,7 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
   // caret's `/word`, and the overlay draws commands and granted folders.
   const { paths: grantedPaths } = useChatPaths(chatId);
   const grantedList = grantedPaths.map((p) => p.path);
-  const tokens = usePromptTokens(text, setText, taRef, grantedList);
+  const tokens = usePromptTokens(text, setText, taRef, grantedList, BUILTINS);
   const slash = tokens.slash;
   // A folder granted while this composer is open — dropped, picked, pasted —
   // goes into the prompt at the caret, so what was handed over is in the words.
@@ -127,6 +131,9 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
   const audioOverrides = useApp((s) => s.appSettings.audioOverrides);
   const videoOverrides = useApp((s) => s.appSettings.videoOverrides);
   const planMode = !!chats.find((c) => c.id === chatId)?.planMode;
+  const setChatPlanMode = useApp((s) => s.setChatPlanMode);
+  const togglePlanMode = () =>
+    setChatPlanMode(chatId, !planMode).catch(reportError("Couldn't switch plan mode"));
   const fileRef = useRef<HTMLInputElement>(null);
   // Focus-the-composer shortcut (Ctrl/Cmd+K): the store bumps a nonce and the
   // mounted composer takes focus.
@@ -372,12 +379,27 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
     // wait for the transcript, and send that. `explicitText` is conversation
     // mode, which is already sending a transcript and must not stop the loop.
     const dictated = explicitText === undefined ? await dictation.finishForSend() : null;
-    const sourceText = explicitText ?? dictated ?? text;
+    const typed = explicitText ?? dictated ?? text;
+    // `/plan` switches the mode first, then anything else typed goes as the
+    // message — "/plan refactor the parser" asks for that plan in one go.
+    const planned = commandsIn(typed, PLAN_SET).length > 0;
+    if (planned) {
+      try {
+        await setChatPlanMode(chatId, !planMode);
+      } catch (e) {
+        reportError("Couldn't switch plan mode")(e);
+        return;
+      }
+    }
+    const sourceText = planned ? withoutCommand(typed, "plan") : typed;
     const hasText = sourceText.trim().length > 0;
-    if (!hasText && pending.length === 0) return;
+    if (!hasText && pending.length === 0) {
+      if (planned) setText("");
+      return;
+    }
 
     setSending(true);
-    const savedText = text;
+    const savedText = planned ? withoutCommand(text, "plan") : text;
     const savedPending = pending;
 
     try {
@@ -391,7 +413,7 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
       }
       // Each `/skill` in the prompt hands the model that skill's instructions,
       // unseen in the transcript, where the word itself stays (0.20.1).
-      parts.push(...(await skillParts(commandsIn(sourceText, tokens.names))));
+      parts.push(...(await skillParts(commandsIn(sourceText, tokens.skillNames))));
 
       for (const att of pending) {
         parts.push(...attachmentToParts(att));
@@ -436,7 +458,21 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
   async function onQueue() {
     if (sending || disabled || pending.length > 0) return;
     const dictated = await dictation.finishForSend();
-    const body = (dictated ?? text).trim();
+    let body = (dictated ?? text).trim();
+    // Mid-turn too: the running turn re-reads the mode after each tool step.
+    if (commandsIn(body, PLAN_SET).length > 0) {
+      try {
+        await setChatPlanMode(chatId, !planMode);
+      } catch (e) {
+        reportError("Couldn't switch plan mode")(e);
+        return;
+      }
+      body = withoutCommand(body, "plan");
+      if (!body) {
+        setText("");
+        return;
+      }
+    }
     if (!body) return;
     setSending(true);
     setText("");
@@ -573,20 +609,20 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
             />
           </div>
         )}
-        {/* Plan mode (0.12.1). Entering is the model's move, not a button: the
-            user asks for a plan in prose and the model calls `enter_plan_mode`.
-            What stays here is the state, because a mode that silently withholds
-            tools has to be visible while it is on — an indicator, not a switch.
-            Leaving is by approving or rejecting the plan in `PlanReview`. */}
+        {/* Plan mode withholds tools, so it has to be visible while it is on.
+            Entered with /plan, the Plan panel's switch, or by the model (as
+            the planEntry setting allows); this chip turns it off. */}
         {planMode && (
           <div className="mb-2 flex items-center gap-2">
-            <span
-              title="Mutating tools are withheld until you approve a plan."
-              className="flex items-center gap-1.5 rounded-full border border-[var(--color-accent)] bg-[var(--color-accent)]/10 px-2.5 py-1 text-xs text-[var(--color-accent)]"
+            <button
+              onClick={togglePlanMode}
+              title="Leave plan mode (or type /plan)"
+              className="flex items-center gap-1.5 rounded-full border border-[var(--color-accent)] bg-[var(--color-accent)]/10 px-2.5 py-1 text-xs text-[var(--color-accent)] hover:bg-[var(--color-accent)]/20"
             >
               <ClipboardList size={11} />
               Plan mode
-            </span>
+              <X size={11} />
+            </button>
             <span className="text-[11px] text-[var(--color-text-muted)]">
               Read-only until you approve a plan.
             </span>
@@ -612,6 +648,7 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
               query={slash}
               onPick={tokens.pick}
               onClose={tokens.dismiss}
+              builtins={[{ name: "plan", description: planMode ? "Leave plan mode" : "Enter plan mode" }]}
             />
           )}
           <div className="relative">

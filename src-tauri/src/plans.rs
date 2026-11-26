@@ -176,11 +176,12 @@ impl PlanStep {
         })
     }
 
-    /// How much of a specification this step actually carries. Used to tell the
-    /// model, in the tool result it gets back, that it filed labels rather than
-    /// a plan — at the point where it can still fix it.
+    /// A step with no real detail at all — a bare heading. The bar is low on
+    /// purpose: it used to be 120 characters, and nagging every short step to
+    /// be rewritten "with the alternatives you rejected" is what made plans
+    /// read as essays.
     pub fn is_thin(&self) -> bool {
-        self.detail.as_deref().map(str::trim).unwrap_or("").len() < 120
+        self.detail.as_deref().map(str::trim).unwrap_or("").len() < 40
     }
 }
 
@@ -387,6 +388,44 @@ pub async fn in_plan_mode(db: &SqlitePool, chat_id: &str) -> bool {
         .ok()
         .flatten()
         .unwrap_or(false)
+}
+
+/// How the model may take a chat into plan mode by itself — the `planEntry`
+/// app setting. The user can always enter it (`/plan`, the Plan panel switch).
+///
+/// Defaults to `Ask`: left on `Auto` the model entered the mode for requests
+/// that did not need a plan, and the user had no say until the plan was filed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PlanEntry {
+    /// `enter_plan_mode` runs like any other tool.
+    Auto,
+    /// `enter_plan_mode` always goes through the approval prompt.
+    #[default]
+    Ask,
+    /// The model is not offered `enter_plan_mode` at all.
+    Manual,
+}
+
+impl PlanEntry {
+    pub fn from_settings(settings: &Value) -> Self {
+        match settings.get("planEntry").and_then(Value::as_str) {
+            Some("auto") => Self::Auto,
+            Some("manual") => Self::Manual,
+            _ => Self::Ask,
+        }
+    }
+
+    pub async fn load(db: &SqlitePool) -> Self {
+        let raw: Option<String> =
+            sqlx::query_scalar("SELECT value FROM settings WHERE key = 'app_settings'")
+                .fetch_optional(db)
+                .await
+                .ok()
+                .flatten();
+        raw.and_then(|s| serde_json::from_str::<Value>(&s).ok())
+            .map(|v| Self::from_settings(&v))
+            .unwrap_or_default()
+    }
 }
 
 pub async fn set_plan_mode(db: &SqlitePool, chat_id: &str, on: bool) -> AppResult<()> {
@@ -921,65 +960,32 @@ pub fn task_list_block(plan: &Plan) -> String {
 
 /// The system snippet a chat in plan mode gets.
 ///
-/// Structured as phases because every harness that does this well does: a model
-/// told only "plan first" investigates for one file and then writes a plan about
-/// the codebase it imagines. The last paragraph is the part unique to us — the
-/// tools are genuinely gone, so a model that tries one is not being disobedient,
-/// it is wasting its own step.
+/// Investigate first (a plan written without looking describes an imagined
+/// codebase), then a *short* plan. The earlier version asked every step for
+/// rejected alternatives, risks and acceptance criteria in "several
+/// paragraphs", and got plans nobody wanted to read before approving.
 pub fn plan_mode_preamble() -> String {
     "## Plan mode is active\n\n\
-     The user wants the work described before any of it happens. Nothing you do this turn may \
-     change anything: every tool that writes, moves, deletes, runs a command, or reaches the \
-     network to change something has been withheld from your toolset for the duration.\n\n\
-     Everything that only *reads* is still there and you are expected to use it hard. Search the \
-     web (`smart_search`, `smart_fetch`, `smart_crawl`), read the files, list the directories, \
-     search the codebase, read your memory and the knowledge base. There is no budget on this you \
-     need to conserve. A plan written without looking is a guess with numbering.\n\n\
-     ### Work in five phases\n\n\
-     **1. Ask.** If the request is ambiguous in a way that changes the plan — scope, audience, \
-     length, which of two readings, what already exists — call `ask_user` *now*, before any \
-     research. Ask several things in one call rather than one at a time. Do not ask what you \
-     could find out yourself, and do not ask permission to start.\n\n\
-     **2. Research.** Read what is actually involved rather than what you assume exists. Follow \
-     the leads you find. Stop when new searches keep returning what you already have.\n\n\
-     **3. Draft, one step at a time.** Call `draft_plan_step` repeatedly. The first call carries \
-     the `title`, the `goal` and the `context`; each call after it adds one step. Finish a step \
-     properly before you think about the next one — that is what this tool exists for, and it is \
-     why you do not have to compress the whole plan into one argument blob.\n\n\
-     **4. Check.** Re-read what you have drafted. Look for the step you have not thought about: \
-     the migration, the test, the caller elsewhere that this breaks, the thing that has to happen \
-     first. Rewrite a weak step with `draft_plan_step` and `replace_index`.\n\n\
-     **5. Propose.** Call `exit_plan_mode` to hand the finished plan to the user.\n\n\
-     ### What a step has to contain\n\n\
-     A step is a heading. The plan is the paragraph under it. `step` names the work in a few \
-     words; `detail` is the specification, and it is the part that matters:\n\n\
-     - the approach, **and the alternatives you rejected, and why**\n\
-     - the concrete parameters — the numbers, names, formats, thresholds, versions, sizes. Not \
-       \"choose a suitable font size\" but \"11pt body, 1.15 leading, 65–75 characters per line\"\n\
-     - what specifically goes wrong here, and what you would do about it\n\
-     - anything the user should push back on before it happens\n\n\
-     Write `detail` as Markdown — headings, lists and tables are all fine, and a table is often \
-     the right shape for a set of parameters. Give `acceptance` too: how anyone tells this step \
-     is genuinely finished rather than nominally done.\n\n\
-     `context` is the part of the plan that is not a step at all: the scope decision you made and \
-     the ones you turned down, the assumptions everything rests on, what the research turned up, \
-     and what is still open. If you had to guess at something, say so there.\n\n\
-     Eight steps of one line each is not a plan; it is a table of contents. If a step's detail \
-     would be one obvious sentence, that step is too small — fold it into its neighbour.\n\n\
+     The user wants to agree the work before it happens. Tools that change anything are \
+     withheld this turn; every read-only tool is still there. Use them: read the files and \
+     search before you plan. If the request is ambiguous in a way that changes the plan, ask \
+     with `ask_user` first, several questions in one call.\n\n\
+     ### Keep the plan short and scannable\n\n\
+     The user should be able to read it in under a minute.\n\n\
+     - **3–7 steps** for most work. Each `step` is a few words naming the change.\n\
+     - **`detail`: one to three lines** — what changes and how, with the specific names, files \
+       or values that matter. No essays, no restating the request, no list of alternatives \
+       unless the choice is genuinely open.\n\
+     - **`files`**: the files the step touches, when there are any.\n\
+     - **`context`**: a few lines at most — a key decision or assumption, and open questions \
+       only if they are real. Leave it out if there is nothing to say.\n\
+     - Set `risk` above low only when it is.\n\n\
      ### Filing it\n\n\
-     `exit_plan_mode` hands the plan to the user, who reads, edits and approves it. That call \
-     *is* the request for approval — do not also ask in prose whether the plan is acceptable, and \
-     do not restate the plan in your answer: they are looking at it. If the answer is no, you \
-     stay in plan mode with their comments and revise.\n\n\
-     The plan is also written to a Markdown file, and `read_plan` reads it back — so a plan \
-     agreed today is still readable in full next week, after this conversation has been \
-     compacted.\n\n\
-     If the request turns out to be a question with a short answer, answer it and do not call \
-     `exit_plan_mode` — you are already here, so say so briefly rather than filing a two-step \
-     plan for something you could have done. But a substantial deliverable *does* want a plan \
-     whether or not it changes a file: a report, a document, a design, a piece of research, an \
-     analysis. What makes a plan worth having is that the shape of the work should be agreed \
-     before the effort goes in — not whether the work happens to end in a file write."
+     Pass the whole plan to `exit_plan_mode` in one call (use `draft_plan_step` only for a long \
+     plan you want to build up). That call is the request for approval: do not also ask in \
+     prose, and do not restate the plan in your answer. If the user turns it down, revise.\n\n\
+     If the request turns out to be a question with a short answer, just answer it and do not \
+     file a plan."
         .to_string()
 }
 

@@ -361,14 +361,29 @@ export function AgentsTab() {
         />
       </section>
       <section>
-        <h3 className="mb-1 text-sm font-medium">Planning offer</h3>
-
-        <ToggleRow
-          label="Full planning offer in the system prompt"
-          description="Off sends one line instead (~270 tokens less)."
-          checked={appSettings.planOfferFull}
-          onChange={(v) => setAppSettings({ planOfferFull: v })}
+        <h3 className="mb-1 text-sm font-medium">Plan mode</h3>
+        <p className="mb-3 text-xs text-[var(--color-text-muted)]">
+          You can always turn it on with <span className="font-mono">/plan</span> or the switch in the Plan panel. This is whether the model may switch it on itself.
+        </p>
+        <OptionCards
+          value={appSettings.planEntry}
+          onChange={(planEntry) => setAppSettings({ planEntry })}
+          options={[
+            ["auto",   "Automatic",       "The model switches to plan mode whenever it thinks the work needs a plan."],
+            ["ask",    "Ask first",       "The model can ask to switch, and you approve or decline."],
+            ["manual", "Only when I ask", "The model never switches by itself."],
+          ]}
         />
+        {appSettings.planEntry !== "manual" && (
+          <div className="mt-3">
+            <ToggleRow
+              label="Full planning offer in the system prompt"
+              description="Off sends one line instead (~270 tokens less)."
+              checked={appSettings.planOfferFull}
+              onChange={(v) => setAppSettings({ planOfferFull: v })}
+            />
+          </div>
+        )}
       </section>
       <section>
         <h3 className="mb-1 text-sm font-medium">Repository map</h3>

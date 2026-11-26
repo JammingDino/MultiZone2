@@ -69,6 +69,16 @@ export function commandsIn(text: string, commands: Set<string>): string[] {
   return seen;
 }
 
+/**
+ * The prompt with each `/name` word taken out, and the space after it — for a
+ * command that acts rather than being sent (`/plan`). Other spacing is left
+ * alone, so indented code in the prompt survives.
+ */
+export function withoutCommand(text: string, name: string): string {
+  const word = name.replace(/\./g, "\\.");
+  return text.replace(new RegExp(`(^|\\s)/${word}(?=\\s|$)[ \\t]?`, "gi"), "$1").trim();
+}
+
 /** Put `insert` in place of `[start, end)`, returning the text and where the caret goes. */
 export function replaceRange(text: string, start: number, end: number, insert: string): { text: string; caret: number } {
   return { text: text.slice(0, start) + insert + text.slice(end), caret: start + insert.length };

@@ -12,17 +12,24 @@ export function usePromptTokens(
   setText: (t: string) => void,
   taRef: RefObject<HTMLTextAreaElement | null>,
   paths: string[],
+  /** The app's own commands this composer understands (`plan`), drawn like skills. */
+  builtins: string[] = [],
 ) {
   const [caret, setCaret] = useState(0);
   const [dismissed, setDismissed] = useState(false);
+  // A send empties the box without an onChange; the next `/` should open the menu.
+  useEffect(() => { if (!text) setDismissed(false); }, [text]);
   const word = dismissed ? null : slashAt(text, caret);
   const skills = useSkillCommands();
-  const highlighted = hasTokens(text, skills.names, paths);
+  const names = builtins.length ? new Set([...skills.names, ...builtins]) : skills.names;
+  const highlighted = hasTokens(text, names, paths);
   const overlayRef = useRef<HTMLDivElement>(null);
   return {
     /** The menu's query, or null when the caret is not in a `/word`. */
     slash: word?.query ?? null,
-    names: skills.names,
+    names,
+    /** Skills only: what `skillParts` should look up. */
+    skillNames: skills.names,
     highlighted,
     overlayRef,
     /** Put a pick in place of the caret's `/word`. */

@@ -1,15 +1,13 @@
 //! `enter_plan_mode` / `exit_plan_mode` (0.12.0) — the model's own hand on the
 //! mode switch.
 //!
-//! Plan mode is a state of the chat, and since 0.12.1 these two tools are the
-//! only way a chat enters and leaves it — the composer toggle is gone. A button
-//! asked the user to decide, before typing, whether what they were about to type
-//! was big enough to need a plan; that is the judgement they came to the model
-//! for. Asking for a plan does it instead, and so does the case that matters
-//! most: a request that sounded small turns out to rewrite six files, and the
-//! model is the first to know. Every harness worth copying gives the model that
-//! move — PI's `EnterPlanMode()`, Claude Code's and Codex's exits — so it lives
-//! here too, in both directions:
+//! Plan mode is a state of the chat. The user moves it with `/plan` or the Plan
+//! panel's switch; the model moves it with these tools, subject to the
+//! `planEntry` setting (`plans::PlanEntry`: automatic, ask first, or never).
+//! The model's move matters for the case where a request that sounded small
+//! turns out to rewrite six files, and the model is the first to know. Every
+//! harness worth copying gives the model that move — PI's `EnterPlanMode()`,
+//! Claude Code's and Codex's exits — so it lives here too, in both directions:
 //!
 //! - `enter_plan_mode` takes the model *into* planning mid-turn: the mutating
 //!   tools go away from the next step onward, and it keeps investigating with
@@ -95,18 +93,12 @@ fn step_schema() -> Value {
             "detail": {
                 "type": "string",
                 "description":
-                    "The specification, as Markdown, and the part that matters. The approach and \
-                     the alternatives you rejected with the reason; the concrete parameters — \
-                     numbers, names, formats, thresholds, versions — not \"choose a suitable \
-                     value\"; what specifically goes wrong here and what you would do about it; \
-                     anything the user should push back on before it happens. Headings, lists and \
-                     tables are all fine. Several paragraphs is normal."
+                    "One to three lines of Markdown: what changes and how, with the specific \
+                     names, files or values that matter. Not an essay."
             },
             "acceptance": {
                 "type": "string",
-                "description":
-                    "How anyone tells this step is genuinely finished and correct, rather than \
-                     nominally done."
+                "description": "Optional. One line: how to tell the step is done, when that is not obvious."
             },
             "files": {
                 "type": "array",
@@ -139,13 +131,11 @@ pub fn draft_step_definition() -> Tool {
         function: ToolFunction {
             name: "draft_plan_step".into(),
             description:
-                "Write one step of your plan, in depth, and append it to the plan document. Call \
-                 this once per step, in order — finish a step properly before you start thinking \
-                 about the next one. The first call should also carry `title`, `goal` and \
-                 `context`; later calls need only `step`. Use `replace_index` to rewrite a step \
-                 you have already drafted. Nothing is shown to the user until you call \
-                 `exit_plan_mode`, so drafting is free: a step you are unhappy with can be \
-                 rewritten before anyone sees it."
+                "For a long plan: write one step and append it to the plan document, one call \
+                 per step, in order. A short plan goes straight to `exit_plan_mode` instead. The \
+                 first call should also carry `title`, `goal` and `context`; later calls need \
+                 only `step`. Use `replace_index` to rewrite a step you have already drafted. \
+                 Nothing is shown to the user until you call `exit_plan_mode`."
                     .into(),
             parameters: json!({
                 "type": "object",
@@ -161,11 +151,9 @@ pub fn draft_step_definition() -> Tool {
                     "context": {
                         "type": "string",
                         "description":
-                            "Markdown. The part of the plan that is not a step: the scope decision \
-                             you made and the ones you rejected, the assumptions everything rests \
-                             on, what your research turned up (with sources), and what is still \
-                             open or guessed at. Send it on the first call; sending it again \
-                             replaces it."
+                            "Optional, a few lines of Markdown: a key decision or assumption, and \
+                             open questions only if they are real. Send it on the first call; \
+                             sending it again replaces it."
                     },
                     "step": step_schema(),
                     "replace_index": {
@@ -226,15 +214,13 @@ pub fn exit_definition() -> Tool {
         function: ToolFunction {
             name: "exit_plan_mode".into(),
             description:
-                "File your finished plan and hand it to the user, who reads, edits and approves \
-                 it before anything runs. This call is the request for approval — do not also ask \
-                 in prose, and do not restate the plan in your answer: they are looking at it. If \
-                 you drafted with `draft_plan_step`, call this with no arguments and the draft is \
-                 filed as it stands. Otherwise pass the whole plan here. Use it only once you \
-                 have actually looked into the work — the files, the sources, whatever the \
-                 request rests on. A question with a short answer does not need a plan; a \
-                 substantial deliverable does, whether or not it changes a file. The turn ends \
-                 here; execution begins when the user approves."
+                "File your plan and hand it to the user, who reads, edits and approves it before \
+                 anything runs. Keep it short: a few steps, a line or three of detail each. This \
+                 call is the request for approval — do not also ask in prose, and do not restate \
+                 the plan in your answer. Pass the whole plan here; if you drafted with \
+                 `draft_plan_step`, call this with no arguments instead. Use it once you have \
+                 looked into the work. The turn ends here; execution begins when the user \
+                 approves."
                     .into(),
             parameters: json!({
                 "type": "object",
@@ -250,15 +236,14 @@ pub fn exit_definition() -> Tool {
                     "context": {
                         "type": "string",
                         "description":
-                            "Markdown. Scope decisions and the ones rejected, assumptions, what \
-                             the research turned up, what is still open."
+                            "Optional, a few lines: a key decision or assumption, and open \
+                             questions only if they are real."
                     },
                     "steps": {
                         "type": "array",
                         "description":
-                            "The plan, in order. Omit entirely if you drafted it with \
-                             `draft_plan_step`. Each step needs a real `detail` — a list of \
-                             headings is not a plan.",
+                            "The plan, in order — usually 3 to 7 steps. Omit entirely if you \
+                             drafted it with `draft_plan_step`.",
                         "items": step_schema()
                     }
                 },
@@ -367,9 +352,8 @@ pub async fn draft_step(
             "docPath": plan.doc_path,
             "steps": count,
             "note": if thin {
-                "Step recorded, but its `detail` is very short — that is a heading, not a plan. \
-                 Rewrite it with `replace_index` and give the approach, the alternatives you \
-                 rejected, and the concrete parameters. Then draft the next step."
+                "Step recorded, but it has no `detail`. Add a line or two on what changes and \
+                 how with `replace_index`, then draft the next step."
             } else {
                 "Step recorded. Draft the next one, or call `exit_plan_mode` when the plan is \
                  complete. Nothing is shown to the user until you do."

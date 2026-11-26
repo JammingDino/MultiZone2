@@ -6,6 +6,8 @@ import { useIsNarrow } from "@/lib/useIsNarrow";
 import { ResizeHandle, usePanelWidth } from "@/components/common/ResizeHandle";
 import { useBackDismiss } from "@/lib/useBackDismiss";
 import { usePersistentChoice } from "@/lib/uiState";
+import { reportError } from "@/lib/reportError";
+import { Toggle } from "@/components/common/Toggle";
 import { PLAN_APPROVED, systemTurnParts } from "@/lib/systemTurn";
 import { TaskPanel } from "@/components/Chat/TaskPanel";
 import { PlanReview } from "@/components/Chat/PlanReview";
@@ -241,8 +243,22 @@ function PlanSection({ chatId }: { chatId: string }) {
   const rejectPlan = useApp((s) => s.rejectPlan);
   const [planBusy, setPlanBusy] = useState(false);
   const livePlans = (plans ?? []).filter((p) => ["approved", "executing", "stopped"].includes(p.status));
+  const planMode = useApp((s) => !!s.chats.find((c) => c.id === chatId)?.planMode);
+  const setChatPlanMode = useApp((s) => s.setChatPlanMode);
   return (
     <>
+      <div
+        onClick={() => setChatPlanMode(chatId, !planMode).catch(reportError("Couldn't switch plan mode"))}
+        className="-mx-1 mb-2 flex cursor-pointer items-center justify-between gap-2 rounded px-1 py-1 hover:bg-[var(--color-panel-hover)]"
+      >
+        <span className="min-w-0">
+          <span className="font-medium text-[var(--color-text)]">Plan mode</span>
+          <span className="ml-1.5 text-[11px] text-[var(--color-text-muted)]">
+            {planMode ? "read-only until you approve a plan" : "off · or type /plan"}
+          </span>
+        </span>
+        <Toggle checked={planMode} onChange={(on) => setChatPlanMode(chatId, on).catch(reportError("Couldn't switch plan mode"))} />
+      </div>
       {pendingPlan ? (
         <PlanReview
           plan={pendingPlan}

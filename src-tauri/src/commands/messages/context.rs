@@ -312,7 +312,10 @@ pub async fn build_system_snippets(
         snippets.push((SnippetKind::PlanMode, crate::plans::plan_mode_preamble()));
     } else if let Some(plan) = crate::plans::active_plan(db, chat_id, None).await {
         snippets.push((SnippetKind::TaskList, crate::plans::task_list_block(&plan)));
-    } else if !zone_tool_ids.is_empty() && !is_perspective {
+    } else if !zone_tool_ids.is_empty()
+        && !is_perspective
+        && crate::plans::PlanEntry::load(db).await != crate::plans::PlanEntry::Manual
+    {
         // Planning is available and off (0.14.6). Saying so is the fix for the
         // mode's real failure — not misuse but disuse. It lived entirely in one
         // tool description among twenty, while the loop preamble just above
@@ -1299,7 +1302,10 @@ pub(super) async fn apply_plan_mode(
         // take the whole conversation — and the other participants' turns —
         // into planning on everyone's behalf. Same reasoning as `ask_user`:
         // the shared controls belong to the primary.
-        if has_tools && !is_perspective {
+        if has_tools
+            && !is_perspective
+            && crate::plans::PlanEntry::load(db).await != crate::plans::PlanEntry::Manual
+        {
             tools.push(crate::tools::plan_mode::enter_definition());
         }
         // Out of plan mode `read_plan` earns its place only when there is a

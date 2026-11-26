@@ -2017,7 +2017,9 @@ async fn run_participant_turn(
     // prompt costs the prefix cache for the whole conversation behind it. It
     // only ever reminds — the mode is still the model's to enter, so a false
     // positive is one wasted sentence rather than a plan nobody asked for.
-    if !planning && !tools.is_empty() {
+    // Keyed on the tool being offered: under "Only when I ask" it is not, and
+    // the nudge would point at nothing.
+    if !planning && tools.iter().any(|t| t.function.name == "enter_plan_mode") {
         if let Some(text) = last_user_text(&api_messages) {
             if crate::plans::reads_as_plan_request(&text) {
                 push_system_note(&mut api_messages, crate::plans::plan_request_nudge());
@@ -2899,7 +2901,11 @@ async fn run_participant_turn(
                     format!(
                         "`{}` was refused by {}",
                         tc.function.name,
-                        if *rule == "editDeny" { "a path rule" } else { "a command rule" }
+                        match *rule {
+                            "editDeny" => "a path rule",
+                            "planEntry" => "the plan mode setting",
+                            _ => "a command rule",
+                        }
                     ),
                     Some(serde_json::json!({
                         "tool": tc.function.name,
@@ -3876,6 +3882,29 @@ mod tests {
         let mut tools: Vec<Tool> = Vec::new();
         apply_plan_mode(&pool, "c1", &mut tools, false).await;
         assert!(tools.is_empty());
+    }
+
+    /// "Only when I ask": the model is neither offered the tool nor told about
+    /// it, and the user's own switch still takes the chat into the mode.
+    #[tokio::test]
+    async fn only_when_i_ask_withholds_the_way_in() {
+        let pool = pool_with_long_chat().await;
+        sqlx::query(
+            "INSERT INTO settings (key, value) VALUES ('app_settings', '{\"planEntry\": \"manual\"}')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let mut tools = vec![tool_named("smart_search"), tool_named("write")];
+        apply_plan_mode(&pool, "c1", &mut tools, false).await;
+        assert!(!names(&tools).contains(&"enter_plan_mode"));
+        let prompt = system_prompt_for(&pool, &zone_with_compact_tool()).await;
+        assert!(!prompt.contains("enter_plan_mode` is how"), "no offer for a tool not offered");
+
+        crate::plans::set_plan_mode(&pool, "c1", true).await.unwrap();
+        let mut tools = vec![tool_named("smart_search"), tool_named("write")];
+        assert!(apply_plan_mode(&pool, "c1", &mut tools, false).await);
+        assert!(names(&tools).contains(&"exit_plan_mode"));
     }
 
     /// Inside the mode: the mutating tools are gone from the request itself, and

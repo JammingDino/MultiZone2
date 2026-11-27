@@ -82,7 +82,17 @@ pub async fn list_chat_paths(state: State<'_, AppState>, chat_id: String) -> App
 /// Whether a pasted path exists, and is a folder. Metadata only.
 #[tauri::command]
 pub async fn stat_path(path: String) -> AppResult<PathStat> {
-    Ok(crate::grants::stat(&path))
+    off_runtime(move || Ok(crate::grants::stat(&path))).await
+}
+
+/// Run filesystem work on the blocking pool. An `open` can wait indefinitely —
+/// a network share, or macOS holding it behind a privacy prompt nobody has
+/// answered — and on an async worker that stalls every other request queued
+/// behind it, the HTTP API's accept loop included.
+async fn off_runtime<T: Send + 'static>(f: impl FnOnce() -> AppResult<T> + Send + 'static) -> AppResult<T> {
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|e| AppError::Other(format!("filesystem task failed: {e}")))?
 }
 
 /// Which project, if any, a path belongs to — for opening a chat in it.
@@ -96,6 +106,10 @@ pub async fn path_context(state: State<'_, AppState>, path: String) -> AppResult
 /// beside a project — but the reader decides what to open.
 #[tauri::command]
 pub async fn list_dir(path: String) -> AppResult<Vec<DirEntry>> {
+    off_runtime(move || list_dir_now(path)).await
+}
+
+fn list_dir_now(path: String) -> AppResult<Vec<DirEntry>> {
     let dir = Path::new(&path);
     if !dir.is_dir() {
         return Err(AppError::Invalid(format!("{path} is not a directory")));
@@ -293,6 +307,17 @@ pub async fn write_workspace_file(path: String, content: String) -> AppResult<Fi
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn list_dir_runs_off_the_runtime_and_puts_folders_first() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("a.txt"), "x").unwrap();
+        std::fs::create_dir(d.path().join("z")).unwrap();
+        let got = list_dir(d.path().to_string_lossy().into_owned()).await.unwrap();
+        let names: Vec<_> = got.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, ["z", "a.txt"]);
+        assert!(list_dir(d.path().join("a.txt").to_string_lossy().into_owned()).await.is_err());
+    }
 
     /// The case that sent this back to the drawing board: a UTF-16 `.ini` is
     /// half NUL bytes, and the old sniff called it binary.

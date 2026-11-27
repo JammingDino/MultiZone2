@@ -19,6 +19,7 @@ import { useDialogFocus } from "@/lib/useDialogFocus";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import * as api from "@/lib/tauri";
 import { useZoneModel } from "@/lib/useZoneModel";
+import { runParams, type SavedRun } from "@/lib/types";
 import { TABS } from "@/components/Workspace/WorkspacePanel";
 import { openSettingAt } from "@/components/Settings/SettingsSearch";
 import { SETTINGS_INDEX } from "@/lib/settingsIndex.generated";
@@ -74,6 +75,8 @@ export function CommandPalette() {
   const savedRuns = useApp((s) => s.savedRuns);
   const refreshSavedRuns = useApp((s) => s.refreshSavedRuns);
   const activeChatId = useApp((s) => s.activeChatId);
+  // A saved run with parameters asks for them here before it starts (0.15.4).
+  const [form, setForm] = useState<{ run: SavedRun; values: Record<string, string> } | null>(null);
 
   useDismissOnEscape(open, close);
   useBackDismiss(open, close);
@@ -95,6 +98,9 @@ export function CommandPalette() {
       const id = window.requestAnimationFrame(() => inputRef.current?.focus());
       return () => window.cancelAnimationFrame(id);
     }
+    // Cleared on close, not on open: a form left over would render for one
+    // frame on the next open and take the focus the search box should get.
+    setForm(null);
   }, [open]);
 
   const items = useMemo<Item[]>(() => {
@@ -171,13 +177,11 @@ export function CommandPalette() {
         detail: r.description ?? undefined,
         group: "Saved runs",
         icon: <Play size={14} />,
-        run: go(async () => {
-          const rendered = await api.renderSavedRun(r.id);
-          const chat = await api.createChat(rendered.zoneId, null);
-          await s.refreshChats();
-          await s.setActiveChat(chat.id);
-          s.setComposerDraft(rendered.prompt);
-        }),
+        run: () => {
+          const params = runParams(r);
+          if (params.length === 0) return void startRun(r, {});
+          setForm({ run: r, values: Object.fromEntries(params.map((p) => [p.name, p.default ?? ""])) });
+        },
       });
     }
 
@@ -244,6 +248,72 @@ export function CommandPalette() {
   }, [cursor, results]);
 
   if (!open) return null;
+
+  async function startRun(r: SavedRun, values: Record<string, string>) {
+    close();
+    try {
+      const s = useApp.getState();
+      const rendered = await api.renderSavedRun(r.id, values);
+      const chat = await api.createChat(rendered.zoneId, null);
+      await s.refreshChats();
+      await s.setActiveChat(chat.id);
+      s.setComposerDraft(rendered.prompt);
+    } catch (e) {
+      console.error("saved run failed", e);
+    }
+  }
+
+  if (form) {
+    const params = runParams(form.run);
+    const blank = params.filter((p) => p.required && !form.values[p.name]?.trim()).map((p) => p.label || p.name);
+    const submit = (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!blank.length) void startRun(form.run, form.values);
+    };
+    return (
+      <div className="mz-safe-overlay fixed inset-0 z-[60] flex items-start justify-center bg-black/40 pt-[12vh] backdrop-blur-[2px]" onMouseDown={close}>
+        <form
+          ref={panelRef as React.RefObject<HTMLFormElement & HTMLDivElement>}
+          onSubmit={submit}
+          onMouseDown={(e) => e.stopPropagation()}
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Run ${form.run.name}`}
+          className="flex max-h-[64vh] w-full max-w-xl flex-col gap-3 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-4 shadow-2xl"
+        >
+          <div className="flex items-center gap-2">
+            <Play size={14} className="text-[var(--color-text-muted)]" />
+            <span className="min-w-0 flex-1 truncate text-sm font-medium">{form.run.name}</span>
+          </div>
+          {params.map((p, i) => (
+            <label key={p.name} className="block">
+              <span className="mb-1 block text-xs text-[var(--color-text-muted)]">
+                {p.label || p.name}{p.required ? " *" : ""}
+              </span>
+              <input
+                autoFocus={i === 0}
+                value={form.values[p.name] ?? ""}
+                onChange={(e) => setForm({ ...form, values: { ...form.values, [p.name]: e.target.value } })}
+                className="w-full rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1.5 text-sm outline-none focus:border-[var(--color-accent)]"
+              />
+              {p.description && <span className="mt-0.5 block text-[11px] text-[var(--color-text-muted)]">{p.description}</span>}
+            </label>
+          ))}
+          <div className="flex items-center gap-2">
+            <span className="mr-auto text-[11px] text-[var(--color-text-muted)]">
+              {blank.length ? `Needs ${blank.join(", ")}` : "Opens a new chat with the prompt filled in, not sent."}
+            </span>
+            <button type="button" onClick={() => setForm(null)} className="rounded border border-[var(--color-border)] px-3 py-1.5 text-sm">
+              Back
+            </button>
+            <button type="submit" disabled={blank.length > 0} className="rounded bg-[var(--color-accent)] px-3 py-1.5 text-sm text-white disabled:opacity-50">
+              Run
+            </button>
+          </div>
+        </form>
+      </div>
+    );
+  }
 
   function onKeyDown(e: React.KeyboardEvent) {
     if (e.key === "ArrowDown") {

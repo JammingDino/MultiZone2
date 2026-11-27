@@ -35,7 +35,7 @@ Open items from 0.1.x–0.16.x, whose full entries are in [RELEASE_HISTORY.md](R
 - [ ] **0.15.2** — Runtime-test: fork a chat that has two sub-agent runs and an earlier branch at each scope, and confirm the tree that arrives matches what was asked for
 - [ ] **0.15.3** — Runtime-test against a server that offers both — the renderers are tested against the shapes the spec allows, but nothing here has met a real server yet
 - [ ] **0.15.4** — **The editor.** Writing a run in the app — name, template, parameter rows, zone — plus export and import as one file, which is the "shareable" half of the item and the reason parameters exist rather than a saved prompt
-- [ ] **0.15.4** — Runtime-test: save a run with two parameters, run it from the palette, confirm the staged prompt is filled and the chat opened in the right zone
+- [x] **0.15.4** — Runtime-test: save a run with two parameters, run it from the palette, confirm the staged prompt is filled and the chat opened in the right zone — *passed 2026-11-28: a run saved over the API with two defaulted parameters and a pinned zone opens a new chat in that zone with the filled prompt staged, not sent. The palette always takes the defaults — there is no form to change them before running; that belongs with the editor item below*
 - [ ] **0.15.4** — Quick assistant — a global-shortcut mini window over the base zone, the fast end of the fast-to-thorough spectrum the roadmap describes
 
 ---

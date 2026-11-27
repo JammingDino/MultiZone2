@@ -418,13 +418,13 @@ Adding a provider in Claude Code is one step and then you work. Here it was the 
 
 Claude Code runs a slash command only as the whole message. Here a command is a word in the prompt: `/review the parser, then /commit` is one message.
 - [x] `/` opens the menu anywhere a word starts (`slashAt`), not only in the first column — skills and skill packs first, then MCP prompts and resources, filtered as you type. A `/word` with a second slash is a path, not a command
-- [ ] Saved runs in the same menu (they are in the palette today)
+- [~] Saved runs in the same menu (they are in the palette today) — listed after the skills; picking one fills its template with the defaults at the caret, like an MCP prompt. Not yet seen in the app
 - [x] A chosen command has a look of its own in the composer — `PromptHighlight`, an overlay behind the textarea in the same font and box that adds colour, background and glow only, so no glyph moves; the textarea's own text goes transparent only while there is a token to draw
 - [x] On send, each `/skill` hands the model its `load_skill` result as a hidden part (`invoke_skill`); the word stays in the transcript. MCP prompts and resources still expand when picked, at the caret, so what they add is visible before sending
 - [x] A folder granted while the composer is open — dropped, picked, pasted — is inserted at the caret and glows amber there, as well as on the Access strip
 - [x] The sent message draws its `/commands` and path-shaped words the same way
 - [x] The Home screen's composer does the same (`usePromptTokens`, shared with the chat composer): menu anywhere, overlay, a folder added there glows in the prompt, skills load with the first message
-- [ ] A message queued behind a running turn goes as text only, so a `/skill` in it is a plain word
+- [x] A message queued behind a running turn goes as text only, so a `/skill` in it is a plain word — queued entries carry hidden parts now (`pending::as_parts`); a send held behind a running turn also stops folding a skill's hidden text into the visible message
 - [ ] Seen in the app: the overlay lined up with the caret through wrapping, scrolling and a 22px interface size; `/a then /b` loading both; a folder drop landing in the prompt
 
 ### 0.20.2 — The first request is yours (soon)
@@ -473,7 +473,8 @@ Raised after using 0.20.0, plus the first-request work that was 0.20.2. Planned 
 - [x] Fuzzy search over every setting, in Settings and in Ctrl+K
 - [x] Settings as a dockable tab (*Settings opens*: dialog or tab)
 - [x] The launch splash drawn on the user's theme (gradient, glass, accent glow)
-- [ ] Left for later: screen-lock detection for relock; PBKDF2 off the async runtime; F6/Ctrl+Shift+Enter inside a docked Settings tab while a model list is open; Settings' Ctrl+F behind a dialog over it; ZoneLibrary's Save/Add menus outside the Escape stack; the APK keyboard inset untested on a device
+- [ ] Left for later: screen-lock detection for relock; F6/Ctrl+Shift+Enter inside a docked Settings tab while a model list is open; Settings' Ctrl+F behind a dialog over it; the APK keyboard inset untested on a device
+- [x] PBKDF2 off the async runtime (`hash_blocking`/`verify_blocking`); ZoneLibrary's Save/Add menus on the Escape stack
 
 ---
 

@@ -501,7 +501,7 @@ interface AppStore {
   pendingByChat: Record<string, PendingMessage[]>;
   /** Queue a message for a chat that is mid-turn. Returns false when the turn
    *  had already finished, meaning the caller should just send it normally. */
-  queuePendingMessage: (chatId: string, text: string, mode: PendingMode) => Promise<boolean>;
+  queuePendingMessage: (chatId: string, text: string, mode: PendingMode, hidden?: string[]) => Promise<boolean>;
   cancelPendingMessage: (chatId: string, id: string) => Promise<void>;
 
   /** A settings bundle waiting on the user's confirmation. Null = no import in flight. */
@@ -2335,12 +2335,12 @@ export const useApp = create<AppStore>((set, get) => ({
     }
   },
 
-  async queuePendingMessage(chatId, text, mode) {
+  async queuePendingMessage(chatId, text, mode, hidden) {
     const id = crypto.randomUUID();
     // The id is minted here and passed down so the chip this adds and the
     // `steer_delivered` / `pending_cleared` event that removes it agree on which
     // message they mean.
-    const { running } = await api.queueChatMessage(chatId, id, text, mode);
+    const { running } = await api.queueChatMessage(chatId, id, text, mode, hidden);
     if (!running) return false;
     set((s) => ({
       pendingByChat: {

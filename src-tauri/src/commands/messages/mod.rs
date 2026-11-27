@@ -963,22 +963,22 @@ pub async fn run_send_entry(
         // messages"), and the chat is wedged until someone deletes the
         // message. So a send into a running turn is held as a `next` follow-up
         // — the same thing the composer does on purpose — and delivered when
-        // the turn ends. Only text can be held (the queue carries text), so a
-        // send with attachments is refused with a reason instead.
+        // the turn ends. Only text can be held (the queue carries text and hidden
+        // text), so a send with attachments is refused with a reason instead.
         {
             let held = ctx.active_streams.write().await;
             if held.contains_key(chat_id) {
                 drop(held);
-                let (text, has_media) = parts.iter().fold(
-                    (Vec::new(), false),
-                    |(mut t, media), p| match p {
-                        InputPart::Text { text } | InputPart::HiddenText { text } => {
-                            t.push(text.as_str());
-                            (t, media)
-                        }
-                        _ => (t, true),
-                    },
-                );
+                let mut text = Vec::new();
+                let mut hidden = Vec::new();
+                let mut has_media = false;
+                for p in &parts {
+                    match p {
+                        InputPart::Text { text: t } => text.push(t.as_str()),
+                        InputPart::HiddenText { text: t } => hidden.push(t.clone()),
+                        _ => has_media = true,
+                    }
+                }
                 if has_media {
                     return Err(AppError::Other(
                         "This chat is still working on the previous message. Wait for it to finish before sending attachments."
@@ -995,6 +995,7 @@ pub async fn run_send_entry(
                     chat_id,
                     None,
                     text.clone(),
+                    hidden,
                     crate::commands::pending::Mode::Next,
                 );
                 sink.emit(chat_id, StreamPayload::PendingQueued { id, text });
@@ -1031,12 +1032,7 @@ pub async fn run_send_entry(
             return result;
         }
 
-        let text = queued
-            .iter()
-            .map(|p| p.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n\n");
-        parts = vec![InputPart::Text { text }];
+        parts = crate::commands::pending::as_parts(&queued);
         ov = TurnOverride::default();
     }
 }
@@ -1052,12 +1048,7 @@ async fn flush_pending_after(ctx: &EngineCtx, sink: &StreamSink, chat_id: &str) 
     }
     let ids: Vec<String> = queued.iter().map(|p| p.id.clone()).collect();
     sink.emit(chat_id, StreamPayload::PendingCleared { ids });
-    let text = queued
-        .iter()
-        .map(|p| p.text.as_str())
-        .collect::<Vec<_>>()
-        .join("\n\n");
-    let parts = vec![InputPart::Text { text }];
+    let parts = crate::commands::pending::as_parts(&queued);
     if let Err(e) = run_send_entry(ctx, sink, chat_id, parts, TurnOverride::default()).await {
         tracing::warn!("queued follow-up for {chat_id} failed: {e}");
     }
@@ -1845,7 +1836,9 @@ async fn deliver_steers(
         return Ok(());
     }
     for p in queued {
-        let content_json = serde_json::to_string(&vec![ContentPart::Text { text: p.text.clone() }])?;
+        let mut content = vec![ContentPart::Text { text: p.text.clone() }];
+        content.extend(p.hidden.iter().map(|t| ContentPart::HiddenText { text: t.clone() }));
+        let content_json = serde_json::to_string(&content)?;
         let msg_id = new_id();
         let now = now_ts();
         sqlx::query(
@@ -1876,7 +1869,7 @@ async fn deliver_steers(
                 "The user sent this just now, while you were working. It is more recent than \
                  anything above and it is not a new task — take it into account before you decide \
                  your next step:\n\n{}",
-                p.text
+                std::iter::once(&p.text).chain(&p.hidden).cloned().collect::<Vec<_>>().join("\n\n")
             ),
         );
     }

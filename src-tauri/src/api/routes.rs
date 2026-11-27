@@ -1322,6 +1322,7 @@ pub async fn queue_message(
         id,
         s(&body, "id"),
         required(&body, "text")?,
+        body.get("hidden").and_then(|v| serde_json::from_value(v.clone()).ok()),
         mode,
     )
     .await?;

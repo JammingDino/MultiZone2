@@ -609,7 +609,8 @@ export const queueChatMessage = (
   id: string,
   text: string,
   mode: PendingMode,
-) => invoke<{ running: boolean; id: string | null }>("queue_chat_message", { chatId, id, text, mode });
+  hidden: string[] = [],
+) => invoke<{ running: boolean; id: string | null }>("queue_chat_message", { chatId, id, text, hidden, mode });
 /** Drop a queued message that hasn't reached the model yet. */
 export const cancelPendingMessage = (chatId: string, id: string) =>
   invoke<boolean>("cancel_pending_message", { chatId, messageId: id });

@@ -28,6 +28,7 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use tauri::State;
 
+use crate::commands::messages::InputPart;
 use crate::commands::new_id;
 use crate::error::AppResult;
 use crate::state::AppState;
@@ -46,6 +47,9 @@ pub enum Mode {
 pub struct Pending {
     pub id: String,
     pub text: String,
+    /// Sent to the model unseen, as the composer would: a `/skill`'s
+    /// instructions, so the word still loads it when the message was queued.
+    pub hidden: Vec<String>,
     pub mode: Mode,
 }
 
@@ -56,12 +60,12 @@ fn queues() -> &'static Mutex<HashMap<String, Vec<Pending>>> {
 }
 
 /// Add a message to a chat's queue. Returns its id.
-pub fn push(chat_id: &str, id: Option<String>, text: String, mode: Mode) -> String {
+pub fn push(chat_id: &str, id: Option<String>, text: String, hidden: Vec<String>, mode: Mode) -> String {
     let id = id.unwrap_or_else(new_id);
     let mut map = queues().lock().unwrap();
     map.entry(chat_id.to_string())
         .or_default()
-        .push(Pending { id: id.clone(), text, mode });
+        .push(Pending { id: id.clone(), text, hidden, mode });
     id
 }
 
@@ -122,14 +126,23 @@ pub async fn queue_chat_message(
     chat_id: String,
     id: Option<String>,
     text: String,
+    hidden: Option<Vec<String>>,
     mode: Mode,
 ) -> AppResult<serde_json::Value> {
     let running = state.active_streams.read().await.contains_key(&chat_id);
     if !running {
         return Ok(serde_json::json!({ "running": false, "id": serde_json::Value::Null }));
     }
-    let id = push(&chat_id, id, text, mode);
+    let id = push(&chat_id, id, text, hidden.unwrap_or_default(), mode);
     Ok(serde_json::json!({ "running": true, "id": id }))
+}
+
+/// Queued `next` messages as one turn's input: their text joined, then every
+/// hidden part they carried.
+pub fn as_parts(queued: &[Pending]) -> Vec<InputPart> {
+    let text = queued.iter().map(|p| p.text.as_str()).collect::<Vec<_>>().join("\n\n");
+    let hidden = queued.iter().flat_map(|p| p.hidden.iter().cloned()).map(|text| InputPart::HiddenText { text });
+    std::iter::once(InputPart::Text { text }).chain(hidden).collect()
 }
 
 /// Drop a queued message that hasn't been delivered yet.
@@ -145,9 +158,9 @@ mod tests {
     #[test]
     fn steers_drain_first_and_next_messages_survive() {
         let chat = format!("chat-{}", new_id());
-        push(&chat, Some("a".into()), "steer one".into(), Mode::Steer);
-        push(&chat, Some("b".into()), "after".into(), Mode::Next);
-        push(&chat, Some("c".into()), "steer two".into(), Mode::Steer);
+        push(&chat, Some("a".into()), "steer one".into(), vec![], Mode::Steer);
+        push(&chat, Some("b".into()), "after".into(), vec![], Mode::Next);
+        push(&chat, Some("c".into()), "steer two".into(), vec![], Mode::Steer);
 
         let steers = take_steers(&chat);
         assert_eq!(
@@ -166,9 +179,21 @@ mod tests {
     #[test]
     fn removing_the_last_entry_clears_the_chat_key() {
         let chat = format!("chat-{}", new_id());
-        push(&chat, Some("x".into()), "hi".into(), Mode::Next);
+        push(&chat, Some("x".into()), "hi".into(), vec![], Mode::Next);
         assert!(remove(&chat, "x"));
         assert!(!remove(&chat, "x"), "a second removal is a no-op");
         assert!(!queues().lock().unwrap().contains_key(&chat));
+    }
+
+    #[test]
+    fn queued_messages_keep_their_hidden_skill_parts() {
+        let q = vec![
+            Pending { id: "a".into(), text: "one /review".into(), hidden: vec!["skill: review".into()], mode: Mode::Next },
+            Pending { id: "b".into(), text: "two".into(), hidden: vec![], mode: Mode::Next },
+        ];
+        let parts = as_parts(&q);
+        assert!(matches!(&parts[0], InputPart::Text { text } if text == "one /review\n\ntwo"));
+        assert!(matches!(&parts[1], InputPart::HiddenText { text } if text == "skill: review"));
+        assert_eq!(parts.len(), 2);
     }
 }

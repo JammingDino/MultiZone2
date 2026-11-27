@@ -478,11 +478,13 @@ export function InputBar({ chatId, disabled, ref, notice }: InputBarProps) {
     setSending(true);
     setText("");
     try {
-      const accepted = await queuePendingMessage(chatId, body, queueMode);
+      // A `/skill` in a queued message loads like one sent directly.
+      const skills = await skillParts(commandsIn(body, tokens.skillNames));
+      const accepted = await queuePendingMessage(chatId, body, queueMode, skills.map((p) => p.text));
       // The turn finished between the keystroke and the call — there is nothing
       // left to queue behind, so send it as an ordinary message.
       if (!accepted) {
-        await api.sendMessage(chatId, [{ type: "text", text: body }]);
+        await api.sendMessage(chatId, [{ type: "text", text: body }, ...skills]);
         refreshChats();
       }
     } catch (e) {

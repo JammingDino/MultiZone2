@@ -8,7 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { deltas, describe, expectedText, token, verifySequence } from "./token-sequence.mjs";
-import { createMockProvider } from "./mock-provider.mjs";
+import { createMockProvider, scriptStep } from "./mock-provider.mjs";
 
 test("the expected text is the padded sequence, space separated", () => {
   assert.equal(expectedText(3), "0001 0002 0003");
@@ -205,4 +205,39 @@ test("the stated mix holds across a run, so two measurements are comparable", as
   assert.ok(kinds.code > 40 && kinds.code < 120, `code ${kinds.code}`);
   assert.ok(kinds.table > 25 && kinds.table < 100, `table ${kinds.table}`);
   assert.ok(kinds.diagram > 15 && kinds.diagram < 80, `diagram ${kinds.diagram}`);
+});
+
+test("script= steps through one round per assistant reply, and repeats or finishes", () => {
+  const tools = [{ type: "function", function: { name: "read_file" } }];
+  const script = 'go script=[{"tool":"read_file","args":{"path":"a.txt"}},{"text":"done","tool":"write_file","args":{}},{"tool":"read_file","repeat":true}]';
+  const at = (after) => scriptStep({ tools, messages: [{ role: "system", content: "s" }, { role: "user", content: script }, ...after] });
+  const round = { role: "assistant", content: "" };
+  const result = { role: "tool", content: "ok" };
+  assert.equal(at([]).tool, "read_file");
+  assert.deepEqual(at([]).args, { path: "a.txt" });
+  assert.equal(at([round, result]).text, "done");
+  assert.equal(at([round, result, round, result]).tool, "read_file");
+  assert.equal(at(Array(20).fill(round)).tool, "read_file", "a repeating last step never ends");
+  const once = (n) => scriptStep({ tools, messages: [{ role: "user", content: 'script=[{"text":"hi"}]' }, ...Array(n).fill(round)] });
+  assert.equal(once(1).text, "script finished");
+  assert.equal(scriptStep({ messages: [{ role: "user", content: script }] }), null, "no tools offered: not scripted");
+  assert.match(scriptStep({ messages: [{ role: "user", content: script }, round, result] }).text, /tools withdrawn/, "tools taken away mid-script");
+  assert.equal(scriptStep({ tools, messages: [{ role: "user", content: "tokens=5" }] }), null);
+  assert.match(scriptStep({ tools, messages: [{ role: "user", content: "script=[nope]" }] }).text, /not valid JSON/);
+});
+
+test("a scripted tool step streams one call whose arguments accumulate to the step's", async () => {
+  await withServer(async (base) => {
+    const res = await fetch(`${base}/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "mock-stream", stream: true, tools: [{ type: "function", function: { name: "read_file" } }],
+        messages: [{ role: "user", content: 'script=[{"text":"looking","tool":"read_file","args":{"path":"x/y.txt"}}]' }] }),
+    });
+    const frames = (await res.text()).split("\n\n").filter((f) => f.startsWith("data: {")).map((f) => JSON.parse(f.slice(6)));
+    const deltas = frames.flatMap((f) => f.choices.map((c) => c.delta ?? {}));
+    assert.equal(deltas.map((d) => d.content ?? "").join(""), "looking");
+    assert.deepEqual(JSON.parse(deltas.flatMap((d) => d.tool_calls ?? []).map((t) => t.function?.arguments ?? "").join("")), { path: "x/y.txt" });
+    assert.equal(frames.at(-1).choices[0].finish_reason, "tool_calls");
+  });
 });

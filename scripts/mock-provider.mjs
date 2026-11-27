@@ -21,6 +21,17 @@
 //   tool=1         emit a tool call before the text, for the pending-args path
 //   mix=<n>        stream a synthetic answer (prose/code/table/diagram) seeded
 //                  by n, for the performance seeder rather than the drop check
+//   script=[...]   an agentic turn, one step per round: a JSON list, last in
+//                  the message, of {"tool": name, "args": {...}} and
+//                  {"text": "..."} steps (a step may have both: text, then the
+//                  call). The round is the number of assistant messages since
+//                  the scripted one, so each tool result moves it on. A last
+//                  step with "repeat": true runs forever (a stuck loop); past
+//                  the end it answers "script finished". Only requests that
+//                  offer tools follow it, so titling and the like answer
+//                  normally; once a scripted turn's tools are withdrawn (the
+//                  loop guard), it answers "mock: tools withdrawn…".
+//                  e.g. script=[{"tool":"read_file","args":{"path":"a.txt"}},{"text":"done"}]
 //
 // e.g. sending "tokens=100000 delay=0" streams 100k tokens as fast as the
 // socket takes them.
@@ -42,16 +53,49 @@ const DEFAULT_DELAY = flag("delay", 2);
 
 const MODEL_ID = "mock-stream";
 
+const textOf = (m) =>
+  typeof m?.content === "string" ? m.content : Array.isArray(m?.content) ? m.content.map((p) => p?.text ?? "").join(" ") : "";
+
+/** This round's step of a `script=` turn, or null when the request is not scripted. */
+export function scriptStep(body) {
+  const offered = Array.isArray(body?.tools) && body.tools.length > 0;
+  const messages = Array.isArray(body?.messages) ? body.messages : [];
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.role !== "user") continue;
+    const m = textOf(messages[i]).match(/\bscript=(\[[\s\S]*\])/);
+    if (!m) continue;
+    // Tools withdrawn mid-script (the loop guard does this) — say so briefly.
+    if (!offered) return messages.slice(i + 1).some((x) => x?.role === "assistant") ? { text: "mock: tools withdrawn, so the script stops here.", round: -1 } : null;
+    let steps;
+    try { steps = JSON.parse(m[1]); } catch (e) { return { text: `mock: script= is not valid JSON (${e.message})` }; }
+    const round = messages.slice(i + 1).filter((x) => x?.role === "assistant").length;
+    const last = steps[steps.length - 1];
+    return { ...(steps[round] ?? (last?.repeat ? last : { text: "script finished" })), round };
+  }
+  return null;
+}
+
+async function streamStep(res, step) {
+  res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
+  sse(res, chunk({ role: "assistant", content: "" }));
+  if (step.text) sse(res, chunk({ content: step.text }));
+  if (step.tool) {
+    // Arguments split across two deltas, as real providers split them.
+    const args = JSON.stringify(step.args ?? {});
+    const cut = Math.floor(args.length / 2);
+    const id = `call_mock_${step.round}`;
+    sse(res, chunk({ tool_calls: [{ index: 0, id, type: "function", function: { name: step.tool, arguments: args.slice(0, cut) } }] }));
+    sse(res, chunk({ tool_calls: [{ index: 0, function: { arguments: args.slice(cut) } }] }));
+  }
+  sse(res, chunk({}, step.tool ? "tool_calls" : "stop"));
+  res.write("data: [DONE]\n\n");
+  res.end();
+}
+
 /** Read `key=value` knobs out of whatever the user last said. */
 function optionsFromPrompt(body) {
   const messages = Array.isArray(body?.messages) ? body.messages : [];
-  const last = [...messages].reverse().find((m) => m?.role === "user");
-  const text =
-    typeof last?.content === "string"
-      ? last.content
-      : Array.isArray(last?.content)
-        ? last.content.map((p) => p?.text ?? "").join(" ")
-        : "";
+  const text = textOf([...messages].reverse().find((m) => m?.role === "user"));
   const num = (name, fallback) => {
     const m = text.match(new RegExp(`\\b${name}\\s*=\\s*(\\d+)`, "i"));
     return m ? Number(m[1]) : fallback;
@@ -196,6 +240,10 @@ export function createMockProvider() {
       let body = {};
       try { body = JSON.parse(raw || "{}"); } catch { /* an unparsable body still gets a stream */ }
       const opts = optionsFromPrompt(body);
+
+      // Agentic turns stream, so the scripted mode is streaming-only.
+      const step = body.stream !== false && scriptStep(body);
+      if (step) return void streamStep(res, step).catch(() => { try { res.destroy(); } catch { /* already gone */ } });
 
       if (body.stream === false) {
         if (opts.mix) {

@@ -15,7 +15,7 @@ Open items from 0.1.x–0.16.x, whose full entries are in [RELEASE_HISTORY.md](R
 - [ ] **0.12.0** — Runtime-test the whole path: ask for something large, watch the mutating tools disappear, edit the plan, approve it, and confirm the executing turn is held to the edited steps
 - [ ] **0.12.1** — Runtime-test: run a plan of several steps, strike one mid-run, add one, and stop after a step
 - [ ] **0.12.1** — Runtime-test: ask for a plan in prose with no button to press, and confirm the model enters plan mode via `enter_plan_mode`
-- [ ] **0.12.2** — Runtime-test: run an agentic turn with an approval declined and a tool failure, then replay it
+- [x] **0.12.2** — Runtime-test: run an agentic turn with an approval declined and a tool failure, then replay it — passed 2026-11-28 (scripted mock, declined over the API): the replay shows the decline, the failure and the end of the turn in order; the chat's step strip counts the declined step as failed ("2/2 steps failed"), noted for review
 - [x] **0.12.3** — Runtime-test: launch in light mode with a 22px interface size and a custom font, then replay a turn that ran tools — passed 2026-11-28 in the browser window (Lora, 22px root): chat and replay both legible; the native window not checked
 - [ ] **0.13.4** — **Runtime-test:** send an image with no text to a vision model — the title names what is in the picture, not "Image Attachment"
 - [ ] **0.13.4** — **Runtime-test:** off by default on an existing install, and the toggle changes the exported document

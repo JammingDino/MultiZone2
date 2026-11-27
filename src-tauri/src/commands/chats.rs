@@ -71,7 +71,7 @@ pub async fn create_chat(
 
     sqlx::query(
         "INSERT INTO chats (id, title, zone_id, project_id, project_context_enabled, knowledge_enabled, created_at, updated_at)
-         VALUES (?1, 'New Chat', ?2, ?3, ?4, ?5, ?6, ?6)",
+         VALUES (?1, ?7, ?2, ?3, ?4, ?5, ?6, ?6)",
     )
     .bind(&id)
     .bind(&effective_zone_id)
@@ -79,6 +79,7 @@ pub async fn create_chat(
     .bind(project_context_enabled)
     .bind(knowledge_enabled)
     .bind(now)
+    .bind(UNTITLED)
     .execute(&state.db)
     .await?;
 
@@ -96,14 +97,28 @@ pub async fn rename_chat(
     state: State<'_, AppState>,
     id: String,
     title: String,
+    // Automatic names pass this, so a title someone already chose (in the
+    // sidebar, or an agent through the API) is not replaced by the first message.
+    if_untitled: Option<bool>,
 ) -> AppResult<()> {
-    sqlx::query("UPDATE chats SET title = ?1, updated_at = ?2 WHERE id = ?3")
-        .bind(&title)
-        .bind(now_ts())
-        .bind(&id)
-        .execute(&state.db)
-        .await?;
+    set_title(&state.db, &id, &title, if_untitled.unwrap_or(false)).await?;
     Ok(())
+}
+
+/// The title a chat is created with, until it is named.
+pub const UNTITLED: &str = "New Chat";
+
+/// Store a chat's title; with `only_if_untitled`, only over [`UNTITLED`].
+/// Whether it was written.
+async fn set_title(db: &sqlx::SqlitePool, id: &str, title: &str, only_if_untitled: bool) -> AppResult<bool> {
+    let done = sqlx::query(&format!("UPDATE chats SET title = ?1, updated_at = ?2 WHERE id = ?3 AND (?4 = 0 OR title = '{UNTITLED}')"))
+        .bind(title)
+        .bind(now_ts())
+        .bind(id)
+        .bind(only_if_untitled)
+        .execute(db)
+        .await?;
+    Ok(done.rows_affected() > 0)
 }
 
 #[tauri::command]
@@ -917,13 +932,18 @@ pub async fn generate_title(
     let whole_conversation = whole_conversation.unwrap_or(false);
     // Titling sends the conversation to a model.
     crate::chat_lock::ensure_open(&state.db, &chat_id).await?;
-    sqlx::query_as::<_, Chat>(&format!(
+    let chat = sqlx::query_as::<_, Chat>(&format!(
         "SELECT {CHAT_COLS} FROM chats WHERE id = ?1"
     ))
     .bind(&chat_id)
     .fetch_optional(&state.db)
     .await?
     .ok_or_else(|| AppError::NotFound(format!("chat {chat_id}")))?;
+    // The automatic pass names untitled chats only: one already named, by the
+    // user or by an agent through the API, keeps its name and costs no call.
+    if !whole_conversation && chat.title != UNTITLED {
+        return Ok(chat.title);
+    }
 
     // Works for both zone-bound chats and simple/quick chats (synthetic zone).
     let (zone, provider) =
@@ -1030,12 +1050,11 @@ pub async fn generate_title(
         }
     };
 
-    sqlx::query("UPDATE chats SET title = ?1, updated_at = ?2 WHERE id = ?3")
-        .bind(&title)
-        .bind(now_ts())
-        .bind(&chat_id)
-        .execute(&state.db)
-        .await?;
+    // Checked again here: a rename while the model was answering wins.
+    if !set_title(&state.db, &chat_id, &title, !whole_conversation).await? {
+        let current: String = sqlx::query_scalar("SELECT title FROM chats WHERE id = ?1").bind(&chat_id).fetch_one(&state.db).await?;
+        return Ok(current);
+    }
 
     let _ = app.emit(
         "chat-title-updated",
@@ -1408,6 +1427,23 @@ fn extract_text_from_content_json(content_json: &str) -> String {
 #[cfg(test)]
 mod title_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn an_automatic_title_only_replaces_new_chat() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::init(dir.path()).await.unwrap();
+        sqlx::query("INSERT INTO chats (id, title, created_at, updated_at) VALUES ('a', ?1, 0, 0), ('b', 'Named by an agent', 0, 0)")
+            .bind(UNTITLED).execute(&db).await.unwrap();
+        let title = |id: &'static str| { let db = db.clone(); async move { sqlx::query_scalar::<_, String>("SELECT title FROM chats WHERE id = ?1").bind(id).fetch_one(&db).await.unwrap() } };
+
+        assert!(set_title(&db, "a", "From the first message", true).await.unwrap());
+        assert_eq!(title("a").await, "From the first message");
+        assert!(!set_title(&db, "b", "From the first message", true).await.unwrap());
+        assert_eq!(title("b").await, "Named by an agent");
+        // A rename the user asks for always lands.
+        assert!(set_title(&db, "b", "Renamed", false).await.unwrap());
+        assert_eq!(title("b").await, "Renamed");
+    }
 
     #[test]
     fn accepts_a_bare_title() {

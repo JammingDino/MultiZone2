@@ -2052,10 +2052,10 @@ export const useApp = create<AppStore>((set, get) => ({
                 : "";
           // Never rename to nothing: leaving "New Chat" is worse than a good
           // title and better than a blank row.
+          // Only over "New Chat": a name set before the first message (an
+          // agent's, through the API) stays. The list shows what was stored.
           if (title) {
-            api.renameChat(chatId, title).catch(console.error);
-            get().setChatTitle(chatId, title);
-            get().refreshChats().catch(console.error);
+            api.renameChat(chatId, title, true).then(() => get().refreshChats()).catch(console.error);
           }
         } catch { /* ignore parse errors */ }
       }

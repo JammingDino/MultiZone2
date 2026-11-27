@@ -138,8 +138,9 @@ export const searchMessages = (query: string) =>
   invoke<SearchHit[]>("search_messages", { query });
 export const createChat = (zoneId: string | null, projectId?: string | null) =>
   invoke<Chat>("create_chat", { zoneId, projectId: projectId ?? null });
-export const renameChat = (id: string, title: string) =>
-  invoke<void>("rename_chat", { id, title });
+/** `ifUntitled`: only while the chat still has its "New Chat" title (automatic names). */
+export const renameChat = (id: string, title: string, ifUntitled?: boolean) =>
+  invoke<void>("rename_chat", { id, title, ifUntitled: ifUntitled ?? null });
 export const setChatZone = (id: string, zoneId: string | null) =>
   invoke<void>("set_chat_zone", { id, zoneId });
 export const setChatSmart = (id: string, smart: boolean) =>

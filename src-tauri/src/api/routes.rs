@@ -780,7 +780,7 @@ pub async fn rename_chat(
     Path(id): Path<String>,
     Json(body): Json<Value>,
 ) -> ApiResult<StatusCode> {
-    commands::chats::rename_chat(app_state(&st), id, required(&body, "title")?).await?;
+    commands::chats::rename_chat(app_state(&st), id, required(&body, "title")?, body.get("ifUntitled").and_then(Value::as_bool)).await?;
     Ok(NO_CONTENT)
 }
 

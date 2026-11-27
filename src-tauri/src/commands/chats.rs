@@ -1016,12 +1016,24 @@ pub async fn generate_title(
 
     let client = LlmClient::new(&state.http, &provider.base_url, provider.api_key.as_deref())
         .for_chat(&chat_id);
-    let resp = request_title(&client, req).await?;
-    crate::llm::tokens::record_request(&state.db, &chat_id, &model, &measure, resp.usage.as_ref())
-        .await;
+    // The automatic pass still names the chat when the provider will not answer
+    // (a zone serving through its fallback, say): the empty reply falls through
+    // to the opening message below. A regenerate the user asked for reports it.
+    let resp = match request_title(&client, req).await {
+        Ok(resp) => Some(resp),
+        Err(e) if !whole_conversation => {
+            tracing::debug!("title request failed ({e}); naming the chat from its first message");
+            None
+        }
+        Err(e) => return Err(e),
+    };
+    if let Some(resp) = &resp {
+        crate::llm::tokens::record_request(&state.db, &chat_id, &model, &measure, resp.usage.as_ref())
+            .await;
+    }
     let raw = resp
-        .choices
-        .first()
+        .as_ref()
+        .and_then(|resp| resp.choices.first())
         .and_then(|c| match &c.message.content {
             Some(MessageContent::Text(s)) => Some(s.clone()),
             Some(MessageContent::Parts(parts)) => {

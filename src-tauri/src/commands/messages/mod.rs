@@ -2548,11 +2548,14 @@ async fn run_participant_turn(
             // transcript will hang "revert what this turn did" on (0.10.1).
             // Only the first assistant message of the turn wins — a turn that
             // took five steps offers one revert, at the top, not five.
+            // Keyed by the zone the tools ran under, as `tools::dispatch` captured
+            // it — not `persp`, which is None for the primary answer, so its
+            // checkpoint never linked and its turns offered no revert.
             match crate::checkpoints::link_message(
                 &ctx.db,
                 chat_id,
                 &turn_id,
-                persp,
+                Some(zone.id.as_str()),
                 &assistant_msg_id,
             )
             .await

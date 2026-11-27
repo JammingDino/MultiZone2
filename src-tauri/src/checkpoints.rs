@@ -379,7 +379,7 @@ pub async fn list_for_chat(db: &SqlitePool, chat_id: &str) -> AppResult<Vec<Chec
 
         let files = rows
             .into_iter()
-            .map(|(path, display_path, existed, _before, after_hash, unstorable)| {
+            .map(|(path, display_path, existed, before_hash, after_hash, unstorable)| {
                 let now = current_hash(Path::new(&path));
                 let change = match (existed == 1, now.is_some()) {
                     (false, _) => "created",
@@ -391,7 +391,10 @@ pub async fn list_for_chat(db: &SqlitePool, chat_id: &str) -> AppResult<Vec<Chec
                     display_path,
                     change: change.to_string(),
                     unstorable,
-                    diverged: after_hash.is_some_and(|a| now.as_deref() != Some(a.as_str())),
+                    // Back as it was before the turn (a revert did that) is not a
+                    // divergence: restoring again loses nothing.
+                    diverged: after_hash.is_some_and(|a| now.as_deref() != Some(a.as_str()))
+                        && now != before_hash,
                 }
             })
             .collect();
@@ -1320,6 +1323,12 @@ mod tests {
         assert!(!by_name("calm.txt").diverged);
         assert!(by_name("touched.txt").diverged);
         assert_eq!(by_name("calm.txt").change, "changed");
+
+        // Put back the way it was before the turn: nothing to lose, so not
+        // flagged — the transcript otherwise warns about the revert itself.
+        std::fs::write(&touched, "before").unwrap();
+        let list = list_for_chat(&db, "c").await.unwrap();
+        assert!(!list[0].files.iter().any(|f| f.diverged));
     }
 
     /// Insert a message row, since a rewind is addressed by message and the

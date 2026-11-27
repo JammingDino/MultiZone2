@@ -757,10 +757,13 @@ async fn copy_child_chats(
     anchor_map: &std::collections::HashMap<String, String>,
     through_ts: i64,
 ) -> AppResult<()> {
+    // `id != dst_parent`: a continuation fork is already a child of the chat
+    // it copies, and copying it into itself recursed until the stack ran out.
     let children = sqlx::query_as::<_, Chat>(&format!(
-        "SELECT {CHAT_COLS} FROM chats WHERE parent_chat_id = ?1 ORDER BY created_at ASC"
+        "SELECT {CHAT_COLS} FROM chats WHERE parent_chat_id = ?1 AND id != ?2 ORDER BY created_at ASC"
     ))
     .bind(src_parent)
+    .bind(dst_parent)
     .fetch_all(db)
     .await?;
 
@@ -1753,6 +1756,24 @@ mod fork_tests {
         )
         .fetch_one(&pool).await.unwrap();
         assert_eq!(grandkids, 1, "a run carried whole carries its own children");
+    }
+
+    /// A continuation fork hangs under the chat it copies, so it is among the
+    /// children being copied. It must not copy itself into itself.
+    #[tokio::test]
+    async fn a_continuation_fork_does_not_copy_itself() {
+        let pool = pool().await;
+        chat(&pool, "src", None, None).await;
+        msg(&pool, "m1", "src", 10).await;
+        chat(&pool, "kid", Some("src"), Some("m1")).await;
+        chat(&pool, "dst", Some("src"), Some("m1")).await;
+
+        let map = copy_messages_and_attachments(&pool, "src", "dst", i64::MAX).await.unwrap();
+        copy_child_chats(&pool, "src", "dst", &map, i64::MAX).await.unwrap();
+
+        let kids: Vec<String> = sqlx::query_scalar("SELECT title FROM chats WHERE parent_chat_id = 'dst'")
+            .fetch_all(&pool).await.unwrap();
+        assert_eq!(kids, vec!["chat kid".to_string()]);
     }
 
     /// A branch of a branch. The recursion has to re-link each level against

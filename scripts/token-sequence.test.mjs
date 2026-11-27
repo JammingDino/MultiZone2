@@ -189,6 +189,24 @@ test("mix= returns the same answer for the same seed and a different one otherwi
   });
 });
 
+test("mix= with delay= streams the answer a word at a time, as long as tokens= asks", async () => {
+  const { pacedMix } = await import("./mock-provider.mjs");
+  const parts = pacedMix(3, 400);
+  assert.ok(parts.join("").split(/\s+/).length >= 400);
+  assert.ok(parts.join("").startsWith((await import("./seed-content.mjs")).mixedAnswer(3)));
+  await withServer(async (base) => {
+    const { text } = await collect(base, "mix=3 tokens=400 delay=0");
+    assert.equal(text, parts.join(""));
+    const res = await fetch(`${base}/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "mock-stream", stream: true, messages: [{ role: "user", content: "mix=3 tokens=400 delay=0" }] }),
+    });
+    const frames = (await res.text()).split("\n\n").filter((f) => f.includes('"content"') && !f.includes('"role"'));
+    assert.equal(frames.length, parts.length, "one frame per word");
+  });
+});
+
 test("the stated mix holds across a run, so two measurements are comparable", async () => {
   const { mixedAnswer } = await import("./seed-content.mjs");
   const kinds = { prose: 0, code: 0, table: 0, diagram: 0 };

@@ -114,7 +114,20 @@ function optionsFromPrompt(body) {
     fail: num("fail", 0),
     tool: num("tool", 0) > 0,
     mix: num("mix", 0),
+    // `mix=` with an explicit `delay=` streams the answer instead of sending it whole.
+    paced: /\bdelay\s*=/i.test(text),
   };
+}
+
+/**
+ * A synthetic answer of at least `words` words, as one delta per word: for
+ * timing the renderer on real markdown (prose, code, tables, diagrams) while it
+ * streams. Further seeded answers are appended until it is long enough.
+ */
+export function pacedMix(seed, words) {
+  let text = mixedAnswer(seed);
+  for (let i = 1; text.split(/\s+/).length < words; i++) text += "\n\n" + mixedAnswer(seed + i);
+  return text.split(/(?<=\s)/);
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -165,7 +178,7 @@ async function streamCompletion(res, opts) {
   // The seeder wants a realistic answer rather than a checkable one, so `mix`
   // replaces the sequence with synthetic content and streams it in one go —
   // seeding 2000 messages token by token would take longer than it is worth.
-  if (opts.mix) {
+  if (opts.mix && !opts.paced) {
     sse(res, chunk({ content: mixedAnswer(opts.mix) }));
     sse(res, chunk({}, "stop"));
     res.write("data: [DONE]\n\n");
@@ -173,7 +186,7 @@ async function streamCompletion(res, opts) {
     return;
   }
 
-  const parts = deltas(opts.tokens);
+  const parts = opts.mix ? pacedMix(opts.mix, opts.tokens) : deltas(opts.tokens);
   const halfway = Math.floor(parts.length / 2);
   let debt = 0;
 

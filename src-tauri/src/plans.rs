@@ -862,7 +862,16 @@ pub async fn link_to_parent_plan(db: &SqlitePool, plan_id: &str, chat_id: &str) 
     let Some(parent_chat) = parent_chat else {
         return Ok(());
     };
-    let Some(parent) = active_plan(db, &parent_chat, None).await else {
+    // Whichever zone the leader's plan was filed under: this side cannot know it.
+    let parent: Option<Plan> = sqlx::query_as(&format!(
+        "SELECT {PLAN_COLS} FROM plans
+         WHERE chat_id = ?1 AND status IN ('approved', 'executing')
+         ORDER BY created_at DESC LIMIT 1"
+    ))
+    .bind(&parent_chat)
+    .fetch_optional(db)
+    .await?;
+    let Some(parent) = parent else {
         return Ok(());
     };
     sqlx::query("UPDATE plans SET parent_plan_id = ?1, updated_at = ?2 WHERE id = ?3")

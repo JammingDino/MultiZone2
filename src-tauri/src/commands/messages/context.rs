@@ -397,7 +397,9 @@ pub async fn build_system_snippets(
     // exclusive by construction: approving a plan is what clears the mode.
     if chat.map_or(false, |c| c.plan_mode) {
         snippets.push((SnippetKind::PlanMode, crate::plans::plan_mode_preamble()));
-    } else if let Some(plan) = crate::plans::active_plan(db, chat_id, None).await {
+    // Under the zone the tools ran in, as `exit_plan_mode` filed it — `None`
+    // never matched, so an approved plan never reached the turn executing it.
+    } else if let Some(plan) = crate::plans::active_plan(db, chat_id, Some(zone.id.as_str())).await {
         snippets.push((SnippetKind::TaskList, crate::plans::task_list_block(&plan)));
     } else if !zone_tool_ids.is_empty()
         && !is_perspective

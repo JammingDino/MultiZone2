@@ -3268,7 +3268,8 @@ async fn run_participant_turn(
         // of eight is not asking for step three to be lost. Withholding the
         // tools for one more step is what turns the loop into a wrap-up — the
         // same mechanism the step budget uses to guarantee prose at the end.
-        if let Some(plan) = crate::plans::active_plan(&ctx.db, chat_id, persp).await {
+        // Keyed by zone like the plan itself (see `link_message` above).
+        if let Some(plan) = crate::plans::active_plan(&ctx.db, chat_id, Some(zone.id.as_str())).await {
             if plan.stop_requested {
                 crate::plans::clear_stop(&ctx.db, &plan.id).await.ok();
                 crate::plans::set_status(&ctx.db, &plan.id, "stopped").await.ok();
@@ -4021,6 +4022,24 @@ mod tests {
             "the system prompt changed as the history grew, so every request \
              behind it misses the prefix cache",
         );
+    }
+
+    /// A plan is filed under the zone whose tools filed it; the prompt has to
+    /// look it up the same way, or the executing turn is never shown the steps
+    /// the user approved (it looked under no zone, and never found one).
+    #[tokio::test]
+    async fn an_approved_plan_reaches_the_turn_that_executes_it() {
+        let pool = pool_with_long_chat().await;
+        let zone = zone_with_compact_tool();
+        let step = crate::plans::PlanStep::sanitize(&serde_json::json!({ "step": "Write plan-z.txt" })).unwrap();
+        let plan = crate::plans::save_draft(&pool, "c1", Some(zone.id.as_str()), "Two notes", None, None, &[step])
+            .await
+            .unwrap();
+        crate::plans::approve(&pool, &plan.id, None, false).await.unwrap();
+
+        let prompt = system_prompt_for(&pool, &zone).await;
+        assert!(prompt.contains("## The approved plan"), "no task list in the prompt");
+        assert!(prompt.contains("Write plan-z.txt"));
     }
 
     // ── Zones talking to each other ──────────────────────────────────────────

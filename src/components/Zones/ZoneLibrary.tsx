@@ -16,6 +16,7 @@ import { InstalledZones, useZoneActions } from "./InstalledZones";
 import { CHROME_QUIET, PRIMARY_ACTION } from "@/lib/chrome";
 import { NavItem } from "@/components/common/NavRail";
 import { ClaudeImportPanel } from "@/components/Settings/ClaudeImportPanel";
+import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 
 type View = "library" | "detail" | "editor" | "claude";
 
@@ -94,6 +95,9 @@ export function ZoneLibrary({ rail }: { rail: (items: React.ReactNode) => React.
   const [toast, setToast] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   const toastTimer = useRef<number | undefined>(undefined);
+  // Opened over the library, so Escape closes the menu first and the library second.
+  useDismissOnEscape(addOpen, () => setAddOpen(false));
+  useDismissOnEscape(savePicker, () => setSavePicker(false));
 
   // Installed zones follow the chat's model (0.20.0), so all an install needs
   // is some provider to run on.

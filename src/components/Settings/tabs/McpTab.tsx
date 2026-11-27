@@ -177,6 +177,10 @@ export function McpTab() {
                   <div className="mt-0.5 truncate font-mono text-[11px] text-[var(--color-text-muted)]">
                     {s.transport === "stdio" ? s.command : s.url}
                   </div>
+                  {/* Spelled out, not only the pill's tooltip: a touch screen has no hover. */}
+                  {s.status.state === "error" && s.status.error && (
+                    <div className="mt-1 text-[11px] text-[var(--color-danger)]">{s.status.error}</div>
+                  )}
                 </div>
                 <div className="flex shrink-0 items-center gap-1 narrow:flex-wrap">
                   <button

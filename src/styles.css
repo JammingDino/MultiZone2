@@ -413,6 +413,17 @@ input[type="color"]:hover { border-color: var(--color-accent); }
 .mz-thread {
   container-type: inline-size;
 }
+/* Turns off screen skip layout and paint. The thread is not virtualised, and
+   in a 2000-message chat every forced layout (a diagram measuring its text, a
+   scroll-geometry read) re-laid all of it: single frames of six seconds.
+   `auto` keeps each turn's last measured height, so the scrollbar only guesses
+   for turns never yet on screen. Paint containment clips, so the clip margin
+   leaves room for the hanging avatar and the bubble's glow. */
+.mz-thread [data-msg] > * {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 320px;
+  overflow-clip-margin: 3rem;
+}
 @container (min-width: 52rem) {
   .mz-turn-row {
     margin-left: -2.5rem;

@@ -172,6 +172,30 @@ export interface MermaidAutoFix {
   toolCallId?: string | null;
 }
 
+/**
+ * True once `ref` has come within about a screen of the viewport, and from then
+ * on. Rendering a diagram is mermaid laying out text in the DOM — tens of
+ * milliseconds each — and a long chat holds hundreds of them, nearly all off
+ * screen: rendered eagerly, opening a 2000-message chat kept the page busy for
+ * minutes.
+ */
+function useNearViewport(ref: React.RefObject<HTMLElement | null>): boolean {
+  const [near, setNear] = useState(() => typeof IntersectionObserver === "undefined");
+  useEffect(() => {
+    const el = ref.current;
+    if (near || !el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) setNear(true);
+      },
+      { rootMargin: "1000px 0px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  });
+  return near;
+}
+
 export function MermaidBlock({
   source,
   onRenderError,
@@ -186,6 +210,8 @@ export function MermaidBlock({
   const [svg, setSvg] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const holderRef = useRef<HTMLDivElement>(null);
+  const near = useNearViewport(holderRef);
   const originalSource = source.trim();
   // A repair already known for this source is applied before the first render,
   // so a remount never shows the broken diagram or re-asks the model.
@@ -274,6 +300,9 @@ export function MermaidBlock({
       return;
     }
 
+    // Off screen: the placeholder holds the slot until it scrolls near.
+    if (!near) return;
+
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -303,7 +332,7 @@ export function MermaidBlock({
     return () => {
       cancelled = true;
     };
-  }, [cleanSource, originalSource, renderId]);
+  }, [cleanSource, originalSource, renderId, near]);
 
   if (repairing) {
     return <MermaidRepairingView />;
@@ -323,7 +352,7 @@ export function MermaidBlock({
 
   if (loading || !svg) {
     return (
-      <div className="my-2 flex items-center gap-3 rounded border border-[var(--color-border)] bg-[var(--color-panel)] p-4 text-xs text-[var(--color-text-muted)]">
+      <div ref={holderRef} className="my-2 flex items-center gap-3 rounded border border-[var(--color-border)] bg-[var(--color-panel)] p-4 text-xs text-[var(--color-text-muted)]">
         <div className="relative flex h-9 w-9 items-center justify-center">
           <GitBranch
             size={16}

@@ -203,7 +203,7 @@ pub const ROUTES: &[RouteDef] = &[
     r("DELETE", "/api/skills/:id", "Delete a skill"),
     r("POST", "/api/skills/:id/enabled", "Enable or disable a skill"),
     r("GET", "/api/skill-packs", "Folder-backed skill packs found on disk"),
-    r("GET", "/api/skills/commands", "Every enabled skill a prompt can invoke as /name"),
+    r("GET", "/api/skills/commands", "Every enabled skill a prompt can invoke as /name; `name` is the word to type (spaces in a skill's name become hyphens)"),
     r("POST", "/api/skills/invoke", "What /name in a prompt hands the model: the load_skill result for it ({name})"),
     r("GET", "/api/skill-packs/root", "The managed folder installers should write to"),
     r("GET", "/api/memories", "All memory entries across every scope"),

@@ -2,7 +2,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { slashAt, segments, commandState, commandsIn, replaceRange, withoutCommand } from "../src/lib/promptTokens.ts";
+import { slashAt, segments, commandState, commandsIn, replaceRange, withoutCommand, commandName } from "../src/lib/promptTokens.ts";
 
 const known = new Set(["review", "commit", "impeccable"]);
 
@@ -74,4 +74,13 @@ test("only the caret's /word is drawn as becoming a command", () => {
 
 test("commandsIn lists each invoked command once, in order, any case", () => {
   assert.deepEqual(commandsIn("/Commit then /review and /commit again", known), ["Commit", "review"]);
+});
+
+test("a skill name with spaces is one command word, the same way the backend makes it", () => {
+  // The same cases as command_name's test in src-tauri/src/tools/skills.rs.
+  assert.equal(commandName("Release notes"), "Release-notes");
+  assert.equal(commandName("  tidy   up  "), "tidy-up");
+  assert.equal(commandName("commit-conventions"), "commit-conventions");
+  assert.equal(commandName("a/b (draft)"), "a-b-draft");
+  assert.deepEqual(commandsIn("/release-notes for 0.21", new Set(["release-notes"])), ["release-notes"]);
 });

@@ -11,6 +11,16 @@
 /** A command name: no spaces, no second slash (so `/usr/bin` is a path, not a command). */
 const NAME = /^[\w.:-]*$/;
 
+/**
+ * A skill's name as one `/word`: each run of characters a command name cannot
+ * hold becomes a hyphen ("Release notes" → "Release-notes"). The skill command
+ * list already arrives in this form; this is for comparing a loaded skill's
+ * real name against it. `command_name` in `src-tauri/src/tools/skills.rs` must agree.
+ */
+export function commandName(name: string): string {
+  return name.split(/[^A-Za-z0-9_.:-]+/).filter(Boolean).join("-");
+}
+
 /** The `/word` the caret is in, or null. It must start a word. */
 export function slashAt(text: string, caret: number): { start: number; end: number; query: string } | null {
   let start = caret;

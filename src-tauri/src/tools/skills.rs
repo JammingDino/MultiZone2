@@ -266,8 +266,32 @@ const PACK_NOTE: &str = "This skill is a folder of files. Its instructions refer
 /// Two sources, in this order: skills the user wrote here (DB rows), then
 /// folder-backed packs installed on disk (see [`crate::skillpacks`]). A DB skill
 /// wins a name collision — it is the one the user can actually see and edit.
+/// A skill's name as one `/word` in a prompt: each run of characters a command
+/// name cannot hold (spaces, mostly) becomes a hyphen, so "Release notes" is
+/// `/Release-notes`. A name that is already one word is unchanged.
+/// `commandName` in `src/lib/promptTokens.ts` must agree.
+pub fn command_name(name: &str) -> String {
+    name.split(|c: char| !(c.is_ascii_alphanumeric() || "_.:-".contains(c)))
+        .filter(|w| !w.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
 pub async fn run(args: &Value, db: &SqlitePool) -> AppResult<String> {
-    let name = args.get("name").and_then(|v| v.as_str()).unwrap_or("").trim();
+    let asked = args.get("name").and_then(|v| v.as_str()).unwrap_or("").trim();
+    // `/Release-notes` from a prompt names the skill "Release notes", unless a
+    // skill is really called that.
+    let resolved = if asked.is_empty() {
+        None
+    } else {
+        let names: Vec<String> = catalog_entries(db).await.into_iter().map(|(n, _, _)| n).collect();
+        if names.iter().any(|n| n.eq_ignore_ascii_case(asked)) {
+            None
+        } else {
+            names.into_iter().find(|n| command_name(n).eq_ignore_ascii_case(asked))
+        }
+    };
+    let name = resolved.as_deref().unwrap_or(asked);
     let file = args.get("file").and_then(|v| v.as_str()).unwrap_or("").trim();
 
     if !name.is_empty() {
@@ -406,6 +430,42 @@ mod tests {
     use super::*;
     use sqlx::sqlite::SqlitePoolOptions;
     use std::path::PathBuf;
+
+    #[test]
+    fn a_name_with_spaces_becomes_one_command_word() {
+        assert_eq!(command_name("Release notes"), "Release-notes");
+        assert_eq!(command_name("  tidy   up  "), "tidy-up");
+        assert_eq!(command_name("commit-conventions"), "commit-conventions");
+        assert_eq!(command_name("a/b (draft)"), "a-b-draft");
+    }
+
+    #[tokio::test]
+    async fn a_skill_with_spaces_loads_by_its_command_name() {
+        let (pool, _root) = fixture().await;
+        sqlx::query(
+            "INSERT INTO skills (id, name, description, content, enabled, created_at, updated_at)
+             VALUES ('s1', 'Release notes', 'd', 'Write them warmly.', 1, 0, 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let out: Value =
+            serde_json::from_str(&run(&json!({ "name": "release-notes" }), &pool).await.unwrap()).unwrap();
+        assert_eq!(out["status"], "loaded", "{out}");
+        assert_eq!(out["name"], "Release notes");
+
+        // A skill really called `release-notes` is the one that name means.
+        sqlx::query(
+            "INSERT INTO skills (id, name, description, content, enabled, created_at, updated_at)
+             VALUES ('s2', 'release-notes', 'd', 'Terse.', 1, 0, 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let out: Value =
+            serde_json::from_str(&run(&json!({ "name": "release-notes" }), &pool).await.unwrap()).unwrap();
+        assert_eq!(out["name"], "release-notes");
+    }
 
     /// A DB with the real schema, plus a temp folder registered as the managed
     /// skills root and one pack installed into it in the `.claude` layout an

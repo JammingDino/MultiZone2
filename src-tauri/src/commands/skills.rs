@@ -39,7 +39,10 @@ pub async fn list_skill_commands(state: State<'_, AppState>) -> AppResult<Vec<se
     Ok(crate::tools::skills::catalog_entries(&state.db)
         .await
         .into_iter()
-        .map(|(name, description, _)| serde_json::json!({ "name": name, "description": description }))
+        // The name as typed after the slash, so one with spaces is still one word.
+        .map(|(name, description, _)| {
+            serde_json::json!({ "name": crate::tools::skills::command_name(&name), "description": description })
+        })
         .collect())
 }
 

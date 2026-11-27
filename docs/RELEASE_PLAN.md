@@ -519,7 +519,7 @@ Raised after using 0.20.0, plus the first-request work that was 0.20.2. Planned 
 
 ## Backlog — unscheduled
 
-- [ ] **A `/command` whose name has spaces never gets the command look** — in the composer and in the sent message it reads as plain text. Raised 2026-11-28; not a priority
+- [x] **A `/command` whose name has spaces never gets the command look** — in the composer and in the sent message it reads as plain text. Raised 2026-11-28; not a priority — *fixed 2026-11-28: a skill's command is its name with each run of spaces (or other characters a command cannot hold) turned into a hyphen, so "Release notes" is `/Release-notes`. The menu inserts that, it is drawn as a command in the composer and the sent message, and it loads the skill on send — before, such a skill could not be invoked by `/` at all. A skill really named `release-notes` still wins that name*
 - [ ] **From 0.19.3, folders handed to a chat.** Each small, each built on `chat_paths`:
   - Reference a large dropped file by path instead of inlining it — a 40 MB log does not need to be in context once the agent can open it
   - Files panel right-click: copy path, reveal in Explorer, grant to another chat

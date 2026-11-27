@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { AlertCircle, Check, ChevronDown, ChevronRight, Loader2, Sparkles } from "lucide-react";
 import type { ContentPart } from "@/lib/types";
-import { commandsIn } from "@/lib/promptTokens";
+import { commandName, commandsIn } from "@/lib/promptTokens";
 import { parseSkillPart, type SkillPart } from "@/lib/skillRuns";
 import { useSkillCommands } from "./PromptHighlight";
 
@@ -18,12 +18,13 @@ const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 /** A sent message's runs, from its unclaimed hidden parts and its text. */
 export function useSkillRuns(text: string, hidden: ContentPart[]): SkillRun[] {
   const { list, names } = useSkillCommands();
-  const describe = (n: string) => list.find((k) => same(k.name, n))?.description ?? "";
+  // The list holds command forms; a loaded part carries the skill's real name.
+  const describe = (n: string) => list.find((k) => same(k.name, commandName(n)))?.description ?? "";
   const loaded = hidden.flatMap((p) => {
     const s = p.type === "hidden_text" ? parseSkillPart(p.text) : null;
     return s ? [s] : [];
   });
-  const missing = commandsIn(text, names).filter((n) => !loaded.some((l) => same(l.name, n)));
+  const missing = commandsIn(text, names).filter((n) => !loaded.some((l) => same(commandName(l.name), n)));
   return [
     ...loaded.map((s) => ({ ...s, description: describe(s.name), loaded: true })),
     ...missing.map((name) => ({ name, files: [], excerpt: "", description: describe(name), loaded: false })),

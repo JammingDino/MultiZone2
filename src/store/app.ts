@@ -628,7 +628,9 @@ interface AppStore {
    * (0.15.0). Set by cross-chat search; cleared by `MessageThread` as soon as
    * it has landed, so re-entering the chat later does not jump again.
    */
-  pendingJumpMessageId: string | null;
+  /** A search hit to scroll to once its chat's thread has it (0.15.0). Keyed by
+   *  chat: every mounted thread watches this, and only that chat's may take it. */
+  pendingJump: { chatId: string; messageId: string } | null;
   /** Open `chatId` and scroll to `messageId` once its thread has loaded. */
   jumpToMessage: (chatId: string, messageId: string) => Promise<void>;
   clearPendingJump: () => void;
@@ -1393,16 +1395,16 @@ export const useApp = create<AppStore>((set, get) => ({
     const ids = new Set(chats.map((c) => c.id));
     get().updateTabLayout((l) => closeWhere(l, (t) => { const c = chatOf(t); return c !== null && !ids.has(c); }));
   },
-  pendingJumpMessageId: null,
+  pendingJump: null,
   async jumpToMessage(chatId, messageId) {
     // Order matters: the flag is set before the switch so a thread that is
     // already mounted for this chat sees it on the same render that the
     // messages arrive, rather than a frame later.
-    set({ pendingJumpMessageId: messageId });
+    set({ pendingJump: { chatId, messageId } });
     await get().setActiveChat(chatId);
   },
   clearPendingJump() {
-    set({ pendingJumpMessageId: null });
+    set({ pendingJump: null });
   },
   async setActiveChat(id, where = get().appSettings.chatClickOpens === "replace" ? "here" : "tab") {
     get().updateTabLayout((l) => navigate(l, id ? chatTab(id) : HOME_TAB, where));

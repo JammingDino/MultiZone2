@@ -241,7 +241,9 @@ export function MessageThread({ chatId, bottomInset = 0 }: {
   // Waits on `messagesLoaded` because the anchor does not exist until the
   // thread has rendered, and clears the flag either way — a jump to a message
   // that has since been deleted should not re-fire on every later visit.
-  const pendingJumpMessageId = useApp((s) => s.pendingJumpMessageId);
+  // Only this chat's jump: another chat's thread mounted in a hidden tab would
+  // otherwise look for the message, miss it, and clear the jump first.
+  const pendingJumpMessageId = useApp((s) => (s.pendingJump?.chatId === chatId ? s.pendingJump.messageId : null));
   const clearPendingJump = useApp((s) => s.clearPendingJump);
   useEffect(() => {
     if (!pendingJumpMessageId || !messagesLoaded) return;
@@ -254,7 +256,12 @@ export function MessageThread({ chatId, bottomInset = 0 }: {
         // Reading the hit is the point: stop following, or the next token
         // would carry the reader straight back down.
         pinnedRef.current = false;
-        target.scrollIntoView({ block: "center", behavior: "smooth" });
+        // Instant, then once more a frame later: turns off screen are laid out
+        // at a placeholder height (`content-visibility`, styles.css), and the
+        // real heights around the hit only exist once it is in view — a smooth
+        // scroll aimed at the estimate stopped a screen or more away from it.
+        target.scrollIntoView({ block: "center" });
+        window.requestAnimationFrame(() => target.scrollIntoView({ block: "center" }));
         target.classList.add("mz-jump-flash");
         window.setTimeout(() => target.classList.remove("mz-jump-flash"), 1600);
       }

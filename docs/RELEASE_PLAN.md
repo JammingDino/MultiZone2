@@ -459,7 +459,7 @@ The main column already tiles (0.18.2), on a layout tree of our own that stops a
 - [x] The Files tree follows the disk (watcher + re-read on focus); the chat follows a streaming reply only until you scroll away
 - [x] Agents set up projects: `PATCH /api/projects/:id`, `/api/projects/schema`, project approvals and a token limit (migration 055)
 - [x] Lock a chat behind the app password or its own (PBKDF2, enforced in Rust and the API; agents may lock, never unlock; migration 056); one Export… item
-- [ ] Left for 0.20.1+: pane keys still act behind open dialogs; idle auto-relock; unlocking from the phone; a keyboard pass over Settings and the model pickers; the phone layout since the pane rewrite; the sidebar text blur the user saw (not reproduced)
+- [ ] Left for 0.20.1+: pane keys still act behind open dialogs; idle auto-relock; unlocking from the phone; a keyboard pass over Settings and the model pickers; the phone layout since the pane rewrite; the sidebar text blur the user saw (not reproduced) — *2026-11-28: the keyboard pass is done (scripted browser): Settings opens with focus inside, Tab stays in the dialog, every stop is named and visibly focused, Escape closes it and focus returns to the composer; in the model field ArrowDown opens the list with an active option and Escape closes only the list; the zone picker opens on ArrowDown, arrows move, Escape closes it and focus returns to its button. Pane keys behind dialogs were fixed in 0.21 (`shortcutFires`); phone width was reviewed fine on 2026-11-27*
 
 ### 0.21.0 — Unstuck, and the first request (released 2026-11-27)
 

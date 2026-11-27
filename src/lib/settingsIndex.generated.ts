@@ -497,6 +497,28 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
     ]
   },
   {
+    "tab": "savedRuns",
+    "tabLabel": "Saved runs",
+    "heading": "Saved runs",
+    "description": "A prompt with blanks to fill. Write {{name}} where a value goes and give it a default; open the run from ⌘K or by typing / in a chat.",
+    "keywords": [
+      "New saved run",
+      "Import…",
+      "Name",
+      "Release notes",
+      "Description (optional)",
+      "Draft the notes for a tagged version",
+      "Prompt",
+      "Write the release notes for {{version}} from the commits since {{previous}}. Keep them {{tone}}.",
+      "Parameters",
+      "Parameter",
+      "Not in the prompt:",
+      "Zone",
+      "— the chat's zone —",
+      "Cancel"
+    ]
+  },
+  {
     "tab": "voice",
     "tabLabel": "Dictation",
     "heading": "Dictation on this computer",

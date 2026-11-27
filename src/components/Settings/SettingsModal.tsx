@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Bell, Bot, ShieldCheck, Server, Smartphone, Palette, MessageSquare, Database, Globe, Brain, Sparkles, Plug, Library, Layers, Mic, Volume2, CalendarClock, SquareArrowOutUpRight } from "lucide-react";
+import { Bell, Bot, ShieldCheck, Server, Smartphone, Palette, MessageSquare, Database, Globe, Brain, Sparkles, Plug, Library, Layers, Mic, Volume2, CalendarClock, SquareArrowOutUpRight, Bookmark } from "lucide-react";
 import { useApp } from "@/store/app";
 import { layerOpen } from "@/lib/useDismissOnEscape";
 import { Modal, ModalTitle } from "@/components/common/Modal";
@@ -18,20 +18,21 @@ import { NotificationsTab } from "./tabs/NotificationsTab";
 import { ProvidersTab } from "./tabs/ProvidersTab";
 import { RemoteTab } from "./tabs/RemoteTab";
 import { SchedulesTab } from "./tabs/SchedulesTab";
+import { SavedRunsTab } from "./tabs/SavedRunsTab";
 import { SkillsTab } from "./tabs/SkillsTab";
 import { SpeechTab } from "./tabs/SpeechTab";
 import { VoiceTab } from "./tabs/VoiceTab";
 import { ZoneLibrary } from "@/components/Zones/ZoneLibrary";
 import { useSettingsSearch } from "./SettingsSearch";
 
-type Tab = "providers" | "zones" | "appearance" | "chat" | "notifications" | "agents" | "approvals" | "schedules" | "voice" | "speech" | "skills" | "mcp" | "knowledge" | "memory" | "remote" | "api" | "data";
+type Tab = "providers" | "zones" | "appearance" | "chat" | "notifications" | "agents" | "approvals" | "schedules" | "savedRuns" | "voice" | "speech" | "skills" | "mcp" | "knowledge" | "memory" | "remote" | "api" | "data";
 
-const TAB_IDS: Tab[] = ["providers", "zones", "appearance", "chat", "notifications", "agents", "approvals", "schedules", "voice", "speech", "skills", "mcp", "knowledge", "memory", "remote", "api", "data"];
+const TAB_IDS: Tab[] = ["providers", "zones", "appearance", "chat", "notifications", "agents", "approvals", "schedules", "savedRuns", "voice", "speech", "skills", "mcp", "knowledge", "memory", "remote", "api", "data"];
 
 /** The nav label for each tab, reused when a tab fails to render so the message
  * names the screen the user actually clicked. */
 const TAB_LABELS: Record<Tab, string> = {
-  providers: "Providers", zones: "Zones", appearance: "Appearance", chat: "Chat", notifications: "Notifications", agents: "Runs", approvals: "Approvals", schedules: "Schedules",
+  providers: "Providers", zones: "Zones", appearance: "Appearance", chat: "Chat", notifications: "Notifications", agents: "Runs", approvals: "Approvals", schedules: "Schedules", savedRuns: "Saved runs",
   voice: "Dictation", speech: "Speech", skills: "Skills", mcp: "MCP",
   knowledge: "Knowledge", memory: "Memory", remote: "Phone & remote", api: "API", data: "Data",
 };
@@ -166,6 +167,7 @@ function SettingsBody({ search }: { search: ReturnType<typeof useSettingsSearch>
       <NavItem active={tab === "agents"} icon={<Bot size={14} />} label="Runs" onClick={() => setTab("agents")} />
       <NavItem active={tab === "approvals"} icon={<ShieldCheck size={14} />} label="Approvals" onClick={() => setTab("approvals")} />
       <NavItem active={tab === "schedules"} icon={<CalendarClock size={14} />} label="Schedules" onClick={() => setTab("schedules")} />
+      <NavItem active={tab === "savedRuns"} icon={<Bookmark size={14} />} label="Saved runs" onClick={() => setTab("savedRuns")} />
 
       <NavGroup label="Tools & context" />
       <NavItem active={tab === "skills"} icon={<Sparkles size={14} />} label="Skills" onClick={() => setTab("skills")} />
@@ -224,6 +226,7 @@ function SettingsBody({ search }: { search: ReturnType<typeof useSettingsSearch>
                 {tab === "agents" && <AgentsTab />}
                 {tab === "approvals" && <ApprovalsTab />}
                 {tab === "schedules" && <SchedulesTab />}
+                {tab === "savedRuns" && <SavedRunsTab />}
                 {tab === "voice" && <VoiceTab />}
                 {tab === "speech" && <SpeechTab />}
                 {tab === "skills" && <SkillsTab />}

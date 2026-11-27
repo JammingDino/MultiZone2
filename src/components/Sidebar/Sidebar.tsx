@@ -384,7 +384,9 @@ export function Sidebar({ docked = false }: { docked?: boolean } = {}) {
 
         {ungroupedChats.length > 0 && (
           <>
-            {projects.length > 0 && <SectionLabel label="Chats" />}
+            {/* Always labelled: the Projects heading is always there, so an
+                unlabelled list reads as the projects' own. */}
+            <SectionLabel label="Chats" />
             <ChatList
               chats={ungroupedChats}
               activeId={activeChatId}

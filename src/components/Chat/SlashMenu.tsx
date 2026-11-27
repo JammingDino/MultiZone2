@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { Terminal, FileText, Loader2, Sparkles, ClipboardList } from "lucide-react";
+import { Terminal, FileText, Loader2, Sparkles, ClipboardList, Play } from "lucide-react";
 import { useSkillCommands } from "./PromptHighlight";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
-import type { McpPrompt, McpResource } from "@/lib/types";
+import type { McpPrompt, McpResource, SavedRun } from "@/lib/types";
 import { reportError } from "@/lib/reportError";
 
 /**
@@ -25,11 +25,13 @@ type Entry =
   | { kind: "builtin"; name: string; description: string }
   | { kind: "skill"; name: string; description: string }
   | { kind: "prompt"; serverId: string; serverName: string; prompt: McpPrompt }
-  | { kind: "resource"; serverId: string; serverName: string; resource: McpResource };
+  | { kind: "resource"; serverId: string; serverName: string; resource: McpResource }
+  | { kind: "run"; run: SavedRun };
 
 function entryKey(e: Entry): string {
   if (e.kind === "builtin") return `b:${e.name}`;
   if (e.kind === "skill") return `s:${e.name}`;
+  if (e.kind === "run") return `run:${e.run.id}`;
   return e.kind === "prompt"
     ? `p:${e.serverId}:${e.prompt.name}`
     : `r:${e.serverId}:${e.resource.uri}`;
@@ -37,11 +39,13 @@ function entryKey(e: Entry): string {
 
 function entryLabel(e: Entry): string {
   if (e.kind === "builtin" || e.kind === "skill") return e.name;
+  if (e.kind === "run") return e.run.name;
   return e.kind === "prompt" ? e.prompt.name : e.resource.name;
 }
 
 function entryDetail(e: Entry): string | null {
   if (e.kind === "builtin" || e.kind === "skill") return e.description || null;
+  if (e.kind === "run") return e.run.description;
   return e.kind === "prompt" ? e.prompt.description : e.resource.description;
 }
 
@@ -62,6 +66,9 @@ export function SlashMenu({
   // Skills first (0.20.1): picking one puts `/name` in the prompt, and it runs
   // when the message is sent. MCP prompts and resources expand where they are.
   const skills = useSkillCommands().list;
+  const savedRuns = useApp((s) => s.savedRuns);
+  const refreshSavedRuns = useApp((s) => s.refreshSavedRuns);
+  useEffect(() => void refreshSavedRuns(), [refreshSavedRuns]);
   const [entries, setEntries] = useState<Entry[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [cursor, setCursor] = useState(0);
@@ -107,6 +114,9 @@ export function SlashMenu({
       ...skills
         .filter((k) => !builtins.some((b) => b.name === k.name.toLowerCase()))
         .map((k): Entry => ({ kind: "skill", name: k.name, description: k.description })),
+      // Saved runs (0.20.1) expand like MCP prompts: the filled-in template,
+      // with its defaults, visible in the composer before it is sent.
+      ...savedRuns.map((run): Entry => ({ kind: "run", run })),
       ...(entries ?? []),
     ];
     const q = query.toLowerCase();
@@ -117,7 +127,7 @@ export function SlashMenu({
         return hay.includes(q);
       })
       .slice(0, 30);
-  }, [entries, skills, query, builtins]);
+  }, [entries, skills, savedRuns, query, builtins]);
 
   useEffect(() => setCursor(0), [query]);
 
@@ -128,12 +138,14 @@ export function SlashMenu({
     }
     try {
       const text =
-        e.kind === "prompt"
+        e.kind === "run"
+          ? (await api.renderSavedRun(e.run.id)).prompt
+          : e.kind === "prompt"
           ? await api.getMcpPrompt(e.serverId, e.prompt.name)
           : await api.readMcpResource(e.serverId, e.resource.uri);
       onPick(text);
     } catch (err) {
-      reportError("Couldn't fetch that from the MCP server")(err);
+      reportError(e.kind === "run" ? "Couldn't fill in that saved run" : "Couldn't fetch that from the MCP server")(err);
       onClose();
     }
   }
@@ -170,7 +182,8 @@ export function SlashMenu({
       <Loader2 size={12} className="animate-spin" /> Asking your MCP servers…
     </p>
   );
-  const kindOf = (e: Entry) => (e.kind === "builtin" ? "command" : e.kind === "skill" ? "skill" : e.serverName);
+  const kindOf = (e: Entry) =>
+    e.kind === "builtin" ? "command" : e.kind === "skill" ? "skill" : e.kind === "run" ? "saved run" : e.serverName;
   // Built-ins and skills go in as `/name`; MCP entries expand where they are.
   const slashed = (e: Entry) => e.kind === "builtin" || e.kind === "skill";
   const row = (e: Entry, i: number, className: string, children: React.ReactNode) => (
@@ -218,10 +231,10 @@ export function SlashMenu({
     <div className="mz-slash absolute bottom-full left-0 z-50 mb-2 max-h-64 w-full max-w-md overflow-y-auto">
       {asking || results.map((e, i) => row(e, i, "mz-slash-row", (
         <>
-          {e.kind === "builtin" ? <ClipboardList size={13} /> : e.kind === "skill" ? <Sparkles size={13} /> : e.kind === "prompt" ? <Terminal size={13} /> : <FileText size={13} />}
+          {e.kind === "builtin" ? <ClipboardList size={13} /> : e.kind === "skill" ? <Sparkles size={13} /> : e.kind === "run" ? <Play size={13} /> : e.kind === "prompt" ? <Terminal size={13} /> : <FileText size={13} />}
           <span className="nm">{slashed(e) ? "/" : ""}{entryLabel(e)}</span>
           <span className="ds">{entryDetail(e)}</span>
-          {!slashed(e) && <span className="src">{e.serverName}</span>}
+          {!slashed(e) && <span className="src">{kindOf(e)}</span>}
           {i === cursor && <kbd className="enter" aria-hidden>↵</kbd>}
         </>
       )))}

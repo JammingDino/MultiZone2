@@ -418,7 +418,7 @@ Adding a provider in Claude Code is one step and then you work. Here it was the 
 
 Claude Code runs a slash command only as the whole message. Here a command is a word in the prompt: `/review the parser, then /commit` is one message.
 - [x] `/` opens the menu anywhere a word starts (`slashAt`), not only in the first column — skills and skill packs first, then MCP prompts and resources, filtered as you type. A `/word` with a second slash is a path, not a command
-- [~] Saved runs in the same menu (they are in the palette today) — listed after the skills; picking one fills its template with the defaults at the caret, like an MCP prompt. Not yet seen in the app
+- [x] Saved runs in the same menu (they are in the palette today) — listed after the skills; picking one fills its template with the defaults at the caret, like an MCP prompt. Seen in the app and approved in review, 2026-11-27
 - [x] A chosen command has a look of its own in the composer — `PromptHighlight`, an overlay behind the textarea in the same font and box that adds colour, background and glow only, so no glyph moves; the textarea's own text goes transparent only while there is a token to draw
 - [x] On send, each `/skill` hands the model its `load_skill` result as a hidden part (`invoke_skill`); the word stays in the transcript. MCP prompts and resources still expand when picked, at the caret, so what they add is visible before sending
 - [x] A folder granted while the composer is open — dropped, picked, pasted — is inserted at the caret and glows amber there, as well as on the Access strip
@@ -430,9 +430,9 @@ Claude Code runs a slash command only as the whole message. Here a command is a 
 ### 0.20.2 — The first request is yours (soon)
 
 Raised while 0.20 was being planned. Watching the requests arrive at a local server (unsloth, LM Studio) shows a first request longer than it should be, with no say in what goes into it.
-- [ ] Every section of the system prompt named and sized (preamble, env, AGENTS.md, skills index, memory, tool notes, tool schemas), each one switchable off per zone, with app-wide defaults
-- [ ] The exact first request — system prompt and tool list as sent — viewable and copyable before anything is sent
-- [ ] A lean preset for small local models: the shortest prompt that still works with tools
+- [x] Every section of the system prompt named and sized (preamble, env, AGENTS.md, skills index, memory, tool notes, tool schemas), each one switchable off per zone, with app-wide defaults
+- [x] The exact first request — system prompt and tool list as sent — viewable and copyable before anything is sent
+- [x] A lean preset for small local models: the shortest prompt that still works with tools — *these three shipped in 0.21.0*
 - [ ] Plan mode: find what makes it frustrating in use and fix that — *to be specified with the user*
 
 ## 0.21.x — Everything is a panel
@@ -459,7 +459,7 @@ The main column already tiles (0.18.2), on a layout tree of our own that stops a
 - [x] The Files tree follows the disk (watcher + re-read on focus); the chat follows a streaming reply only until you scroll away
 - [x] Agents set up projects: `PATCH /api/projects/:id`, `/api/projects/schema`, project approvals and a token limit (migration 055)
 - [x] Lock a chat behind the app password or its own (PBKDF2, enforced in Rust and the API; agents may lock, never unlock; migration 056); one Export… item
-- [ ] Left for 0.20.1+: pane keys still act behind open dialogs; idle auto-relock; unlocking from the phone; a keyboard pass over Settings and the model pickers; the phone layout since the pane rewrite; the sidebar text blur the user saw (not reproduced) — *2026-11-28: the keyboard pass is done (scripted browser): Settings opens with focus inside, Tab stays in the dialog, every stop is named and visibly focused, Escape closes it and focus returns to the composer; in the model field ArrowDown opens the list with an active option and Escape closes only the list; the zone picker opens on ArrowDown, arrows move, Escape closes it and focus returns to its button. Pane keys behind dialogs were fixed in 0.21 (`shortcutFires`); phone width was reviewed fine on 2026-11-27*
+- [x] Left for 0.20.1+ (all shipped in 0.21.0): pane keys still act behind open dialogs; idle auto-relock; unlocking from the phone; a keyboard pass over Settings and the model pickers; the phone layout since the pane rewrite; the sidebar text blur the user saw (not reproduced) — *2026-11-28: the keyboard pass is done (scripted browser): Settings opens with focus inside, Tab stays in the dialog, every stop is named and visibly focused, Escape closes it and focus returns to the composer; in the model field ArrowDown opens the list with an active option and Escape closes only the list; the zone picker opens on ArrowDown, arrows move, Escape closes it and focus returns to its button. Pane keys behind dialogs were fixed in 0.21 (`shortcutFires`); phone width was reviewed fine on 2026-11-27*
 
 ### 0.21.0 — Unstuck, and the first request (released 2026-11-27)
 

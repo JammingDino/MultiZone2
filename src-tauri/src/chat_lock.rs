@@ -122,6 +122,17 @@ pub fn verify_password(password: &str, stored: &str) -> bool {
     got.iter().zip(key.iter()).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0
 }
 
+// 600k rounds is a fraction of a second of CPU: run it on the blocking pool so
+// it never stalls an async worker that is streaming someone else's turn.
+async fn hash_blocking(password: String) -> String {
+    tokio::task::spawn_blocking(move || hash_password(&password)).await.expect("hashing panicked")
+}
+
+async fn verify_blocking(password: &str, stored: String) -> bool {
+    let password = password.to_owned();
+    tokio::task::spawn_blocking(move || verify_password(&password, &stored)).await.expect("hashing panicked")
+}
+
 // ─── Who holds an unlock ──────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -565,10 +576,17 @@ async fn password_opens(db: &SqlitePool, chat_id: &str, password: &str) -> AppRe
     if kind.is_none() {
         return Ok(true);
     }
-    if kind.as_deref() == Some(KIND_CHAT) && hash.as_deref().is_some_and(|h| verify_password(password, h)) {
-        return Ok(true);
+    if kind.as_deref() == Some(KIND_CHAT) {
+        if let Some(h) = hash {
+            if verify_blocking(password, h).await {
+                return Ok(true);
+            }
+        }
     }
-    Ok(app_hash(db).await?.is_some_and(|h| verify_password(password, &h)))
+    Ok(match app_hash(db).await? {
+        Some(h) => verify_blocking(password, h).await,
+        None => false,
+    })
 }
 
 fn notify(app: &AppHandle) {
@@ -688,7 +706,7 @@ pub async fn lock_chat(
         Some(pw) => {
             sqlx::query("UPDATE chats SET lock_kind = ?1, lock_hash = ?2 WHERE id = ?3")
                 .bind(KIND_CHAT)
-                .bind(hash_password(&pw))
+                .bind(hash_blocking(pw).await)
                 .bind(&chat_id)
                 .execute(db)
                 .await?;
@@ -758,14 +776,18 @@ pub async fn set_app_lock_password(
 ) -> AppResult<()> {
     let db = &state.db;
     if let Some(h) = app_hash(db).await? {
-        if !current.as_deref().is_some_and(|c| verify_password(c, &h)) {
+        let ok = match current.as_deref() {
+            Some(c) => verify_blocking(c, h).await,
+            None => false,
+        };
+        if !ok {
             return Err(AppError::Invalid("the current app password is wrong".into()));
         }
     }
     match new.filter(|p| !p.is_empty()) {
         Some(pw) => {
             sqlx::query("INSERT INTO app_lock (id, hash) VALUES (1, ?1) ON CONFLICT(id) DO UPDATE SET hash = excluded.hash")
-                .bind(hash_password(&pw))
+                .bind(hash_blocking(pw).await)
                 .execute(db)
                 .await?;
         }

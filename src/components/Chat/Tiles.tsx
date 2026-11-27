@@ -170,6 +170,15 @@ export function Tiles({ renderTab, renderBar }: {
     if (g.tabs.length && ws.getSnapshot().focusedPanel !== g.id) ws.focus(g.id);
   }, [ws, layout, narrow]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Trellis scrolls a tab into view only as it is selected, so a strip laid
+  // out or narrowed afterwards could open with its active tab cut off.
+  useEffect(() => {
+    const strips = host.current?.querySelectorAll<HTMLElement>('[data-trellis-part="tabs"]') ?? [];
+    const ro = new ResizeObserver((entries) => entries.forEach(({ target }) => revealSelected(target as HTMLElement)));
+    strips.forEach((s) => ro.observe(s));
+    return () => ro.disconnect();
+  }, [ws, layout, narrow]);
+
   // Moving around the panes from the keyboard (0.21.0).
   useEffect(() => {
     if (!ws) return;
@@ -490,6 +499,15 @@ function neighbour(panelId: string, dir: "left" | "right" | "top" | "bottom"): s
     if (!best || score < best.score) best = { id, score };
   }
   return best?.id ?? null;
+}
+
+/** Scroll a tab strip just far enough to show its selected tab. */
+function revealSelected(list: HTMLElement) {
+  const tab = list.querySelector<HTMLElement>('[aria-selected="true"]');
+  if (!tab) return;
+  const left = tab.offsetLeft - list.offsetLeft;
+  if (left < list.scrollLeft) list.scrollLeft = Math.max(0, left - 8);
+  else if (left + tab.offsetWidth > list.scrollLeft + list.clientWidth) list.scrollLeft = left + tab.offsetWidth - list.clientWidth + 8;
 }
 
 /** One view's content, with its tab's name kept current. */

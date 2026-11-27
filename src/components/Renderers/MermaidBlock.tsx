@@ -157,6 +157,15 @@ export async function renderMermaidSvg(source: string): Promise<string | null> {
   }
 }
 
+// Diagrams render one at a time, a frame apart: a fast scroll through a long
+// chat brings several near at once, and each is tens of milliseconds of layout.
+let turn: Promise<void> = Promise.resolve();
+function inTurn<T>(job: () => Promise<T>): Promise<T> {
+  const run = turn.then(() => new Promise<void>((r) => requestAnimationFrame(() => r()))).then(job);
+  turn = run.then(() => {}, () => {});
+  return run;
+}
+
 /**
  * Identifies the stored `draw_diagram` call behind this block (0.9.8).
  *
@@ -308,9 +317,9 @@ export function MermaidBlock({
     setError(null);
     (async () => {
       try {
-        const mermaid = await ensureInitialized();
-        const { svg } = await mermaid.render(renderId, cleanSource);
-        if (!cancelled) {
+        const out = await inTurn(async () => (cancelled ? null : (await ensureInitialized()).render(renderId, cleanSource)));
+        if (out && !cancelled) {
+          const { svg } = out;
           const cleaned = svg
             .replace(/(<svg[^>]*?)\s+style="[^"]*background[^"]*"/i, "$1")
             .replace(/background-color:\s*[^;"]+;?/gi, "");

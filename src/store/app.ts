@@ -42,15 +42,23 @@ function panelFlags(l: TabLayout) {
 }
 function readTabLayout(): TabLayout {
   const stored = readStoredLayout();
-  const l = ensureHome(withPanels(stored));
+  // Nothing usable stored (a new profile, cleared site data, a layout that no
+  // longer parses): start with both panels docked. The migration above runs
+  // once, so without this a lost layout came back with no sidebar at all.
+  const l = ensureHome(stored ? withPanels(stored) : withBothPanels(initialLayout()));
   if (l !== stored) writeTabLayout(l);
   return l;
 }
-function readStoredLayout(): TabLayout {
+function withBothPanels(l: TabLayout): TabLayout {
+  try { localStorage.setItem(PANELS_KEY, "1"); } catch { /* storage off */ }
+  l = dockPanel(l, [SIDEBAR_TAB], "left", 0.2);
+  return dockPanel(l, DEFAULT_SECTIONS.map(sectionTab), "right", 0.26);
+}
+function readStoredLayout(): TabLayout | null {
   try {
-    return parseLayout(JSON.parse(localStorage.getItem(TAB_LAYOUT_KEY) ?? "null")) ?? initialLayout();
+    return parseLayout(JSON.parse(localStorage.getItem(TAB_LAYOUT_KEY) ?? "null"));
   } catch {
-    return initialLayout();
+    return null;
   }
 }
 function writeTabLayout(l: TabLayout) {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Bell, Bot, ShieldCheck, Server, Smartphone, Palette, MessageSquare, Database, Globe, Brain, Sparkles, Plug, Library, Layers, Mic, Volume2, CalendarClock, SquareArrowOutUpRight } from "lucide-react";
 import { useApp } from "@/store/app";
+import { layerOpen } from "@/lib/useDismissOnEscape";
 import { Modal, ModalTitle } from "@/components/common/Modal";
 import { CHROME_QUIET } from "@/lib/chrome";
 import { SETTINGS_TAB, focusedGroup } from "@/lib/tabLayout";
@@ -102,9 +103,10 @@ export function SettingsView() {
   const root = useRef<HTMLDivElement>(null);
   // Ctrl+F and "/" are Settings' only from inside it: the window is shared
   // with chats now. Focus on the page itself counts when Settings is in front.
+  // Never while a dialog or list is up: that layer owns the keyboard.
   const owns = useCallback((e: KeyboardEvent) => {
     const el = root.current;
-    if (!el) return false;
+    if (!el || layerOpen()) return false;
     if (el.contains(e.target as Node)) return true;
     return e.target === document.body && focusedGroup(useApp.getState().tabLayout).active === SETTINGS_TAB;
   }, []);

@@ -473,7 +473,7 @@ Raised after using 0.20.0, plus the first-request work that was 0.20.2. Planned 
 - [x] Fuzzy search over every setting, in Settings and in Ctrl+K
 - [x] Settings as a dockable tab (*Settings opens*: dialog or tab)
 - [x] The launch splash drawn on the user's theme (gradient, glass, accent glow)
-- [ ] Left for later: screen-lock detection for relock; F6/Ctrl+Shift+Enter inside a docked Settings tab while a model list is open; Settings' Ctrl+F behind a dialog over it; the APK keyboard inset untested on a device
+- [ ] Left for later: screen-lock detection for relock; ~~F6/Ctrl+Shift+Enter inside a docked Settings tab while a model list is open~~ (2026-11-28: Trellis's own bindings bypassed open layers and Ctrl+Shift+Enter picked a model; both fixed, Playwright-checked); ~~Settings' Ctrl+F behind a dialog over it~~ (2026-11-28: the tab's Ctrl+F stands down while any layer is up); the APK keyboard inset untested on a device
 - [x] PBKDF2 off the async runtime (`hash_blocking`/`verify_blocking`); ZoneLibrary's Save/Add menus on the Escape stack
 
 ---

@@ -773,6 +773,10 @@ async fn copy_child_chats(
                 // Anchored past this fork's cut — drop it and its subtree.
                 None => continue,
             },
+            // A sub-agent run has no anchor, so its start time places it: one
+            // spawned by a turn past the cut belongs to that turn, which the
+            // fork does not have.
+            None if child.created_at > through_ts => continue,
             None => None,
         };
 
@@ -812,7 +816,8 @@ async fn copy_child_chats(
         .execute(db)
         .await?;
 
-        Box::pin(copy_child_chats(db, &child.id, &child_new_id, &child_map, through_ts)).await?;
+        // The child came whole, so everything hanging off it comes too.
+        Box::pin(copy_child_chats(db, &child.id, &child_new_id, &child_map, i64::MAX)).await?;
     }
     Ok(())
 }
@@ -1717,6 +1722,37 @@ mod fork_tests {
         let kids: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM chats WHERE parent_chat_id = 'dst'")
             .fetch_one(&pool).await.unwrap();
         assert_eq!(kids, 1);
+    }
+
+    /// A sub-agent spawned by a turn past the cut stays behind with that turn;
+    /// one spawned before it travels, along with whatever hangs off it however
+    /// late that was made.
+    #[tokio::test]
+    async fn a_sub_agent_run_past_the_cut_is_left_behind() {
+        let pool = pool().await;
+        chat(&pool, "src", None, None).await;
+        chat(&pool, "dst", None, None).await;
+        msg(&pool, "m1", "src", 10).await;
+        msg(&pool, "m2", "src", 30).await;
+        chat(&pool, "early", Some("src"), None).await;
+        chat(&pool, "late", Some("src"), None).await;
+        chat(&pool, "early_kid", Some("early"), None).await;
+        for (id, ts) in [("early", 12), ("late", 32), ("early_kid", 40)] {
+            sqlx::query("UPDATE chats SET created_at = ?1 WHERE id = ?2")
+                .bind(ts).bind(id).execute(&pool).await.unwrap();
+        }
+
+        let map = copy_messages_and_attachments(&pool, "src", "dst", 20).await.unwrap();
+        copy_child_chats(&pool, "src", "dst", &map, 20).await.unwrap();
+
+        let kids: Vec<String> = sqlx::query_scalar("SELECT title FROM chats WHERE parent_chat_id = 'dst'")
+            .fetch_all(&pool).await.unwrap();
+        assert_eq!(kids, vec!["chat early".to_string()]);
+        let grandkids: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM chats WHERE parent_chat_id = (SELECT id FROM chats WHERE parent_chat_id = 'dst')",
+        )
+        .fetch_one(&pool).await.unwrap();
+        assert_eq!(grandkids, 1, "a run carried whole carries its own children");
     }
 
     /// A branch of a branch. The recursion has to re-link each level against

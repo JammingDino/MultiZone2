@@ -157,7 +157,7 @@ pub const ROUTES: &[RouteDef] = &[
     r("GET", "/api/chats/:id/subagents", "The leader's sub-agent roster"),
     r("POST", "/api/chats/:id/subagents", "Replace the sub-agent roster"),
     r("GET", "/api/chats/:id/subchats", "The leader→sub-agent call tree"),
-    r("POST", "/api/chats/:id/branch", "Fork the chat at a message"),
+    r("POST", "/api/chats/:id/branch", "Fork the chat at a message ({messageId}; optional scope: \"visible\" (default) for this thread, \"branches\" to also carry the branches and sub-agent runs from before the cut, \"all\" for the whole transcript and every child; standalone: true for a root chat rather than one nested under this)"),
     r("POST", "/api/chats/:id/regenerate", "Re-run the last turn; streams SSE unless ?wait=true"),
     r("POST", "/api/chats/:id/regenerate-participant", "Re-run one participant's answer"),
     r("POST", "/api/chats/:id/cancel", "Cancel the in-flight turn"),

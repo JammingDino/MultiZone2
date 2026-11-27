@@ -2054,6 +2054,9 @@ async fn run_participant_turn(
     // Set when the user asked the run to stop after the step in flight (0.12.1).
     // The next step runs with no tools, so it can only answer.
     let mut stop_after_step = false;
+    // When the plan was last shown to the model: the system prompt carries it
+    // from turn start, and a user edit after that is passed on as a note.
+    let mut plan_shown_at = now_ts();
     // Loop detection (0.14.1), per turn — a call repeated across two turns is
     // the user asking twice, not an agent stuck.
     let mut loop_guard = crate::llm::runaway::LoopGuard::new();
@@ -3270,12 +3273,27 @@ async fn run_participant_turn(
         // same mechanism the step budget uses to guarantee prose at the end.
         // Keyed by zone like the plan itself (see `link_message` above).
         if let Some(plan) = crate::plans::active_plan(&ctx.db, chat_id, Some(zone.id.as_str())).await {
+            // Striking or adding a step mid-run (0.12.1). The system prompt is
+            // built once a turn (rebuilding it each step would throw away the
+            // prefix cache), so the edited list goes in as a note instead.
+            let checked_at = now_ts();
+            if crate::plans::user_edited_since(&ctx.db, chat_id, plan_shown_at).await {
+                push_system_note(
+                    &mut api_messages,
+                    format!(
+                        "The user changed the plan while you were working. From here on, follow \
+                         this version: skip steps marked [-] and do the ones added.\n\n{}",
+                        crate::plans::task_list_block(&plan)
+                    ),
+                );
+            }
+            plan_shown_at = checked_at;
             if plan.stop_requested {
                 crate::plans::clear_stop(&ctx.db, &plan.id).await.ok();
                 crate::plans::set_status(&ctx.db, &plan.id, "stopped").await.ok();
                 push_system_note(
                     &mut api_messages,
-                    "The user has asked you to stop after the current step. Do not start                      another step or call another tool. Report what you finished, what you                      did not, and what the next person picking this up needs to know."
+                    "The user has asked you to stop after the current step. Do not start another step or call another tool. Report what you finished, what you did not, and what the next person picking this up needs to know."
                         .to_string(),
                 );
                 stop_after_step = true;

@@ -747,6 +747,21 @@ pub async fn active_plan(
     .flatten()
 }
 
+/// Whether the user edited this chat's plan after `since` (ms) — the signal for
+/// passing an edited task list to a turn already running it.
+pub async fn user_edited_since(db: &SqlitePool, chat_id: &str, since: i64) -> bool {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT EXISTS(SELECT 1 FROM session_events
+          WHERE chat_id = ?1 AND kind = 'plan_edit' AND created_at >= ?2)",
+    )
+    .bind(chat_id)
+    .bind(since)
+    .fetch_one(db)
+    .await
+    .map(|n| n == 1)
+    .unwrap_or(false)
+}
+
 /// Has this chat ever planned? Gates offering `read_plan` outside plan mode —
 /// a tool that would return "no plans yet" is worth nothing in the request.
 pub async fn chat_has_plans(db: &SqlitePool, chat_id: &str) -> bool {
@@ -1501,6 +1516,19 @@ mod tests {
             .unwrap();
         assert_eq!(get(&db, &first.id).await.unwrap().status, "superseded");
         assert_eq!(pending_draft(&db, "c1").await.map(|p| p.id), Some(second.id));
+    }
+
+    /// A running turn passes on the user's edit once: only an edit after the
+    /// last look counts, and a plan the model updates itself is not an edit.
+    #[tokio::test]
+    async fn only_a_user_edit_after_the_last_look_counts() {
+        let db = pool().await;
+        assert!(!user_edited_since(&db, "c1", 0).await);
+        crate::events::record(&db, "c1", None, None, "plan_update", "the model ticked a step", None).await;
+        assert!(!user_edited_since(&db, "c1", 0).await);
+        crate::events::record(&db, "c1", None, None, "plan_edit", "You added a step to the plan", None).await;
+        assert!(user_edited_since(&db, "c1", 0).await);
+        assert!(!user_edited_since(&db, "c1", now_ts() + 1).await);
     }
 
     /// Approving writes back what the *user* agreed to and leaves plan mode.

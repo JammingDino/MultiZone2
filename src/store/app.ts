@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { DEFAULT_APP_SETTINGS, type AppSettings, type Chat, type Checkpoint, type RestoreReport, type RewindReport, type RewindStatus, type ChatTagEntry, type ChatTagLink, type ChatZone, type McpServerView, type Memory, type Message, type PendingMessage, type PendingMode, type Plan, type PlanStep, type Project, type GeneratedIcon, type Provider, type Skill, type SkillPack, type Tag, type Zone } from "@/lib/types";
 import * as api from "@/lib/tauri";
 import { isLockedNow, useChatLocks } from "@/lib/chatLock";
+import { pruneChatMaps } from "@/lib/chatMaps";
 // Dictation goes through its own seam: the microphone is on this device, and
 // on a phone that means the WebView rather than the machine running the app.
 import * as dictation from "@/lib/dictation";
@@ -1390,9 +1391,11 @@ export const useApp = create<AppStore>((set, get) => ({
   },
   async refreshChats() {
     const chats = await api.listChats();
-    set({ chats });
-    // A deleted chat's tab goes with it, wherever it was.
     const ids = new Set(chats.map((c) => c.id));
+    // A deleted chat's cached state goes with it, messages included.
+    const deleted = new Set(get().chats.map((c) => c.id).filter((id) => !ids.has(id)));
+    set({ chats, ...pruneChatMaps(get(), deleted) });
+    // And so does its tab, wherever it was.
     get().updateTabLayout((l) => closeWhere(l, (t) => { const c = chatOf(t); return c !== null && !ids.has(c); }));
   },
   pendingJump: null,

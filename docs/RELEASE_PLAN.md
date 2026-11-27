@@ -425,7 +425,7 @@ Claude Code runs a slash command only as the whole message. Here a command is a 
 - [x] The sent message draws its `/commands` and path-shaped words the same way
 - [x] The Home screen's composer does the same (`usePromptTokens`, shared with the chat composer): menu anywhere, overlay, a folder added there glows in the prompt, skills load with the first message
 - [x] A message queued behind a running turn goes as text only, so a `/skill` in it is a plain word — queued entries carry hidden parts now (`pending::as_parts`); a send held behind a running turn also stops folding a skill's hidden text into the visible message
-- [ ] Seen in the app: the overlay lined up with the caret through wrapping, scrolling and a 22px interface size; `/a then /b` loading both; a folder drop landing in the prompt
+- [x] Seen in the app: the overlay lined up with the caret through wrapping, scrolling and a 22px interface size; `/a then /b` loading both; a folder drop landing in the prompt — *2026-11-28, scripted browser: overlay glyphs match the textarea's pixel for pixel at 16 and 22px, wrapped and scrolled mid-way (a 1px shift fails the same check); `/about-this-app then /json-output` sent both skills' text to the model; a folder granted mid-sentence lands at the caret and glows (it left a double space — fixed). The window's own drop event is the one step not driven; it ends in the same grant*
 
 ### 0.20.2 — The first request is yours (soon)
 

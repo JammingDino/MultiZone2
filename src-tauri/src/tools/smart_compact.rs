@@ -253,7 +253,7 @@ pub fn apply(rows: &mut [Message], through: i64, opts: &Options) {
                     let name = entry.map(|(_, n)| n).unwrap_or_default();
                     vec![ContentPart::Text {
                         text: format!(
-                            "[Result omitted: `{name}` was called again later with the same                              arguments — the newer result is the current one.]"
+                            "[Result omitted: `{name}` was called again later with the same arguments — the newer result is the current one.]"
                         ),
                     }]
                 } else {

@@ -2537,7 +2537,7 @@ mod tests {
         }
         assert!(
             envelope.contains_key("get_setting"),
-            "the envelope scanner found nothing where it is known to apply —              has routes.rs changed shape?",
+            "the envelope scanner found nothing where it is known to apply — has routes.rs changed shape?",
         );
 
 
@@ -2575,12 +2575,12 @@ mod tests {
                 }
                 let Some(field) = declared else {
                     panic!(
-                        "{command} is served by `{handler}`, which answers an object                          with the keys {keys:?} rather than the command's own value.                          Say which key holds it: `Route(\"{route} -> <key>\")`.",
+                        "{command} is served by `{handler}`, which answers an object with the keys {keys:?} rather than the command's own value. Say which key holds it: `Route(\"{route} -> <key>\")`.",
                     );
                 };
                 assert!(
                     keys.contains(&field),
-                    "{command} unwraps `{field}`, which `{handler}` does not answer                      with — it has {keys:?}",
+                    "{command} unwraps `{field}`, which `{handler}` does not answer with — it has {keys:?}",
                 );
             }
         }

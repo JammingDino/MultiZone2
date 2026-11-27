@@ -40,6 +40,12 @@ acted behind an open model list (and the combobox took Ctrl+Shift+Enter as a
 pick); the Settings tab's Ctrl+F reached past the palette or a list. Also, a
 skill whose name has spaces is now one `/word`.
 
+**Built:** Settings → Saved runs, the 0.15.4 editor — parameters as rows, blanks
+without one offered as chips, one-file export and import with the zone by name —
+and ⌘K now asks for a run's parameters before starting it. The browser-upsert
+fix first guessed from the body's shape and emptied a run's `values`; the
+commands are now named in `BODY_IS_ARGUMENT`, with a test against the call sites.
+
 ### Not done
 
 - Items that need a real model's judgement are annotated, not ticked: plan mode

@@ -461,15 +461,19 @@ The main column already tiles (0.18.2), on a layout tree of our own that stops a
 - [x] Lock a chat behind the app password or its own (PBKDF2, enforced in Rust and the API; agents may lock, never unlock; migration 056); one Export… item
 - [ ] Left for 0.20.1+: pane keys still act behind open dialogs; idle auto-relock; unlocking from the phone; a keyboard pass over Settings and the model pickers; the phone layout since the pane rewrite; the sidebar text blur the user saw (not reproduced)
 
-### 0.21.1 — Unstuck, and the first request (in progress on `feat/0.21`)
+### 0.21.1 — Unstuck, and the first request (done on `feat/0.21`, not yet released)
 
 Raised after using 0.20.0, plus the first-request work that was 0.20.2.
-- [ ] A startup that fails because the data is newer than the app offers *Update now* from the latest GitHub release, instead of a manual reinstall (dev builds write newer data than the installed app reads)
-- [ ] A `/command` looks like one while it is typed: an in-progress look for a prefix of a known command, the full look the moment it is complete (not only when picked from the menu)
-- [ ] Clicking a chat opens it in a new tab by default; *Replaces the current tab* stays as a setting
-- [ ] Browser mode (opt-in): the app starts without a window and opens the same interface in the default browser, over a loopback-only listener with a one-time login, reusing the phone's HTTP transport
-- [ ] The first request is yours: system-prompt sections named and sized, switchable per zone with app-wide defaults; the exact first request viewable and copyable before sending; a Lean preset for small local models
-- [ ] Carried from 0.20.0: pane keys still act behind open dialogs; idle auto-relock; unlocking from the phone; a keyboard pass over Settings and the model pickers; the phone layout since the pane rewrite; the sidebar text blur (not reproduced)
+- [x] A startup that fails because the data is newer than the app offers *Update now* from the latest GitHub release, instead of a manual reinstall (dev builds write newer data than the installed app reads)
+- [x] A `/command` looks like one while it is typed: an in-progress look for a prefix of a known command, the full look the moment it is complete (not only when picked from the menu)
+- [x] Clicking a chat opens it in a new tab by default; *Replaces the current tab* stays as a setting
+- [x] Browser mode (opt-in): the app starts without a window and opens the same interface in the default browser, over a loopback-only listener with a one-time login, reusing the phone's HTTP transport
+- [x] The first request is yours: system-prompt sections named and sized, switchable per zone with app-wide defaults; the exact first request viewable and copyable before sending; a Lean preset for small local models
+- [x] Carried from 0.20.0: pane keys no longer act behind open dialogs; idle auto-relock (default 15 min); unlocking from the phone and a browser tab, per device; a keyboard pass over Settings and the model pickers; the phone layout since the pane rewrite; the sidebar text blur (a will-change layer left soft after a pane zoom)
+- [x] Fuzzy search over every setting, in Settings and in Ctrl+K
+- [x] Settings as a dockable tab (*Settings opens*: dialog or tab)
+- [x] The launch splash drawn on the user's theme (gradient, glass, accent glow)
+- [ ] Left for later: screen-lock detection for relock; PBKDF2 off the async runtime; F6/Ctrl+Shift+Enter inside a docked Settings tab while a model list is open; Settings' Ctrl+F behind a dialog over it; ZoneLibrary's Save/Add menus outside the Escape stack; the APK keyboard inset untested on a device
 
 ---
 

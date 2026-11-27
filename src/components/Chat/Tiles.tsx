@@ -15,7 +15,7 @@ import {
   isPanelTab, moveTab, sectionOf, studyOf, type DropZone, type Section, type TabLayout,
 } from "@/lib/tabLayout";
 import { evenPanels, fromDocument, resizePanel, toDocument } from "@/lib/trellisLayout";
-import type { Command, LayoutNode, PanelNode } from "@danfessler/trellis";
+import { formatCombo, type Command, type LayoutNode, type PanelNode } from "@danfessler/trellis";
 
 type Phase = "move" | "drop" | "cancel";
 
@@ -218,8 +218,15 @@ export function Tiles({ renderTab, renderBar }: {
         // No Hide: the app has no tray to bring a hidden pane back from.
         panelMenu={(entries) => entries
           .filter((e) => e === "separator" || e.id !== "hide")
-          .map((e) => (e !== "separator" && e.id === "close" ? { ...e, shortcut: "Ctrl+W" } : e))}
-        keymap={{ "navigation.stepOut": null }}
+          .map((e) =>
+            e === "separator" ? e
+            : e.id === "close" ? { ...e, shortcut: "Ctrl+W" }
+            // The keymap entry is off (paneKeys has it), which took its hint with it.
+            : e.id === "maximize" ? { ...e, shortcut: formatCombo("Mod+Shift+Enter") }
+            : e)}
+        // F6 and the zoom toggle go through paneKeys instead, which stands
+        // down while a dialog or a list is open; Trellis's own binding does not.
+        keymap={{ "navigation.stepOut": null, "panel.next": null, "panel.previous": null, "frame.toggle": null }}
         tabs={{ inset: 0 }}
         label="Workspace"
         onDocumentChange={(doc) => take(fromDocument(doc, useApp.getState().tabLayout.focused))}
@@ -369,6 +376,7 @@ const DIRS: Record<string, "left" | "right" | "top" | "bottom"> = {
 function commandFor(e: KeyboardEvent): Command | null {
   if (e.key === "F6" && !(e.ctrlKey || e.metaKey)) return e.shiftKey ? "panel.previous" : "panel.next";
   if (!(e.ctrlKey || e.metaKey)) return null;
+  if (e.key === "Enter" && e.shiftKey) return "frame.toggle";
   if (e.key === "Tab") return e.shiftKey ? "tab.previous" : "tab.next";
   if (e.shiftKey) return null;
   if (e.key === "PageDown") return "tab.next";

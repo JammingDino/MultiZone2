@@ -96,8 +96,9 @@ export function ModelCombobox({ value, onChange, options, placeholder, className
       e.preventDefault();
       if (!shown) openList();
       else setActive((i) => rovingIndex(e.key, i, list.length, "vertical") ?? i);
-    } else if (e.key === "Enter" && shown) {
+    } else if (e.key === "Enter" && shown && !(e.ctrlKey || e.metaKey || e.altKey)) {
       // Picking from the list is the Enter; a typed name is already committed.
+      // A modified Enter is some other shortcut's, not a pick.
       if (active >= 0 && list[active]) {
         e.preventDefault();
         pick(list[active]);

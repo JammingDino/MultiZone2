@@ -13,6 +13,7 @@ import type { Project } from "@/lib/types";
 import { CHROME_ACTIVE, CHROME_OUTLINED, CHROME_QUIET } from "@/lib/chrome";
 import { ResizeHandle, usePanelWidth } from "@/components/common/ResizeHandle";
 import { useIsNarrow } from "@/lib/useIsNarrow";
+import { Modal, ModalTitle } from "@/components/common/Modal";
 
 /**
  * `docked`: drawn as a pane of the window's layout (0.21.0), which sizes it and
@@ -595,12 +596,9 @@ function DeleteProjectDialog({
 }) {
   const chatLabel = `${chatCount} chat${chatCount === 1 ? "" : "s"}`;
   return (
-    <div className="mz-safe-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onCancel}>
-      <div
-        className="w-[380px] rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] p-4 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-1 text-sm font-medium">Delete “{project.name}”?</div>
+    // The shared dialog (0.21), for Escape, focus kept inside it and given back.
+    <Modal onClose={onCancel} header={<ModalTitle>Delete “{project.name}”?</ModalTitle>} size="dialog" className="w-[380px]">
+      <div className="p-4">
         <p className="mb-4 text-xs text-[var(--color-text-muted)]">
           {chatCount === 0
             ? "This project has no chats."
@@ -631,12 +629,14 @@ function DeleteProjectDialog({
         <div className="mt-3 flex justify-end">
           <button
             onClick={onCancel}
+            // With nothing to keep, the first control is Delete: not where Enter should land.
+            autoFocus={chatCount === 0}
             className="rounded px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
           >
             Cancel
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

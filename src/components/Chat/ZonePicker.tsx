@@ -57,6 +57,10 @@ export function ZonePicker({ chatId, currentZoneId, smartRouting, routingState }
       <button
         ref={buttonRef}
         onClick={() => setOpen((v) => !v)}
+        // A menu button: Enter and Space as any button, and the arrows too.
+        onKeyDown={(e) => { if ((e.key === "ArrowDown" || e.key === "ArrowUp") && !open) { e.preventDefault(); setOpen(true); } }}
+        aria-haspopup="menu"
+        aria-expanded={open}
         className={`flex min-w-0 max-w-full items-center gap-1.5 rounded px-1.5 py-0.5 text-xs ${open ? CHROME_ACTIVE : CHROME_QUIET}`}
         title="Change zone"
       >
@@ -117,9 +121,11 @@ export function ZonePicker({ chatId, currentZoneId, smartRouting, routingState }
         align="end"
         className="min-w-[260px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg"
       >
-        <div>
+        <div role="menu" aria-label="Zone">
           <button
             onClick={() => pick(null)}
+            role="menuitemradio"
+            aria-checked={!smartRouting && currentZoneId === null}
             className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)]"
           >
             <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-[var(--color-panel-hover)]">
@@ -133,6 +139,8 @@ export function ZonePicker({ chatId, currentZoneId, smartRouting, routingState }
           </button>
           <button
             onClick={pickSmart}
+            role="menuitemradio"
+            aria-checked={smartRouting}
             className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)]"
           >
             <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-[var(--color-panel-hover)]">
@@ -153,6 +161,8 @@ export function ZonePicker({ chatId, currentZoneId, smartRouting, routingState }
               <button
                 key={z.id}
                 onClick={() => pick(z.id)}
+                role="menuitemradio"
+                aria-checked={!smartRouting && active}
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)]"
               >
                 <div
@@ -180,6 +190,7 @@ export function ZonePicker({ chatId, currentZoneId, smartRouting, routingState }
               setOpen(false);
               openZoneEditor(null);
             }}
+            role="menuitem"
             className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
           >
             <Plus size={12} />
@@ -191,6 +202,7 @@ export function ZonePicker({ chatId, currentZoneId, smartRouting, routingState }
                 setOpen(false);
                 openZoneEditor(current.id);
               }}
+              role="menuitem"
               className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[var(--color-text-muted)] hover:bg-[var(--color-panel-hover)] hover:text-[var(--color-text)]"
             >
               <Layers size={12} />

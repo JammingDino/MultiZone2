@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
 import { ChevronDown, Search } from "lucide-react";
 import type { ApprovalCategory, ApprovalPolicy } from "@/lib/types";
+import { rovingKeyDown, rovingTab } from "@/lib/keyboard";
+
+/**
+ * A radio group from the keyboard (0.21): one Tab stop, the arrows move the
+ * choice, as native radios do.
+ */
+const radioKeys = (e: React.KeyboardEvent<HTMLElement>) => rovingKeyDown(e, "[role=radio]", { select: true });
 
 /** A labelled checkbox row used by the export selector. */
 export function CheckLine({
@@ -126,17 +133,19 @@ export function OptionCards<T extends string | number>({
   layout?: "row" | "column";
   align?: "left" | "center";
 }) {
+  const anyChosen = options.some((o) => o[0] === value);
   // Bare values are a segmented control: one line, the choice readable at a
   // glance (0.18.3). They were a row of full-width cards, which made "Enter or
   // Ctrl+Enter" the heaviest thing on its page.
   if (options.every((o) => o.length === 2)) {
     return (
-      <div role="radiogroup" className="inline-flex flex-wrap overflow-hidden rounded border border-[var(--color-border)] text-sm">
-        {options.map(([val, label]) => (
+      <div role="radiogroup" onKeyDown={radioKeys} className="inline-flex flex-wrap overflow-hidden rounded border border-[var(--color-border)] text-sm">
+        {options.map(([val, label], i) => (
           <button
             key={val}
             role="radio"
             aria-checked={value === val}
+            tabIndex={rovingTab(value === val, i, anyChosen)}
             onClick={() => onChange(val)}
             className={`px-3 py-1.5 ${value === val ? SEG_ON : SEG_OFF}`}
           >
@@ -149,12 +158,13 @@ export function OptionCards<T extends string | number>({
   // Described options are a radio list: a dot, the label, the line of
   // explanation beside it — no box around each.
   return (
-    <div role="radiogroup" className="flex flex-col">
-      {options.map(([val, label, description]) => (
+    <div role="radiogroup" onKeyDown={radioKeys} className="flex flex-col">
+      {options.map(([val, label, description], i) => (
         <button
           key={val}
           role="radio"
           aria-checked={value === val}
+          tabIndex={rovingTab(value === val, i, anyChosen)}
           onClick={() => onChange(val)}
           className="-mx-2 flex items-baseline gap-2.5 rounded px-2 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)]"
         >
@@ -220,7 +230,7 @@ export function ApprovalCategoryGrid({
                 <div className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">{description}</div>
               )}
             </div>
-            <div className="flex shrink-0 overflow-hidden rounded border border-[var(--color-border)] text-[11px]">
+            <div role="radiogroup" aria-label={label} onKeyDown={radioKeys} className="flex shrink-0 overflow-hidden rounded border border-[var(--color-border)] text-[11px]">
               {([
                 [undefined, "Inherit"],
                 [false, "Ask"],
@@ -228,6 +238,9 @@ export function ApprovalCategoryGrid({
               ] as [boolean | undefined, string][]).map(([state, text]) => (
                 <button
                   key={text}
+                  role="radio"
+                  aria-checked={current === state}
+                  tabIndex={current === state ? 0 : -1}
                   onClick={() => set(cat, state)}
                   className={`px-2 py-1 ${current === state ? SEG_ON : SEG_OFF}`}
                 >
@@ -346,6 +359,8 @@ export function SliderRow({
         step={step}
         value={value}
         onChange={(e) => onChange(parseFloat(e.target.value))}
+        aria-label={label}
+        aria-valuetext={display}
         className="w-full"
       />
     </div>

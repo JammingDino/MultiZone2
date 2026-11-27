@@ -13,6 +13,7 @@
  */
 
 import { useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { AudioLines, FileText, Film, Image as ImageIcon, FileType, Loader2, Music, X, ZoomIn } from "lucide-react";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
@@ -30,6 +31,7 @@ import {
   type PendingAttachment,
 } from "@/lib/attachFiles";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
+import { useDialogFocus } from "@/lib/useDialogFocus";
 import { CHROME_QUIET, PRIMARY_ACTION } from "@/lib/chrome";
 import { errorText } from "@/lib/errors";
 
@@ -500,6 +502,8 @@ export function AttachmentPreview({
   onRetry?: () => void;
 }) {
   useDismissOnEscape(true, onClose);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(panelRef);
 
   let body: React.ReactNode;
 
@@ -588,19 +592,28 @@ export function AttachmentPreview({
     );
   }
 
-  return (
+  // In the body, like every dialog: from inside the composer its keys reached
+  // the workspace tiles, and Tab walked out into the pane behind it.
+  return createPortal(
     <div
       className="mz-safe-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="relative rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-5 shadow-2xl"
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={attachment.fileName}
+        tabIndex={-1}
+        className="relative rounded-xl outline-none border border-[var(--color-border)] bg-[var(--color-panel)] p-5 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-center justify-between gap-6">
           <span className="max-w-[400px] truncate text-sm font-medium">{attachment.fileName}</span>
           <button
             onClick={onClose}
+            aria-label="Close"
+            data-dialog-close=""
             className={`rounded p-1 ${CHROME_QUIET}`}
           >
             <X size={16} />
@@ -608,7 +621,8 @@ export function AttachmentPreview({
         </div>
         {body}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

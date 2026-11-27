@@ -1,6 +1,8 @@
 import { useEffect } from "react";
 import { useApp } from "@/store/app";
 import { GLOBAL_SHORTCUTS, type GlobalShortcut, type ShortcutAction } from "@/lib/shortcuts";
+import { shortcutFires } from "@/lib/keyboard";
+import { layerOpen } from "@/lib/useDismissOnEscape";
 
 /** True when focus is in a text-entry surface, where plain keys are content. */
 function isTyping(target: EventTarget | null): boolean {
@@ -80,13 +82,28 @@ export function useGlobalShortcuts() {
     function onKeyDown(e: KeyboardEvent) {
       // Plain "?" opens the reference, unless the user is typing.
       if (e.key === "?" && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        if (isTyping(e.target)) return;
+        if (isTyping(e.target) || layerOpen()) return;
         e.preventDefault();
         useApp.getState().openShortcutsHelp();
         return;
       }
       for (const s of GLOBAL_SHORTCUTS) {
         if (matches(e, s)) {
+          // A dialog, menu or the palette on top owns the keyboard.
+          const st = useApp.getState();
+          const open = {
+            settings: st.settingsOpen,
+            zones: st.settingsOpen && st.settingsTab === "zones",
+            projects: st.projectsPanelOpen,
+            palette: st.commandPaletteOpen,
+            help: st.shortcutsHelpOpen,
+          };
+          if (!shortcutFires(s.action, layerOpen(), open)) {
+            // Still not the webview's (Ctrl+N, Ctrl+P), but Alt+↓ stays a
+            // select's way to open.
+            if (s.mod) e.preventDefault();
+            return;
+          }
           e.preventDefault();
           run(s.action);
           return;

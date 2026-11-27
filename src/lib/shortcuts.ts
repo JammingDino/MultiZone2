@@ -123,6 +123,8 @@ export const CONTEXTUAL_GROUPS: ShortcutGroup[] = [
     items: [
       { keys: ["Enter"], description: "Confirm a rename or inline text field" },
       { keys: ["Esc"], description: "Cancel a rename" },
+      { keys: ["↑", "↓", "Home", "End"], description: "In a menu, a model list or Settings' rail: move through it (type a name to jump to it in a menu)" },
+      { keys: ["←", "→"], description: "In a set of choices (a segmented control, the themes): pick the next one" },
     ],
   },
   {

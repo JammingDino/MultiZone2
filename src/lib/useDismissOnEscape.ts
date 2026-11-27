@@ -38,6 +38,15 @@ if (typeof window !== "undefined") {
 }
 
 /**
+ * Is any dismissable layer up — a dialog, a menu, the palette, an open
+ * combobox? While one is, it owns the keyboard: the global and pane shortcuts
+ * ask this before acting on the window behind it (0.21).
+ */
+export function layerOpen(): boolean {
+  return stack.length > 0;
+}
+
+/**
  * Register a dismissable layer while `active` is true. `onDismiss` is read
  * through a ref, so passing an inline arrow function doesn't churn the stack.
  */

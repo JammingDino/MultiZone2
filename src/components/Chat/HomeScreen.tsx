@@ -788,6 +788,9 @@ export function HomeScreen() {
               <button
                 ref={menuBtnRef}
                 onClick={() => setMenuOpen((v) => !v)}
+                onKeyDown={(e) => { if ((e.key === "ArrowDown" || e.key === "ArrowUp") && !menuOpen) { e.preventDefault(); setMenuOpen(true); } }}
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
                 className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs ${
                   menuOpen ? CHROME_ACTIVE : CHROME_OUTLINED
                 }`}
@@ -837,9 +840,11 @@ export function HomeScreen() {
                   zIndex={30}
                   className="max-h-72 min-w-[260px] rounded-md border border-[var(--color-border)] bg-[var(--color-panel)] py-1 shadow-lg"
                 >
-                  <div>
+                  <div role="menu" aria-label="Mode">
                       <button
                         onClick={() => { setMode({ type: "quick" }); setMenuOpen(false); }}
+                        role="menuitemradio"
+                        aria-checked={mode.type === "quick"}
                         className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)]"
                         title="Uses the base zone (Settings → Chat) for every message — fast and consistent"
                       >
@@ -858,6 +863,8 @@ export function HomeScreen() {
                       </button>
                       <button
                         onClick={() => { setMode({ type: "smart" }); setMenuOpen(false); }}
+                        role="menuitemradio"
+                        aria-checked={mode.type === "smart"}
                         className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)]"
                         title="A router model picks the best zone for each individual message"
                       >
@@ -872,6 +879,8 @@ export function HomeScreen() {
                       </button>
                       <button
                         onClick={() => { setMode({ type: "multizone" }); setMenuOpen(false); }}
+                        role="menuitemradio"
+                        aria-checked={mode.type === "multizone"}
                         className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                         disabled={!multizoneAvailable}
                         title={
@@ -900,6 +909,8 @@ export function HomeScreen() {
                           <button
                             key={z.id}
                             onClick={() => { setMode({ type: "zone", id: z.id }); setMenuOpen(false); }}
+                            role="menuitemradio"
+                            aria-checked={active}
                             className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-[var(--color-panel-hover)]"
                             title={`Use the "${z.name}" zone for every message in this chat`}
                           >

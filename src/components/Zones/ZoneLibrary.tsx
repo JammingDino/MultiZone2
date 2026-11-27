@@ -580,6 +580,9 @@ function LibraryView(props: {
                     onDragLeave={p.onDragLeave}
                     onDrop={p.onDrop}
                     onClick={p.onBrowse}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); p.onBrowse(); } }}
                     className={`flex cursor-pointer flex-col items-center gap-2 rounded-lg border border-dashed px-3 py-4 text-center transition ${
                       p.dragOver ? "border-[var(--color-accent)] bg-[var(--color-accent)]/10" : "border-[var(--color-border)] hover:bg-[var(--color-panel-hover)]"
                     }`}
@@ -840,7 +843,8 @@ function ZoneCard({
       <span className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl shadow-sm" style={{ background: accent }}>
         <Icon size={21} color="white" />
       </span>
-      <div className="mb-1 text-[14px] font-semibold tracking-tight" style={{ color: accent }}>{entry.name}</div>
+      {/* The name is the card's keyboard way in (0.21); the card is a click target only. */}
+      <button type="button" onClick={(e) => stop(e, onOpen)} className="mb-1 self-start text-left text-[14px] font-semibold tracking-tight" style={{ color: accent }}>{entry.name}</button>
       <div className="text-[12px] leading-snug text-[var(--color-text-muted)]" style={{ display: "-webkit-box", WebkitLineClamp: compact ? 2 : 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
         {entry.description || (entry.systemPrompt ?? "").replace(/\s+/g, " ").trim() || "No description."}
       </div>

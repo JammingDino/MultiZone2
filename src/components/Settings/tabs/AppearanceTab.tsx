@@ -14,6 +14,7 @@ import { formatCount } from "@/lib/format";
 import { OptionCards, SettingSelect, SliderRow } from "../controls";
 import { StreamingMarkdown } from "@/components/Renderers/StreamingMarkdown";
 import { useThrottledStreaming } from "@/lib/useThrottledStreaming";
+import { rovingKeyDown, rovingTab } from "@/lib/keyboard";
 import type { AppSettings } from "@/lib/types";
 
 const ACCENT_PRESETS = ["#4f9cf9", "#22c55e", "#a855f7", "#f97316", "#ec4899", "#facc15"];
@@ -133,12 +134,15 @@ export function AppearanceTab() {
             <span className="text-xs text-[var(--color-text-muted)]">Custom — pick one to start over</span>
           )}
         </div>
-        <div className="grid grid-cols-3 narrow:grid-cols-2 gap-3">
-          {THEME_PRESETS.map((p) => (
+        {/* One Tab stop and the arrows between cards (0.21), but Enter or Space
+            to pick: a theme replaces every colour, so passing over one must not. */}
+        <div role="group" aria-label="Theme" onKeyDown={(e) => rovingKeyDown(e, "button[aria-pressed]")} className="grid grid-cols-3 narrow:grid-cols-2 gap-3">
+          {THEME_PRESETS.map((p, i) => (
             <ThemeCard
               key={p.id}
               preset={p}
               active={active === p.id}
+              tabIndex={rovingTab(active === p.id, i, !!active)}
               onPick={() => setTheme({ ...presetPrefs(p), followSystem: false })}
             />
           ))}
@@ -461,7 +465,7 @@ export function AppearanceTab() {
  * A built-in theme as a little window in its own colours: the backdrop, a
  * sidebar and a chat pane, glass where the theme has it.
  */
-function ThemeCard({ preset, active, onPick }: { preset: ThemePreset; active: boolean; onPick: () => void }) {
+function ThemeCard({ preset, active, onPick, tabIndex }: { preset: ThemePreset; active: boolean; onPick: () => void; tabIndex: number }) {
   const c = presetPalette(preset);
   const prefs = presetPrefs(preset);
   const pane = (col: string) => (prefs.glassEnabled ? `color-mix(in srgb, ${col} 60%, transparent)` : col);
@@ -475,6 +479,7 @@ function ThemeCard({ preset, active, onPick }: { preset: ThemePreset; active: bo
     <button
       onClick={onPick}
       aria-pressed={active}
+      tabIndex={tabIndex}
       className={`flex flex-col gap-1.5 rounded-lg p-1.5 text-left transition-shadow ${
         active ? "ring-2 ring-[var(--color-accent)]" : "ring-1 ring-[var(--color-border)] hover:ring-[var(--color-text-muted)]"
       }`}
@@ -523,12 +528,14 @@ function BackdropPicker() {
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="grid grid-cols-4 narrow:grid-cols-2 gap-2">
-        {BACKDROPS.map((b) => (
+      <div role="radiogroup" aria-label="Backdrop" onKeyDown={(e) => rovingKeyDown(e, "[role=radio]", { select: true })} className="grid grid-cols-4 narrow:grid-cols-2 gap-2">
+        {BACKDROPS.map((b, i) => (
           <button
             key={b.id}
             onClick={() => pick(b.id)}
-            aria-pressed={current === b.id}
+            role="radio"
+            aria-checked={current === b.id}
+            tabIndex={rovingTab(current === b.id, i, BACKDROPS.some((x) => x.id === current))}
             className={`flex flex-col gap-1 rounded-md p-1 text-left text-[11px] ${
               current === b.id ? "ring-2 ring-[var(--color-accent)]" : "ring-1 ring-[var(--color-border)] hover:ring-[var(--color-text-muted)]"
             }`}

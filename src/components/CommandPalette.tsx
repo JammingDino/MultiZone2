@@ -15,6 +15,7 @@ import {
 import { useApp } from "@/store/app";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
 import { useBackDismiss } from "@/lib/useBackDismiss";
+import { useDialogFocus } from "@/lib/useDialogFocus";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import * as api from "@/lib/tauri";
 import { useZoneModel } from "@/lib/useZoneModel";
@@ -76,6 +77,9 @@ export function CommandPalette() {
 
   useDismissOnEscape(open, close);
   useBackDismiss(open, close);
+  // Tab stays in the palette, and focus goes back where it was on close.
+  const panelRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(panelRef, open);
 
   // A palette always opens empty — it is a fresh question every time, and a
   // stale query is one the user has to clear before they can start.
@@ -262,6 +266,7 @@ export function CommandPalette() {
     >
       <div
         className="flex max-h-[64vh] w-full max-w-xl flex-col overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] shadow-2xl"
+        ref={panelRef}
         onMouseDown={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"

@@ -34,6 +34,7 @@ import { useApp } from "@/store/app";
 import { usePaneChatId } from "@/lib/paneChat";
 import { getZoneIcon } from "@/lib/zoneIcons";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
+import { useDialogFocus } from "@/lib/useDialogFocus";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { CHROME_QUIET } from "@/lib/chrome";
 import { useZoneModel } from "@/lib/useZoneModel";
@@ -405,6 +406,8 @@ function MessagePreviewModal({
   onClose: () => void;
 }) {
   useDismissOnEscape(true, onClose);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(panelRef);
 
   const title =
     preview.kind === "image" ? "Image preview" : preview.fileName;
@@ -451,13 +454,20 @@ function MessagePreviewModal({
       onClick={onClose}
     >
       <div
-        className="relative rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-5 shadow-2xl"
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        tabIndex={-1}
+        className="relative rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] p-5 shadow-2xl outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-center justify-between gap-6">
           <span className="max-w-[400px] truncate text-sm font-medium">{title}</span>
           <button
             onClick={onClose}
+            aria-label="Close"
+            data-dialog-close=""
             className={`rounded p-1 ${CHROME_QUIET}`}
           >
             <X size={16} />

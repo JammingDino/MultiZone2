@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { rovingKeyDown } from "@/lib/keyboard";
 
 /**
  * The left rail of a workspace panel — Settings and Configure Zones (0.18.1).
@@ -11,10 +12,16 @@ import type { ReactNode } from "react";
  * On a narrow screen the rail becomes a horizontally scrolling strip along the
  * top (0.17.3) — the one part of the panel that has to stay reachable from
  * every pane, kept visible without a second navigation concept to learn.
+ *
+ * From the keyboard (0.21) the rail is one Tab stop, the page on screen, and
+ * the arrows (Home, End) step through the pages, opening each as they go
+ * the way tabs do. Rows that are not `NavItem`s keep their own keys.
  */
 export function NavRail({ children }: { children: ReactNode }) {
   return (
-    <nav className="flex w-44 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-[var(--color-border)] p-2 text-sm narrow:w-full narrow:flex-none narrow:flex-row narrow:overflow-x-auto narrow:overflow-y-hidden narrow:border-r-0 narrow:border-b">
+    <nav
+      onKeyDown={(e) => rovingKeyDown(e, "[data-nav-item]", { select: true })}
+      className="flex w-44 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-[var(--color-border)] p-2 text-sm narrow:w-full narrow:flex-none narrow:flex-row narrow:overflow-x-auto narrow:overflow-y-hidden narrow:border-r-0 narrow:border-b">
       {children}
     </nav>
   );
@@ -44,7 +51,21 @@ export function NavItem({
   active: boolean; icon: ReactNode; label: string; onClick: () => void;
 }) {
   return (
-    <button onClick={onClick} className={navItemClass(active)}>
+    <button
+      onClick={() => {
+        onClick();
+        // Zones draws the rail itself, so moving to or from it remounts the
+        // rail and drops focus on the body; put it back on this page.
+        requestAnimationFrame(() => {
+          if (document.activeElement && document.activeElement !== document.body) return;
+          document.querySelector<HTMLElement>(`[data-nav-item="${CSS.escape(label)}"]`)?.focus();
+        });
+      }}
+      data-nav-item={label}
+      aria-current={active ? "page" : undefined}
+      tabIndex={active ? 0 : -1}
+      className={navItemClass(active)}
+    >
       {icon}
       {label}
     </button>

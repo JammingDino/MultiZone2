@@ -9,6 +9,7 @@ import { useApp } from "@/store/app";
 import { usePaneChatId } from "@/lib/paneChat";
 import { useSettledValue } from "@/lib/useSettledValue";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
+import { useDialogFocus } from "@/lib/useDialogFocus";
 import * as api from "@/lib/tauri";
 import { CHROME_QUIET } from "@/lib/chrome";
 
@@ -369,6 +370,8 @@ function MermaidViewport({ svg }: { svg: string }) {
   // Escape leaves fullscreen — through the shared layer stack, so a diagram
   // opened from inside a modal closes itself first and leaves the modal up.
   useDismissOnEscape(fullscreen, () => setFullscreen(false));
+  const overlayRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(overlayRef, fullscreen);
 
   const toggleFullscreen = useCallback(() => {
     if (!fullscreen) setSlotHeight(slotRef.current?.offsetHeight ?? null);
@@ -691,7 +694,12 @@ function MermaidViewport({ svg }: { svg: string }) {
       {fullscreen &&
         createPortal(
           <div
-            className="mz-safe-overlay fixed inset-0 z-50 flex bg-black/70 p-4 backdrop-blur-sm"
+            ref={overlayRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Diagram"
+            tabIndex={-1}
+            className="mz-safe-overlay fixed inset-0 z-50 flex bg-black/70 p-4 outline-none backdrop-blur-sm"
             onClick={(e) => {
               // Click the backdrop to leave; a click that lands on the frame
               // (including a pan that ends outside it) does not.

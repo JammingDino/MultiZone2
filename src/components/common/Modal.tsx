@@ -1,6 +1,8 @@
 import { X } from "lucide-react";
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
+import { useDialogFocus } from "@/lib/useDialogFocus";
 import { useBackDismiss } from "@/lib/useBackDismiss";
 import { CHROME_QUIET } from "@/lib/chrome";
 
@@ -60,14 +62,23 @@ export function Modal({
   // modal in the app goes through this component, so this one line is what
   // makes back work in Settings, the zone editor and the rest of them.
   useBackDismiss(true, onClose);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(panelRef);
 
-  return (
+  // Portalled to the body (0.21): a modal opened from inside a pane (the
+  // first-request viewer, a lock prompt) was inside the workspace's tiles,
+  // whose own keys (F6, Ctrl+Shift+Enter) then acted on the panes behind it.
+  return createPortal(
     <div
       className="mz-overlay mz-safe-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/60"
       onClick={onClose}
     >
       <div
-        className={`flex max-h-[94vh] max-w-[96vw] flex-col rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] shadow-2xl ${MOBILE_SIZE} ${size === "workspace" ? WORKSPACE_SIZE : ""} ${className}`}
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        tabIndex={-1}
+        className={`flex max-h-[94vh] outline-none max-w-[96vw] flex-col rounded-xl border border-[var(--color-border)] bg-[var(--color-panel)] shadow-2xl ${MOBILE_SIZE} ${size === "workspace" ? WORKSPACE_SIZE : ""} ${className}`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border)] px-5">
@@ -75,6 +86,7 @@ export function Modal({
           <button
             onClick={onClose}
             aria-label="Close"
+            data-dialog-close=""
             className={`shrink-0 rounded-md p-1.5 ${CHROME_QUIET}`}
           >
             <X size={16} />
@@ -82,7 +94,8 @@ export function Modal({
         </div>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

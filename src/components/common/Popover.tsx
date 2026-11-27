@@ -9,6 +9,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useDismissOnEscape } from "@/lib/useDismissOnEscape";
+import { rovingIndex, typeaheadIndex } from "@/lib/keyboard";
 
 /**
  * Every floating surface in the app — dropdowns, pickers, right-click menus.
@@ -139,17 +140,30 @@ interface PopoverProps {
 
 const FOCUSABLE = "button:not(:disabled), [href], input:not(:disabled), select, textarea, [tabindex]:not([tabindex='-1'])";
 
-/** Up and down the surface's controls, the way a menu goes. A text field keeps its arrows. */
+/** Letters typed in a menu within this long of each other make one word. */
+const TYPEAHEAD_MS = 700;
+let typed = { text: "", at: 0 };
+
+/**
+ * Up and down the surface's controls, the way a menu goes: arrows, Home and
+ * End, and typing a name jumps to it. A text field keeps its keys.
+ */
 function moveFocus(e: React.KeyboardEvent<HTMLElement>) {
-  const step = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
-  if (!step || e.altKey || e.ctrlKey || e.metaKey) return;
+  if (e.altKey || e.ctrlKey || e.metaKey) return;
   if ((e.target as HTMLElement).matches("input, textarea, select")) return;
   const items = [...e.currentTarget.querySelectorAll<HTMLElement>(FOCUSABLE)];
   if (!items.length) return;
+  const i = items.indexOf(e.target as HTMLElement);
+  let next = rovingIndex(e.key, i, items.length, "vertical");
+  if (next === null && e.key.length === 1 && e.key !== " ") {
+    typed = { text: (e.timeStamp - typed.at < TYPEAHEAD_MS ? typed.text : "") + e.key, at: e.timeStamp };
+    const hit = typeaheadIndex(items.map((el) => el.textContent ?? ""), i, typed.text);
+    next = hit === -1 ? null : hit;
+  }
+  if (next === null) return;
   e.preventDefault();
   e.stopPropagation();
-  const i = items.indexOf(e.target as HTMLElement);
-  items[(i + step + items.length) % items.length].focus();
+  items[next].focus();
 }
 
 export function Popover({
@@ -228,7 +242,14 @@ export function Popover({
     if (!open) return;
     const opener = document.activeElement as HTMLElement | null;
     if (opener?.matches("input, textarea, [contenteditable='true']")) return;
-    const raf = requestAnimationFrame(() => surfaceRef.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus({ preventScroll: true }));
+    // A picker opens on what is picked, so the arrows start from there.
+    const raf = requestAnimationFrame(() => {
+      const s = surfaceRef.current;
+      const items = s ? [...s.querySelectorAll<HTMLElement>(FOCUSABLE)] : [];
+      const el = items.find((x) => x.matches("[aria-checked='true'], [aria-selected='true']")) ?? items[0];
+      el?.focus({ preventScroll: true });
+      el?.scrollIntoView({ block: "nearest" });
+    });
     return () => {
       cancelAnimationFrame(raf);
       // Only if focus went with the surface — not if an item moved it on (a rename box).

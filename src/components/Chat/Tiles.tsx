@@ -5,6 +5,7 @@ import { ViewType, Workspace, useView, useViewBadge, useViewTitle, type MenuEntr
 import { Sidebar } from "@/components/Sidebar/Sidebar";
 import { SectionBody, TABS as SECTIONS, usePlanFocus } from "@/components/Workspace/WorkspacePanel";
 import { useIsNarrow } from "@/lib/useIsNarrow";
+import { layerOpen } from "@/lib/useDismissOnEscape";
 import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { iconFor } from "@/components/Workspace/FilesPanel";
@@ -387,7 +388,8 @@ function panelIn(n: LayoutNode | null | undefined, id: string): PanelNode | unde
  * handlers run first, so a used key arrives here marked as handled.
  */
 function paneKeys(e: KeyboardEvent, ws: WorkspaceHandle) {
-  if (e.altKey || e.defaultPrevented) return;
+  // A dialog or menu on top owns the keyboard (0.21).
+  if (e.altKey || e.defaultPrevented || layerOpen()) return;
   const command = commandFor(e);
   if (command) {
     e.preventDefault();

@@ -1756,3 +1756,18 @@ html.mz-editorial .mz-queue-chip {
   .mz-settings-flash { animation: none; box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-accent) 22%, transparent); }
 }
 /* ── end: settings search ── */
+
+/* ── Keyboard control (0.21, owner: keyboard) ────────────────────────────────
+ * Rings for the controls the global button rule misses or clips. */
+/* Sliders draw no outline (the track is the shape); ring the thumb. */
+input[type="range"]:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-accent);
+}
+input[type="range"]:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-accent);
+}
+/* A segmented control clips its corners, and a ring outside a segment with it. */
+[role="radiogroup"].overflow-hidden > [role="radio"]:focus-visible {
+  outline-offset: -2px;
+}
+/* ── end: Keyboard control ── */

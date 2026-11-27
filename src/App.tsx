@@ -258,6 +258,10 @@ export default function App() {
 
   return (
     <div className="h-full w-full overflow-hidden text-[var(--color-text)]">
+      {/* First child, so the rest can be hidden behind it with a sibling
+          selector (styles.css, "Boot splash"); z-index keeps it on top. It
+          covers the window while the first frame settles. */}
+      <BootSplash />
       <BackgroundEffect />
       <div className="relative z-10 flex h-full w-full flex-col">
         {/* The window chrome is the desktop's; a phone has the system's. */}
@@ -296,9 +300,6 @@ export default function App() {
       <UpdatePrompt />
       {/* Failures of one-off actions that have no panel to show them in. */}
       <ErrorToasts />
-      {/* Last child, and above everything: it covers the window while the first
-          frame settles. */}
-      <BootSplash />
     </div>
   );
 }

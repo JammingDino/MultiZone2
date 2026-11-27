@@ -189,7 +189,7 @@ function SettingsBody({ search }: { search: ReturnType<typeof useSettingsSearch>
             strip along the top — the tab list is the one part of Settings that
             has to stay reachable from every panel, and a strip keeps it visible
             without a second navigation concept to learn. */}
-        <div className="flex min-h-0 flex-1 overflow-hidden narrow:flex-col">
+        <div className="mz-rail-host flex min-h-0 flex-1 overflow-hidden narrow:flex-col">
           {search.results ? (
             <>
               {rail()}

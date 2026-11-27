@@ -357,7 +357,7 @@ export function ZoneLibrary({ rail }: { rail: (items: React.ReactNode) => React.
 
   return (
     <>
-        <div className="relative flex min-h-0 flex-1 narrow:flex-col">
+        <div className="mz-rail-host relative flex min-h-0 flex-1 narrow:flex-col">
           {/* The Settings rail itself (0.18.1), with this page's items nested
               one indent under "Zones": the library, a new zone, and every
               installed zone. */}

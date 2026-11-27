@@ -1124,9 +1124,11 @@ html.shadows .mz-chrome-cluster {
    background never does. Opacity rather than visibility, so a field that
    focuses itself on mount still gets the focus; `!important` because the
    background effect sets its own opacity inline, and it arriving mid-splash
-   is exactly the assembling the splash is there to hide. */
-:has(> .mz-splash[data-state="in"]) > :not(.mz-splash) { opacity: 0 !important; }
-:has(> .mz-splash[data-state="out"]) > :not(.mz-splash) { animation: mz-fade-in 260ms ease-out both; }
+   is exactly the assembling the splash is there to hide.
+   A sibling selector, not :has(): a :has() whose subject could be any element
+   made every DOM insertion re-check the whole page, ~100ms in a long chat. */
+.mz-splash[data-state="in"] ~ * { opacity: 0 !important; }
+.mz-splash[data-state="out"] ~ * { animation: mz-fade-in 260ms ease-out both; }
 .mz-splash[data-state="out"] { animation: mz-fade-in 260ms ease-out reverse both; }
 
 /* A soft pool of the accent behind the mark, so it reads as lit rather than
@@ -1779,7 +1781,8 @@ html.mz-editorial .mz-queue-chip {
 .mz-settings-tab { container: mz-settings / inline-size; }
 .mz-settings-tab-head > div { margin-left: 0; width: min(18rem, 100%); }
 @container mz-settings (max-width: 40rem) {
-  .mz-settings-tab :has(> nav) { flex-direction: column; }
+  /* A class, not :has(> nav): see "Boot splash" on what a loose :has() costs. */
+  .mz-settings-tab .mz-rail-host { flex-direction: column; }
   .mz-settings-tab nav {
     flex: none;
     flex-direction: row;

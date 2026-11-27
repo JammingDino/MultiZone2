@@ -31,6 +31,14 @@ without the fix:**
 - A nested fork with branches or everything copied itself into itself until the
   stack overflowed and the app aborted.
 - An API turn sent with `?wait=true` died when the caller hung up.
+- From a browser or a paired phone, every upsert (providers, zones, projects,
+  skills, …) failed with "missing field `name`": the transport sent
+  `{provider: {…}}` where the route reads the struct itself.
+
+**Keyboard leftovers from 0.21, fixed:** Trellis's own F6 and Ctrl+Shift+Enter
+acted behind an open model list (and the combobox took Ctrl+Shift+Enter as a
+pick); the Settings tab's Ctrl+F reached past the palette or a list. Also, a
+skill whose name has spaces is now one `/word`.
 
 ### Not done
 

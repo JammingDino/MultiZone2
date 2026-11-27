@@ -19,6 +19,8 @@
 //   --messages 500    total messages (user + assistant), rounded down to pairs
 //   --seed 1          any integer; the same seed gives the same chat
 //   --title "..."     defaults to "perf — <n> messages"
+//   --cleanup         delete every seeded and soak chat, and the mock providers
+//                     and zones behind them, then exit
 //
 // Then open the chat and, in devtools, run `__mzPerf.scroll()`.
 
@@ -54,7 +56,23 @@ async function call(method, path, body) {
   return res.status === 204 ? null : res.json();
 }
 
+const SEED_NAME = "Mock stream (seed)";
+// What this script and stream-soak.mjs create: chats in these zones, the zones, their providers.
+const MOCK_NAMES = new Set([SEED_NAME, "Mock stream (test)"]);
+
+async function cleanup() {
+  const zones = (await call("GET", "/zones")).filter((z) => MOCK_NAMES.has(z.name));
+  const ids = new Set(zones.map((z) => z.id));
+  const chats = (await call("GET", "/chats")).filter((c) => ids.has(c.zoneId));
+  for (const c of chats) await call("DELETE", `/chats/${c.id}`);
+  for (const z of zones) await call("DELETE", `/zones/${z.id}`);
+  const providers = (await call("GET", "/providers")).filter((p) => MOCK_NAMES.has(p.name));
+  for (const p of providers) await call("DELETE", `/providers/${p.id}`);
+  console.log(`deleted ${chats.length} chats, ${zones.length} zones, ${providers.length} providers`);
+}
+
 async function main() {
+  if (argv.includes("--cleanup")) return cleanup();
   try {
     await call("GET", "/health");
   } catch (e) {
@@ -70,14 +88,14 @@ async function main() {
     process.exit(2);
   }
 
-  const provider = await call("POST", "/providers", {
-    name: "Mock stream (seed)",
-    baseUrl: `http://127.0.0.1:${MOCK_PORT}/v1`,
-    defaultModel: "mock-stream",
-  });
-  const zone = await call("POST", "/zones", {
-    name: "Mock stream (seed)",
-    providerId: provider.id,
+  // One seed zone however many chats are seeded, not one per run.
+  const zone = (await call("GET", "/zones")).find((z) => z.name === SEED_NAME) ?? await call("POST", "/zones", {
+    name: SEED_NAME,
+    providerId: (await call("POST", "/providers", {
+      name: SEED_NAME,
+      baseUrl: `http://127.0.0.1:${MOCK_PORT}/v1`,
+      defaultModel: "mock-stream",
+    })).id,
     model: "mock-stream",
     toolsEnabled: "[]",
   });
@@ -103,7 +121,7 @@ async function main() {
   console.log(`\r  ${pairs * 2}/${pairs * 2} messages${" ".repeat(20)}`);
   console.log(`\nchat ${chat.id} — "${TITLE}" (${((Date.now() - started) / 1000).toFixed(0)}s)`);
   console.log("Open it, then in devtools: __mzPerf.scroll()");
-  console.log(`\nThe provider and zone "Mock stream (seed)" are left behind — delete them in Settings when done.`);
+  console.log(`\nThe chat, and the provider and zone "${SEED_NAME}", stay until: node scripts/seed-chat.mjs --cleanup`);
 }
 
 main().catch((e) => {

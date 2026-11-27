@@ -222,15 +222,23 @@ async function main() {
   const { provider, zone } = await setup();
   console.log(`provider ${provider.id}, zone ${zone.id}\n`);
 
-  let allOk = true;
-  for (const name of names) {
-    const results = await SCENARIOS[name](zone);
-    for (const r of results) allOk = report(r) && allOk;
-  }
-
-  if (!KEEP) {
+  // Removed however the run ends, Ctrl+C included; one left behind is cleared
+  // by `node scripts/seed-chat.mjs --cleanup`.
+  const teardown = async () => {
+    if (KEEP) return;
     await call("DELETE", `/zones/${zone.id}`).catch(() => {});
     await call("DELETE", `/providers/${provider.id}`).catch(() => {});
+  };
+  process.once("SIGINT", () => void teardown().finally(() => process.exit(130)));
+
+  let allOk = true;
+  try {
+    for (const name of names) {
+      const results = await SCENARIOS[name](zone);
+      for (const r of results) allOk = report(r) && allOk;
+    }
+  } finally {
+    await teardown();
   }
 
   console.log(`\n${allOk ? "no dropped tokens" : "DROPPED TOKENS — see the indexes above"}`);

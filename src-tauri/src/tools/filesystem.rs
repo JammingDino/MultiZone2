@@ -666,7 +666,17 @@ fn path_candidates(path: &str, project_dir: Option<&str>) -> Vec<Candidate> {
 
     out.push(literal);
 
-    if raw.starts_with('/') || raw.starts_with('\\') {
+    // Only when the path's top folder does not exist on disk. `/Users/me/x`
+    // names that place: re-reading it under the project would write somewhere
+    // other than the path an approval prompt just showed the user.
+    let top_exists = Path::new(raw)
+        .components()
+        .find_map(|c| match c {
+            std::path::Component::Normal(n) => Some(n),
+            _ => None,
+        })
+        .is_some_and(|top| Path::new(std::path::MAIN_SEPARATOR_STR).join(top).exists());
+    if (raw.starts_with('/') || raw.starts_with('\\')) && !top_exists {
         let rest = raw.trim_start_matches(['/', '\\']);
         if !rest.is_empty() {
             out.push(rel(rest));
@@ -2764,6 +2774,24 @@ mod tests {
         let hint = v["how_to_write_the_path"].as_str().unwrap();
         assert!(hint.contains(sb.dir().unwrap()), "hint must name the directory: {hint}");
         assert!(!sb.root.parent().unwrap().join("escaped.md").exists());
+
+        // An absolute path outside the roots is refused too, not quietly
+        // re-read under the project: its top folder exists, so it means that
+        // place, and an approval for it showed that place.
+        let outside = sb.root.parent().unwrap().join("mz_outside_target").join("x.md");
+        let out = create_file(
+            &json!({ "path": outside.to_string_lossy(), "content": "nope" }),
+            &sb.zone_config(),
+            sb.dir(),
+            CHAT,
+        )
+        .await
+        .unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert!(v["error"].as_str().unwrap().contains("outside"), "{v}");
+        let nested = outside.strip_prefix(std::path::MAIN_SEPARATOR_STR).unwrap_or(&outside).to_path_buf();
+        assert!(!sb.root.join(nested).exists(), "written under the project instead");
+        assert!(!outside.exists());
     }
 
     /// A model that can't accept images is never *offered* one: `as_image` is

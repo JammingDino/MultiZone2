@@ -1,15 +1,15 @@
 {
-  "version": "0.21.0",
-  "notes": "## MultiZone v0.21.0\n\n| Installer | Description |\n|-----------|-------------|\n| `*_x64-setup.exe` | Windows installer |\n| `MultiZone-*.apk` | Android — a remote for your computer, not a second app. Pair it under Settings → Phone & remote. |\n\nExisting installs update themselves — see Settings → Data → Updates.\n\nSee the [commit history](https://github.com/JammingDino/MultiZone2/commits/main)\nfor a full list of changes since the last release.",
-  "pub_date": "2026-11-27T00:45:15.868Z",
+  "version": "0.21.1",
+  "notes": "## MultiZone v0.21.1\n\n| Installer | Description |\n|-----------|-------------|\n| `*_x64-setup.exe` | Windows installer |\n| `MultiZone-*.apk` | Android — a remote for your computer, not a second app. Pair it under Settings → Phone & remote. |\n\nExisting installs update themselves — see Settings → Data → Updates.\n\nSee the [commit history](https://github.com/JammingDino/MultiZone2/commits/main)\nfor a full list of changes since the last release.",
+  "pub_date": "2026-11-27T23:02:01.214Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSYnU4bm5Tb212dzV5VURXaDR1ZVpwcjhEU3N1d2Z0S2QzYWJEWllmNXBYNkVnWVRhakNVUnJqeE5QdGpXRldGekxqZ2xDdml4UFRycWRsM1dDZDJtWmdzV01NbWlwandrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NzQwMzExCWZpbGU6TXVsdGlab25lXzAuMjEuMF94NjQtc2V0dXAuZXhlCk16bGZuNHp1bkdSSm9rN3FSTG4vTW9GTDQyd1luWktaMjlPTWpqRmJhMExkb3dEUTJyQTc1cTNadjh3MUNtWFV0Vk82TGU4aHJiczBqazN6US9xTUNBPT0K",
-      "url": "https://api.github.com/repos/JammingDino/MultiZone2/releases/assets/798335315"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSYnU4bm5Tb212dytoL00wTGhHL1R1Z0xBQWRUc09kbUxkbGlYcUFkYjdQSlVWazNGZFUzcFRQVXg3WDR6QjY4enNyWUtraUtXK21FazlZNlJ1SXczVmdOdWx0bUdoUWdnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1ODIwNTE3CWZpbGU6TXVsdGlab25lXzAuMjEuMV94NjQtc2V0dXAuZXhlCmtUb094bmJmM2VQSFIwR2s5UGUvUWRoZ296WURwOTBRZmVETXg2WUhiT3Z5Y1BiYmJ1MXZxOFYrUHFSY3UwbGhDeUJyaHdXdEg3Wk5hTitzVnFjcUFnPT0K",
+      "url": "https://api.github.com/repos/JammingDino/MultiZone2/releases/assets/802374974"
     },
     "windows-x86_64-nsis": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSYnU4bm5Tb212dzV5VURXaDR1ZVpwcjhEU3N1d2Z0S2QzYWJEWllmNXBYNkVnWVRhakNVUnJqeE5QdGpXRldGekxqZ2xDdml4UFRycWRsM1dDZDJtWmdzV01NbWlwandrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NzQwMzExCWZpbGU6TXVsdGlab25lXzAuMjEuMF94NjQtc2V0dXAuZXhlCk16bGZuNHp1bkdSSm9rN3FSTG4vTW9GTDQyd1luWktaMjlPTWpqRmJhMExkb3dEUTJyQTc1cTNadjh3MUNtWFV0Vk82TGU4aHJiczBqazN6US9xTUNBPT0K",
-      "url": "https://api.github.com/repos/JammingDino/MultiZone2/releases/assets/798335315"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSYnU4bm5Tb212dytoL00wTGhHL1R1Z0xBQWRUc09kbUxkbGlYcUFkYjdQSlVWazNGZFUzcFRQVXg3WDR6QjY4enNyWUtraUtXK21FazlZNlJ1SXczVmdOdWx0bUdoUWdnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1ODIwNTE3CWZpbGU6TXVsdGlab25lXzAuMjEuMV94NjQtc2V0dXAuZXhlCmtUb094bmJmM2VQSFIwR2s5UGUvUWRoZ296WURwOTBRZmVETXg2WUhiT3Z5Y1BiYmJ1MXZxOFYrUHFSY3UwbGhDeUJyaHdXdEg3Wk5hTitzVnFjcUFnPT0K",
+      "url": "https://api.github.com/repos/JammingDino/MultiZone2/releases/assets/802374974"
     }
   }
 }

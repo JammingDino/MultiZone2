@@ -997,7 +997,15 @@ async fn send_message(
         // Blocking: run to completion, then return the turn's new primary messages.
         let start = now_ts();
         let sink = StreamSink::tauri(st.app.clone());
-        run_send_entry(&ctx, &sink, &chat_id, parts, turn).await?;
+        // Spawned and then awaited, not run in place: a caller that hangs up
+        // (a client timeout) would otherwise drop the turn halfway through,
+        // leaving a tool approval waiting on a turn that no longer exists.
+        let id = chat_id.clone();
+        tokio::spawn(crate::chat_lock::carry(async move {
+            run_send_entry(&ctx, &sink, &id, parts, turn).await
+        }))
+        .await
+        .map_err(|e| AppError::Other(format!("the turn stopped unexpectedly: {e}")))??;
         let rows = sqlx::query_as::<_, Message>(&format!(
             "SELECT {MSG_COLS} FROM messages
              WHERE chat_id = ?1 AND zone_id IS NULL AND created_at >= ?2
@@ -1035,7 +1043,13 @@ async fn regenerate(
     if q.wait {
         let start = now_ts();
         let sink = StreamSink::tauri(st.app.clone());
-        run_regenerate_entry(&ctx, &sink, &chat_id).await?;
+        // Spawned for the same reason as a send's `wait`.
+        let id = chat_id.clone();
+        tokio::spawn(crate::chat_lock::carry(async move {
+            run_regenerate_entry(&ctx, &sink, &id).await
+        }))
+        .await
+        .map_err(|e| AppError::Other(format!("the turn stopped unexpectedly: {e}")))??;
         let rows = sqlx::query_as::<_, Message>(&format!(
             "SELECT {MSG_COLS} FROM messages
              WHERE chat_id = ?1 AND zone_id IS NULL AND created_at >= ?2

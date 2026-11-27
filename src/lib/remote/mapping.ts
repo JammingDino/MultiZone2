@@ -198,7 +198,13 @@ export function buildRequest(
     appendQuery(url, leftovers);
     return { method, url: url.toString(), body: JSON.stringify(leftovers) };
   }
-  return { method, url: url.toString(), body: JSON.stringify(leftovers) };
+  // `upsert_zone({ zone })`: a command whose one argument is a struct takes it
+  // as the route's whole body. Sent as the envelope, every upsert failed with
+  // "missing field `name`" from the browser and the phone.
+  const values = Object.values(leftovers);
+  const only = values.length === 1 ? values[0] : undefined;
+  const body = only && typeof only === "object" && !Array.isArray(only) ? only : leftovers;
+  return { method, url: url.toString(), body: JSON.stringify(body) };
 }
 
 /**

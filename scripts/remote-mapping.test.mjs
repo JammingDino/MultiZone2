@@ -93,6 +93,14 @@ test("a POST puts what is left in the body", () => {
   assert.deepEqual(JSON.parse(req.body), { zoneId: "z1" });
 });
 
+// The upserts take their struct as the body, not `{ zone: {...} }` (0.21).
+test("a POST whose one argument is an object sends the object itself", () => {
+  const req = buildRequest({ method: "POST", path: "/api/providers" }, "upsert_provider", { provider: { name: "A", baseUrl: "http://x" } }, "http://h:8765");
+  assert.deepEqual(JSON.parse(req.body), { name: "A", baseUrl: "http://x" });
+  const ids = buildRequest({ method: "PUT", path: "/api/chats/:id/subagents" }, "set_chat_subagents", { chatId: "c1", zoneIds: ["z"] }, "http://h:8765");
+  assert.deepEqual(JSON.parse(ids.body), { zoneIds: ["z"] });
+});
+
 // Some DELETE handlers read a query flag and some read a JSON body. Sending
 // both is what lets this file not know which.
 test("a DELETE sends its leftovers as both query and body", () => {

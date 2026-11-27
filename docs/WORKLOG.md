@@ -5,6 +5,43 @@ alone. Newest first. Detail belongs in the linked docs; this is the thread.
 
 ---
 
+## 2026-11-28 (0.21) — Overnight runtime-test pass on the Mac mini
+
+**Why.** A long list of release-plan items were built and unit-tested but had
+never run in the app. A mock provider that follows a scripted agentic turn
+(`script=[…]`) and records every request (`MOCK_DUMP`) made most of them
+runnable without a real model, from the API and a scripted browser.
+
+**Passed and ticked in RELEASE_PLAN:** revert (0.10.1), plan mode end to end
+(0.12.0/0.12.1), the loop guard in a sub-agent (0.14.1), a 22-step plan's
+scrolling (0.14.6), a saved run from ⌘K (0.15.4), the PDF session-log toggle
+(0.13.4), the `{project}` edit boundary and AGENTS.md handling (0.14.5), fork
+scopes (0.15.2), MCP prompts and resources against a spec-shaped server (0.15.3),
+and frame timings for one and four streams (0.9.16).
+
+**Bugs the runtime tests found, all fixed with a regression test that fails
+without the fix:**
+
+- Checkpoints, the approved plan and stop-after-step were written under the
+  zone's id and read under the perspective lane (or none), so Revert never
+  appeared, the executing turn never saw its plan, and Stop did nothing.
+- An approved absolute path outside the allowed folders was re-read under the
+  project: the prompt showed one path and the file went to another.
+- A "with branches" fork carried sub-agent runs spawned after its cut.
+- A nested fork with branches or everything copied itself into itself until the
+  stack overflowed and the app aborted.
+- An API turn sent with `?wait=true` died when the caller hung up.
+
+### Not done
+
+- Items that need a real model's judgement are annotated, not ticked: plan mode
+  from prose, the research path, cross-zone reachability, image-only titles, and
+  a model repairing a failing typecheck.
+- No "before" build was measured for 0.9.16; the numbers are after only, in
+  headless Chromium rather than the Tauri webview.
+
+---
+
 ## 2026-10-08 (0.19.0) — A lighter app, and the plan cut down to what is current
 
 **Why.** Task Manager showed WebView2 at ~4% CPU and ~5% GPU with the window

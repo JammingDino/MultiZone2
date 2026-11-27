@@ -758,7 +758,9 @@ export function HomeScreen() {
             style={{ scrollbarGutter: "stable" }}
           />
           </div>
-          <div className="flex items-center gap-2 px-1 pt-1">
+          {/* Wraps on a phone (0.21): the row is wider than a handset, and
+              unwrapped its chips ran under the project and tag buttons. */}
+          <div className="flex items-center gap-2 px-1 pt-1 narrow:flex-wrap">
             {/* Attach */}
             <button
               onClick={() => fileRef.current?.click()}
@@ -781,7 +783,7 @@ export function HomeScreen() {
 
             {/* What the chat will be — mode, and who else answers — reading
                 left to right from the attach and mic buttons it follows. */}
-            <div className="flex flex-1 items-center gap-2">
+            <div className="flex flex-1 items-center gap-2 narrow:flex-wrap">
 
             {/* Mode */}
             <div className="shrink-0">
@@ -996,7 +998,7 @@ export function HomeScreen() {
                 where this chat goes rather than what it is, so they belong with
                 the button that sends it, not spread across the bar — and at a
                 tighter gap than the rest of the row, to read as one cluster. */}
-            <div className="flex shrink-0 items-center gap-1">
+            <div className="flex shrink-0 items-center gap-1 narrow:ml-auto">
 
             {/* Project — custom dropdown. Always shown: "New project" and "New
                 study project" live in it, and they are how a first project

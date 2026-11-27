@@ -15,7 +15,10 @@ use tauri::{AppHandle, Emitter};
 static LAST: Mutex<Option<Value>> = Mutex::new(None);
 
 /// What a tab id names, for whoever reads the layout without the source.
-const TABS: &str = "A tab is `chat:<chat id>`, `@home` (the new-chat screen), `study:set:<set id>`, \
+const TABS: &str = "A tab is `chat:<chat id>`, `@home` (the new-chat screen), `@settings` (Settings \
+                    as a tab; one at most, and while it is open, opening Settings goes to it), \
+                    `@sidebar` (the chat list), `@ws:<files|plan|chat|terminals|context|study>` \
+                    (a workspace section), `study:set:<set id>`, \
                     `study:review:<project id>`, or a file's absolute path. `root` is a tree of \
                     groups (a tab strip: `tabs`, `active`) and splits (`dir` row|col, `sizes` \
                     summing to 1); `floating` holds windows over it, `rect` in fractions of the \

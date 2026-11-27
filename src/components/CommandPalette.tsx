@@ -112,6 +112,7 @@ export function CommandPalette() {
       { id: "act:search", label: "Search messages", detail: "Find where something was said", group: "Actions", icon: <Search size={14} />,
         run: go(s.focusChatSearch) },
       { id: "act:settings", label: "Settings", group: "Actions", icon: <SettingsIcon size={14} />, run: go(s.openSettings) },
+      { id: "act:settings-tab", label: "Show Settings as a tab", detail: "Dock it beside a chat", group: "Actions", icon: <SettingsIcon size={14} />, run: go(s.showSettingsTab) },
       { id: "act:zones", label: "Zone library", detail: "Configure zones", group: "Actions", icon: <Layers size={14} />, run: go(() => s.openZoneLibrary()) },
       { id: "act:projects", label: "Manage projects", group: "Actions", icon: <FolderKanban size={14} />, run: go(() => s.openProjectsPanel()) },
       { id: "act:sidebar", label: "Show / hide the sidebar", group: "Actions", icon: <PanelLeft size={14} />, run: go(s.toggleSidebar) },

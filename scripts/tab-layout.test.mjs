@@ -9,6 +9,7 @@ import {
   groups, groupOf, isShowing, parseLayout,
   openBeside, studySetTab, studyReviewTab, studyOf, isFileTab, isAuxTab, floatTab,
   SIDEBAR_TAB, DEFAULT_SECTIONS, sectionTab, sectionOf, dockPanel, revealSection, ensureHome,
+  SETTINGS_TAB, settingsOpensIn,
 } from "../src/lib/tabLayout.ts";
 
 const shape = (n) => (n.kind === "group" ? n.tabs : { [n.dir]: n.children.map(shape) });
@@ -219,4 +220,26 @@ test("a section is revealed in place, joins the sections' pane, or docks the wor
   l = revealSection(l, "files");
   assert.equal(groupOf(l, sectionTab("files")).active, sectionTab("files"));
   assert.equal(sectionOf(sectionTab("context")), "context");
+});
+
+test("Settings opens as one tab where a chat would, or as the dialog", () => {
+  let l = dockPanel(navigate(initialLayout(), A), [SIDEBAR_TAB], "left", 0.2);
+  assert.equal(settingsOpensIn(l, "dialog", false), "dialog");
+  assert.equal(settingsOpensIn(l, undefined, false), "dialog");
+  assert.equal(settingsOpensIn(l, "tab", false), "tab");
+  // A phone keeps the full-screen dialog.
+  assert.equal(settingsOpensIn(l, "tab", true), "dialog");
+  l = navigate(l, SETTINGS_TAB, "tab");
+  assert.deepEqual(shape(l.root).row, [[SIDEBAR_TAB], [A, SETTINGS_TAB]]);
+  assert.ok(!isFileTab(SETTINGS_TAB) && isAuxTab(SETTINGS_TAB));
+  // Once open, every way in goes to it, whatever the choice; a phone, which
+  // shows no Settings tab, still gets the dialog.
+  assert.equal(settingsOpensIn(l, "dialog", false), "tab");
+  assert.equal(settingsOpensIn(l, "tab", true), "dialog");
+  l = navigate(navigate(l, A, "tab"), SETTINGS_TAB, "tab");
+  assert.equal(groups(l.root).flatMap((g) => g.tabs).filter((t) => t === SETTINGS_TAB).length, 1);
+  assert.equal(groupOf(l, SETTINGS_TAB).active, SETTINGS_TAB);
+  // A chat clicked while Settings is in front opens beside it, not over it.
+  l = navigate(l, B);
+  assert.deepEqual(groupOf(l, B).tabs, [A, SETTINGS_TAB, B]);
 });

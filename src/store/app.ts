@@ -16,8 +16,9 @@ import { errorText } from "@/lib/errors";
 import {
   HOME_TAB, chatOf, chatTab, closeTab, closeWhere, floatTab, focusedGroup, initialLayout, isAuxTab, navigate, openBeside, openTab,
   SIDEBAR_TAB, DEFAULT_SECTIONS, allGroups, dockPanel, ensureHome, isPanelTab, revealSection, sectionOf, sectionTab,
-  parseLayout, type TabLayout,
+  parseLayout, type TabLayout, SETTINGS_TAB, settingsOpensIn,
 } from "@/lib/tabLayout";
+import { phoneNow } from "@/lib/mobileLayout";
 
 const TAB_LAYOUT_KEY = "ui.tabLayout";
 // The sidebar and the workspace became panes in the layout in 0.21.0. A
@@ -564,7 +565,10 @@ interface AppStore {
   setConversationChatId: (id: string | null) => void;
 
   // ui
+  /** The Settings dialog is up. Settings as a tab is the layout's `@settings`. */
   settingsOpen: boolean;
+  /** A request to open Settings went to its tab: its search field takes focus once. */
+  settingsTabFocus: boolean;
   zonesPanelOpen: boolean;
   /**
    * Ask the Zones page to open straight into the editor rather than onto the
@@ -684,8 +688,11 @@ interface AppStore {
     hunks?: number[],
   ) => Promise<void>;
 
+  /** Open Settings: the dialog, or the tab (see `settingsOpensIn`). */
   openSettings: () => void;
   closeSettings: () => void;
+  /** Settings as a tab in the main column, whatever the setting says. */
+  showSettingsTab: () => void;
   /** Show the session replay for `chatId`. */
   openReplay: (chatId: string) => void;
   closeReplay: () => void;
@@ -1276,7 +1283,8 @@ export const useApp = create<AppStore>((set, get) => ({
   chatTagLinks: [],
   chatZonesByChat: {},
 
-  activeChatId: chatOf(focusedGroup(INITIAL_LAYOUT).active),
+  // A file or Settings left in front still has a chat behind it in its pane.
+  activeChatId: chatOf(focusedGroup(INITIAL_LAYOUT).active) ?? focusedGroup(INITIAL_LAYOUT).tabs.map(chatOf).find(Boolean) ?? null,
   messagesByChat: {},
   streamingByChat: {},
   perspectiveStreamsByChat: {},
@@ -1306,6 +1314,7 @@ export const useApp = create<AppStore>((set, get) => ({
   conversationChatId: null,
 
   settingsOpen: false,
+  settingsTabFocus: false,
   zonesPanelOpen: false,
   zoneLibraryInitialEdit: null,
   settingsTab: "providers",
@@ -1313,7 +1322,8 @@ export const useApp = create<AppStore>((set, get) => ({
   replayChatId: null,
   defaultZoneId: null,
   shortcutsHelpOpen: false,
-  ...panelFlags(INITIAL_LAYOUT),
+  // A phone starts with its drawers in (see setSidebarOpen).
+  ...(phoneNow() ? { sidebarOpen: false, workspaceOpen: false } : panelFlags(INITIAL_LAYOUT)),
   workspaceFocus: null,
   tabLayout: INITIAL_LAYOUT,
   focusComposerNonce: 0,
@@ -2394,34 +2404,49 @@ export const useApp = create<AppStore>((set, get) => ({
       console.warn("failed to list voice input devices", e);
     }
   },
-  openSettings: () => set({ settingsOpen: true }),
+  openSettings: () => {
+    const s = get();
+    if (settingsOpensIn(s.tabLayout, s.appSettings.settingsOpenIn, phoneNow()) === "tab") s.showSettingsTab();
+    else set({ settingsOpen: true });
+  },
   closeSettings: () => set({ settingsOpen: false }),
+  showSettingsTab: () => {
+    set({ settingsOpen: false, settingsTabFocus: true });
+    get().updateTabLayout((l) => navigate(l, SETTINGS_TAB, "tab"));
+  },
   openReplay: (chatId) => set({ replayChatId: chatId }),
   closeReplay: () => set({ replayChatId: null }),
   // Editing a zone is Settings → Zones opened on its editor (0.18.1): one
   // panel and one rail, from wherever the request comes.
-  openZoneEditor: (id) =>
+  openZoneEditor: (id) => {
     set((st) => ({
-      settingsOpen: true,
       settingsTab: "zones",
       zoneLibraryInitialEdit: { zoneId: id },
       zoneLibraryNonce: st.zoneLibraryNonce + 1,
-    })),
+    }));
+    get().openSettings();
+  },
   openZonesPanel: () => set({ zonesPanelOpen: true }),
   closeZonesPanel: () => set({ zonesPanelOpen: false }),
-  openZoneLibrary: () =>
+  openZoneLibrary: () => {
     set((st) => ({
-      settingsOpen: true,
       settingsTab: "zones",
       zoneLibraryInitialEdit: null,
       zoneLibraryNonce: st.zoneLibraryNonce + 1,
-    })),
+    }));
+    get().openSettings();
+  },
   setSettingsTab: (tab) => set({ settingsTab: tab, zoneLibraryInitialEdit: null }),
   openShortcutsHelp: () => set({ shortcutsHelpOpen: true }),
   closeShortcutsHelp: () => set({ shortcutsHelpOpen: false }),
   // The sidebar and the workspace are panes in the layout (0.21.0): opening
   // one docks it where it opens by default, closing it closes its tabs.
+  // On a phone they are drawers over the one tab on screen (0.21), and a
+  // drawer coming out is not a layout change: the layout keeps them docked
+  // where they were, for when the window is wide again. The flags then say
+  // which drawer is out, one at a time.
   setSidebarOpen: (open) => {
+    if (phoneNow()) return set(open ? { sidebarOpen: true, workspaceOpen: false } : { sidebarOpen: false });
     get().updateTabLayout((l) => (open ? dockPanel(l, [SIDEBAR_TAB], "left", 0.2) : closeWhere(l, (t) => t === SIDEBAR_TAB)));
   },
   resetPanels: () => {
@@ -2434,6 +2459,7 @@ export const useApp = create<AppStore>((set, get) => ({
     });
   },
   setWorkspaceOpen: (open) => {
+    if (phoneNow()) return set(open ? { workspaceOpen: true, sidebarOpen: false } : { workspaceOpen: false });
     get().updateTabLayout((l) =>
       open
         ? panelFlags(l).workspaceOpen ? l : dockPanel(l, DEFAULT_SECTIONS.map(sectionTab), "right", 0.26)
@@ -2442,7 +2468,8 @@ export const useApp = create<AppStore>((set, get) => ({
   },
   focusWorkspace: (section) => {
     if (section) {
-      get().updateTabLayout((l) => revealSection(l, section));
+      if (phoneNow()) get().setWorkspaceOpen(true);
+      else get().updateTabLayout((l) => revealSection(l, section));
       set({ workspaceFocus: section });
     } else {
       set({ workspaceFocus: null });
@@ -2482,7 +2509,7 @@ export const useApp = create<AppStore>((set, get) => ({
     // active one.
     const front = focusedGroup(next).active;
     const chatId = isAuxTab(front) ? get().activeChatId : chatOf(front);
-    set({ tabLayout: next, ...panelFlags(next), ...(chatId !== get().activeChatId ? { activeChatId: chatId } : {}) });
+    set({ tabLayout: next, ...(phoneNow() ? {} : panelFlags(next)), ...(chatId !== get().activeChatId ? { activeChatId: chatId } : {}) });
   },
   toggleSidebar: () => get().setSidebarOpen(!get().sidebarOpen),
   focusComposer: () => set((s) => ({ focusComposerNonce: s.focusComposerNonce + 1 })),
@@ -2667,3 +2694,14 @@ systemDark?.addEventListener("change", () => {
   const s = useApp.getState();
   if (s.themeLoaded && s.theme.followSystem) void s.setTheme({});
 });
+
+// Crossing the phone breakpoint swaps drawers for panes and back (0.21): the
+// flags follow, so a window widened with a drawer out does not lose its panes.
+if (typeof window !== "undefined") {
+  let wasPhone = phoneNow();
+  window.addEventListener("resize", () => {
+    if (phoneNow() === wasPhone) return;
+    wasPhone = !wasPhone;
+    useApp.setState(wasPhone ? { sidebarOpen: false, workspaceOpen: false } : panelFlags(useApp.getState().tabLayout));
+  });
+}

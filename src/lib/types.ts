@@ -1013,6 +1013,13 @@ export interface AppSettings {
    * as before 0.21.0. Anything else reads as "tab".
    */
   chatClickOpens: "tab" | "replace";
+  /**
+   * Where Settings opens (0.21): the dialog, as always, or a tab in the main
+   * column that docks, splits and floats like any other. While a Settings tab
+   * is open every way in goes to it, whichever this says; a phone keeps the
+   * dialog. Anything else reads as "dialog".
+   */
+  settingsOpenIn: "dialog" | "tab";
   /** Automatically generate a chat title after the first assistant response. */
   autoTitle: boolean;
   /** Start thinking/reasoning blocks expanded instead of collapsed. */
@@ -1527,6 +1534,7 @@ export interface AppSettings {
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   sendKey: "enter",
   chatClickOpens: "tab",
+  settingsOpenIn: "dialog",
   autoTitle: true,
   expandThinkingByDefault: false,
   compactSteps: true,

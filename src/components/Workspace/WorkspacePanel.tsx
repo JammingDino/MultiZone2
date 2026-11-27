@@ -77,6 +77,8 @@ export function WorkspacePanel() {
           className={`absolute inset-y-0 right-0 z-40 flex w-[min(92vw,380px)] flex-col border-l border-[var(--color-border)] bg-[var(--color-panel)] shadow-xl transition-transform duration-200 ease-in-out ${
             shown ? "translate-x-0" : "translate-x-full"
           }`}
+          // Solid over the chat, as the sidebar's drawer (App.tsx).
+          style={{ background: "var(--color-panel)" }}
         >
           {body}
         </aside>

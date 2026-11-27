@@ -168,7 +168,8 @@ export function ZoneLibrary({ rail }: { rail: (items: React.ReactNode) => React.
     setView("library");
   }
 
-  const leavePanel = closeSettings;
+  // Settings as a tab is not left by finishing an edit; it goes back to the library.
+  const leavePanel = () => (useApp.getState().settingsOpen ? closeSettings() : setView("library"));
 
   /** Finished with the editor: leave the panel, or fall back into the library. */
   async function afterEditor() {

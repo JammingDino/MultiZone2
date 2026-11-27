@@ -7,6 +7,7 @@ import { MessageThread } from "./MessageThread";
 import { LockGate, refreshLockStatus } from "./LockGate";
 import { FileViewer } from "@/components/Workspace/FileViewer";
 import { Tiles } from "./Tiles";
+import { MobileTiles } from "./MobileTiles";
 import { chatOf, chatTab, closeTab, floatTab, focusGroup, isFileTab, isShowing, isStudyTab, navigate, parseLayout, revealSection, sectionOf } from "@/lib/tabLayout";
 import { StudyTab } from "@/components/Study/StudyTab";
 import { PaneChat } from "@/lib/paneChat";
@@ -40,6 +41,7 @@ import { useIsNarrow } from "@/lib/useIsNarrow";
 const STREAM_DRAIN_MS = 16;
 
 export function ChatPanel() {
+  const Columns = useIsNarrow() ? MobileTiles : Tiles;
   const {
     settingsOpen,
     projectsPanelOpen,
@@ -207,8 +209,9 @@ export function ChatPanel() {
   return (
     <main className="relative flex h-full min-w-0 flex-1 flex-col">
       {/* Chats, files, study sets and the new-chat screen, as tabs that tile the column
-          (0.18.3) — as many as you like, side by side or stacked. */}
-      <Tiles
+          (0.18.3) — as many as you like, side by side or stacked. On a phone,
+          the same tabs one at a time (0.21). */}
+      <Columns
         renderBar={(tab) => {
           const id = chatOf(tab);
           return id ? <ChatBar chatId={id} /> : null;

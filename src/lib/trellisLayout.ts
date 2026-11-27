@@ -1,5 +1,5 @@
 import type { LayoutDocument, LayoutNode, PanelNode, SplitNode } from "@danfessler/trellis";
-import { HOME_TAB, SIDEBAR_TAB, chatOf, initialLayout, isPanelTab, isStudyTab, sectionOf, type TabGroup, type TabLayout, type TabNode } from "./tabLayout.ts";
+import { HOME_TAB, SETTINGS_TAB, SIDEBAR_TAB, chatOf, initialLayout, isPanelTab, isStudyTab, sectionOf, type TabGroup, type TabLayout, type TabNode } from "./tabLayout.ts";
 
 /**
  * The main column's layout as Trellis draws it (0.21.0), and back.
@@ -8,11 +8,12 @@ import { HOME_TAB, SIDEBAR_TAB, chatOf, initialLayout, isPanelTab, isStudyTab, s
  * it — and Trellis draws, drags, docks and floats. A tab's id is its view id,
  * so the two describe the same views; a group is a panel and keeps its id.
  */
-export type TabKind = "chat" | "home" | "study" | "file" | "sidebar" | "section";
+export type TabKind = "chat" | "home" | "study" | "file" | "sidebar" | "section" | "settings";
 export const kindOf = (tab: string): TabKind =>
   chatOf(tab) ? "chat"
   : tab === HOME_TAB ? "home"
   : tab === SIDEBAR_TAB ? "sidebar"
+  : tab === SETTINGS_TAB ? "settings"
   : sectionOf(tab) ? "section"
   : isStudyTab(tab) ? "study"
   : "file";

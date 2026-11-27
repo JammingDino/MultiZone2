@@ -278,6 +278,21 @@ export function AppearanceTab() {
             {TITLE_BAR_HINTS[theme.titleBar ?? "shown"]}
           </p>
         </div>
+
+        <div>
+          <h3 className="mb-2 text-sm font-medium">Settings opens</h3>
+          <OptionCards
+            value={appSettings.settingsOpenIn === "tab" ? "tab" : "dialog"}
+            onChange={(settingsOpenIn) => setAppSettings({ settingsOpenIn })}
+            options={[
+              ["dialog", "In a dialog"],
+              ["tab", "As a tab"],
+            ]}
+          />
+          <p className="mt-2 text-[11px] text-[var(--color-text-muted)]">
+            A tab docks beside a chat, splits and floats like any other. While one is open, Settings always opens there.
+          </p>
+        </div>
       </section>
 
       {/* Everything past the everyday choices above: one fold, closed. */}

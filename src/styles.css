@@ -5,8 +5,10 @@
    half-width desktop window does not want them at all. */
 @custom-variant coarse (@media (pointer: coarse));
 /* `narrow:` — the layout question, for the handful of places where a phone
-   needs a different arrangement rather than a bigger one. */
-@custom-variant narrow (@media (max-width: 767px));
+   needs a different arrangement rather than a bigger one. A touchscreen too
+   short for panes (a phone on its side) counts too: the same line as
+   `isPhone` in lib/mobileLayout.ts, and the two must not drift. */
+@custom-variant narrow (@media (max-width: 767px), (max-height: 500px) and (pointer: coarse));
 
 @theme {
   --color-bg: #0b0d10;
@@ -1333,7 +1335,7 @@ body,
  *    is that somebody can read it. Everything else that needs a different
  *    arrangement on a phone uses the `narrow:` variant at its own call site,
  *    which keeps the reason next to the markup it applies to. */
-@media (max-width: 767px) {
+@media (max-width: 767px), (max-height: 500px) and (pointer: coarse) {
   .mz-wrap-anywhere {
     overflow-wrap: anywhere;
     word-break: break-word;
@@ -1352,7 +1354,7 @@ body,
  * Padding rather than insets, so a panel sized `h-full` resolves against the
  * padded box and still fits.
  */
-@media (max-width: 767px) {
+@media (max-width: 767px), (max-height: 500px) and (pointer: coarse) {
   .mz-safe-overlay {
     padding-top: env(safe-area-inset-top);
     padding-bottom: env(safe-area-inset-bottom);
@@ -1756,6 +1758,48 @@ html.mz-editorial .mz-queue-chip {
   .mz-settings-flash { animation: none; box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-accent) 22%, transparent); }
 }
 /* ── end: settings search ── */
+
+/* ── Settings as a tab (0.21, SettingsModal.tsx → SettingsView) ──
+   The dialog was always 980px wide; a pane is whatever width it was dragged
+   to. Measured on the pane rather than the window, so a narrow pane beside a
+   chat gets the same folded rail a phone does: the rail's rows become one
+   scrolling strip along the top and its group headings go. Unlayered, so it
+   wins over the rail's own utility classes. */
+.mz-settings-tab { container: mz-settings / inline-size; }
+.mz-settings-tab-head > div { margin-left: 0; width: min(18rem, 100%); }
+@container mz-settings (max-width: 40rem) {
+  .mz-settings-tab :has(> nav) { flex-direction: column; }
+  .mz-settings-tab nav {
+    flex: none;
+    flex-direction: row;
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .mz-settings-tab nav > div:not(:has(button)) { display: none; }
+  /* The Zones page's own list, nested under "Zones" in the rail. */
+  .mz-settings-tab nav > div:has(button) { flex-direction: row; margin-left: 0; padding-left: 0; border-left: 0; }
+  .mz-settings-tab nav button { width: auto; flex-shrink: 0; white-space: nowrap; }
+  .mz-settings-tab [data-settings-content] { padding: 1rem; }
+}
+/* ── end: Settings as a tab ── */
+
+/* ── Phone layout (0.21, owner: mobile) ──────────────────────────────────────
+ * One tab at a time below the breakpoint (MobileTiles, lib/mobileLayout.ts).
+ * The tab strip and the chat's control row scroll sideways under a thumb, and
+ * a scrollbar under either is a second line of chrome on a 44px row. */
+.mz-phone-tabs,
+.mz-phone-chatbar {
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+}
+.mz-phone-tabs::-webkit-scrollbar,
+.mz-phone-chatbar::-webkit-scrollbar {
+  display: none;
+}
+/* ── end: Phone layout ── */
 
 /* ── Keyboard control (0.21, owner: keyboard) ────────────────────────────────
  * Rings for the controls the global button rule misses or clips. */

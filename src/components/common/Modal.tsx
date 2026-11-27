@@ -40,17 +40,20 @@ const MOBILE_SIZE = "narrow:h-full narrow:max-h-full narrow:w-full narrow:max-w-
  *   supplies a width via `className` and leaves the height to grow.
  *
  * `header` is the left-hand header content (a title or a row of tabs) and the
- * body is children. Clicking the backdrop or the ✕ calls `onClose`.
+ * body is children. Clicking the backdrop or the ✕ calls `onClose`; `actions`
+ * sit just left of the ✕.
  */
 export function Modal({
   onClose,
   header,
+  actions,
   children,
   size = "workspace",
   className = "",
 }: {
   onClose: () => void;
   header: ReactNode;
+  actions?: ReactNode;
   children: ReactNode;
   size?: "workspace" | "dialog";
   className?: string;
@@ -83,6 +86,7 @@ export function Modal({
       >
         <div className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border)] px-5">
           <div className="flex min-w-0 items-center gap-2">{header}</div>
+          {actions && <div className="ml-auto flex shrink-0 items-center gap-1">{actions}</div>}
           <button
             onClick={onClose}
             aria-label="Close"

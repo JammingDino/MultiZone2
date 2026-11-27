@@ -63,6 +63,16 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
   {
     "tab": "appearance",
     "tabLabel": "Appearance",
+    "heading": "Settings opens",
+    "description": "A tab docks beside a chat, splits and floats like any other. While one is open, Settings always opens there.",
+    "keywords": [
+      "In a dialog",
+      "As a tab"
+    ]
+  },
+  {
+    "tab": "appearance",
+    "tabLabel": "Appearance",
     "heading": "Accent colour",
     "description": "",
     "keywords": [

@@ -5,26 +5,25 @@
  * questions with different answers. A remote client can be a second laptop at
  * full width, and a desktop window dragged narrow wants the phone's layout
  * without being one. Width decides layout; the pointer type decides target
- * sizes; neither decides the other.
+ * sizes; neither decides the other — except a touchscreen too short for panes,
+ * a phone on its side (0.21, see lib/mobileLayout.ts).
  *
- * 767px is Tailwind's `md` boundary less one, so this and the `narrow:` variant
- * in styles.css flip together. They are two expressions of one line and must
- * not drift.
+ * The `narrow:` variant in styles.css is the same line as CSS and must flip
+ * together with this.
  */
 
 import { useEffect, useState } from "react";
+import { NARROW_QUERY, phoneNow } from "./mobileLayout";
 
-export const NARROW_QUERY = "(max-width: 767px)";
+export { NARROW_QUERY };
 
 export function useIsNarrow(): boolean {
-  const [narrow, setNarrow] = useState(
-    () => typeof window !== "undefined" && window.matchMedia(NARROW_QUERY).matches,
-  );
+  const [narrow, setNarrow] = useState(phoneNow);
 
   useEffect(() => {
     const mql = window.matchMedia(NARROW_QUERY);
-    const onChange = (e: MediaQueryListEvent) => setNarrow(e.matches);
-    setNarrow(mql.matches);
+    const onChange = () => setNarrow(phoneNow());
+    onChange();
     mql.addEventListener("change", onChange);
     return () => mql.removeEventListener("change", onChange);
   }, []);

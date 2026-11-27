@@ -90,8 +90,14 @@ function isTyping(target: EventTarget | null): boolean {
  * query — Settings renders one tab at a time, so the index comes from
  * scripts/gen-settings-index.mjs rather than from the page.
  */
-export function useSettingsSearch() {
-  const [query, setQuery] = useState("");
+export function useSettingsSearch({ initial = "", owns, autoFocus: focusOnMount = true }: {
+  /** The query to start from: what the dialog had, when it became a tab. */
+  initial?: string;
+  /** Whether a Ctrl+F or "/" is Settings' to take; a tab shares the window with chats. */
+  owns?: (e: KeyboardEvent) => boolean;
+  autoFocus?: boolean;
+} = {}) {
+  const [query, setQuery] = useState(initial);
   const [cursor, setCursor] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const groups = useMemo(() => groupByTab(searchSettings(SETTINGS_INDEX, query)), [query]);
@@ -108,14 +114,14 @@ export function useSettingsSearch() {
     const onKey = (e: KeyboardEvent) => {
       const find = (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "f";
       const slash = e.key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey && !isTyping(e.target);
-      if (!find && !slash) return;
+      if ((!find && !slash) || (owns && !owns(e))) return;
       e.preventDefault();
       inputRef.current?.focus();
       inputRef.current?.select();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [owns]);
 
   function pick(i: number) {
     const hit = flat[i];
@@ -141,7 +147,7 @@ export function useSettingsSearch() {
   }
 
   // A touchscreen would open its keyboard over the page just for visiting it.
-  const autoFocus = typeof window !== "undefined" && !window.matchMedia("(pointer: coarse)").matches;
+  const autoFocus = focusOnMount && typeof window !== "undefined" && !window.matchMedia("(pointer: coarse)").matches;
 
   const field = (
     <div className="relative ml-2 w-60 narrow:w-36">
@@ -226,5 +232,9 @@ export function useSettingsSearch() {
     </div>
   ) : null;
 
-  return { field, results, clear: () => setQuery("") };
+  const focus = () => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  };
+  return { field, results, query, focus, clear: () => setQuery("") };
 }

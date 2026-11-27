@@ -32,9 +32,7 @@ import { useBackDismiss } from "./lib/useBackDismiss";
 import { useLaunchPath } from "./lib/useLaunchPath";
 
 /**
- * The sidebar, positioned for the window it is in.
- *
- * Wide: an ordinary flex child beside the chat. Narrow *and expanded*: an
+ * The sidebar on a phone (a wide window docks it as a pane in Tiles): an
  * overlay with a backdrop, so the chat keeps the full width underneath and
  * tapping away closes it — the gesture people already expect from every drawer
  * on a phone.
@@ -48,17 +46,28 @@ function SidebarSlot() {
   // as tapping the backdrop, on the control people reach for first.
   useBackDismiss(narrow && sidebarOpen, () => setSidebarOpen(false));
 
-  if (!narrow || !sidebarOpen) return <Sidebar />;
-
+  // No collapsed rail on a phone (0.21): the menu button in the tab strip
+  // opens the drawer, and a 48px strip is an eighth of the screen. Closed, it
+  // stays mounted off-screen — the sidebar is what loads the chat list,
+  // settings and theme, and keeps them current.
   return (
     <>
+      {sidebarOpen && (
+        <div
+          className="absolute inset-0 z-20 bg-black/50"
+          onClick={() => setSidebarOpen(false)}
+          aria-hidden
+        />
+      )}
       <div
-        className="absolute inset-0 z-20 bg-black/50"
-        onClick={() => setSidebarOpen(false)}
-        aria-hidden
-      />
-      <div className="absolute inset-y-0 left-0 z-30 flex max-w-[85vw] shadow-2xl">
-        <Sidebar />
+        className={`absolute inset-y-0 left-0 z-30 flex w-[min(85vw,20rem)] shadow-2xl transition-[transform,visibility] duration-200 ease-in-out ${
+          sidebarOpen ? "" : "invisible -translate-x-full"
+        }`}
+        // Solid, whatever the theme's translucency: a drawer the chat shows
+        // through reads as two screens on top of each other.
+        style={{ background: "var(--color-panel)" }}
+      >
+        <Sidebar docked />
       </div>
     </>
   );
@@ -265,9 +274,7 @@ export default function App() {
               it (0.17.3). A 288px column beside a chat panel needs roughly twice
               the width a handset has, and the two side by side is what the first
               build actually did — both squeezed, the chat's own content clipped.
-              The collapsed rail is left alone: it is 48px, it carries the
-              expand control, and a drawer with no visible way to open it is
-              worse than a thin strip. */}
+              Its menu button is in the phone's tab strip (MobileTiles). */}
           {/* On a wide window the sidebar and the workspace sections are panes
               of the layout ChatPanel draws (0.21.0), moved and docked like any
               tab. On a phone they stay drawers over the chat. */}

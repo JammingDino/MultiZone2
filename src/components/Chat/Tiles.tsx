@@ -1,8 +1,9 @@
 import "@danfessler/trellis/style.css";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { GraduationCap, MessageSquare, PanelLeft, Plus, Repeat } from "lucide-react";
+import { GraduationCap, MessageSquare, PanelLeft, Plus, Repeat, Settings } from "lucide-react";
 import { ViewType, Workspace, useView, useViewBadge, useViewTitle, type MenuEntry, type WorkspaceHandle } from "@danfessler/trellis-react";
 import { Sidebar } from "@/components/Sidebar/Sidebar";
+import { SettingsView } from "@/components/Settings/SettingsModal";
 import { SectionBody, TABS as SECTIONS, usePlanFocus } from "@/components/Workspace/WorkspacePanel";
 import { useIsNarrow } from "@/lib/useIsNarrow";
 import { layerOpen } from "@/lib/useDismissOnEscape";
@@ -10,7 +11,7 @@ import { useApp } from "@/store/app";
 import * as api from "@/lib/tauri";
 import { iconFor } from "@/components/Workspace/FilesPanel";
 import {
-  DEFAULT_SECTIONS, HOME_TAB, SIDEBAR_TAB, allGroups, chatOf, closeTab, closeWhere, dockPanel, sectionTab, focusGroup, focusedGroup, groupOf,
+  DEFAULT_SECTIONS, HOME_TAB, SETTINGS_TAB, SIDEBAR_TAB, allGroups, chatOf, closeTab, closeWhere, dockPanel, sectionTab, focusGroup, focusedGroup, groupOf,
   isPanelTab, moveTab, sectionOf, studyOf, type DropZone, type Section, type TabLayout,
 } from "@/lib/tabLayout";
 import { evenPanels, fromDocument, resizePanel, toDocument } from "@/lib/trellisLayout";
@@ -67,11 +68,12 @@ export function dragIntoTiles(e: React.PointerEvent<HTMLElement>, tab: string, d
   followDrag(e, (x, y, phase) => tilesDrag?.(tab, x, y, phase), dragged);
 }
 
-function nameOf(tab: string, s: ReturnType<typeof useApp.getState>): string {
+export function nameOf(tab: string, s: ReturnType<typeof useApp.getState>): string {
   const id = chatOf(tab);
   if (id) return s.chats.find((c) => c.id === id)?.title || "Untitled chat";
   if (tab === HOME_TAB) return "New chat";
   if (tab === SIDEBAR_TAB) return "Chats";
+  if (tab === SETTINGS_TAB) return "Settings";
   const section = sectionOf(tab);
   if (section) return SECTION_NAMES[section];
   const study = studyOf(tab);
@@ -196,7 +198,7 @@ export function Tiles({ renderTab, renderBar }: {
     return () => { tilesDrag = null; };
   }, [change]);
 
-  const kinds = ["chat", "home", "study", "file", "sidebar", "section"] as const;
+  const kinds = ["chat", "home", "study", "file", "sidebar", "section", "settings"] as const;
   return (
     <div ref={host} className="relative min-h-0 flex-1 overflow-hidden">
       <Workspace
@@ -281,8 +283,18 @@ function chatMenu(view: { id: string }): MenuEntry[] {
     { label: "Rename…", run: () => renameChat(id) },
     { label: "View replay session", run: () => s.openReplay(id) },
     { label: "Workspace", checked: s.workspaceOpen, run: () => s.setWorkspaceOpen(!s.workspaceOpen) },
+    settingsEntry(),
     "separator",
   ];
+}
+
+/** Settings as a tab, from a pane's menu: ticked while open, like the sections. */
+function settingsEntry(): MenuEntry {
+  const s = useApp.getState();
+  const open = !!groupOf(s.tabLayout, SETTINGS_TAB);
+  return open
+    ? { label: "Settings", checked: true, run: () => s.updateTabLayout((l) => closeTab(l, SETTINGS_TAB)) }
+    : { label: "Settings", checked: false, run: () => s.showSettingsTab() };
 }
 
 function renameChat(id: string) {
@@ -321,6 +333,8 @@ function sectionMenu(): MenuEntry[] {
         ? { label: SECTION_NAMES[section], checked: true, run: () => s.updateTabLayout((l) => closeTab(l, tab)) }
         : { label: SECTION_NAMES[section], checked: false, run: () => s.focusWorkspace(section) };
     }),
+    "separator",
+    settingsEntry(),
     "separator",
   ];
 }
@@ -486,7 +500,10 @@ function Tile({ render }: { render: (tab: string) => ReactNode }) {
   const section = sectionOf(view.id);
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      {view.id === SIDEBAR_TAB ? <Sidebar docked /> : section ? <SectionView section={section} /> : render(view.id)}
+      {view.id === SIDEBAR_TAB ? <Sidebar docked />
+        : view.id === SETTINGS_TAB ? <SettingsView />
+        : section ? <SectionView section={section} />
+        : render(view.id)}
     </div>
   );
 }
@@ -513,6 +530,7 @@ function SectionView({ section }: { section: Section }) {
 function TabIcon() {
   const tab = useView().id;
   if (tab === SIDEBAR_TAB) return <PanelLeft size={12} />;
+  if (tab === SETTINGS_TAB) return <Settings size={12} />;
   const section = sectionOf(tab);
   if (section) return <>{SECTIONS.find((s) => s.id === section)?.icon}</>;
   const study = studyOf(tab);

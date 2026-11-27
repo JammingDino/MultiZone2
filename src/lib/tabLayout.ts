@@ -43,7 +43,15 @@ export const DEFAULT_SECTIONS: Section[] = ["files", "plan", "chat", "terminals"
 export const sectionTab = (s: Section) => `@ws:${s}`;
 export const sectionOf = (tab: string): Section | null => (tab.startsWith("@ws:") ? (tab.slice(4) as Section) : null);
 export const isPanelTab = (tab: string) => tab === SIDEBAR_TAB || tab.startsWith("@ws:");
-export const isFileTab = (tab: string) => tab !== HOME_TAB && !tab.startsWith("chat:") && !isStudyTab(tab) && !isPanelTab(tab);
+/**
+ * Settings as a tab (0.21). Not a panel: it opens where a chat would and a
+ * chat may open beside it. Like a file it belongs to no chat, so the chat it
+ * was opened over stays the active one. One at most — opening Settings again
+ * brings it forward.
+ */
+export const SETTINGS_TAB = "@settings";
+export const isFileTab = (tab: string) =>
+  tab !== HOME_TAB && tab !== SETTINGS_TAB && !tab.startsWith("chat:") && !isStudyTab(tab) && !isPanelTab(tab);
 /**
  * A tab that is not a chat but belongs to one — a file, a study set. Bringing
  * it forward keeps the chat it was opened from as the active one, so the
@@ -370,6 +378,17 @@ export function revealSection(layout: TabLayout, section: Section): TabLayout {
   if (home) return withGroups(layout, (g) => (g.id === home.id ? { ...g, tabs: [...g.tabs, tab], active: tab } : g));
   const tabs = [...DEFAULT_SECTIONS.map(sectionTab), ...(DEFAULT_SECTIONS.includes(section) ? [] : [tab])];
   return reveal(dockPanel(layout, tabs, "right", 0.26), tab);
+}
+
+/**
+ * Where a request to open Settings goes (0.21). A phone shows no Settings tab
+ * (lib/mobileLayout.ts): the dialog already is the whole screen. Elsewhere, to
+ * the tab when one is open anywhere, so there are never two; else to a new tab
+ * when the user chose tabs.
+ */
+export function settingsOpensIn(layout: TabLayout, choice: string | undefined, narrow: boolean): "tab" | "dialog" {
+  if (narrow) return "dialog";
+  return choice === "tab" || groupOf(layout, SETTINGS_TAB) ? "tab" : "dialog";
 }
 
 /**

@@ -1,7 +1,9 @@
-import { Bell, Bot, ShieldCheck, Server, Smartphone, Palette, MessageSquare, Database, Globe, Brain, Sparkles, Plug, Library, Layers, Mic, Volume2, CalendarClock } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Bell, Bot, ShieldCheck, Server, Smartphone, Palette, MessageSquare, Database, Globe, Brain, Sparkles, Plug, Library, Layers, Mic, Volume2, CalendarClock, SquareArrowOutUpRight } from "lucide-react";
 import { useApp } from "@/store/app";
-import * as api from "@/lib/tauri";
 import { Modal, ModalTitle } from "@/components/common/Modal";
+import { CHROME_QUIET } from "@/lib/chrome";
+import { SETTINGS_TAB, focusedGroup } from "@/lib/tabLayout";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import { NavGroup, NavItem, NavRail } from "@/components/common/NavRail";
 import { ApiTab } from "./tabs/ApiTab";
@@ -60,13 +62,80 @@ function UnsavableWarning() {
   );
 }
 
+/** What the dialog's search held when it became a tab, for the tab to start from. */
+let handoffQuery = "";
+
+/** Settings as the dialog. */
 export function SettingsModal() {
   const closeSettings = useApp((s) => s.closeSettings);
+  const showSettingsTab = useApp((s) => s.showSettingsTab);
+  const search = useSettingsSearch();
+  return (
+    <Modal
+      onClose={closeSettings}
+      header={<><ModalTitle>Settings</ModalTitle>{search.field}</>}
+      actions={
+        <button
+          onClick={() => {
+            handoffQuery = search.query;
+            showSettingsTab();
+          }}
+          aria-label="Open as tab"
+          title="Open as tab — dock it beside a chat, split it or float it"
+          className={`rounded-md p-1.5 ${CHROME_QUIET}`}
+        >
+          <SquareArrowOutUpRight size={15} />
+        </button>
+      }
+    >
+      <SettingsBody search={search} />
+    </Modal>
+  );
+}
+
+/**
+ * Settings as a tab in the main column (0.21), `@settings` in the layout. The
+ * same page as the dialog, at whatever size its pane is: below about 40rem the
+ * rail folds into the strip a phone gets (styles.css, "Settings as a tab").
+ */
+export function SettingsView() {
+  const root = useRef<HTMLDivElement>(null);
+  // Ctrl+F and "/" are Settings' only from inside it: the window is shared
+  // with chats now. Focus on the page itself counts when Settings is in front.
+  const owns = useCallback((e: KeyboardEvent) => {
+    const el = root.current;
+    if (!el) return false;
+    if (el.contains(e.target as Node)) return true;
+    return e.target === document.body && focusedGroup(useApp.getState().tabLayout).active === SETTINGS_TAB;
+  }, []);
+  const [initial] = useState(() => {
+    const q = handoffQuery;
+    handoffQuery = "";
+    return q;
+  });
+  // No focus grab on mount: a tab restored at launch is not a request to type.
+  const search = useSettingsSearch({ initial, owns, autoFocus: false });
+  const wantsFocus = useApp((s) => s.settingsTabFocus);
+  useEffect(() => {
+    if (!wantsFocus) return;
+    useApp.setState({ settingsTabFocus: false });
+    // A frame later: the tiles focus the pane itself as it comes forward.
+    if (!window.matchMedia("(pointer: coarse)").matches) requestAnimationFrame(() => search.focus());
+  }, [wantsFocus]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <div ref={root} className="mz-settings-tab flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--color-panel)]">
+      <div className="mz-settings-tab-head flex h-11 shrink-0 items-center border-b border-[var(--color-border)] px-3">{search.field}</div>
+      <SettingsBody search={search} />
+    </div>
+  );
+}
+
+/** The rail and the page on screen, for the dialog and the tab alike. */
+function SettingsBody({ search }: { search: ReturnType<typeof useSettingsSearch> }) {
   // In the store, so "edit this zone" from anywhere can land on Zones.
   const stored = useApp((s) => s.settingsTab);
   const tab: Tab = isTab(stored) ? stored : "providers";
   const setStoredTab = useApp((s) => s.setSettingsTab);
-  const search = useSettingsSearch();
   // Picking a tab while results are up means "show me that tab".
   const setTab = (t: Tab) => {
     search.clear();
@@ -112,7 +181,7 @@ export function SettingsModal() {
   );
 
   return (
-    <Modal onClose={closeSettings} header={<><ModalTitle>Settings</ModalTitle>{search.field}</>}>
+    <>
       <UnsavableWarning />
       <style>{`.input { width: 100%; border: 1px solid var(--color-border); border-radius: 4px; padding: 8px 12px; background: var(--color-panel); font-size: 13px; outline: none; } .input:focus { border-color: var(--color-accent); }`}</style>
         {/* A left rail of tabs is 176px the phone does not have (0.17.3). On a
@@ -120,7 +189,7 @@ export function SettingsModal() {
             strip along the top — the tab list is the one part of Settings that
             has to stay reachable from every panel, and a strip keeps it visible
             without a second navigation concept to learn. */}
-        <div className="flex flex-1 overflow-hidden narrow:flex-col">
+        <div className="flex min-h-0 flex-1 overflow-hidden narrow:flex-col">
           {search.results ? (
             <>
               {rail()}
@@ -143,7 +212,9 @@ export function SettingsModal() {
                 throws is one screen, not the window. The bottom padding keeps
                 the last section off the panel's edge. */}
             <ErrorBoundary label={`${TAB_LABELS[tab]} settings`} resetKey={tab}>
-              <div className="min-w-0 flex-1 pb-10">
+              {/* Capped at the dialog's width: a wide pane does not stretch
+                  a row of controls across the screen. */}
+              <div className="min-w-0 max-w-3xl flex-1 pb-10">
                 {tab === "providers" && <ProvidersTab />}
                 {tab === "appearance" && <AppearanceTab />}
                 {tab === "chat" && <ChatTab />}
@@ -166,7 +237,7 @@ export function SettingsModal() {
           </>
           )}
         </div>
-    </Modal>
+    </>
   );
 }
 

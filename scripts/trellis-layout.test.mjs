@@ -13,6 +13,7 @@ test("tabs map to their kinds", () => {
   assert.equal(kindOf("@home"), "home");
   assert.equal(kindOf(studySetTab("s")), "study");
   assert.equal(kindOf("C:/x/report.md"), "file");
+  assert.equal(kindOf("@settings"), "settings");
 });
 
 test("a split layout with a floating window round-trips", () => {

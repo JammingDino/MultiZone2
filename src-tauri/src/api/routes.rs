@@ -131,7 +131,7 @@ pub const ROUTES: &[RouteDef] = &[
     r("POST", "/api/chats/:id/plan-mode", "Turn plan mode on or off for a chat ({on: bool})"),
     r("GET", "/api/chats/:id/plans", "Every plan this chat has proposed, approved or run"),
     r("GET", "/api/chats/:id/plans/pending", "The plan waiting on the user, if any"),
-    r("POST", "/api/plans/:id/approve", "Approve a plan, optionally with edited steps ({steps?, edited?})"),
+    r("POST", "/api/plans/:id/approve", "Approve a plan, optionally with edited steps ({steps?, edited?}). Nothing runs until a message follows: the app sends POST /api/chats/:id/messages {parts:[{type:\"hidden_text\",text:\"[MultiZone] Approved — carry out the plan.\"}]}"),
     r("POST", "/api/plans/:id/reject", "Turn a plan down; the chat stays in plan mode"),
     r("POST", "/api/plans/:id/steps", "Rewrite a plan's steps ({steps})"),
     r("POST", "/api/plans/:id/stop", "Ask the run to finish the current step and stop"),

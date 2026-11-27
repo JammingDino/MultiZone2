@@ -241,3 +241,11 @@ test("a scripted tool step streams one call whose arguments accumulate to the st
     assert.equal(frames.at(-1).choices[0].finish_reason, "tool_calls");
   });
 });
+
+test("a {tools: true} step answers with the tool names this round offers", () => {
+  const body = {
+    tools: [{ function: { name: "write" } }, { function: { name: "read" } }],
+    messages: [{ role: "user", content: 'go script=[{"tools":true}]' }],
+  };
+  assert.equal(scriptStep(body).text, "tools: read,write");
+});

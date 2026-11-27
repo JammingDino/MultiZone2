@@ -8,6 +8,7 @@
 // the network, which is what lets the streaming scenarios run on any machine.
 //
 //   node scripts/mock-provider.mjs [--port 8799] [--tokens 2000] [--delay 2]
+//   MOCK_DUMP=requests.jsonl appends every request body, one per line
 //
 // Per-request overrides ride in the prompt, so scenarios can be driven from the
 // app's own composer without restarting the server:
@@ -30,13 +31,15 @@
 //                  the end it answers "script finished". Only requests that
 //                  offer tools follow it, so titling and the like answer
 //                  normally; once a scripted turn's tools are withdrawn (the
-//                  loop guard), it answers "mock: tools withdrawn…".
+//                  loop guard), it answers "mock: tools withdrawn…". A
+//                  {"tools": true} step answers with the tool names offered.
 //                  e.g. script=[{"tool":"read_file","args":{"path":"a.txt"}},{"text":"done"}]
 //
 // e.g. sending "tokens=100000 delay=0" streams 100k tokens as fast as the
 // socket takes them.
 
 import { createServer } from "node:http";
+import { appendFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { deltas, expectedText } from "./token-sequence.mjs";
 import { mixedAnswer } from "./seed-content.mjs";
@@ -70,7 +73,11 @@ export function scriptStep(body) {
     try { steps = JSON.parse(m[1]); } catch (e) { return { text: `mock: script= is not valid JSON (${e.message})` }; }
     const round = messages.slice(i + 1).filter((x) => x?.role === "assistant").length;
     const last = steps[steps.length - 1];
-    return { ...(steps[round] ?? (last?.repeat ? last : { text: "script finished" })), round };
+    const step = steps[round] ?? (last?.repeat ? last : { text: "script finished" });
+    // {"tools": true} reports what this round was offered, so a test can watch tools come and go.
+    // It can ride along with a "tool" step, as text before the call.
+    if (step.tools) return { ...step, text: `tools: ${body.tools.map((t) => t?.function?.name).sort().join(",")}`, round };
+    return { ...step, round };
   }
   return null;
 }
@@ -242,6 +249,8 @@ export function createMockProvider() {
       const opts = optionsFromPrompt(body);
 
       // Agentic turns stream, so the scripted mode is streaming-only.
+      // MOCK_DUMP=<file> appends each request body as a line, to see what the app sent.
+      if (process.env.MOCK_DUMP) appendFileSync(process.env.MOCK_DUMP, JSON.stringify(body) + "\n");
       const step = body.stream !== false && scriptStep(body);
       if (step) return void streamStep(res, step).catch(() => { try { res.destroy(); } catch { /* already gone */ } });
 

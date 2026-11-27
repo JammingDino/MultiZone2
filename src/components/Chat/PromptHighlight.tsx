@@ -77,8 +77,10 @@ export function usePromptTokens(
 export function insertAtCaret(cur: string, ta: HTMLTextAreaElement | null, insert: string): string {
   const at = Math.min(ta?.selectionStart ?? cur.length, cur.length);
   const before = cur.slice(0, at);
+  const after = cur.slice(at);
   const lead = before && !/\s$/.test(before) ? " " : "";
-  return `${before}${lead}${insert} ${cur.slice(at)}`;
+  const trail = /^\s/.test(after) ? "" : " ";
+  return `${before}${lead}${insert}${trail}${after}`;
 }
 
 /**

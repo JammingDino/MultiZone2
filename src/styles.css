@@ -443,6 +443,10 @@ input[type="color"]:hover { border-color: var(--color-accent); }
 .markdown {
   line-height: 1.55;
   font-size: 14px;
+  /* A long URL or identifier breaks rather than running off under the pane's
+   * edge. break-word, not anywhere: it leaves min-content alone, so table
+   * columns are not squeezed to a letter wide. */
+  overflow-wrap: break-word;
   /* KaTeX's own equation-number counter is reset only on `body` (see
    * katex.css), which never re-renders in this SPA — so without this it climbs
    * across every message in the session instead of resetting per message.

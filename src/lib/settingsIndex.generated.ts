@@ -984,6 +984,9 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
     "heading": "Chat locks",
     "description": "Lock a chat from its right-click menu in the sidebar. The app password opens every chat locked with it, and any chat with its own password too — the way back into one whose password is forgotten. A lock is not encryption: chats stay unencrypted in the database. Agents can lock a chat, never unlock one or set a password.",
     "keywords": [
+      "Lock again after",
+      "Without keyboard, mouse or touch on the screen that opened it. Also when the window goes to the tray, or a phone's screen goes off.",
+      "minutes",
       "Current app password",
       "New app password",
       "App password",

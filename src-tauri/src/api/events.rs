@@ -131,6 +131,10 @@ impl Drop for EventBridge {
 /// would go quiet with no error and no reconnect.
 pub async fn events(State(st): State<ApiState>) -> Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>> {
     let mut rx = st.events.subscribe();
+    // Read now: the stream is polled after this handler has returned, outside
+    // the request's scope.
+    let holder = crate::chat_lock::current_holder();
+    let db = st.db.clone();
 
     let stream = async_stream::stream! {
         // Named `ready` rather than left to the first real event: a client needs
@@ -138,9 +142,14 @@ pub async fn events(State(st): State<ApiState>) -> Sse<impl futures_util::Stream
         // races its own initial load against the events it just missed.
         yield Ok(Event::default().event("ready").data(json!({ "events": FORWARDED }).to_string()));
 
+        // A locked chat's turn goes only to the device that unlocked it (0.21).
+        let mut gate = crate::chat_lock::StreamGate::default();
         loop {
             match rx.recv().await {
                 Ok(ev) => {
+                    if ev.name == "stream" && !gate.allows(&db, &holder, &ev.payload).await {
+                        continue;
+                    }
                     yield Ok(Event::default().event(ev.name).data(ev.payload));
                 }
                 // The client fell behind. Say so, rather than resuming mid-gap

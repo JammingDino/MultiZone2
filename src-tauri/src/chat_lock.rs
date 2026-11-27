@@ -22,19 +22,33 @@
 //! deleted.
 //!
 //! Agents may *lock* (`POST /api/chats/:id/lock`, app password only) and
-//! nothing else: unlocking, removing a lock, and setting or changing a password
-//! are Tauri commands with no route, and `app_control` refuses those paths by
-//! name besides.
+//! nothing else: removing a lock and setting or changing a password are Tauri
+//! commands with no route, and `app_control` refuses those paths by name
+//! besides.
+//!
+//! An unlock belongs to whoever typed the password (0.21): the window, one
+//! paired device, or one browser tab on this machine — see [`Holder`]. The
+//! phone unlocking a chat opens it on the phone and nowhere else. The static
+//! API token (scripts, and `app_control` in-process) holds none and cannot get
+//! one: it is shared by everything on this machine that can read the setting,
+//! so it is not anybody in particular. Every unlock closes again after the idle
+//! time (`chatLockIdleMinutes`), when the window is hidden to the tray, and
+//! when the app restarts.
 
 use crate::error::{AppError, AppResult};
+use crate::remote::DeviceAuth;
 use crate::state::AppState;
 use base64::Engine;
 use hmac::{Hmac, Mac};
 use serde::Serialize;
+use serde_json::Value;
 use sha2::Sha256;
 use sqlx::SqlitePool;
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, State};
 
 /// PBKDF2-HMAC-SHA256 rounds — OWASP's 2023 figure. Stored in the hash, so
@@ -46,7 +60,7 @@ pub const KIND_CHAT: &str = "chat";
 pub const KIND_APP: &str = "app";
 
 pub const LOCKED_MESSAGE: &str =
-    "this chat is locked; it can only be opened in the MultiZone window, with its password";
+    "this chat is locked; it opens only where its password is typed — the MultiZone window, or a paired device or browser tab for itself";
 
 // ─── Hashing ──────────────────────────────────────────────────────────────────
 
@@ -108,26 +122,345 @@ pub fn verify_password(password: &str, stored: &str) -> bool {
     got.iter().zip(key.iter()).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0
 }
 
+// ─── Who holds an unlock ──────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Holder {
+    /// The desktop window, over IPC.
+    Window,
+    /// A paired phone or tablet, by device id.
+    Device(String),
+    /// A browser tab on this machine (`remote::local`), by session.
+    Browser(String),
+    /// The static API token — scripts, and `app_control` from inside a turn.
+    /// Never holds an unlock.
+    Nobody,
+}
+
+impl Holder {
+    /// Who an API request is, from what the auth layer recorded.
+    pub fn of(auth: Option<&DeviceAuth>) -> Holder {
+        match auth {
+            Some(DeviceAuth::Device(d)) => Holder::Device(d.id.clone()),
+            Some(DeviceAuth::LocalBrowser(session)) => Holder::Browser(session.clone()),
+            _ => Holder::Nobody,
+        }
+    }
+
+    fn remote(&self) -> bool {
+        matches!(self, Holder::Device(_) | Holder::Browser(_))
+    }
+}
+
+tokio::task_local! {
+    static HOLDER: Holder;
+}
+
+/// Whose unlocks apply to the code running now. The API's lock layer sets it
+/// for every request; anything outside a request is the window's own IPC or
+/// work the window started. A task that loses the scope falls back to the
+/// window, which only ever grants what the window already has, and only to
+/// code that already passed a check inside the same lock (see
+/// [`ensure_reachable`]).
+pub fn current_holder() -> Holder {
+    HOLDER.try_with(Clone::clone).unwrap_or(Holder::Window)
+}
+
+pub fn as_holder<F: Future>(holder: Holder, fut: F) -> impl Future<Output = F::Output> {
+    HOLDER.scope(holder, fut)
+}
+
+/// `fut`, run as whoever is running now — for a `tokio::spawn` inside a turn
+/// or a request, which would otherwise start a task without the scope.
+pub fn carry<F: Future>(fut: F) -> impl Future<Output = F::Output> {
+    as_holder(current_holder(), fut)
+}
+
 // ─── Session unlocks ──────────────────────────────────────────────────────────
 
-/// Lock roots the user has unlocked since the app started. In memory only, so
-/// a restart locks everything again; "Lock now" takes one out early.
-fn unlocked() -> &'static Mutex<HashSet<String>> {
-    static SET: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-    SET.get_or_init(Default::default)
+struct Session {
+    roots: HashSet<String>,
+    active: Instant,
 }
 
-pub fn is_unlocked(root: &str) -> bool {
-    unlocked().lock().map(|s| s.contains(root)).unwrap_or(false)
+/// Lock roots each holder has unlocked since the app started. In memory only,
+/// so a restart locks everything again. `now` and the idle limit are passed in
+/// so expiry is testable without sleeping.
+#[derive(Default)]
+struct Sessions {
+    by: HashMap<Holder, Session>,
 }
 
-fn set_unlocked(root: &str, open: bool) {
-    if let Ok(mut s) = unlocked().lock() {
-        if open {
-            s.insert(root.to_string());
-        } else {
-            s.remove(root);
+impl Sessions {
+    fn expire(&mut self, h: &Holder, now: Instant, idle: Option<Duration>) {
+        if let (Some(limit), Some(s)) = (idle, self.by.get(h)) {
+            if now.duration_since(s.active) >= limit {
+                self.by.remove(h);
+            }
         }
+    }
+
+    fn open(&mut self, h: &Holder, root: &str, now: Instant) {
+        if *h == Holder::Nobody {
+            return;
+        }
+        let s = self.by.entry(h.clone()).or_insert_with(|| Session { roots: HashSet::new(), active: now });
+        s.roots.insert(root.to_string());
+        s.active = now;
+    }
+
+    fn is_open(&mut self, h: &Holder, root: &str, now: Instant, idle: Option<Duration>) -> bool {
+        self.expire(h, now, idle);
+        *h != Holder::Nobody && self.by.get(h).is_some_and(|s| s.roots.contains(root))
+    }
+
+    fn roots(&mut self, h: &Holder, now: Instant, idle: Option<Duration>) -> Vec<String> {
+        self.expire(h, now, idle);
+        self.by.get(h).map(|s| s.roots.iter().cloned().collect()).unwrap_or_default()
+    }
+
+    /// Activity keeps a holder's unlocks open — unless they have already gone.
+    fn touch(&mut self, h: &Holder, now: Instant, idle: Option<Duration>) {
+        self.expire(h, now, idle);
+        if let Some(s) = self.by.get_mut(h) {
+            s.active = now;
+        }
+    }
+
+    /// Close one lock for every holder.
+    fn close_root(&mut self, root: &str) {
+        for s in self.by.values_mut() {
+            s.roots.remove(root);
+        }
+    }
+
+    /// Close everything one holder has open. Whether it had anything.
+    fn close_holder(&mut self, h: &Holder) -> bool {
+        self.by.remove(h).is_some_and(|s| !s.roots.is_empty())
+    }
+}
+
+fn sessions<T>(f: impl FnOnce(&mut Sessions) -> T) -> T {
+    static S: OnceLock<Mutex<Sessions>> = OnceLock::new();
+    let mut guard = S.get_or_init(Default::default).lock().unwrap_or_else(|p| p.into_inner());
+    f(&mut guard)
+}
+
+pub fn is_unlocked_for(h: &Holder, root: &str) -> bool {
+    sessions(|s| s.is_open(h, root, Instant::now(), backstop()))
+}
+
+/// Unlocked for whoever is running now — see [`current_holder`].
+pub fn is_unlocked(root: &str) -> bool {
+    is_unlocked_for(&current_holder(), root)
+}
+
+/// Close `root` everywhere: locking, "Lock now" and removing a lock are about
+/// the chat, not one screen.
+fn close_everywhere(root: &str) {
+    sessions(|s| s.close_root(root));
+    LOCK_GEN.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Bumped whenever which chats are locked changes, so a cache of lock roots
+/// (the event stream's, [`StreamGate`]) knows to start again.
+static LOCK_GEN: AtomicU64 = AtomicU64::new(0);
+
+// ─── Idle relock ──────────────────────────────────────────────────────────────
+
+/// `app_settings` key: minutes without the holder's own activity before its
+/// unlocks close again; 0 is never. 15 by default: the 0.20 unlock lasted until
+/// restart, which on a machine left on for weeks is the same as no lock, and
+/// fifteen minutes is the order of an OS screen lock or a password manager's.
+pub const IDLE_KEY: &str = "chatLockIdleMinutes";
+pub const DEFAULT_IDLE_MINUTES: u32 = 15;
+const MAX_IDLE_MINUTES: u64 = 24 * 60;
+
+/// The window and the phone close their own unlocks on time (they see the
+/// keyboard); this is the backstop for one that cannot — a page frozen in a
+/// pocket, or one that stopped reporting — so it is a minute later than theirs,
+/// and their throttled activity reports always land inside it.
+const BACKSTOP_GRACE: Duration = Duration::from_secs(60);
+
+static IDLE_MINUTES: AtomicU32 = AtomicU32::new(DEFAULT_IDLE_MINUTES);
+
+/// The setting as stored. Anything other than a whole number of minutes in
+/// range reads as the default — the same reading as the window's `idleMinutes`.
+pub fn idle_minutes(app_settings: &Value) -> u32 {
+    match app_settings.get(IDLE_KEY) {
+        None => DEFAULT_IDLE_MINUTES,
+        Some(v) => v.as_u64().filter(|m| *m <= MAX_IDLE_MINUTES).map(|m| m as u32).unwrap_or(DEFAULT_IDLE_MINUTES),
+    }
+}
+
+fn backstop() -> Option<Duration> {
+    match IDLE_MINUTES.load(Ordering::Relaxed) {
+        0 => None,
+        m => Some(Duration::from_secs(u64::from(m) * 60) + BACKSTOP_GRACE),
+    }
+}
+
+/// Re-read the idle time from `app_settings` (at launch, and on every write).
+pub async fn sync_idle(db: &SqlitePool) {
+    let raw: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key = 'app_settings'")
+        .fetch_optional(db)
+        .await
+        .ok()
+        .flatten();
+    let v = raw.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(Value::Null);
+    IDLE_MINUTES.store(idle_minutes(&v), Ordering::Relaxed);
+}
+
+/// What `app_control` may do to the idle time: shorten it or switch it on,
+/// never lengthen it or switch it off. A model told to "stop the chats locking
+/// on me" is the one caller that must not be able to, by the same rule that
+/// lets it lock a chat and never open one. `requested` is the value the write
+/// would leave (None: the field is gone, which reads as the default).
+pub fn agent_may_set_idle(requested: Option<&Value>) -> Result<(), String> {
+    let current = IDLE_MINUTES.load(Ordering::Relaxed);
+    let new = match requested {
+        None => DEFAULT_IDLE_MINUTES,
+        Some(v) => v.as_u64().filter(|m| *m <= MAX_IDLE_MINUTES).map(|m| m as u32).ok_or_else(|| {
+            format!("{IDLE_KEY} is a whole number of minutes, 1 to {MAX_IDLE_MINUTES}, or 0 for never")
+        })?,
+    };
+    agent_idle_change(current, new)
+}
+
+fn agent_idle_change(current: u32, new: u32) -> Result<(), String> {
+    let strictness = |m: u32| if m == 0 { u32::MAX } else { m };
+    if strictness(new) > strictness(current) {
+        let say = |m: u32| if m == 0 { "never".to_string() } else { format!("{m} min") };
+        return Err(format!(
+            "an agent may make chat locks close sooner, never later: {IDLE_KEY} is {} and this would make it {}. \
+             Only the user lengthens it or turns it off, in Settings → Data → Chat locks",
+            say(current),
+            say(new),
+        ));
+    }
+    Ok(())
+}
+
+/// The window went to the tray: whoever walks up to the machine next should
+/// meet the lock. Not when the user switched relocking off.
+pub fn window_hidden(app: &AppHandle) {
+    if IDLE_MINUTES.load(Ordering::Relaxed) != 0 && sessions(|s| s.close_holder(&Holder::Window)) {
+        let _ = app.emit("chats-changed", serde_json::json!({}));
+    }
+}
+
+// ─── Wrong passwords ──────────────────────────────────────────────────────────
+
+/// Tries before the waits start, per device and across all of them. A paired
+/// device can pair another (and so get a fresh count), which is what the
+/// shared count is for.
+const FREE_TRIES: u32 = 5;
+const FREE_TRIES_ALL: u32 = 20;
+/// A count with no new failure for this long starts again.
+const FORGET_AFTER: Duration = Duration::from_secs(60 * 60);
+
+#[derive(Default)]
+struct Tries {
+    failures: u32,
+    last: Option<Instant>,
+    until: Option<Instant>,
+}
+
+impl Tries {
+    fn wait(&self, now: Instant) -> Option<Duration> {
+        self.until.map(|u| u.saturating_duration_since(now)).filter(|d| !d.is_zero())
+    }
+
+    fn fail(&mut self, now: Instant, free: u32) {
+        if self.last.is_some_and(|l| now.duration_since(l) > FORGET_AFTER) {
+            *self = Tries::default();
+        }
+        self.failures += 1;
+        self.last = Some(now);
+        if self.failures > free {
+            // 30 s, doubling, up to 16 min.
+            let n = (self.failures - free - 1).min(5);
+            self.until = Some(now + Duration::from_secs(30 << n));
+        }
+    }
+}
+
+/// Remote unlock attempts. The window is not counted: the person at it is the
+/// one the lock is for, and nothing else can reach its IPC.
+#[derive(Default)]
+struct Guesses {
+    by: HashMap<Holder, Tries>,
+    all: Tries,
+}
+
+impl Guesses {
+    /// Count a try before the slow hash runs, so twenty requests sent at once
+    /// are twenty tries, not twenty free ones that all finish before the first
+    /// failure is written down.
+    fn claim(&mut self, h: &Holder, now: Instant) -> Result<(), Duration> {
+        let mine = self.by.entry(h.clone()).or_default();
+        if let Some(wait) = mine.wait(now).max(self.all.wait(now)) {
+            return Err(wait);
+        }
+        mine.fail(now, FREE_TRIES);
+        self.all.fail(now, FREE_TRIES_ALL);
+        Ok(())
+    }
+
+    /// The claimed try was right: forgive the device, and take this try back
+    /// out of the shared count.
+    fn succeeded(&mut self, h: &Holder) {
+        self.by.remove(h);
+        self.all.failures = self.all.failures.saturating_sub(1);
+        if self.all.failures <= FREE_TRIES_ALL {
+            self.all.until = None;
+        }
+    }
+}
+
+fn guesses<T>(f: impl FnOnce(&mut Guesses) -> T) -> T {
+    static G: OnceLock<Mutex<Guesses>> = OnceLock::new();
+    let mut guard = G.get_or_init(Default::default).lock().unwrap_or_else(|p| p.into_inner());
+    f(&mut guard)
+}
+
+// ─── The event stream ─────────────────────────────────────────────────────────
+
+/// Which chats' turns one `/api/events` subscriber may watch. Without it every
+/// paired device saw the tokens of a locked chat stream past whenever the
+/// window had it open — the transcript, a word at a time.
+#[derive(Default)]
+pub struct StreamGate {
+    generation: u64,
+    roots: HashMap<String, Option<String>>,
+}
+
+impl StreamGate {
+    /// Whether a `stream` event's payload may go to `holder`. A database error
+    /// keeps it back.
+    pub async fn allows(&mut self, db: &SqlitePool, holder: &Holder, payload: &str) -> bool {
+        let Some(chat_id) = serde_json::from_str::<Value>(payload)
+            .ok()
+            .and_then(|v| v.get("chatId").and_then(Value::as_str).map(str::to_string))
+        else {
+            return true;
+        };
+        let generation = LOCK_GEN.load(Ordering::Relaxed);
+        if generation != self.generation {
+            self.roots.clear();
+            self.generation = generation;
+        }
+        let root = match self.roots.get(&chat_id) {
+            Some(r) => r.clone(),
+            None => match lock_root(db, &chat_id).await {
+                Ok(r) => {
+                    self.roots.insert(chat_id, r.clone());
+                    r
+                }
+                Err(_) => return false,
+            },
+        };
+        root.map_or(true, |r| is_unlocked_for(holder, &r))
     }
 }
 
@@ -265,7 +598,7 @@ pub async fn lock_with_app_password(db: &SqlitePool, chat_id: &str) -> AppResult
 /// Close the session and take the chat (and its branches) off the mirror's
 /// disk, which is plain text in a folder the user may sync somewhere.
 async fn after_lock(db: &SqlitePool, chat_id: &str) {
-    set_unlocked(chat_id, false);
+    close_everywhere(chat_id);
     if let Ok(locked) = locked_chats(db).await {
         for (id, root) in locked {
             if root == chat_id {
@@ -279,14 +612,62 @@ async fn after_lock(db: &SqlitePool, chat_id: &str) {
 #[serde(rename_all = "camelCase")]
 pub struct LockStatus {
     pub app_password_set: bool,
-    /// Lock roots open in this session, so a reloaded window agrees with us.
+    /// Lock roots the caller has open — the window's, or this device's — so a
+    /// reloaded page agrees with us.
     pub unlocked: Vec<String>,
 }
 
 #[tauri::command]
 pub async fn chat_lock_status(state: State<'_, AppState>) -> AppResult<LockStatus> {
-    let unlocked = unlocked().lock().map(|s| s.iter().cloned().collect()).unwrap_or_default();
+    let h = current_holder();
+    let unlocked = sessions(|s| s.roots(&h, Instant::now(), backstop()));
     Ok(LockStatus { app_password_set: app_hash(&state.db).await?.is_some(), unlocked })
+}
+
+/// The caller's user did something (`idle` false), keeping its unlocks open;
+/// or its idle time ran out (`idle` true), closing them all. Only ever the
+/// caller's own: the static token's are always none, so a model calling this
+/// keeps nothing open.
+#[tauri::command]
+pub async fn chat_lock_activity(idle: Option<bool>) -> AppResult<()> {
+    let h = current_holder();
+    sessions(|s| {
+        if idle == Some(true) {
+            s.close_holder(&h);
+        } else {
+            s.touch(&h, Instant::now(), backstop());
+        }
+    });
+    Ok(())
+}
+
+const NOT_FOR_THE_TOKEN: &str = "a chat is unlocked by the person who will read it — in the window, or on a \
+     paired device or browser tab with its own sign-in; the API token is not one person, so it cannot unlock";
+
+/// Open the lock covering `chat_id` for `holder`, if `password` opens it.
+/// `false` for a wrong password; an error when the caller may not try, or
+/// has tried too often.
+pub async fn unlock_as(db: &SqlitePool, holder: &Holder, chat_id: &str, password: &str) -> AppResult<bool> {
+    if *holder == Holder::Nobody {
+        return Err(AppError::Invalid(NOT_FOR_THE_TOKEN.into()));
+    }
+    let Some(root) = lock_root(db, chat_id).await? else { return Ok(true) };
+    if holder.remote() {
+        if let Err(wait) = guesses(|g| g.claim(holder, Instant::now())) {
+            return Err(AppError::Invalid(format!(
+                "too many wrong passwords from here; try again in {} s",
+                wait.as_secs().max(1)
+            )));
+        }
+    }
+    let ok = password_opens(db, &root, password).await?;
+    if ok {
+        if holder.remote() {
+            guesses(|g| g.succeeded(holder));
+        }
+        sessions(|s| s.open(holder, &root, Instant::now()));
+    }
+    Ok(ok)
 }
 
 /// Lock a chat: with its own `password`, or with the app password when none is
@@ -328,20 +709,20 @@ pub async fn lock_chat(
     Ok(())
 }
 
-/// Open a locked chat for this session. `false` for a wrong password.
+/// Open a locked chat for the caller — the window over IPC, or the device or
+/// tab whose request this is. `false` for a wrong password.
 #[tauri::command]
 pub async fn unlock_chat(state: State<'_, AppState>, chat_id: String, password: String) -> AppResult<bool> {
-    let ok = password_opens(&state.db, &chat_id, &password).await?;
-    if ok {
-        set_unlocked(&chat_id, true);
-    }
-    Ok(ok)
+    unlock_as(&state.db, &current_holder(), &chat_id, &password).await
 }
 
-/// "Lock now": close the session early. Changes nothing stored.
+/// "Lock now": close the chat early, everywhere it is open. Changes nothing
+/// stored.
 #[tauri::command]
-pub async fn relock_chat(chat_id: String) -> AppResult<()> {
-    set_unlocked(&chat_id, false);
+pub async fn relock_chat(app: AppHandle, chat_id: String) -> AppResult<()> {
+    close_everywhere(&chat_id);
+    // So a phone that had it open drops what it is showing.
+    notify(&app);
     Ok(())
 }
 
@@ -361,7 +742,7 @@ pub async fn remove_chat_lock(
         .bind(&chat_id)
         .execute(&state.db)
         .await?;
-    set_unlocked(&chat_id, false);
+    close_everywhere(&chat_id);
     crate::commands::mirror::mirror_chat_best_effort(&state.db, &chat_id).await;
     notify(&app);
     Ok(true)
@@ -409,7 +790,11 @@ pub async fn set_app_lock_password(
 pub mod tests_support {
     /// Stand in for a successful `unlock_chat` without a password round.
     pub fn open_session(root: &str) {
-        super::set_unlocked(root, true);
+        open_for(&super::Holder::Window, root);
+    }
+
+    pub fn open_for(h: &super::Holder, root: &str) {
+        super::sessions(|s| s.open(h, root, std::time::Instant::now()));
     }
 }
 
@@ -472,7 +857,7 @@ mod tests {
         // Locked → closed to the window, to the chat's own tools, and to others.
         assert!(ensure_open(&db, "a-sub").await.is_err());
         assert!(ensure_reachable(&db, Some("a"), "a-sub").await.is_err());
-        set_unlocked("a", true);
+        tests_support::open_session("a");
         assert!(ensure_open(&db, "a-branch").await.is_ok());
         // Open: the chat's own turn reaches its sub-agents; another chat and an
         // unattended job still do not.
@@ -480,8 +865,159 @@ mod tests {
         assert!(ensure_reachable(&db, Some("b"), "a-sub").await.is_err());
         assert!(ensure_reachable(&db, None, "a").await.is_err());
         assert!(ensure_reachable(&db, None, "b").await.is_ok());
-        set_unlocked("a", false);
+        // The window's unlock is the window's: a device's turn, or an API
+        // request, does not see it.
+        let phone = Holder::Device("phone".into());
+        assert!(as_holder(phone.clone(), ensure_open(&db, "a")).await.is_err());
+        assert!(as_holder(Holder::Nobody, ensure_open(&db, "a")).await.is_err());
+        close_everywhere("a");
         assert!(ensure_open(&db, "a").await.is_err());
+    }
+
+    /// An unlock is the holder's own, closes after its idle time, and is kept
+    /// open only by its own activity.
+    #[test]
+    fn unlocks_are_per_holder_and_close_when_idle() {
+        let mut s = Sessions::default();
+        let t0 = Instant::now();
+        let idle = Some(Duration::from_secs(300));
+        let phone = Holder::Device("phone".into());
+        let tablet = Holder::Device("tablet".into());
+        s.open(&phone, "x", t0);
+        assert!(s.is_open(&phone, "x", t0, idle));
+        assert!(!s.is_open(&tablet, "x", t0, idle), "another device");
+        assert!(!s.is_open(&Holder::Window, "x", t0, idle), "the window");
+        assert!(!s.is_open(&phone, "y", t0, idle), "another lock");
+
+        // Activity keeps it open; another holder's does not.
+        s.touch(&phone, t0 + Duration::from_secs(200), idle);
+        s.touch(&tablet, t0 + Duration::from_secs(400), idle);
+        assert!(s.is_open(&phone, "x", t0 + Duration::from_secs(450), idle));
+        assert!(!s.is_open(&phone, "x", t0 + Duration::from_secs(500), idle), "idle");
+        // Gone is gone: activity after the idle time does not bring it back.
+        s.touch(&phone, t0 + Duration::from_secs(501), idle);
+        assert!(!s.is_open(&phone, "x", t0 + Duration::from_secs(502), idle));
+
+        // Off: open until closed.
+        s.open(&phone, "x", t0);
+        assert!(s.is_open(&phone, "x", t0 + Duration::from_secs(86_400), None));
+        s.open(&Holder::Window, "x", t0);
+        s.close_root("x");
+        assert!(!s.is_open(&phone, "x", t0, None) && !s.is_open(&Holder::Window, "x", t0, None));
+
+        // The static token can never hold one.
+        s.open(&Holder::Nobody, "x", t0);
+        assert!(!s.is_open(&Holder::Nobody, "x", t0, None));
+    }
+
+    #[tokio::test]
+    async fn only_a_person_can_unlock_and_only_for_themselves() {
+        let db = pool().await;
+        // Their own ids: sessions are process-wide and other tests open "a".
+        for (id, parent) in [("u", None), ("u-sub", Some("u"))] {
+            sqlx::query("INSERT INTO chats (id, title, parent_chat_id, created_at, updated_at) VALUES (?1, ?1, ?2, 0, 0)")
+                .bind(id)
+                .bind(parent)
+                .execute(&db)
+                .await
+                .unwrap();
+        }
+        sqlx::query("UPDATE chats SET lock_kind = 'chat', lock_hash = ?1 WHERE id = 'u'")
+            .bind(hash_with("pw", 1_000))
+            .execute(&db)
+            .await
+            .unwrap();
+        // The API token — scripts and app_control — is refused outright, even
+        // with the right password.
+        assert!(unlock_as(&db, &Holder::Nobody, "u", "pw").await.is_err());
+
+        let phone = Holder::Device("unlock-test-phone".into());
+        assert!(!unlock_as(&db, &phone, "u", "nope").await.unwrap());
+        assert!(!is_unlocked_for(&phone, "u"));
+        // Through a sub-agent's id: the lock covering it is what opens.
+        assert!(unlock_as(&db, &phone, "u-sub", "pw").await.unwrap());
+        assert!(is_unlocked_for(&phone, "u"));
+        assert!(!is_unlocked_for(&Holder::Window, "u"));
+        assert!(!is_unlocked_for(&Holder::Device("other".into()), "u"));
+        // An unlocked chat needs no password and opens nothing.
+        assert!(unlock_as(&db, &phone, "b", "").await.unwrap());
+        assert!(!is_unlocked_for(&phone, "b"));
+        close_everywhere("u");
+        assert!(!is_unlocked_for(&phone, "u"));
+    }
+
+    #[test]
+    fn wrong_passwords_back_off_per_device_and_overall() {
+        let mut g = Guesses::default();
+        let t0 = Instant::now();
+        let phone = Holder::Device("phone".into());
+        for _ in 0..=FREE_TRIES {
+            assert!(g.claim(&phone, t0).is_ok());
+        }
+        // Counted at the claim, so a burst is refused before any hash runs.
+        let wait = g.claim(&phone, t0).unwrap_err();
+        assert_eq!(wait, Duration::from_secs(30));
+        assert!(g.claim(&phone, t0 + Duration::from_secs(29)).is_err());
+        assert!(g.claim(&phone, t0 + Duration::from_secs(30)).is_ok());
+        assert_eq!(g.claim(&phone, t0 + Duration::from_secs(31)).unwrap_err(), Duration::from_secs(59), "doubles");
+        // Another device has its own count...
+        let tablet = Holder::Device("tablet".into());
+        assert!(g.claim(&tablet, t0).is_ok());
+        // ...and a right password forgives the device that typed it.
+        g.succeeded(&phone);
+        assert!(g.claim(&phone, t0 + Duration::from_secs(31)).is_ok());
+
+        // Across devices — a device can pair another — the shared count stops
+        // them all.
+        let mut g = Guesses::default();
+        for i in 0..=FREE_TRIES_ALL {
+            assert!(g.claim(&Holder::Device(format!("d{}", i / 2)), t0).is_ok());
+        }
+        assert!(g.claim(&Holder::Device("fresh".into()), t0).is_err());
+
+        // An hour without a failure starts the count again.
+        let mut g = Guesses::default();
+        for _ in 0..=FREE_TRIES {
+            let _ = g.claim(&phone, t0);
+        }
+        assert!(g.claim(&phone, t0 + FORGET_AFTER + Duration::from_secs(1)).is_ok());
+        assert!(g.claim(&phone, t0 + FORGET_AFTER + Duration::from_secs(2)).is_ok());
+    }
+
+    #[test]
+    fn an_agent_may_shorten_the_idle_time_never_lengthen_it() {
+        assert!(agent_idle_change(15, 5).is_ok());
+        assert!(agent_idle_change(15, 15).is_ok());
+        assert!(agent_idle_change(0, 60).is_ok(), "switching it on is stricter");
+        assert!(agent_idle_change(15, 30).is_err());
+        assert!(agent_idle_change(15, 0).is_err(), "off is the loosest of all");
+        assert!(agent_idle_change(5, 0).unwrap_err().contains("Settings"));
+        assert_eq!(idle_minutes(&serde_json::json!({})), DEFAULT_IDLE_MINUTES);
+        assert_eq!(idle_minutes(&serde_json::json!({ IDLE_KEY: 0 })), 0);
+        assert_eq!(idle_minutes(&serde_json::json!({ IDLE_KEY: 30 })), 30);
+        for bad in [serde_json::json!("never"), serde_json::json!(-1), serde_json::json!(99_999), serde_json::json!(2.5)] {
+            assert_eq!(idle_minutes(&serde_json::json!({ IDLE_KEY: bad })), DEFAULT_IDLE_MINUTES, "{bad}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_event_stream_hides_a_locked_chats_turn_unless_this_holder_opened_it() {
+        let db = pool().await;
+        sqlx::query("INSERT INTO chats (id, title, lock_kind, created_at, updated_at) VALUES ('s', 's', 'app', 0, 0)")
+            .execute(&db)
+            .await
+            .unwrap();
+        let phone = Holder::Device("stream-test-phone".into());
+        let ev = |id: &str| serde_json::json!({ "chatId": id, "event": { "type": "delta" } }).to_string();
+        let mut gate = StreamGate::default();
+        assert!(gate.allows(&db, &phone, &ev("b")).await);
+        assert!(!gate.allows(&db, &phone, &ev("s")).await);
+        tests_support::open_session("s");
+        assert!(!gate.allows(&db, &phone, &ev("s")).await, "open in the window is not open on the phone");
+        tests_support::open_for(&phone, "s");
+        assert!(gate.allows(&db, &phone, &ev("s")).await);
+        close_everywhere("s");
+        assert!(!gate.allows(&db, &phone, &ev("s")).await);
     }
 
     #[tokio::test]

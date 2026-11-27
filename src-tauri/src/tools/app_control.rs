@@ -97,8 +97,11 @@ fn control_definition() -> Tool {
 ///   agreed", and a model that can answer one has removed it.
 /// - Opening a chat lock is the same boundary for a chat (0.20). A model may
 ///   lock a chat (`POST /api/chats/:id/lock`) but never unlock one, remove a
-///   lock or set a password. The API has no such routes today; these names are
-///   refused anyway, so one added later is not reachable by a model by default.
+///   lock or set a password. `POST /api/chats/:id/unlock` exists since 0.21,
+///   for a paired device's own unlock, and refuses the static token this tool
+///   uses besides; the other names have no route and are refused anyway, so
+///   one added later is not reachable by a model by default. Loosening the
+///   idle relock is refused where the setting is written (`FromAgent`).
 fn refusal(path: &str) -> Option<&'static str> {
     let p = path.split('?').next().unwrap_or(path);
     let last = p.rsplit('/').next().unwrap_or("");
@@ -111,7 +114,7 @@ fn refusal(path: &str) -> Option<&'static str> {
             Some("a tool approval is the user's answer to give, not the model's")
         }
         "unlock" | "remove-lock" | "lock-password" | "app-password" => Some(
-            "a chat lock is opened only by the user, with its password, in the window;              agents may lock a chat but never unlock it, remove a lock or set a password",
+            "a chat lock is opened only by the user, with its password, in the window or on their own device;              agents may lock a chat but never unlock it, remove a lock or set a password",
         ),
         _ => None,
     }

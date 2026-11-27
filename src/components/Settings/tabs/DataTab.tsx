@@ -15,7 +15,7 @@ import { formatBytes, formatCount, formatTokens } from "@/lib/format";
 import { errorText } from "@/lib/errors";
 import { reportError } from "@/lib/reportError";
 import { CheckLine, NumberField, PickList } from "../controls";
-import { useChatLocks } from "@/lib/chatLock";
+import { IDLE_CHOICES, idleMinutes, useChatLocks } from "@/lib/chatLock";
 import { PRIMARY_ACTION } from "@/lib/chrome";
 
 export function DataTab() {
@@ -615,6 +615,8 @@ function SettingsTransferSection() {
  */
 function ChatLocksSection() {
   const appPasswordSet = useChatLocks((s) => s.appPasswordSet);
+  const idle = useApp((s) => idleMinutes(s.appSettings.chatLockIdleMinutes));
+  const setAppSettings = useApp((s) => s.setAppSettings);
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -643,6 +645,25 @@ function ChatLocksSection() {
         forgotten. A lock is not encryption: chats stay unencrypted in the database. Agents can lock a
         chat, never unlock one or set a password.
       </p>
+      <label className="mb-3 flex max-w-sm items-center justify-between gap-3 text-xs">
+        <span>
+          Lock again after
+          <span className="block text-[var(--color-text-muted)]">
+            Without keyboard, mouse or touch on the screen that opened it. Also when the window goes to the tray, or a phone's screen goes off.
+          </span>
+        </span>
+        <select
+          value={idle}
+          onChange={(e) => void setAppSettings({ chatLockIdleMinutes: Number(e.target.value) })}
+          aria-label="Lock again after"
+          className="input shrink-0 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs outline-none focus:border-[var(--color-accent)]"
+        >
+          {IDLE_CHOICES.includes(idle as (typeof IDLE_CHOICES)[number]) ? null : <option value={idle}>{idle} minutes</option>}
+          {IDLE_CHOICES.map((m) => (
+            <option key={m} value={m}>{m === 0 ? "Never" : `${m} minutes`}</option>
+          ))}
+        </select>
+      </label>
       <div className="flex max-w-sm flex-col gap-2">
         {appPasswordSet && (
           <input type="password" value={current} onChange={(e) => setCurrent(e.target.value)} placeholder="Current app password" aria-label="Current app password" className={field} />

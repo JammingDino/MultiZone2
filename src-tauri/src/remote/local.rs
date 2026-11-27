@@ -254,6 +254,8 @@ fn arg<T: serde::de::DeserializeOwned>(args: &Value, key: &str) -> Result<T, Api
 async fn refuse_locked(st: &ApiState, chat_id: &str) -> Result<(), ApiError> {
     match crate::chat_lock::lock_root(&st.db, chat_id).await {
         Ok(None) => Ok(()),
+        // This tab's own unlock, from the request's scope (`chat_lock_mw`).
+        Ok(Some(root)) if crate::chat_lock::is_unlocked(&root) => Ok(()),
         Ok(Some(_)) => Err(ApiError(AppError::Invalid(crate::chat_lock::LOCKED_MESSAGE.into()))),
         Err(e) => Err(ApiError(e.into())),
     }
@@ -264,9 +266,9 @@ async fn refuse_locked(st: &ApiState, chat_id: &str) -> Result<(), ApiError> {
 /// Each is GUI-only because a *remote* caller cannot see or use the result — a
 /// dialog or an Explorer window opens on a screen it is not looking at — not
 /// because the user should not have it. The person at this tab is at that
-/// screen. Not on the list, deliberately: unlocking or changing chat locks
-/// (the unlock is the window's, and the API never serves a locked chat), the
-/// API's own settings and token, the database reset, and the desktop's
+/// screen. Not on the list, deliberately: changing chat locks or passwords
+/// (a tab unlocks a chat for itself over the ordinary route, as a phone does),
+/// the API's own settings and token, the database reset, and the desktop's
 /// microphone (a tab records in the browser, as a phone does).
 ///
 /// Reached only on the loopback listener (the route is not mounted anywhere
@@ -278,7 +280,7 @@ pub async fn invoke(
     caller: Option<Extension<DeviceAuth>>,
     Json(body): Json<InvokeBody>,
 ) -> ApiResult<Response> {
-    if !matches!(caller.as_deref(), Some(DeviceAuth::LocalBrowser)) {
+    if !matches!(caller.as_deref(), Some(DeviceAuth::LocalBrowser(_))) {
         return Ok((StatusCode::FORBIDDEN, Json(json!({ "error": "browser sessions only" })))
             .into_response());
     }
@@ -308,13 +310,6 @@ pub async fn invoke(
         }
         "get_attachment_images" => {
             json!(attachments::get_attachment_images(state(), arg(a, "attachmentId")?).await?)
-        }
-        // So the tab can draw a locked chat as locked. Never "unlocked": an
-        // unlock is the window's, and the API refuses a locked chat regardless.
-        "chat_lock_status" => {
-            let mut s = json!(crate::chat_lock::chat_lock_status(state()).await?);
-            s["unlocked"] = json!([]);
-            s
         }
         "add_project_sources" => json!(
             projects::add_project_sources(st.app.clone(), state(), arg(a, "projectId")?, arg(a, "paths")?)

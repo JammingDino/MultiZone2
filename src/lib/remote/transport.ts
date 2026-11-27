@@ -93,7 +93,6 @@ const LOCAL_OK = new Set([
   "get_attachment_images",
   "write_export_file",
   "add_project_sources",
-  "chat_lock_status",
 ]);
 
 function loginParams(): URLSearchParams | null {

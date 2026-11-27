@@ -52,7 +52,7 @@ const fn open(method: &'static str, path: &'static str, description: &'static st
 
 /// Bumped whenever a route is added, removed or changes shape, so a caller can
 /// tell "the app is older than my script" from "my script is wrong".
-pub const ROUTE_SET_VERSION: u32 = 16;
+pub const ROUTE_SET_VERSION: u32 = 17;
 
 pub const ROUTES: &[RouteDef] = &[
     // Discovery — deliberately unauthenticated. A caller debugging a broken
@@ -116,7 +116,10 @@ pub const ROUTES: &[RouteDef] = &[
     r("POST", "/api/runs/:id/render", "Fill a run's template. Body: { \"values\"? }"),
     r("POST", "/api/chats", "Create a chat"),
     r("DELETE", "/api/chats/:id", "Delete a chat"),
-    r("POST", "/api/chats/:id/lock", "Lock a chat behind the app password, or re-lock it now if already locked (no body). Locking is all the API does: unlocking, removing a lock and setting passwords are the user's, in the window. Every other /api/chats/:id/… route answers 423 for a locked chat"),
+    r("POST", "/api/chats/:id/lock", "Lock a chat behind the app password, or re-lock it now if already locked (no body). Closes it everywhere it is open. Removing a lock and setting passwords are the user's, in the window. Every other /api/chats/:id/… route answers 423 for a locked chat, except to the paired device or browser tab that unlocked it"),
+    r("POST", "/api/chats/:id/unlock", "Unlock a locked chat (or the lock covering a sub-chat) for this paired device or browser tab only: {\"password\"} → true, or false for a wrong one. Never the window's or anyone else's unlock, and not for the API token or app_control, which are refused. It closes again after the idle time (app setting chatLockIdleMinutes), with POST /api/chat-locks/activity {\"idle\":true}, on Lock now from anywhere, and when the app restarts. Wrong passwords back off: 5 tries per device, then waits from 30 s doubling to 16 min"),
+    r("GET", "/api/chat-locks", "Chat locks as the caller sees them: {appPasswordSet, unlocked: the lock roots this caller has open} — always [] for the API token"),
+    r("POST", "/api/chat-locks/activity", "Report the person's activity on this device ({} keeps its unlocks open; the phone sends it at most every 30 s while one is open), or {\"idle\":true} to close them all now. Only ever the caller's own unlocks"),
     r("GET", "/api/chats/:id/messages", "Every message in a chat"),
     r("POST", "/api/chats/:id/messages", "Send a message ({text|parts}, optional overrideZoneId/overrideModel for this turn only); streams SSE unless ?wait=true"),
     r("PATCH", "/api/chats/:id/messages/:messageId", "Replace a message's text in place"),
@@ -252,7 +255,7 @@ pub const ROUTES: &[RouteDef] = &[
     r("GET", "/api/stats", "Row counts: chats, messages, zones, projects, tags"),
     r("GET", "/api/settings/:key", "Read one settings row"),
     r("PUT", "/api/settings/:key", "Write one settings row"),
-    r("PATCH", "/api/settings/:key", "Merge fields into a JSON settings row (e.g. {\"mode\":\"dark\"} on `theme`; on `app_settings`, {\"chatClickOpens\":\"tab\"|\"replace\"} sets whether clicking a chat opens a new tab, the default, or replaces the one on screen; {\"settingsOpenIn\":\"dialog\"|\"tab\"} sets whether Settings opens as a dialog, the default, or as a tab in the main column (a phone always gets the dialog; POST /api/layout/show {\"tab\":\"@settings\"} opens the tab once); {\"openIn\":\"window\"|\"browser\"} sets whether MultiZone opens in its own window, the default, or starts hidden in the tray and opens a tab in the default browser — applies from the next launch)"),
+    r("PATCH", "/api/settings/:key", "Merge fields into a JSON settings row (e.g. {\"mode\":\"dark\"} on `theme`; on `app_settings`, {\"chatClickOpens\":\"tab\"|\"replace\"} sets whether clicking a chat opens a new tab, the default, or replaces the one on screen; {\"settingsOpenIn\":\"dialog\"|\"tab\"} sets whether Settings opens as a dialog, the default, or as a tab in the main column (a phone always gets the dialog; POST /api/layout/show {\"tab\":\"@settings\"} opens the tab once); {\"openIn\":\"window\"|\"browser\"} sets whether MultiZone opens in its own window, the default, or starts hidden in the tray and opens a tab in the default browser — applies from the next launch; {\"chatLockIdleMinutes\": 0-1440} is how many minutes without activity before unlocked chats lock again, everywhere they are open (default 15; 0 never, which also keeps them open when the window goes to the tray). app_control may only make it shorter or switch it on from 0 — lengthening it or setting 0 is refused, here and through PUT, because loosening a lock is the user's, in Settings → Data → Chat locks)"),
     // Remote access (0.17.0)
     r("GET", "/api/remote", "Whether the app is reachable from the network, on which address, and whether it is being advertised"),
     r("GET", "/api/network-interfaces", "The addresses this machine could bind"),
@@ -369,8 +372,10 @@ pub const COVERAGE: &[(&str, Coverage)] = &[
     // Chat locks (0.20): an agent may lock, never open. See `chat_lock`.
     ("chat_lock::lock_chat", Route("POST /api/chats/:id/lock")),
     ("chat_lock::relock_chat", Route("POST /api/chats/:id/lock")),
-    ("chat_lock::chat_lock_status", GuiOnly("which chats this window has unlocked, and whether an app password exists; the API never serves a locked chat either way")),
-    ("chat_lock::unlock_chat", GuiOnly("opening a locked chat is the person at the window typing its password; a caller that could do it remotely is the thing the lock keeps out")),
+    ("chat_lock::chat_lock_status", Route("GET /api/chat-locks")),
+    // Per caller (0.21): a device's unlock is its own. See `chat_lock::Holder`.
+    ("chat_lock::unlock_chat", Route("POST /api/chats/:id/unlock")),
+    ("chat_lock::chat_lock_activity", Route("POST /api/chat-locks/activity")),
     ("chat_lock::remove_chat_lock", GuiOnly("removing a lock is the user's decision, with the password, in the window — never an agent's")),
     ("chat_lock::set_app_lock_password", GuiOnly("setting or changing a password is the user's; an agent that could set one could open every chat it covers")),
     ("chats::get_messages", Route("GET /api/chats/:id/messages")),
@@ -788,7 +793,8 @@ pub async fn lock_chat(
     Path(id): Path<String>,
     body: Option<Json<Value>>,
 ) -> ApiResult<StatusCode> {
-    if body.as_ref().is_some_and(|b| b.get("password").is_some()) {
+    // `null` is the remote window's "no password": the app password.
+    if body.as_ref().is_some_and(|b| b.get("password").is_some_and(|p| !p.is_null())) {
         return Err(crate::error::AppError::Invalid(
             "the API locks with the app password only; a per-chat password is set in the window".into(),
         )
@@ -796,6 +802,29 @@ pub async fn lock_chat(
     }
     crate::chat_lock::lock_with_app_password(&st.db, &id).await?;
     let _ = st.app.emit("chats-changed", json!({}));
+    Ok(NO_CONTENT)
+}
+
+/// Unlock for the caller only — this paired device or browser tab (0.21).
+/// The static token is refused in `chat_lock::unlock_as`, and `app_control`
+/// refuses the path before it gets here.
+pub async fn unlock_chat(
+    State(st): State<ApiState>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> ApiResult<Response> {
+    let password = required(&body, "password")?;
+    let holder = crate::chat_lock::current_holder();
+    Ok(Json(crate::chat_lock::unlock_as(&st.db, &holder, &id, &password).await?).into_response())
+}
+
+pub async fn chat_lock_status(State(st): State<ApiState>) -> ApiResult<Response> {
+    Ok(Json(crate::chat_lock::chat_lock_status(app_state(&st)).await?).into_response())
+}
+
+pub async fn chat_lock_activity(body: Option<Json<Value>>) -> ApiResult<StatusCode> {
+    let idle = body.as_ref().and_then(|b| b.get("idle")).and_then(Value::as_bool);
+    crate::chat_lock::chat_lock_activity(idle).await?;
     Ok(NO_CONTENT)
 }
 
@@ -2022,16 +2051,22 @@ pub async fn get_setting(
 pub async fn set_setting(
     State(st): State<ApiState>,
     Path(key): Path<String>,
+    agent: Option<axum::Extension<crate::api::FromAgent>>,
     Json(body): Json<Value>,
 ) -> ApiResult<StatusCode> {
-    commands::settings::set_setting(
-        st.app.clone(),
-        app_state(&st),
-        key,
-        required(&body, "value")?,
-    )
-    .await?;
+    let value = required(&body, "value")?;
+    if agent.is_some() && key == "app_settings" {
+        let whole: Value = serde_json::from_str(&value).unwrap_or(Value::Null);
+        agent_idle_check(whole.get(crate::chat_lock::IDLE_KEY))?;
+    }
+    commands::settings::set_setting(st.app.clone(), app_state(&st), key, value).await?;
     Ok(NO_CONTENT)
+}
+
+/// `app_control` may make chat locks close sooner, never later.
+fn agent_idle_check(requested: Option<&Value>) -> Result<(), ApiError> {
+    crate::chat_lock::agent_may_set_idle(requested)
+        .map_err(|why| ApiError(crate::error::AppError::Invalid(why)))
 }
 
 /// Merge fields into a JSON settings row — the one-call form of "change this
@@ -2040,6 +2075,7 @@ pub async fn set_setting(
 pub async fn patch_setting(
     State(st): State<ApiState>,
     Path(key): Path<String>,
+    agent: Option<axum::Extension<crate::api::FromAgent>>,
     Json(body): Json<Value>,
 ) -> ApiResult<Response> {
     let patch = match body {
@@ -2050,6 +2086,11 @@ pub async fn patch_setting(
             )))
         }
     };
+    if agent.is_some() && key == "app_settings" {
+        if let Some(v) = patch.get(crate::chat_lock::IDLE_KEY) {
+            agent_idle_check(Some(v))?;
+        }
+    }
     let value =
         commands::settings::patch_setting(st.app.clone(), app_state(&st), key.clone(), patch)
             .await?;

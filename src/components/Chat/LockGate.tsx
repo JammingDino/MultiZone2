@@ -2,7 +2,8 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { Loader2, Lock } from "lucide-react";
 import * as api from "@/lib/tauri";
 import { useApp } from "@/store/app";
-import { lockRoot, setUnlocked, useChatLocks } from "@/lib/chatLock";
+import { idleExpired, idleMinutes, lockRoot, setUnlocked, useChatLocks } from "@/lib/chatLock";
+import { isLocalBrowser, isRemote } from "@/lib/remote/transport";
 import { Modal, ModalTitle } from "@/components/common/Modal";
 import { PRIMARY_ACTION } from "@/lib/chrome";
 import { errorText } from "@/lib/errors";
@@ -22,23 +23,80 @@ const INPUT =
 const SECONDARY =
   "rounded border border-[var(--color-border)] px-3 py-1.5 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-50";
 
-/** Sync with Rust's session state — on start, and after a window reload. */
+/**
+ * Sync with Rust's session state — on start, after a reload, and whenever
+ * chats change (a lock closed elsewhere: "Lock now" on another device, the
+ * window going to the tray). What Rust no longer has open is closed here too.
+ */
 export function refreshLockStatus() {
-  api.chatLockStatus().then((s) => useChatLocks.setState(s)).catch(console.error);
+  api
+    .chatLockStatus()
+    .then((s) => {
+      const gone = useChatLocks.getState().unlocked.filter((r) => !s.unlocked.includes(r));
+      useChatLocks.setState(s);
+      for (const root of gone) dropTranscripts(root);
+    })
+    .catch(console.error);
 }
 
-/**
- * Close a lock for this session ("Lock now", or just after locking): Rust stops
- * serving it, and the transcripts already in memory for it and its branches
- * are dropped so nothing still on screen keeps showing them.
- */
-export async function closeLock(root: string) {
-  await api.relockChat(root);
+/** The transcripts in memory for a lock and its branches, so nothing on screen keeps showing them. */
+function dropTranscripts(root: string) {
   setUnlocked(root, false);
   useApp.setState((s) => {
     const messagesByChat = { ...s.messagesByChat };
     for (const c of s.chats) if (lockRoot(s.chats, c.id) === root) delete messagesByChat[c.id];
     return { messagesByChat };
+  });
+}
+
+/** Close a lock ("Lock now", or just after locking) — everywhere it is open. */
+export async function closeLock(root: string) {
+  await api.relockChat(root);
+  dropTranscripts(root);
+}
+
+/**
+ * Idle relock (0.21). The person's own keyboard, pointer and touch keep this
+ * screen's unlocks open; past the idle time they close, here and in Rust, for
+ * this screen only. Rust closes them a minute later on its own, for a page
+ * that is frozen or gone. A phone whose screen goes off or that leaves the app
+ * locks at once — that is its screen lock. Started once, by the chat panel.
+ */
+let watching = false;
+let lastActive = Date.now();
+let lastReport = 0;
+/** Rust's backstop is a minute behind ours, so this lands well inside it. */
+const REPORT_EVERY_MS = 30_000;
+
+export function watchIdle() {
+  if (watching || typeof window === "undefined") return;
+  watching = true;
+  const anyOpen = () => useChatLocks.getState().unlocked.length > 0;
+  const minutes = () => idleMinutes(useApp.getState().appSettings.chatLockIdleMinutes);
+  const active = (e: Event) => {
+    // A layout shift under a still mouse fires moves with no movement in them.
+    if (e instanceof PointerEvent && e.type === "pointermove" && !e.movementX && !e.movementY) return;
+    lastActive = Date.now();
+    if (anyOpen() && lastActive - lastReport > REPORT_EVERY_MS) {
+      lastReport = lastActive;
+      api.chatLockActivity(false).catch(() => {});
+    }
+  };
+  for (const type of ["keydown", "pointerdown", "pointermove", "wheel", "touchstart"]) {
+    window.addEventListener(type, active, { capture: true, passive: true });
+  }
+  const relock = () => {
+    if (!anyOpen()) return;
+    for (const root of useChatLocks.getState().unlocked) dropTranscripts(root);
+    api.chatLockActivity(true).catch(console.error);
+  };
+  const check = () => {
+    if (idleExpired(lastActive, Date.now(), minutes())) relock();
+  };
+  setInterval(check, 15_000);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") check();
+    else if (isRemote() && !isLocalBrowser() && minutes() > 0) relock();
   });
 }
 
@@ -100,7 +158,7 @@ function UnlockScreen({ root, chatId }: { root: string; chatId: string }) {
           {perChat && appPasswordSet
             ? "Forgot it? The app password opens this chat too."
             : "A forgotten password can't be recovered here; the chat can still be deleted."}
-          {" "}It stays open until you lock it again or restart the app.
+          {" "}It locks again when you lock it, after a while without use, or when the app restarts.
         </p>
       </form>
     </div>

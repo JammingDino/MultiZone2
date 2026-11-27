@@ -527,6 +527,8 @@ export const lockChat = (chatId: string, password?: string) =>
 export const unlockChat = (chatId: string, password: string) =>
   invoke<boolean>("unlock_chat", { chatId, password });
 export const relockChat = (chatId: string) => invoke<void>("relock_chat", { chatId });
+/** Keep this screen's unlocks open (the person is here), or close them all (`idle`). */
+export const chatLockActivity = (idle: boolean) => invoke<void>("chat_lock_activity", { idle });
 export const removeChatLock = (chatId: string, password: string) =>
   invoke<boolean>("remove_chat_lock", { chatId, password });
 /** Set (`current` null), change, or remove (`next` null) the app password. */

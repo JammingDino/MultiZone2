@@ -1640,18 +1640,19 @@ async fn run_turn_inner(
             let chat_id = chat_id.to_string();
             let ov = ov.clone();
             let cancel = cancel.clone();
-            handles.push(tokio::spawn(async move {
+            // `carry`: the turn's tools check locks as whoever started it.
+            handles.push(tokio::spawn(crate::chat_lock::carry(async move {
                 if let Err(e) = run_agentic_loop(&ctx, &sink, &chat_id, &ov, cancel).await {
                     sink.emit(&chat_id, StreamPayload::Error { message: e.to_string() });
                 }
-            }));
+            })));
         }
         for zone_id in persp_ids {
             let ctx = ctx.clone();
             let sink = sink.clone();
             let chat_id = chat_id.to_string();
             let cancel = cancel.clone();
-            handles.push(tokio::spawn(async move {
+            handles.push(tokio::spawn(crate::chat_lock::carry(async move {
                 if let Err(e) = run_perspective(&ctx, &sink, &chat_id, &zone_id, cancel).await {
                     tracing::warn!("perspective zone {zone_id} error: {e}");
                     sink.emit_persp(
@@ -1660,7 +1661,7 @@ async fn run_turn_inner(
                         StreamPayload::Error { message: e.to_string() },
                     );
                 }
-            }));
+            })));
         }
         for h in handles {
             let _ = h.await;

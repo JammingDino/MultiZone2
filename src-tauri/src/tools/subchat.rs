@@ -111,9 +111,11 @@ fn run_turn_owned(
     chat_id: String,
     parts: Vec<InputPart>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = AppResult<()>> + Send + 'static>> {
-    Box::pin(async move {
+    // Built inside the leader's turn and spawned: it runs as whoever runs that
+    // turn, so a sub-agent of a chat a phone unlocked is open to it too.
+    Box::pin(crate::chat_lock::carry(async move {
         run_send_entry(&ctx, &sink, &chat_id, parts, agent_turn()).await
-    })
+    }))
 }
 
 pub fn definitions() -> Vec<Tool> {

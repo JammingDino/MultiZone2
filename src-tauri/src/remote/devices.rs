@@ -50,14 +50,16 @@ pub enum DeviceAuth {
     /// A paired device, identified.
     Device(Box<PairedDevice>),
     /// A browser tab on this machine, signed in by the app itself (0.21) —
-    /// see `remote::local`. Only ever accepted on the loopback listener.
-    LocalBrowser,
+    /// see `remote::local`. Only ever accepted on the loopback listener. Carries
+    /// a hash of the session token, so each tab is its own holder of chat
+    /// unlocks (`chat_lock::Holder`).
+    LocalBrowser(String),
 }
 
 impl DeviceAuth {
     pub fn device_id(&self) -> Option<&str> {
         match self {
-            DeviceAuth::Static | DeviceAuth::LocalBrowser => None,
+            DeviceAuth::Static | DeviceAuth::LocalBrowser(_) => None,
             DeviceAuth::Device(d) => Some(&d.id),
         }
     }

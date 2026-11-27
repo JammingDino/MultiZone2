@@ -4,7 +4,7 @@ import { useApp } from "@/store/app";
 import { useShallow } from "zustand/react/shallow";
 import * as api from "@/lib/tauri";
 import { MessageThread } from "./MessageThread";
-import { LockGate, refreshLockStatus } from "./LockGate";
+import { LockGate, refreshLockStatus, watchIdle } from "./LockGate";
 import { FileViewer } from "@/components/Workspace/FileViewer";
 import { Tiles } from "./Tiles";
 import { MobileTiles } from "./MobileTiles";
@@ -139,6 +139,7 @@ export function ChatPanel() {
       else unlistenZone = u;
     });
     refreshLockStatus();
+    watchIdle();
     api.onChatsChanged(() => {
       // A subchat was spawned (or the chat list otherwise changed) — refresh so
       // the sidebar shows it nested under its parent live.

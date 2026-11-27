@@ -38,6 +38,22 @@ export function setUnlocked(root: string, open: boolean) {
   }));
 }
 
+/**
+ * Idle relock (0.21): minutes without the person's own keyboard, pointer or
+ * touch before every open lock closes again; 0 is never. Read the same way as
+ * Rust's `chat_lock::idle_minutes` — anything else is the default.
+ */
+export const DEFAULT_IDLE_MINUTES = 15;
+export const IDLE_CHOICES = [0, 5, 15, 30, 60] as const;
+
+export function idleMinutes(v: unknown): number {
+  return typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 1440 ? v : DEFAULT_IDLE_MINUTES;
+}
+
+export function idleExpired(lastActive: number, now: number, minutes: number): boolean {
+  return minutes > 0 && now - lastActive >= minutes * 60_000;
+}
+
 /** Locked and not opened this session: draw the unlock screen, read nothing. */
 export function isLockedNow(chats: readonly LockFields[], id: string, unlocked: readonly string[]): boolean {
   const root = lockRoot(chats, id);

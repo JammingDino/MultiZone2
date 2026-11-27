@@ -1157,6 +1157,14 @@ export interface AppSettings {
    * backend at startup, so a change applies on the next launch.
    */
   openIn: "window" | "browser";
+  /**
+   * Minutes without the person's own activity before unlocked chats lock
+   * again (0.21), on whichever screen or device unlocked them; 0 is never
+   * (and also keeps them open when the window goes to the tray). Read by the
+   * backend too, which closes unlocks a frontend could not. An agent may only
+   * shorten it — see `chat_lock::agent_may_set_idle`.
+   */
+  chatLockIdleMinutes: number;
   maxToolSteps: number;
   /**
    * Ceiling on the billed tokens one session — a chat plus every sub-agent
@@ -1565,6 +1573,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   streamAnimationMs: 250,
   closeToTray: true,
   openIn: "window",
+  chatLockIdleMinutes: 15,
   maxToolSteps: 30,
   maxSessionTokens: 0,
   rollingContextTokens: 0,

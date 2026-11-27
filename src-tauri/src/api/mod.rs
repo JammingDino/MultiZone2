@@ -210,7 +210,7 @@ pub(crate) async fn call_in_process(
 
     let method = axum::http::Method::from_bytes(method.to_uppercase().as_bytes())
         .map_err(|_| AppError::Invalid(format!("'{method}' is not an HTTP method")))?;
-    let request = axum::http::Request::builder()
+    let mut request = axum::http::Request::builder()
         .method(method)
         .uri(path_and_query)
         .header(AUTHORIZATION, format!("Bearer {token}"))
@@ -219,6 +219,9 @@ pub(crate) async fn call_in_process(
             body.unwrap_or(serde_json::Value::Object(Default::default())).to_string(),
         ))
         .map_err(|e| AppError::Invalid(format!("could not build the request: {e}")))?;
+    // Nothing on a socket can put this here, so a route can tell a model
+    // from the user's own script holding the same kind of token.
+    request.extensions_mut().insert(FromAgent);
 
     let response = build_router(state)
         .oneshot(request)
@@ -243,6 +246,13 @@ pub(crate) async fn call_in_process(
         })?;
     Ok((status, String::from_utf8_lossy(&bytes).into_owned()))
 }
+
+/// Set on a request [`call_in_process`] makes for `app_control` — a model, not
+/// a person. The token alone cannot say: the user's own scripts use the static
+/// token too, and may do what a model may not (lengthen the chat-lock idle
+/// time, see `chat_lock::agent_may_set_idle`).
+#[derive(Clone, Copy)]
+pub(crate) struct FromAgent;
 
 fn build_router(state: ApiState) -> Router {
     use tower_http::cors::CorsLayer;
@@ -276,6 +286,9 @@ fn build_router(state: ApiState) -> Router {
         .route("/api/runs/:id/render", post(h::render_saved_run))
         .route("/api/chats/:id", axum::routing::delete(h::delete_chat))
         .route("/api/chats/:id/lock", post(h::lock_chat))
+        .route("/api/chats/:id/unlock", post(h::unlock_chat))
+        .route("/api/chat-locks", get(h::chat_lock_status))
+        .route("/api/chat-locks/activity", post(h::chat_lock_activity))
         .route("/api/chats/:id/messages", get(get_messages).post(send_message))
         .route("/api/chats/:id/messages/:messageId", axum::routing::patch(h::update_message))
         .route("/api/chats/:id/messages/from", axum::routing::delete(h::delete_messages_from))
@@ -555,7 +568,8 @@ async fn auth_mw(
         return next.run(req).await;
     }
     if st.local_port.is_some() && crate::remote::local::session_valid(token) {
-        req.extensions_mut().insert(crate::remote::DeviceAuth::LocalBrowser);
+        let session = crate::remote::devices::hash_token(token);
+        req.extensions_mut().insert(crate::remote::DeviceAuth::LocalBrowser(session));
         return next.run(req).await;
     }
 
@@ -570,22 +584,29 @@ async fn auth_mw(
     next.run(req).await
 }
 
-/// A locked chat is never served over the API (0.20) — not to a script, a
-/// phone, or a model's `app_read` — even while it is open in the window: the
-/// unlock is the window's, for the person at it.
+/// A locked chat is served over the API only to the device or browser tab
+/// that unlocked it (0.21) — never to a script or a model's `app_read` on the
+/// static token, and not to a phone because the window has it open: an unlock
+/// is the holder's, for the person holding it (`chat_lock::Holder`).
 ///
 /// One layer over every `/api/chats/:id/…` route rather than a check in each
 /// handler, so a route added next release is covered the day it lands. Exempt:
-/// `/lock` itself, and `DELETE /api/chats/:id` (no sub-path), since deleting
-/// stays possible when a password is forgotten.
+/// `/lock` and `/unlock` themselves, and `DELETE /api/chats/:id` (no
+/// sub-path), since deleting stays possible when a password is forgotten.
+///
+/// It also runs every request as its caller, so a check deeper in (a turn's
+/// `ensure_open`, a tool reaching a sub-agent) asks about this caller's unlocks
+/// rather than the window's.
 async fn chat_lock_mw(
     State(db): State<SqlitePool>,
     req: axum::extract::Request,
     next: Next,
 ) -> Response {
+    let holder = crate::chat_lock::Holder::of(req.extensions().get::<crate::remote::DeviceAuth>());
     if let Some(id) = lock_checked_chat(req.uri().path()) {
         match crate::chat_lock::lock_root(&db, id).await {
             Ok(None) => {}
+            Ok(Some(root)) if crate::chat_lock::is_unlocked_for(&holder, &root) => {}
             Ok(Some(_)) => {
                 return (
                     StatusCode::LOCKED,
@@ -596,13 +617,13 @@ async fn chat_lock_mw(
             Err(e) => return ApiError(e.into()).into_response(),
         }
     }
-    next.run(req).await
+    crate::chat_lock::as_holder(holder, next.run(req)).await
 }
 
 /// The chat a path reads or acts inside, when the lock applies to it.
 fn lock_checked_chat(path: &str) -> Option<&str> {
     let (id, rest) = path.strip_prefix("/api/chats/")?.split_once('/')?;
-    (!id.is_empty() && !rest.is_empty() && rest != "lock").then_some(id)
+    (!id.is_empty() && !rest.is_empty() && rest != "lock" && rest != "unlock").then_some(id)
 }
 
 fn unauthorized() -> Response {
@@ -993,10 +1014,11 @@ async fn send_message(
     // Streaming: feed the same event envelopes the GUI gets over SSE.
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let sink = StreamSink::api(st.app.clone(), tx);
-    tokio::spawn(async move {
+    // Carried into the task: the turn runs as the device that sent it.
+    tokio::spawn(crate::chat_lock::carry(async move {
         // Dropping `sink` (and thus the sender) when this finishes ends the SSE.
         let _ = run_send_entry(&ctx, &sink, &chat_id, parts, turn).await;
-    });
+    }));
 
     let stream = UnboundedReceiverStream::new(rx)
         .map(|line| Ok::<Event, Infallible>(Event::default().data(line)));
@@ -1029,9 +1051,9 @@ async fn regenerate(
 
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let sink = StreamSink::api(st.app.clone(), tx);
-    tokio::spawn(async move {
+    tokio::spawn(crate::chat_lock::carry(async move {
         let _ = run_regenerate_entry(&ctx, &sink, &chat_id).await;
-    });
+    }));
 
     let stream = UnboundedReceiverStream::new(rx)
         .map(|line| Ok::<Event, Infallible>(Event::default().data(line)));
@@ -1074,8 +1096,69 @@ mod tests {
         assert_eq!(status("/api/chats/shut/messages").await, 423);
     }
 
+    /// The gate decisions for a device's unlock (0.21): through for the chat it
+    /// unlocked and that chat's sub-chats, 423 for everyone else and for every
+    /// other locked chat — whatever credential they hold.
+    #[tokio::test]
+    async fn a_device_unlock_lets_that_device_and_only_it_through() {
+        use crate::remote::{devices::PairedDevice, DeviceAuth};
+        let db = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        crate::db::MIGRATOR.run(&db).await.unwrap();
+        for (id, parent, kind) in [
+            ("dl", None, Some("app")),
+            ("dl-sub", Some("dl"), None),
+            ("dl-own", Some("dl"), Some("chat")),
+            ("other", None, Some("app")),
+        ] {
+            sqlx::query("INSERT INTO chats (id, title, parent_chat_id, lock_kind, created_at, updated_at) VALUES (?1, ?1, ?2, ?3, 0, 0)")
+                .bind(id)
+                .bind(parent)
+                .bind(kind)
+                .execute(&db)
+                .await
+                .unwrap();
+        }
+        let app = Router::new()
+            .route("/api/chats/:id/messages", get(|| async { "transcript" }))
+            .route("/api/chats/:id/unlock", axum::routing::post(|| async { "unlock" }))
+            .route_layer(middleware::from_fn_with_state(db.clone(), chat_lock_mw));
+        let device = |id: &str| {
+            DeviceAuth::Device(Box::new(PairedDevice {
+                id: id.into(),
+                name: id.into(),
+                platform: "android".into(),
+                created_at: 0,
+                last_seen_at: None,
+                last_seen_ip: None,
+                revoked_at: None,
+            }))
+        };
+        let status = |auth: Option<DeviceAuth>, path: &'static str| {
+            let app = app.clone();
+            async move {
+                let mut req = Request::get(path).body(Body::empty()).unwrap();
+                if let Some(a) = auth {
+                    req.extensions_mut().insert(a);
+                }
+                app.oneshot(req).await.unwrap().status().as_u16()
+            }
+        };
+        crate::chat_lock::tests_support::open_for(&crate::chat_lock::Holder::Device("gate-phone".into()), "dl");
+
+        assert_eq!(status(Some(device("gate-phone")), "/api/chats/dl/messages").await, 200);
+        assert_eq!(status(Some(device("gate-phone")), "/api/chats/dl-sub/messages").await, 200, "a sub-chat under the lock");
+        assert_eq!(status(Some(device("gate-phone")), "/api/chats/dl-own/messages").await, 423, "its own lock");
+        assert_eq!(status(Some(device("gate-phone")), "/api/chats/other/messages").await, 423, "another lock");
+        assert_eq!(status(Some(device("gate-tablet")), "/api/chats/dl/messages").await, 423, "another device");
+        assert_eq!(status(Some(DeviceAuth::Static), "/api/chats/dl/messages").await, 423, "the API token / app_control");
+        assert_eq!(status(Some(DeviceAuth::LocalBrowser("tab".into())), "/api/chats/dl/messages").await, 423, "a browser tab");
+        assert_eq!(status(None, "/api/chats/dl/messages").await, 423);
+        // The unlock route itself is reachable while locked, or nothing could unlock.
+        assert_eq!(status(Some(device("gate-tablet")), "/api/chats/other/unlock").await, 405, "past the gate (GET on a POST route)");
+    }
+
     /// Every route inside a chat is behind its lock — messages, events, export
-    /// material, sends — except locking itself and deleting the chat.
+    /// material, sends — except locking, unlocking and deleting the chat.
     #[test]
     fn every_route_inside_a_chat_is_lock_checked() {
         for p in [
@@ -1088,7 +1171,7 @@ mod tests {
         ] {
             assert_eq!(lock_checked_chat(p), Some("c1"), "{p}");
         }
-        for p in ["/api/chats/c1/lock", "/api/chats/c1", "/api/chats", "/api/search", "/api/chats/"] {
+        for p in ["/api/chats/c1/lock", "/api/chats/c1/unlock", "/api/chats/c1", "/api/chats", "/api/search", "/api/chats/"] {
             assert_eq!(lock_checked_chat(p), None, "{p}");
         }
     }

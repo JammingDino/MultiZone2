@@ -261,6 +261,7 @@ pub fn run() {
                 };
                 handle.manage(state);
                 tray::sync(&handle.state::<AppState>().db).await;
+                chat_lock::sync_idle(&handle.state::<AppState>().db).await;
                 let browser = remote::local::read_mode(&handle.state::<AppState>().db).await;
                 let tray_ok = match tray::init(&handle) {
                     Ok(()) => true,
@@ -332,6 +333,7 @@ pub fn run() {
                     api.prevent_close();
                     let _ = window.hide();
                     background::set_hidden(window.app_handle(), true);
+                    chat_lock::window_hidden(window.app_handle());
                 }
             }
             background::on_window_event(window, event);
@@ -407,6 +409,7 @@ pub fn run() {
             chat_lock::chat_lock_status,
             chat_lock::lock_chat,
             chat_lock::unlock_chat,
+            chat_lock::chat_lock_activity,
             chat_lock::relock_chat,
             chat_lock::remove_chat_lock,
             chat_lock::set_app_lock_password,

@@ -114,6 +114,7 @@ pub async fn set_setting(
         // have changed).
         crate::commands::mirror::resync().await;
         crate::tray::sync(&state.db).await;
+        crate::chat_lock::sync_idle(&state.db).await;
     }
     // Mirror user-facing preferences to the installer-safe backup so they survive
     // a version update that clears the per-app data dir. Best-effort — a failed

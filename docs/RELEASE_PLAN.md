@@ -461,9 +461,9 @@ The main column already tiles (0.18.2), on a layout tree of our own that stops a
 - [x] Lock a chat behind the app password or its own (PBKDF2, enforced in Rust and the API; agents may lock, never unlock; migration 056); one Export… item
 - [ ] Left for 0.20.1+: pane keys still act behind open dialogs; idle auto-relock; unlocking from the phone; a keyboard pass over Settings and the model pickers; the phone layout since the pane rewrite; the sidebar text blur the user saw (not reproduced)
 
-### 0.21.1 — Unstuck, and the first request (done on `feat/0.21`, not yet released)
+### 0.21.0 — Unstuck, and the first request (released 2026-11-27)
 
-Raised after using 0.20.0, plus the first-request work that was 0.20.2.
+Raised after using 0.20.0, plus the first-request work that was 0.20.2. Planned as 0.21.1; released as 0.21.0, since the pane work that held that number shipped inside 0.20.0.
 - [x] A startup that fails because the data is newer than the app offers *Update now* from the latest GitHub release, instead of a manual reinstall (dev builds write newer data than the installed app reads)
 - [x] A `/command` looks like one while it is typed: an in-progress look for a prefix of a known command, the full look the moment it is complete (not only when picked from the menu)
 - [x] Clicking a chat opens it in a new tab by default; *Replaces the current tab* stays as a setting

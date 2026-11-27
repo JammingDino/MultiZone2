@@ -470,6 +470,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)] // backslash paths are one component elsewhere
     fn containment_is_by_component_and_ignores_case_on_windows() {
         assert!(path_contains(Path::new(r"D:\dev"), Path::new(r"D:\dev\x")));
         assert!(path_contains(Path::new(r"D:\dev"), Path::new(r"D:\dev")));

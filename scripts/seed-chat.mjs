@@ -57,16 +57,17 @@ async function call(method, path, body) {
 }
 
 const SEED_NAME = "Mock stream (seed)";
-// What this script and stream-soak.mjs create: chats in these zones, the zones, their providers.
-const MOCK_NAMES = new Set([SEED_NAME, "Mock stream (test)"]);
+// What this script and stream-soak.mjs create (and hand-made test zones named
+// the same way, e.g. "Mock stream (test) dead"): chats in these zones, the zones, their providers.
+const isMock = (name) => /^Mock stream \((seed|test)\)/.test(name ?? "");
 
 async function cleanup() {
-  const zones = (await call("GET", "/zones")).filter((z) => MOCK_NAMES.has(z.name));
+  const zones = (await call("GET", "/zones")).filter((z) => isMock(z.name));
   const ids = new Set(zones.map((z) => z.id));
   const chats = (await call("GET", "/chats")).filter((c) => ids.has(c.zoneId));
   for (const c of chats) await call("DELETE", `/chats/${c.id}`);
   for (const z of zones) await call("DELETE", `/zones/${z.id}`);
-  const providers = (await call("GET", "/providers")).filter((p) => MOCK_NAMES.has(p.name));
+  const providers = (await call("GET", "/providers")).filter((p) => isMock(p.name));
   for (const p of providers) await call("DELETE", `/providers/${p.id}`);
   console.log(`deleted ${chats.length} chats, ${zones.length} zones, ${providers.length} providers`);
 }

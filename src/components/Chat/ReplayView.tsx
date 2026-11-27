@@ -483,6 +483,7 @@ function kindLabel(kind: string): string {
     tool_result: "tool output",
     tool_failed: "tool failed",
     runaway: "loop stopped",
+    zone_fallback: "fallback zone",
     instructions: "directory rules",
     checks_passed: "checks passed",
     checks_failed: "checks failed",
@@ -503,7 +504,7 @@ function KindIcon({ kind }: { kind: string }) {
   if (kind === "checks_failed")
     return <AlertTriangle className={`${cls} text-[var(--color-danger)]`} />;
   if (kind.startsWith("plan")) return <ClipboardList className={`${cls} text-[var(--color-accent)]`} />;
-  if (kind === "zone_switch") return <Users className={`${cls} text-[var(--color-text-muted)]`} />;
+  if (kind === "zone_switch" || kind === "zone_fallback") return <Users className={`${cls} text-[var(--color-text-muted)]`} />;
   if (kind === "turn_start" || kind === "turn_end")
     return <Flag className={`${cls} text-[var(--color-text-muted)]`} />;
   if (kind === "user_message") return <User className={`${cls} text-[var(--color-accent)]`} />;

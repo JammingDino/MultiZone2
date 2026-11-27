@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   buildRequest,
+  BODY_IS_ARGUMENT,
   errorMessage,
   fillPath,
   leftoverArgs,
@@ -94,11 +95,27 @@ test("a POST puts what is left in the body", () => {
 });
 
 // The upserts take their struct as the body, not `{ zone: {...} }` (0.21).
-test("a POST whose one argument is an object sends the object itself", () => {
+test("a command whose argument is the body sends the object itself", () => {
   const req = buildRequest({ method: "POST", path: "/api/providers" }, "upsert_provider", { provider: { name: "A", baseUrl: "http://x" } }, "http://h:8765");
   assert.deepEqual(JSON.parse(req.body), { name: "A", baseUrl: "http://x" });
-  const ids = buildRequest({ method: "PUT", path: "/api/chats/:id/subagents" }, "set_chat_subagents", { chatId: "c1", zoneIds: ["z"] }, "http://h:8765");
-  assert.deepEqual(JSON.parse(ids.body), { zoneIds: ["z"] });
+});
+
+// …and only those: render reads `values` by name, so a rule about one
+// object-valued argument sent it an unnamed map and every blank came out empty.
+test("any other one-object body keeps its name", () => {
+  const req = buildRequest({ method: "POST", path: "/api/runs/:id/render" }, "render_saved_run", { id: "r1", values: { version: "2.1" } }, "http://h:8765");
+  assert.deepEqual(JSON.parse(req.body), { values: { version: "2.1" } });
+  const set = buildRequest({ method: "PUT", path: "/api/settings/:key" }, "set_setting", { key: "k", value: { a: 1 } }, "http://h:8765");
+  assert.deepEqual(JSON.parse(set.body), { value: { a: 1 } });
+});
+
+test("each body-is-argument command is called with exactly that one argument", () => {
+  const src = readFileSync(new URL("../src/lib/tauri.ts", import.meta.url), "utf8");
+  for (const [command, arg] of Object.entries(BODY_IS_ARGUMENT)) {
+    const m = src.match(new RegExp(`"${command}",\\s*\\{([^}]*)\\}`));
+    assert.ok(m, `${command} is called from tauri.ts`);
+    assert.deepEqual(m[1].split(",").map((s) => s.trim()).filter(Boolean), [arg], command);
+  }
 });
 
 // Some DELETE handlers read a query flag and some read a JSON body. Sending

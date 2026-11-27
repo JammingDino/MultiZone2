@@ -106,6 +106,28 @@ export const ARGUMENT_OVERRIDES: Record<
   forget_paired_device: (rest) => ({ ...rest, forget: "true" }),
 };
 
+/**
+ * Commands whose one argument is the route's whole body: `upsert_zone({ zone })`
+ * is `POST /api/zones` with the zone itself, not `{ zone: … }`. Sent as the
+ * envelope, every one failed with "missing field `name`" from a browser or a
+ * phone (0.21). A list, not a rule about object-valued arguments: `values` on
+ * render and `value` on settings are read by name, and a rule broke the first.
+ */
+export const BODY_IS_ARGUMENT: Record<string, string> = {
+  upsert_provider: "provider",
+  upsert_zone: "zone",
+  upsert_project: "project",
+  upsert_tag: "tag",
+  upsert_skill: "skill",
+  upsert_memory: "memory",
+  upsert_mcp_server: "server",
+  upsert_saved_run: "run",
+  upsert_scheduled_run: "run",
+  upsert_library_entry: "entry",
+  install_connector: "input",
+  import_connectors: "input",
+};
+
 /** Everything the caller passed that the path did not consume, after any
  *  rename. */
 export function leftoverArgs(
@@ -198,12 +220,8 @@ export function buildRequest(
     appendQuery(url, leftovers);
     return { method, url: url.toString(), body: JSON.stringify(leftovers) };
   }
-  // `upsert_zone({ zone })`: a command whose one argument is a struct takes it
-  // as the route's whole body. Sent as the envelope, every upsert failed with
-  // "missing field `name`" from the browser and the phone.
-  const values = Object.values(leftovers);
-  const only = values.length === 1 ? values[0] : undefined;
-  const body = only && typeof only === "object" && !Array.isArray(only) ? only : leftovers;
+  const whole = BODY_IS_ARGUMENT[command];
+  const body = whole ? leftovers[whole] : leftovers;
   return { method, url: url.toString(), body: JSON.stringify(body) };
 }
 
